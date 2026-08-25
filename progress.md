@@ -12,6 +12,8 @@ Current map-redesign request: 参考 WorldBox 的地图空间组织，严格让�
 
 Current reference-correction request: 用户以图2明确纠偏：保留现有精美UI，但海陆结构必须从“平滑横向胶囊陆块”改成图2式复杂大陆；优先呈现渤海内湾、东北抬升、辽东—朝鲜半岛链、斜向岭南海岸、日本岛弧与细碎近海岛屿。
 
+Current playability-focus request: 用户面对完整世界时“不知所措”；优先补一位只读的“史家编辑”，把全局信号整理成一人、一国、一条矛盾，并借助现有关注、季度推进、自动暂停与因果查看形成明确观察循环。
+
 ## Product thesis
 
 - Visual thesis: 墨色舆图 × 朱砂史册；暖纸底、炭墨信息、单一朱砂交互色，像一座可操作的历史观测台。
@@ -23,6 +25,9 @@ Current reference-correction request: 用户以图2明确纠偏：保留现有�
 - Reference-correction visual thesis: 锯齿海岸的东方群岛沙盘；轮廓辨识度、海湾和半岛优先于平滑装饰。
 - Reference-correction content plan: 北方大陆与朝鲜半岛构成带渤海/黄海凹湾的复杂主陆块；岭南为西南—东北斜长陆块；海南、台湾与日本四岛弧分离，辅以少量无主小岛。
 - Reference-correction interaction thesis: 保持整州点击、政权铺色和历史回溯不变；凹岸之外必须是海，沿岸州域高亮不得跨越海湾。
+- Playability visual thesis: 史家批注落在舆图空海处；朱砂只标真正值得追的三条线，面板克制、半透明且可收起，不与地图争夺主视觉。
+- Playability content plan: “现在看什么”固定为一位潜在时代人物、一个承压政权和一条正在升温的战争/疫病/外交/海权/地方矛盾；每条只给两项权威证据和下一观察信号。
+- Playability interaction thesis: 查看线索定位对象与正确叠层，关注后复用现有 watchlist，推进季度后由相关史事触发提醒与自动暂停，再进入“为什么”查看因果。
 
 ## V0.1 scope
 
@@ -114,3 +119,6 @@ Current reference-correction request: 用户以图2明确纠偏：保留现有�
 - 2026-08-25 concave-coast architecture: Territory generation now uses per-shape convex bounds, while political fills, borders, hover and selection are clipped by the complex coast mask. Hit testing first requires a land-mask match and then chooses the deterministic nearest display site, so deep bays and straits cannot become accidental clickable land. Simulation coordinates, schema, saves and hashes remain untouched.
 - 2026-08-25 reference visual loop: Removed the desktop `0.714` vertical squash (`yScale=1`) and extended the sea field across the complete canvas so the wide margins are intentional ocean rather than paper. Focused geography/hit tests pass 9/9, production build passes, and the mandatory web-game client capture `output/reference-topology-loop-3/shot-0.png` was visually reviewed with 82 regions and no browser errors.
 - 2026-08-25 reference correction release gate: Full Vitest passes 80/80; production build and Chromium V1 E2E pass on desktop and 390×844; E2E finishes at turn 4/hash `ecaff723046fe14b`; production dependency audit reports zero vulnerabilities. Reviewed both `geographic-world-map.png` and `mobile-world-map-390x844.png` after the final sea-field adjustment.
+- 2026-08-25 playability diagnosis: The world already produces rich pre-event pressure, but the opening screen treated 82 regions, 8 polities and 192 people as equally important. The missing layer was an editorial answer to “who matters now, why, and what should I wait for,” not another simulation subsystem.
+- 2026-08-25 当世三问: Added a deterministic read-only lead projector that always selects one potential era-changing person, one pressured polity and one live war/disease/diplomacy/naval/regional contradiction. Every question exposes two authoritative signals, a 伏线/升温/临界 stage, tension, next signal, target and relevant map overlay; derivation consumes no RNG and cannot change the world hash.
+- 2026-08-25 observation loop: The main world view now uses the otherwise-empty dossier column for “现在看什么.” Inspecting a lead switches to its authoritative dossier and overlay; following reuses the persistent observer watchlist and existing relevant-event alerts/autopause. Mobile defaults to one lead and expands to all three. Full Vitest passes 83/83, production build passes, mandated web-game snapshots report the three leads with no browser errors, and expanded Chromium desktop/mobile E2E finishes at turn 4/hash `ecaff723046fe14b` with collection coverage.

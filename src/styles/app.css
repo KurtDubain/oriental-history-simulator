@@ -26,6 +26,10 @@
   grid-template-columns: 68px minmax(0, 1fr) 0;
 }
 
+.observer-app[data-inspector-open="false"][data-focus-open="true"] {
+  grid-template-columns: 68px minmax(0, 1fr) clamp(288px, 21vw, 316px);
+}
+
 .observer-world-summary,
 .observer-world-tools,
 .observer-world-signature,
@@ -324,6 +328,10 @@
     grid-template-columns: 60px minmax(0, 1fr);
   }
 
+  .observer-app[data-inspector-open="false"][data-focus-open="true"] {
+    grid-template-columns: 60px minmax(0, 1fr) 288px;
+  }
+
   .observer-app > .quarter-pulse {
     grid-column: 2;
   }
@@ -331,6 +339,10 @@
 
 @media (max-width: 760px) {
   .observer-app[data-inspector-open="false"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .observer-app[data-inspector-open="false"][data-focus-open="true"] {
     grid-template-columns: minmax(0, 1fr);
   }
 

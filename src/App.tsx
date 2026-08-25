@@ -27,6 +27,7 @@ import {
   type MapPrimerStep,
 } from './components/MapPrimer';
 import { ObserverDesk } from './components/ObserverDesk';
+import { ObserverLeads, observerLeadTargetKey } from './components/ObserverLeads';
 import {
   QuarterPulse,
   type QuarterPulseEvent,
@@ -98,6 +99,7 @@ import {
 import {
   type HistoricalTerritoryView,
 } from './view/v1-history';
+import { deriveObserverLeads, type ObserverLead } from './view/observer-leads';
 import {
   OBSERVER_DESK_STORAGE_KEY,
   applyObserverEventAlerts,
@@ -450,6 +452,7 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
   const report = world.lastTurn;
   const interventionHistory = world.history.filter(isV03InterventionEvent);
   const latestIntervention = interventionHistory.at(-1);
+  const focusLeads = deriveObserverLeads(world);
   return JSON.stringify({
     mode: options.startOpen ? 'world-menu' : 'observing',
     productVersion: '1.0.0',
@@ -471,6 +474,16 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
       worldSaveCount: options.worldSaveCount,
       primerOpen: options.primerOpen,
       primerStep: options.primerStep,
+      focusLeads: focusLeads.map((lead) => ({
+        slot: lead.slot,
+        question: lead.question,
+        stage: lead.stage,
+        tension: lead.tension,
+        evidence: lead.evidence,
+        nextSignal: lead.nextSignal,
+        target: lead.target,
+        overlay: lead.overlay,
+      })),
     },
     interface: {
       view: options.view,
@@ -1305,6 +1318,7 @@ export function App() {
   const mapFleets = useMemo(() => world && !historicalView ? toMapFleets(world) : [], [historicalView, world]);
   const mapFlows = useMemo(() => world && !historicalView ? toMapFlows(world, overlay) : [], [historicalView, overlay, world]);
   const mapMarkers = useMemo(() => world && !historicalView ? toMapMarkers(world, overlay) : [], [historicalView, overlay, world]);
+  const observerLeads = useMemo(() => world ? deriveObserverLeads(world) : [], [world]);
   const polityItems = useMemo(() => world ? polityRoster(world) : [], [world]);
   const familyItems = useMemo(() => world ? familyRoster(world) : [], [world]);
   const peopleItems = useMemo(() => world ? peopleRoster(world) : [], [world]);
@@ -1488,6 +1502,30 @@ export function App() {
     setPauseMatch(null);
   }, []);
 
+  const handleInspectObserverLead = useCallback((lead: ObserverLead) => {
+    setPauseMatch(null);
+    setOverlay(lead.overlay);
+    setSelection(lead.target);
+    setActiveView('world');
+  }, []);
+
+  const handleToggleObserverLead = useCallback((lead: ObserverLead) => {
+    const current = worldRef.current;
+    if (!current) return;
+    const item = watchItemForSelection(current, lead.target);
+    if (!item) return;
+    const watched = observerSettingsRef.current.watchlist.some((entry) => (
+      observerWatchKey(entry.kind, entry.id) === observerLeadTargetKey(lead)
+    ));
+    const nextSettings = watched
+      ? removeObserverWatch(observerSettingsRef.current, item.kind, item.id)
+      : upsertObserverWatch(observerSettingsRef.current, item);
+    commitObserverSettings(nextSettings);
+    setToast(watched
+      ? `已取消关注：${item.label}`
+      : `已关注：${item.label}。推进季度后，相关动向会提醒并自动暂停。`);
+  }, [commitObserverSettings]);
+
   const handleGuideAction = useCallback((step: ObserverGuideStepId) => {
     const current = worldRef.current;
     if (!current) return;
@@ -1573,6 +1611,7 @@ export function App() {
           ref={worldShellRef}
           className="observer-app"
           data-inspector-open={Boolean(inspector)}
+          data-focus-open={activeView === 'world' && !historicalView && !inspector || undefined}
           aria-hidden={startOpen || archiveOpen || mandateOpen || observerDeskOpen || collectionOpen || primerOpen || activeView === 'chronicle' || undefined}
         >
           <TopBar
@@ -1743,6 +1782,16 @@ export function App() {
               </div>
             ) : null}
           </section>
+
+          {activeView === 'world' && !historicalView && !inspector ? (
+            <ObserverLeads
+              leads={observerLeads}
+              watchedKeys={followed}
+              selectedKey={selection ? `${selection.kind}:${selection.id}` : null}
+              onInspect={handleInspectObserverLead}
+              onToggleWatch={handleToggleObserverLead}
+            />
+          ) : null}
 
           {inspector}
 

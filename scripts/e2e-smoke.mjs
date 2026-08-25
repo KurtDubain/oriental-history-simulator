@@ -181,6 +181,37 @@ async function advanceTo(page, turn) {
   return current;
 }
 
+async function exerciseObserverLeads(page, initialHash) {
+  const initial = await snapshot(page);
+  assert.equal(initial.observer.focusLeads.length, 3, '史家应始终给出一人、一国、一条矛盾');
+  assert.deepEqual(initial.observer.focusLeads.map((item) => item.slot), ['person', 'polity', 'tension']);
+  const panel = page.locator('[data-observer-leads="true"]');
+  await panel.waitFor();
+  assert.match(await panel.textContent(), /现在看什么/);
+  const rows = panel.locator('[data-testid="observer-lead"]');
+  assert.equal(await rows.count(), 3);
+
+  const firstLead = initial.observer.focusLeads[0];
+  await rows.first().locator('.observer-leads__inspect').click();
+  const inspected = await waitForSnapshot(page, (current, target) => (
+    current.interface.selected?.kind === target.kind && current.interface.selected?.id === target.id
+  ), firstLead.target);
+  assert.equal(inspected.interface.overlay, firstLead.overlay);
+  assert.equal(inspected.deterministicWorldHash, initialHash, '查看史家线索不得改写世界哈希');
+  await page.locator('.observer-inspector button[aria-label="关闭档案"]').click();
+  await panel.waitFor();
+
+  const firstWatch = panel.locator('[data-testid="observer-lead"]').first().locator('.observer-leads__watch');
+  await firstWatch.click();
+  const watched = await waitForSnapshot(page, (current) => current.observer.watchedCount === 1);
+  assert.equal(watched.deterministicWorldHash, initialHash, '关注史家线索不得改写世界哈希');
+  assert.equal(await firstWatch.getAttribute('aria-pressed'), 'true');
+  await firstWatch.click();
+  await waitForSnapshot(page, (current) => current.observer.watchedCount === 0);
+  assert.equal((await snapshot(page)).deterministicWorldHash, initialHash);
+  await page.locator('.observer-toast').waitFor({ state: 'detached', timeout: 5_000 });
+}
+
 async function selectFirstMapObject(page, expectedKind, expectedDossier) {
   const canvas = page.locator('.world-map__canvas');
   await canvas.focus();
@@ -477,6 +508,7 @@ try {
   }, '舆图必须使用北陆半岛体系、岭南陆与六岛形的参考拓扑');
 
   const afterPrimer = await exerciseMapPrimer(page);
+  await exerciseObserverLeads(page, afterPrimer.deterministicWorldHash);
   await page.screenshot({ path: `${ARTIFACT_DIR}/geographic-world-map.png`, fullPage: true });
   await selectFirstMapObject(page, 'region', '地域档案');
   await exerciseObserverDesk(page, afterPrimer.deterministicWorldHash);
@@ -715,7 +747,14 @@ try {
   assert.ok(mobileMapLayout.stageWidth >= 389 && mobileMapLayout.mapWidth >= 389, '移动端舆图必须使用完整视口宽度');
   assert.ok(mobileMapLayout.dockWidth >= 370, '移动端观察导航应成为全宽底部观察坞');
   assert.equal(mobileMapLayout.mapLayout, 'reference-topology-v3');
+  const mobileLeads = mobilePage.locator('[data-observer-leads="true"]');
+  await mobileLeads.waitFor();
+  await assertWithinViewport(mobilePage, '[data-observer-leads="true"]', '移动端史家线索不可横向溢出');
+  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 1, '移动端默认只展开一条线索');
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-world-map-390x844.png`, fullPage: true });
+  await mobileLeads.locator('.observer-leads__mobile-toggle').click();
+  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 3, '移动端可展开全部三条线索');
+  await mobileLeads.locator('.observer-leads__mobile-toggle').click();
 
   await mobilePage.locator('button[data-observer-desk-trigger="true"]').click();
   const mobileObserverDesk = mobilePage.locator('.observer-desk');
