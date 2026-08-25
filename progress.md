@@ -14,6 +14,8 @@ Current reference-correction request: 用户以图2明确纠偏：保留现有�
 
 Current playability-focus request: 用户面对完整世界时“不知所措”；优先补一位只读的“史家编辑”，把全局信号整理成一人、一国、一条矛盾，并借助现有关注、季度推进、自动暂停与因果查看形成明确观察循环。
 
+Current zoom-mobile request: 地图支持滚轮/双指缩放、拖拽平移与一键归位；移动端优先消除拖动误点、过小触控目标、遮挡和安全区问题。
+
 ## Product thesis
 
 - Visual thesis: 墨色舆图 × 朱砂史册；暖纸底、炭墨信息、单一朱砂交互色，像一座可操作的历史观测台。
@@ -28,6 +30,9 @@ Current playability-focus request: 用户面对完整世界时“不知所措”
 - Playability visual thesis: 史家批注落在舆图空海处；朱砂只标真正值得追的三条线，面板克制、半透明且可收起，不与地图争夺主视觉。
 - Playability content plan: “现在看什么”固定为一位潜在时代人物、一个承压政权和一条正在升温的战争/疫病/外交/海权/地方矛盾；每条只给两项权威证据和下一观察信号。
 - Playability interaction thesis: 查看线索定位对象与正确叠层，关注后复用现有 watchlist，推进季度后由相关史事触发提醒与自动暂停，再进入“为什么”查看因果。
+- Zoom/mobile visual thesis: 舆图像可捧起端详的纸卷；缩放控件采用克制的测绘边钮，不再增加一层厚重面板。
+- Zoom/mobile content plan: 地图继续占据主视觉，只增加缩放百分比、归位按钮和短暂手势提示；观察线索与历史信息保持第二层级。
+- Zoom/mobile interaction thesis: 点按选择、拖动浏览、滚轮/双指围绕焦点缩放；手势阈值、触控反馈和可预测归位共同避免误操作。
 
 ## V0.1 scope
 
@@ -122,3 +127,7 @@ Current playability-focus request: 用户面对完整世界时“不知所措”
 - 2026-08-25 playability diagnosis: The world already produces rich pre-event pressure, but the opening screen treated 82 regions, 8 polities and 192 people as equally important. The missing layer was an editorial answer to “who matters now, why, and what should I wait for,” not another simulation subsystem.
 - 2026-08-25 当世三问: Added a deterministic read-only lead projector that always selects one potential era-changing person, one pressured polity and one live war/disease/diplomacy/naval/regional contradiction. Every question exposes two authoritative signals, a 伏线/升温/临界 stage, tension, next signal, target and relevant map overlay; derivation consumes no RNG and cannot change the world hash.
 - 2026-08-25 observation loop: The main world view now uses the otherwise-empty dossier column for “现在看什么.” Inspecting a lead switches to its authoritative dossier and overlay; following reuses the persistent observer watchlist and existing relevant-event alerts/autopause. Mobile defaults to one lead and expands to all three. Full Vitest passes 83/83, production build passes, mandated web-game snapshots report the three leads with no browser errors, and expanded Chromium desktop/mobile E2E finishes at turn 4/hash `ecaff723046fe14b` with collection coverage.
+- 2026-08-25 map viewport: Added a presentation-only 1×–3.6× camera with cursor-anchored wheel/double-click zoom, mouse/one-finger pan, two-finger midpoint zoom+pan, keyboard +/−/0 controls and 44px zoom/reset buttons. Drawing, inverse hit testing and the text snapshot share the same clamped transform; changing the camera never mutates simulation state or the world hash.
+- 2026-08-25 touch contract: Map selection now occurs only on pointer-up after a sub-8px tap candidate; drag, pinch, cancel and lost-capture paths cannot select. Fleet, marker, flow and sea targets use stable CSS-pixel hit radii (22–30px on touch), while land still requires the illustrated coast mask. Mobile “当世三问” starts as a 48px story strip and cycles to one/all leads so the atlas remains usable.
+- 2026-08-25 mobile shell: Added a visible 44px speed-cycle control, raised topbar/world/map/inspector controls to touch targets, fixed the inspector's inherited grid-area overflow, hid the obstructed bottom dock while a mobile dossier is open, changed its reveal to vertical motion, and added viewport safe-area handling. World tools, summary, primer, story strip, map controls and navigation now occupy separate bands at 390×844.
+- 2026-08-25 zoom/mobile QA: Full Vitest passes 87/87 and the production build passes. The expanded Chromium gate now uses a real `isMobile + hasTouch + DPR3` context and CDP touch events; it verifies single-finger drag without selection, two-finger zoom without browser-page zoom, wheel zoom, reset, post-zoom hit testing, 44px targets, inspector bounds, navigation occlusion and invariant world hash. Orientation resizing preserves the world point at viewport center. E2E finishes at turn 4/hash `ecaff723046fe14b`; the mandated web-game client reports mapViewport 1/0/0 with no browser errors.

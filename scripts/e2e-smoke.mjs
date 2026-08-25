@@ -212,6 +212,135 @@ async function exerciseObserverLeads(page, initialHash) {
   await page.locator('.observer-toast').waitFor({ state: 'detached', timeout: 5_000 });
 }
 
+async function exerciseMapViewportDesktop(page) {
+  const map = page.locator('.world-map');
+  const canvas = page.locator('.world-map__canvas');
+  const before = await snapshot(page);
+  const box = await canvas.boundingBox();
+  assert.ok(box);
+  await page.mouse.move(box.x + box.width * 0.56, box.y + box.height * 0.52);
+  await page.mouse.wheel(0, -420);
+  await page.waitForFunction(() => Number(document.querySelector('.world-map')?.getAttribute('data-map-zoom')) > 1.05);
+  const zoomed = await snapshot(page);
+  assert.ok(zoomed.interface.mapViewport.zoom > 1.05, '桌面滚轮应放大舆图');
+  assert.equal(zoomed.deterministicWorldHash, before.deterministicWorldHash, '舆图缩放不得改变世界哈希');
+  const selectionBeforeDrag = JSON.stringify(zoomed.interface.selected);
+  const panBefore = {
+    x: Number(await map.getAttribute('data-map-pan-x')),
+    y: Number(await map.getAttribute('data-map-pan-y')),
+  };
+  await page.mouse.move(box.x + box.width * 0.44, box.y + box.height * 0.62);
+  await page.mouse.down();
+  await page.mouse.move(box.x + box.width * 0.53, box.y + box.height * 0.69, { steps: 6 });
+  await page.mouse.up();
+  const panAfter = {
+    x: Number(await map.getAttribute('data-map-pan-x')),
+    y: Number(await map.getAttribute('data-map-pan-y')),
+  };
+  assert.ok(Math.abs(panAfter.x - panBefore.x) > 2 || Math.abs(panAfter.y - panBefore.y) > 2, '桌面拖动应平移舆图');
+  assert.equal(JSON.stringify((await snapshot(page)).interface.selected), selectionBeforeDrag, '拖动舆图不得误选对象');
+  await page.locator('[data-map-reset="true"]').click();
+  await page.waitForFunction(() => document.querySelector('.world-map')?.getAttribute('data-map-zoom') === '1.000');
+  const reset = await snapshot(page);
+  assert.deepEqual(reset.interface.mapViewport, { zoom: 1, panX: 0, panY: 0 });
+  assert.equal(reset.deterministicWorldHash, before.deterministicWorldHash);
+}
+
+async function exerciseMapViewportTouch(context, page) {
+  const map = page.locator('.world-map');
+  const canvas = page.locator('.world-map__canvas');
+  const before = await snapshot(page);
+  const controls = page.locator('.world-map__viewport-controls button');
+  assert.equal(await controls.count(), 3);
+  for (let index = 0; index < await controls.count(); index += 1) {
+    const bounds = await controls.nth(index).boundingBox();
+    assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, '移动端舆图缩放按钮至少应为44px');
+  }
+  const viewportControlsBounds = await page.locator('.world-map__viewport-controls').boundingBox();
+  const navigationBounds = await page.locator('.observer-navigation').boundingBox();
+  assert.ok(
+    viewportControlsBounds && navigationBounds
+      && viewportControlsBounds.y + viewportControlsBounds.height <= navigationBounds.y,
+    '舆图缩放控件必须位于底部观察坞上方',
+  );
+  const worldTools = page.locator('.observer-world-tools button');
+  for (let index = 0; index < await worldTools.count(); index += 1) {
+    const bounds = await worldTools.nth(index).boundingBox();
+    assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, '移动端世界工具至少应为44px');
+  }
+  for (const selector of ['.observer-speed-cycle', '.observer-time-controls__toggle', '.observer-advance-button']) {
+    const bounds = await page.locator(selector).boundingBox();
+    assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, `${selector} 应提供44px触控目标`);
+  }
+
+  await page.locator('.observer-speed-cycle').click();
+  const speedChanged = await waitForSnapshot(page, (current) => current.playback.speed === 2);
+  assert.equal(speedChanged.deterministicWorldHash, before.deterministicWorldHash, '切换倍速不得推进世界');
+
+  await page.locator('[data-map-zoom-in="true"]').click();
+  await page.waitForFunction(() => Number(document.querySelector('.world-map')?.getAttribute('data-map-zoom')) > 1.1);
+  const box = await canvas.boundingBox();
+  assert.ok(box);
+  const cdp = await context.newCDPSession(page);
+  const dispatch = (type, touchPoints) => cdp.send('Input.dispatchTouchEvent', {
+    type,
+    touchPoints: touchPoints.map((point, index) => ({
+      x: point.x,
+      y: point.y,
+      id: index + 1,
+      radiusX: 5,
+      radiusY: 5,
+      force: 1,
+    })),
+  });
+  const dragStart = { x: box.x + 72, y: box.y + box.height * 0.62 };
+  const dragEnd = { x: dragStart.x + 68, y: dragStart.y + 38 };
+  const selectedBeforeDrag = JSON.stringify((await snapshot(page)).interface.selected);
+  const panBefore = Number(await map.getAttribute('data-map-pan-x'));
+  await dispatch('touchStart', [dragStart]);
+  await dispatch('touchMove', [{ x: dragStart.x + 24, y: dragStart.y + 12 }]);
+  await dispatch('touchMove', [dragEnd]);
+  await dispatch('touchEnd', []);
+  await page.waitForTimeout(80);
+  assert.notEqual(Number(await map.getAttribute('data-map-pan-x')), panBefore, '单指拖动应平移放大后的舆图');
+  assert.equal(JSON.stringify((await snapshot(page)).interface.selected), selectedBeforeDrag, '单指拖动不得误选对象');
+
+  const zoomBeforePinch = Number(await map.getAttribute('data-map-zoom'));
+  const midpointY = box.y + box.height * 0.62;
+  await dispatch('touchStart', [
+    { x: box.x + 112, y: midpointY },
+    { x: box.x + 252, y: midpointY },
+  ]);
+  await dispatch('touchMove', [
+    { x: box.x + 78, y: midpointY - 8 },
+    { x: box.x + 286, y: midpointY + 8 },
+  ]);
+  await dispatch('touchEnd', []);
+  await page.waitForTimeout(80);
+  assert.ok(Number(await map.getAttribute('data-map-zoom')) > zoomBeforePinch, '双指张开应放大舆图');
+  assert.equal(JSON.stringify((await snapshot(page)).interface.selected), selectedBeforeDrag, '双指手势不得误选对象');
+  assert.equal(await page.evaluate(() => window.visualViewport?.scale ?? 1), 1, '双指只应缩放舆图而非浏览器页面');
+
+  await page.locator('[data-map-reset="true"]').click();
+  await page.waitForFunction(() => document.querySelector('.world-map')?.getAttribute('data-map-zoom') === '1.000');
+  const reset = await snapshot(page);
+  assert.deepEqual(reset.interface.mapViewport, { zoom: 1, panX: 0, panY: 0 });
+  assert.equal(reset.deterministicWorldHash, before.deterministicWorldHash);
+
+  const fitScale = Math.min((box.width - 16) / 1000, (box.height - 16) / 700);
+  const taiwan = {
+    x: box.x + (box.width - 1000 * fitScale) / 2 + 416 * fitScale,
+    y: box.y + (box.height - 700 * fitScale) / 2 + 547 * fitScale,
+  };
+  await page.touchscreen.tap(taiwan.x, taiwan.y);
+  await waitForSnapshot(page, (current) => current.interface.selected?.id === 'r_taiwan');
+  const inspectorBounds = await page.locator('.observer-inspector').boundingBox();
+  assert.ok(inspectorBounds && inspectorBounds.x >= 0 && inspectorBounds.x + inspectorBounds.width <= 391, '触摸点选后的档案不可横向溢出');
+  assert.equal(await page.locator('.observer-navigation').isVisible(), false, '移动端档案打开时应隐藏被遮挡的底部导航');
+  await page.locator('.observer-inspector button[aria-label="关闭档案"]').click();
+  await page.locator('.observer-inspector').waitFor({ state: 'detached' });
+}
+
 async function selectFirstMapObject(page, expectedKind, expectedDossier) {
   const canvas = page.locator('.world-map__canvas');
   await canvas.focus();
@@ -508,6 +637,7 @@ try {
   }, '舆图必须使用北陆半岛体系、岭南陆与六岛形的参考拓扑');
 
   const afterPrimer = await exerciseMapPrimer(page);
+  await exerciseMapViewportDesktop(page);
   await exerciseObserverLeads(page, afterPrimer.deterministicWorldHash);
   await page.screenshot({ path: `${ARTIFACT_DIR}/geographic-world-map.png`, fullPage: true });
   await selectFirstMapObject(page, 'region', '地域档案');
@@ -717,7 +847,12 @@ try {
   assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 3存档续读应恢复完全相同的世界');
   assert.deepEqual(desktopErrors, []);
 
-  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const mobileContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 3,
+  });
   const mobilePage = await mobileContext.newPage();
   const mobileErrors = [];
   collectBrowserErrors(mobilePage, mobileErrors);
@@ -750,11 +885,14 @@ try {
   const mobileLeads = mobilePage.locator('[data-observer-leads="true"]');
   await mobileLeads.waitFor();
   await assertWithinViewport(mobilePage, '[data-observer-leads="true"]', '移动端史家线索不可横向溢出');
-  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 1, '移动端默认只展开一条线索');
+  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 0, '移动端默认只显示紧凑线索条，避免遮挡舆图');
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-world-map-390x844.png`, fullPage: true });
+  await mobileLeads.locator('.observer-leads__mobile-toggle').click();
+  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 1, '移动端可展开第一条线索');
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();
   assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 3, '移动端可展开全部三条线索');
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();
+  await exerciseMapViewportTouch(mobileContext, mobilePage);
 
   await mobilePage.locator('button[data-observer-desk-trigger="true"]').click();
   const mobileObserverDesk = mobilePage.locator('.observer-desk');

@@ -1,3 +1,4 @@
+import { Minus, Plus, ScanLine } from "lucide-react";
 import {
   useCallback,
   useEffect,
@@ -6,6 +7,7 @@ import {
   useRef,
   useState,
   type KeyboardEvent as ReactKeyboardEvent,
+  type MouseEvent as ReactMouseEvent,
   type PointerEvent as ReactPointerEvent,
 } from "react";
 
@@ -148,7 +150,15 @@ export interface WorldMapProps {
   overlay: MapOverlay;
   onSelectRegion: (regionId: string) => void;
   onSelectObject?: (kind: MapFlowView["selectedKind"] | "seaZone" | "fleet", id: string) => void;
+  cameraKey?: string | number;
+  onCameraChange?: (camera: MapCamera) => void;
   className?: string;
+}
+
+export interface MapCamera {
+  zoom: number;
+  panX: number;
+  panY: number;
 }
 
 export interface MapViewportTransform {
@@ -161,6 +171,9 @@ export interface MapViewportTransform {
 
 export const MAP_WORLD_WIDTH = MAP_PRESENTATION_WIDTH;
 export const MAP_WORLD_HEIGHT = MAP_PRESENTATION_HEIGHT;
+export const MAP_MIN_ZOOM = 1;
+export const MAP_MAX_ZOOM = 3.6;
+export const DEFAULT_MAP_CAMERA: MapCamera = { zoom: MAP_MIN_ZOOM, panX: 0, panY: 0 };
 
 const MAP_PADDING = 8;
 const MAP_DESKTOP_RENDER_HEIGHT = MAP_PRESENTATION_HEIGHT;
@@ -181,6 +194,32 @@ interface CanvasSize {
 
 interface HoverState {
   region: MapRegionView;
+  x: number;
+  y: number;
+}
+
+interface PointerContact {
+  pointerType: string;
+  current: MapPoint;
+}
+
+interface PinchSnapshot {
+  camera: MapCamera;
+  distance: number;
+  midpoint: MapPoint;
+}
+
+interface MapGestureState {
+  pointerType: string;
+  startPoint: MapPoint;
+  lastPoint: MapPoint;
+  moved: boolean;
+  hadMultiple: boolean;
+  pinch?: PinchSnapshot;
+}
+
+interface TapFeedback {
+  id: number;
   x: number;
   y: number;
 }
@@ -235,8 +274,7 @@ const polityFallback = (id: string) => {
   return palette[hashString(id) % palette.length];
 };
 
-/** Returns the wide illustrated-atlas transform used by the canvas. */
-export function createMapViewportTransform(
+function createBaseMapViewportTransform(
   width: number,
   height: number,
   padding = MAP_PADDING,
@@ -254,13 +292,135 @@ export function createMapViewportTransform(
   };
 }
 
+function clampAxisPan(
+  baseOffset: number,
+  contentSize: number,
+  viewportSize: number,
+  rawPan: number,
+) {
+  const gutter = Math.min(32, Math.max(12, viewportSize * 0.08));
+  if (contentSize <= viewportSize - gutter * 2) {
+    return (viewportSize - contentSize) / 2 - baseOffset;
+  }
+  const minimum = viewportSize - gutter - contentSize - baseOffset;
+  const maximum = gutter - baseOffset;
+  return Math.min(maximum, Math.max(minimum, rawPan));
+}
+
+/** Keeps a camera finite and prevents the atlas from being panned completely out of view. */
+export function clampMapCamera(
+  camera: MapCamera,
+  width: number,
+  height: number,
+  padding = MAP_PADDING,
+): MapCamera {
+  const zoom = Math.min(
+    MAP_MAX_ZOOM,
+    Math.max(MAP_MIN_ZOOM, Number.isFinite(camera.zoom) ? camera.zoom : MAP_MIN_ZOOM),
+  );
+  if (zoom <= MAP_MIN_ZOOM + 0.0001) return { ...DEFAULT_MAP_CAMERA };
+  const base = createBaseMapViewportTransform(width, height, padding);
+  const rawPanX = Number.isFinite(camera.panX) ? camera.panX : 0;
+  const rawPanY = Number.isFinite(camera.panY) ? camera.panY : 0;
+  return {
+    zoom,
+    panX: clampAxisPan(base.offsetX, MAP_WORLD_WIDTH * base.scale * zoom, width, rawPanX),
+    panY: clampAxisPan(base.offsetY, base.renderHeight * base.scale * zoom, height, rawPanY),
+  };
+}
+
+/** Returns the illustrated-atlas transform, including the observer's local camera. */
+export function createMapViewportTransform(
+  width: number,
+  height: number,
+  padding = MAP_PADDING,
+  camera: MapCamera = DEFAULT_MAP_CAMERA,
+): MapViewportTransform {
+  const base = createBaseMapViewportTransform(width, height, padding);
+  const safeCamera = clampMapCamera(camera, width, height, padding);
+  return {
+    ...base,
+    scale: base.scale * safeCamera.zoom,
+    offsetX: base.offsetX + safeCamera.panX,
+    offsetY: base.offsetY + safeCamera.panY,
+  };
+}
+
+/** Zooms around a screen-space focal point so the place under the pointer stays fixed. */
+export function zoomMapCameraAtPoint(
+  camera: MapCamera,
+  nextZoom: number,
+  anchor: MapPoint,
+  width: number,
+  height: number,
+  padding = MAP_PADDING,
+): MapCamera {
+  const base = createBaseMapViewportTransform(width, height, padding);
+  const current = clampMapCamera(camera, width, height, padding);
+  const zoom = Math.min(MAP_MAX_ZOOM, Math.max(MAP_MIN_ZOOM, nextZoom));
+  if (zoom <= MAP_MIN_ZOOM + 0.0001) return { ...DEFAULT_MAP_CAMERA };
+  const worldX = (anchor.x - base.offsetX - current.panX) / (base.scale * current.zoom);
+  const worldY = (anchor.y - base.offsetY - current.panY)
+    / (base.scale * current.zoom * base.yScale);
+  return clampMapCamera({
+    zoom,
+    panX: anchor.x - base.offsetX - worldX * base.scale * zoom,
+    panY: anchor.y - base.offsetY - worldY * base.scale * zoom * base.yScale,
+  }, width, height, padding);
+}
+
+export function panMapCamera(
+  camera: MapCamera,
+  deltaX: number,
+  deltaY: number,
+  width: number,
+  height: number,
+  padding = MAP_PADDING,
+): MapCamera {
+  return clampMapCamera({
+    zoom: camera.zoom,
+    panX: camera.panX + deltaX,
+    panY: camera.panY + deltaY,
+  }, width, height, padding);
+}
+
+/** Preserves the world point at screen center when the viewport changes orientation or size. */
+export function reframeMapCamera(
+  camera: MapCamera,
+  previousWidth: number,
+  previousHeight: number,
+  nextWidth: number,
+  nextHeight: number,
+  padding = MAP_PADDING,
+): MapCamera {
+  if (previousWidth <= 1 || previousHeight <= 1) {
+    return clampMapCamera(camera, nextWidth, nextHeight, padding);
+  }
+  const current = clampMapCamera(camera, previousWidth, previousHeight, padding);
+  if (current.zoom <= MAP_MIN_ZOOM + 0.0001) return { ...DEFAULT_MAP_CAMERA };
+  const focus = screenToWorldPoint(
+    { x: previousWidth / 2, y: previousHeight / 2 },
+    previousWidth,
+    previousHeight,
+    padding,
+    current,
+  );
+  const base = createBaseMapViewportTransform(nextWidth, nextHeight, padding);
+  return clampMapCamera({
+    zoom: current.zoom,
+    panX: nextWidth / 2 - base.offsetX - focus.x * base.scale * current.zoom,
+    panY: nextHeight / 2 - base.offsetY - focus.y * base.scale * current.zoom * base.yScale,
+  }, nextWidth, nextHeight, padding);
+}
+
 export function screenToWorldPoint(
   point: MapPoint,
   width: number,
   height: number,
   padding = MAP_PADDING,
+  camera: MapCamera = DEFAULT_MAP_CAMERA,
 ): MapPoint {
-  const transform = createMapViewportTransform(width, height, padding);
+  const transform = createMapViewportTransform(width, height, padding, camera);
   return {
     x: (point.x - transform.offsetX) / transform.scale,
     y: (point.y - transform.offsetY) / (transform.scale * transform.yScale),
@@ -287,8 +447,9 @@ export function regionAtScreenPoint(
   width: number,
   height: number,
   padding = MAP_PADDING,
+  camera: MapCamera = DEFAULT_MAP_CAMERA,
 ): MapRegionView | null {
-  const worldPoint = screenToWorldPoint(point, width, height, padding);
+  const worldPoint = screenToWorldPoint(point, width, height, padding, camera);
 
   const containingShapeIds = new Set(
     MAP_LAND_SHAPES
@@ -693,7 +854,7 @@ function drawLandFoundation(
   context.save();
   context.lineJoin = "round";
   context.shadowColor = "rgba(28, 47, 49, 0.2)";
-  context.shadowBlur = Math.max(3, 8 * transform.scale);
+  context.shadowBlur = Math.min(12, Math.max(3, 8 * transform.scale));
   for (const shape of [...MAP_LAND_SHAPES, ...MAP_DECORATIVE_ISLETS]) {
     context.beginPath();
     applyLinePath(context, shape.polygon, transform);
@@ -701,7 +862,7 @@ function drawLandFoundation(
     context.fillStyle = "role" in shape && shape.role === "mainland" ? "#d8d0b4" : "#d4ccb0";
     context.fill();
     context.strokeStyle = "rgba(242, 235, 214, 0.95)";
-    context.lineWidth = Math.max(2.6, 9 * transform.scale);
+    context.lineWidth = Math.min(9, Math.max(2.6, 9 * transform.scale));
     context.stroke();
   }
   context.restore();
@@ -719,10 +880,10 @@ function drawGeographicContours(
     applyLinePath(context, shape.polygon, transform);
     context.closePath();
     context.strokeStyle = "rgba(249, 243, 224, 0.78)";
-    context.lineWidth = Math.max(2.2, 4.5 * transform.scale);
+    context.lineWidth = Math.min(4.5, Math.max(2.2, 4.5 * transform.scale));
     context.stroke();
     context.strokeStyle = "rgba(36, 48, 45, 0.72)";
-    context.lineWidth = Math.max(0.85, 1.5 * transform.scale);
+    context.lineWidth = Math.min(1.8, Math.max(0.85, 1.5 * transform.scale));
     context.stroke();
   }
 
@@ -1410,13 +1571,14 @@ function drawMap(
   selectedRegionId: string | null | undefined,
   selectedObject: WorldMapProps["selectedObject"],
   hoveredRegionId: string | undefined,
+  camera: MapCamera,
 ) {
   const { width, height, dpr } = size;
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   context.clearRect(0, 0, width, height);
 
-  const transform = createMapViewportTransform(width, height);
-  const compactMap = width < 420 || transform.scale < 0.42;
+  const transform = createMapViewportTransform(width, height, MAP_PADDING, camera);
+  const compactMap = transform.scale < 0.42;
   const denseMap = regions.length > 64;
   const regionById = new Map(regions.map((region) => [region.id, region]));
   const highlightedRegions = new Set(highlightedRegionIds);
@@ -1633,16 +1795,80 @@ export function WorldMap({
   overlay,
   onSelectRegion,
   onSelectObject,
+  cameraKey,
+  onCameraChange,
   className = "",
 }: WorldMapProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<CanvasSize>({ width: 1, height: 1, dpr: 1 });
   const [hover, setHover] = useState<HoverState | null>(null);
+  const [camera, setCameraState] = useState<MapCamera>(() => ({ ...DEFAULT_MAP_CAMERA }));
+  const [dragging, setDragging] = useState(false);
+  const [hasInteracted, setHasInteracted] = useState(false);
+  const [tapFeedback, setTapFeedback] = useState<TapFeedback | null>(null);
+  const cameraRef = useRef<MapCamera>({ ...DEFAULT_MAP_CAMERA });
+  const cameraKeyRef = useRef(cameraKey);
+  const viewportSizeRef = useRef({ width: 1, height: 1 });
+  const pointersRef = useRef(new Map<number, PointerContact>());
+  const gestureRef = useRef<MapGestureState | null>(null);
+  const tapSequenceRef = useRef(0);
+  const tapTimerRef = useRef<number | null>(null);
   const presentation = useMemo(
     () => buildMapPresentation(regions, routes, armies, seaZones, fleets, flows, markers),
     [armies, fleets, flows, markers, regions, routes, seaZones],
   );
+
+  const applyCamera = useCallback((candidate: MapCamera) => {
+    const next = clampMapCamera(candidate, size.width, size.height);
+    const current = cameraRef.current;
+    if (
+      Math.abs(current.zoom - next.zoom) < 0.0001
+      && Math.abs(current.panX - next.panX) < 0.05
+      && Math.abs(current.panY - next.panY) < 0.05
+    ) return current;
+    cameraRef.current = next;
+    setCameraState(next);
+    return next;
+  }, [size.height, size.width]);
+
+  const commitCamera = useCallback((next = cameraRef.current) => {
+    onCameraChange?.({ ...next });
+  }, [onCameraChange]);
+
+  useEffect(() => {
+    if (cameraKeyRef.current === cameraKey) return;
+    cameraKeyRef.current = cameraKey;
+    cameraRef.current = { ...DEFAULT_MAP_CAMERA };
+    setCameraState({ ...DEFAULT_MAP_CAMERA });
+    setHasInteracted(false);
+    commitCamera(DEFAULT_MAP_CAMERA);
+  }, [cameraKey, commitCamera]);
+
+  useEffect(() => {
+    const previous = viewportSizeRef.current;
+    const next = reframeMapCamera(
+      cameraRef.current,
+      previous.width,
+      previous.height,
+      size.width,
+      size.height,
+    );
+    viewportSizeRef.current = { width: size.width, height: size.height };
+    const current = cameraRef.current;
+    if (
+      Math.abs(current.zoom - next.zoom) < 0.0001
+      && Math.abs(current.panX - next.panX) < 0.05
+      && Math.abs(current.panY - next.panY) < 0.05
+    ) return;
+    cameraRef.current = next;
+    setCameraState(next);
+    commitCamera(next);
+  }, [commitCamera, size.height, size.width]);
+
+  useEffect(() => () => {
+    if (tapTimerRef.current !== null) window.clearTimeout(tapTimerRef.current);
+  }, []);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -1691,72 +1917,360 @@ export function WorldMap({
       selectedRegionId,
       selectedObject,
       hover?.region.id,
+      camera,
     );
-  }, [highlightedRegionIds, hover?.region.id, overlay, presentation, selectedObject, selectedRegionId, size]);
+  }, [camera, highlightedRegionIds, hover?.region.id, overlay, presentation, selectedObject, selectedRegionId, size]);
 
   const localPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
     return {
-      x: event.clientX - rect.left,
-      y: event.clientY - rect.top,
+      x: (event.clientX - rect.left) * (size.width / Math.max(1, rect.width)),
+      y: (event.clientY - rect.top) * (size.height / Math.max(1, rect.height)),
     };
+  }, [size.height, size.width]);
+
+  const localClientPoint = useCallback((clientX: number, clientY: number) => {
+    const canvas = canvasRef.current;
+    if (!canvas) return { x: size.width / 2, y: size.height / 2 };
+    const rect = canvas.getBoundingClientRect();
+    return {
+      x: (clientX - rect.left) * (size.width / Math.max(1, rect.width)),
+      y: (clientY - rect.top) * (size.height / Math.max(1, rect.height)),
+    };
+  }, [size.height, size.width]);
+
+  const showTapFeedback = useCallback((point: MapPoint) => {
+    tapSequenceRef.current += 1;
+    setTapFeedback({ id: tapSequenceRef.current, x: point.x, y: point.y });
+    if (tapTimerRef.current !== null) window.clearTimeout(tapTimerRef.current);
+    tapTimerRef.current = window.setTimeout(() => setTapFeedback(null), 420);
   }, []);
+
+  const regionNearScreenPoint = useCallback((point: MapPoint, tolerance: number) => {
+    const direct = regionAtScreenPoint(
+      presentation.regions,
+      point,
+      size.width,
+      size.height,
+      MAP_PADDING,
+      cameraRef.current,
+    );
+    if (direct || tolerance <= 0) return direct;
+    for (const radius of [tolerance * 0.55, tolerance]) {
+      for (let index = 0; index < 8; index += 1) {
+        const angle = index * Math.PI / 4;
+        const candidate = regionAtScreenPoint(
+          presentation.regions,
+          { x: point.x + Math.cos(angle) * radius, y: point.y + Math.sin(angle) * radius },
+          size.width,
+          size.height,
+          MAP_PADDING,
+          cameraRef.current,
+        );
+        if (candidate) return candidate;
+      }
+    }
+    return null;
+  }, [presentation.regions, size.height, size.width]);
+
+  const selectAtPoint = useCallback((point: MapPoint, pointerType: string) => {
+    const coarse = pointerType === "touch" || pointerType === "pen";
+    const transform = createMapViewportTransform(
+      size.width,
+      size.height,
+      MAP_PADDING,
+      cameraRef.current,
+    );
+    const worldPoint = screenToWorldPoint(
+      point,
+      size.width,
+      size.height,
+      MAP_PADDING,
+      cameraRef.current,
+    );
+    const worldRadius = (screenPixels: number) => screenPixels
+      / Math.max(0.001, transform.scale * Math.min(1, transform.yScale));
+    const nearestFleet = presentation.fleets
+      .map((fleet) => ({ fleet, distance: Math.hypot(fleet.position.x - worldPoint.x, fleet.position.y - worldPoint.y) }))
+      .sort((left, right) => left.distance - right.distance)[0];
+    if (onSelectObject && nearestFleet && nearestFleet.distance <= worldRadius(coarse ? 22 : 12)) {
+      onSelectObject("fleet", nearestFleet.fleet.id);
+      showTapFeedback(point);
+      return;
+    }
+    const nearestMarker = presentation.markers
+      .map((marker) => ({ marker, distance: Math.hypot(marker.position.x - worldPoint.x, marker.position.y - worldPoint.y) }))
+      .sort((left, right) => left.distance - right.distance)[0];
+    if (onSelectObject && nearestMarker && nearestMarker.distance <= worldRadius(coarse ? 22 : 12)) {
+      onSelectObject(nearestMarker.marker.kind, nearestMarker.marker.id);
+      showTapFeedback(point);
+      return;
+    }
+    const pointToSegment = (flow: MapFlowView) => {
+      const dx = flow.to.x - flow.from.x;
+      const dy = flow.to.y - flow.from.y;
+      const denominator = dx * dx + dy * dy || 1;
+      const ratio = clamp(((worldPoint.x - flow.from.x) * dx + (worldPoint.y - flow.from.y) * dy) / denominator);
+      return Math.hypot(worldPoint.x - (flow.from.x + ratio * dx), worldPoint.y - (flow.from.y + ratio * dy));
+    };
+    const nearestFlow = presentation.flows
+      .map((flow) => ({ flow, distance: pointToSegment(flow) }))
+      .sort((left, right) => left.distance - right.distance)[0];
+    if (onSelectObject && nearestFlow && nearestFlow.distance <= worldRadius(coarse ? 18 : 9)) {
+      onSelectObject(nearestFlow.flow.selectedKind, nearestFlow.flow.selectedId);
+      showTapFeedback(point);
+      return;
+    }
+    const region = regionNearScreenPoint(point, coarse ? 8 : 0);
+    if (region) {
+      onSelectRegion(region.id);
+      showTapFeedback(point);
+      return;
+    }
+    const nearestSea = presentation.seaZones
+      .map((zone) => ({ zone, distance: Math.hypot(zone.center.x - worldPoint.x, zone.center.y - worldPoint.y) }))
+      .sort((left, right) => left.distance - right.distance)[0];
+    if (onSelectObject && nearestSea && nearestSea.distance <= worldRadius(coarse ? 30 : 24)) {
+      onSelectObject("seaZone", nearestSea.zone.id);
+      showTapFeedback(point);
+    }
+  }, [onSelectObject, onSelectRegion, presentation, regionNearScreenPoint, showTapFeedback, size.height, size.width]);
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
       const point = localPoint(event);
-      const region = regionAtScreenPoint(presentation.regions, point, size.width, size.height);
-      event.currentTarget.style.cursor = region ? "crosshair" : "default";
+      const contact = pointersRef.current.get(event.pointerId);
+      if (contact) {
+        event.preventDefault();
+        contact.current = point;
+        const gesture = gestureRef.current;
+        if (!gesture) return;
+        const active = [...pointersRef.current.values()];
+        if (active.length >= 2) {
+          const first = active[0].current;
+          const second = active[1].current;
+          const midpoint = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+          const distance = Math.max(1, Math.hypot(first.x - second.x, first.y - second.y));
+          if (!gesture.pinch) {
+            gesture.pinch = { camera: { ...cameraRef.current }, distance, midpoint };
+          }
+          const pinch = gesture.pinch;
+          const zoomed = zoomMapCameraAtPoint(
+            pinch.camera,
+            pinch.camera.zoom * (distance / Math.max(1, pinch.distance)),
+            pinch.midpoint,
+            size.width,
+            size.height,
+          );
+          applyCamera(panMapCamera(
+            zoomed,
+            midpoint.x - pinch.midpoint.x,
+            midpoint.y - pinch.midpoint.y,
+            size.width,
+            size.height,
+          ));
+          gesture.moved = true;
+          gesture.hadMultiple = true;
+          setDragging(true);
+          setHasInteracted(true);
+          setHover(null);
+          return;
+        }
+        const threshold = gesture.pointerType === "touch" ? 8 : 5;
+        const totalDistance = Math.hypot(point.x - gesture.startPoint.x, point.y - gesture.startPoint.y);
+        if (gesture.moved || totalDistance >= threshold) {
+          gesture.moved = true;
+          const before = cameraRef.current;
+          const next = applyCamera(panMapCamera(
+            cameraRef.current,
+            point.x - gesture.lastPoint.x,
+            point.y - gesture.lastPoint.y,
+            size.width,
+            size.height,
+          ));
+          const cameraMoved = Math.abs(next.panX - before.panX) > 0.05
+            || Math.abs(next.panY - before.panY) > 0.05;
+          if (cameraMoved) {
+            setDragging(true);
+            setHasInteracted(true);
+          }
+          setHover(null);
+        }
+        gesture.lastPoint = point;
+        return;
+      }
+      if (event.pointerType !== "mouse" || event.buttons !== 0) return;
+      const region = regionNearScreenPoint(point, 0);
       setHover(region ? { region, x: point.x, y: point.y } : null);
     },
-    [localPoint, presentation.regions, size.height, size.width],
+    [applyCamera, localPoint, regionNearScreenPoint, size.height, size.width],
   );
 
-  const handleClick = useCallback(
+  const handlePointerDown = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
+      if (event.pointerType === "mouse" && event.button !== 0) return;
+      event.preventDefault();
+      event.currentTarget.focus({ preventScroll: true });
       const point = localPoint(event);
-      const worldPoint = screenToWorldPoint(point, size.width, size.height);
-      const nearestFleet = presentation.fleets
-        .map((fleet) => ({ fleet, distance: Math.hypot(fleet.position.x - worldPoint.x, fleet.position.y - worldPoint.y) }))
-        .sort((left, right) => left.distance - right.distance)[0];
-      if (nearestFleet && nearestFleet.distance <= 18) {
-        onSelectObject?.("fleet", nearestFleet.fleet.id);
-        return;
+      let captured = false;
+      try {
+        event.currentTarget.setPointerCapture(event.pointerId);
+        captured = event.currentTarget.hasPointerCapture(event.pointerId);
+      } catch {
+        // Pointer capture can fail when a browser cancels a touch during handoff.
       }
-      const nearestMarker = presentation.markers
-        .map((marker) => ({ marker, distance: Math.hypot(marker.position.x - worldPoint.x, marker.position.y - worldPoint.y) }))
-        .sort((left, right) => left.distance - right.distance)[0];
-      if (nearestMarker && nearestMarker.distance <= 16) {
-        onSelectObject?.(nearestMarker.marker.kind, nearestMarker.marker.id);
-        return;
+      if (!captured) return;
+      pointersRef.current.set(event.pointerId, {
+        pointerType: event.pointerType,
+        current: point,
+      });
+      const active = [...pointersRef.current.values()];
+      if (active.length === 1) {
+        gestureRef.current = {
+          pointerType: event.pointerType,
+          startPoint: point,
+          lastPoint: point,
+          moved: false,
+          hadMultiple: false,
+        };
+      } else {
+        const first = active[0].current;
+        const second = active[1].current;
+        const midpoint = { x: (first.x + second.x) / 2, y: (first.y + second.y) / 2 };
+        gestureRef.current = {
+          pointerType: event.pointerType,
+          startPoint: gestureRef.current?.startPoint ?? point,
+          lastPoint: point,
+          moved: true,
+          hadMultiple: true,
+          pinch: {
+            camera: { ...cameraRef.current },
+            distance: Math.max(1, Math.hypot(first.x - second.x, first.y - second.y)),
+            midpoint,
+          },
+        };
+        setDragging(true);
+        setHasInteracted(true);
       }
-      const pointToSegment = (flow: MapFlowView) => {
-        const dx = flow.to.x - flow.from.x;
-        const dy = flow.to.y - flow.from.y;
-        const denominator = dx * dx + dy * dy || 1;
-        const ratio = clamp(((worldPoint.x - flow.from.x) * dx + (worldPoint.y - flow.from.y) * dy) / denominator);
-        return Math.hypot(worldPoint.x - (flow.from.x + ratio * dx), worldPoint.y - (flow.from.y + ratio * dy));
-      };
-      const nearestFlow = presentation.flows.map((flow) => ({ flow, distance: pointToSegment(flow) })).sort((a, b) => a.distance - b.distance)[0];
-      if (nearestFlow && nearestFlow.distance <= 12) {
-        onSelectObject?.(nearestFlow.flow.selectedKind, nearestFlow.flow.selectedId);
-        return;
-      }
-      const region = regionAtScreenPoint(presentation.regions, point, size.width, size.height);
-      if (region) {
-        onSelectRegion(region.id);
-        return;
-      }
-      const nearestSea = presentation.seaZones
-        .map((zone) => ({ zone, distance: Math.hypot(zone.center.x - worldPoint.x, zone.center.y - worldPoint.y) }))
-        .sort((left, right) => left.distance - right.distance)[0];
-      if (nearestSea && nearestSea.distance <= 52) onSelectObject?.("seaZone", nearestSea.zone.id);
+      setHover(null);
     },
-    [localPoint, onSelectObject, onSelectRegion, presentation, size.height, size.width],
+    [localPoint],
   );
+
+  const finishPointer = useCallback((event: ReactPointerEvent<HTMLCanvasElement>, cancelled: boolean) => {
+    const contact = pointersRef.current.get(event.pointerId);
+    if (!contact) return;
+    const point = localPoint(event);
+    contact.current = point;
+    const gesture = gestureRef.current;
+    const shouldSelect = !cancelled
+      && pointersRef.current.size === 1
+      && !gesture?.moved
+      && !gesture?.hadMultiple;
+    pointersRef.current.delete(event.pointerId);
+    try {
+      if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+        event.currentTarget.releasePointerCapture(event.pointerId);
+      }
+    } catch {
+      // The browser may already have released capture after a touch cancellation.
+    }
+    const remaining = [...pointersRef.current.values()];
+    if (remaining.length > 0) {
+      const next = remaining[0].current;
+      gestureRef.current = {
+        pointerType: remaining[0].pointerType,
+        startPoint: next,
+        lastPoint: next,
+        moved: true,
+        hadMultiple: true,
+      };
+      setDragging(cameraRef.current.zoom > MAP_MIN_ZOOM + 0.0001);
+      return;
+    }
+    gestureRef.current = null;
+    setDragging(false);
+    if (shouldSelect) selectAtPoint(point, contact.pointerType);
+    commitCamera();
+  }, [commitCamera, localPoint, selectAtPoint]);
+
+  const handleWheel = useCallback((event: WheelEvent) => {
+    event.preventDefault();
+    const point = localClientPoint(event.clientX, event.clientY);
+    const unit = event.deltaMode === 1 ? 16 : event.deltaMode === 2 ? size.height : 1;
+    const factor = Math.exp(-event.deltaY * unit * 0.00135);
+    const next = applyCamera(zoomMapCameraAtPoint(
+      cameraRef.current,
+      cameraRef.current.zoom * factor,
+      point,
+      size.width,
+      size.height,
+    ));
+    setHasInteracted(true);
+    setHover(null);
+    commitCamera(next);
+  }, [applyCamera, commitCamera, localClientPoint, size.height, size.width]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    if (!canvas) return undefined;
+    const listener = (event: WheelEvent) => handleWheel(event);
+    canvas.addEventListener("wheel", listener, { passive: false });
+    return () => canvas.removeEventListener("wheel", listener);
+  }, [handleWheel]);
+
+  const zoomAtCenter = useCallback((nextZoom: number) => {
+    const next = applyCamera(zoomMapCameraAtPoint(
+      cameraRef.current,
+      nextZoom,
+      { x: size.width / 2, y: size.height / 2 },
+      size.width,
+      size.height,
+    ));
+    setHasInteracted(true);
+    setHover(null);
+    commitCamera(next);
+  }, [applyCamera, commitCamera, size.height, size.width]);
+
+  const resetCamera = useCallback(() => {
+    const next = applyCamera(DEFAULT_MAP_CAMERA);
+    setHasInteracted(true);
+    setHover(null);
+    commitCamera(next);
+  }, [applyCamera, commitCamera]);
+
+  const handleDoubleClick = useCallback((event: ReactMouseEvent<HTMLCanvasElement>) => {
+    event.preventDefault();
+    const point = localClientPoint(event.clientX, event.clientY);
+    const next = applyCamera(zoomMapCameraAtPoint(
+      cameraRef.current,
+      cameraRef.current.zoom * 1.45,
+      point,
+      size.width,
+      size.height,
+    ));
+    setHasInteracted(true);
+    setHover(null);
+    commitCamera(next);
+  }, [applyCamera, commitCamera, localClientPoint, size.height, size.width]);
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLCanvasElement>) => {
+      if (event.key === "+" || event.key === "=") {
+        event.preventDefault();
+        zoomAtCenter(cameraRef.current.zoom * 1.35);
+        return;
+      }
+      if (event.key === "-" || event.key === "_") {
+        event.preventDefault();
+        zoomAtCenter(cameraRef.current.zoom / 1.35);
+        return;
+      }
+      if (event.key === "0") {
+        event.preventDefault();
+        resetCamera();
+        return;
+      }
       const contextualObjects = overlay === "naval"
         ? [...presentation.seaZones.map((item) => ({ kind: "seaZone" as const, id: item.id })), ...presentation.fleets.map((item) => ({ kind: "fleet" as const, id: item.id }))]
         : [...presentation.markers.map((item) => ({ kind: item.kind, id: item.id })), ...presentation.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId }))];
@@ -1781,7 +2295,7 @@ export function WorldMap({
       const nextIndex = (currentIndex + direction + presentation.regions.length) % presentation.regions.length;
       onSelectRegion(presentation.regions[nextIndex].id);
     },
-    [hover?.region.id, onSelectObject, onSelectRegion, overlay, presentation, selectedObject?.id, selectedRegionId],
+    [hover?.region.id, onSelectObject, onSelectRegion, overlay, presentation, resetCamera, selectedObject?.id, selectedRegionId, zoomAtCenter],
   );
 
   const tooltipStyle = useMemo(() => {
@@ -1806,6 +2320,12 @@ export function WorldMap({
       data-landmass-count="2"
       data-island-shape-count="6"
       data-highlighted-region-count={highlightedRegionIds.length}
+      data-map-zoom={camera.zoom.toFixed(3)}
+      data-map-pan-x={camera.panX.toFixed(1)}
+      data-map-pan-y={camera.panY.toFixed(1)}
+      data-pannable={camera.zoom > MAP_MIN_ZOOM + 0.0001 || undefined}
+      data-dragging={dragging || undefined}
+      data-hover-region={Boolean(hover) || undefined}
     >
       <canvas
         ref={canvasRef}
@@ -1813,12 +2333,68 @@ export function WorldMap({
         style={{ width: `${size.width}px`, height: `${size.height}px` }}
         role="application"
         tabIndex={0}
-        aria-label={`天下舆图。${selectedName ? `当前选择：${selectedName}。` : "尚未选择区域。"}左右方向键切换区域，回车确认。`}
+        aria-label={`天下舆图。${selectedName ? `当前选择：${selectedName}。` : "尚未选择区域。"}点按选择，拖动浏览，滚轮或双指缩放。左右方向键切换区域，加减号缩放，数字零归位，回车确认。`}
         onPointerMove={handlePointerMove}
-        onPointerLeave={() => setHover(null)}
-        onPointerDown={handleClick}
+        onPointerLeave={() => {
+          if (pointersRef.current.size === 0) setHover(null);
+        }}
+        onPointerDown={handlePointerDown}
+        onPointerUp={(event) => finishPointer(event, false)}
+        onPointerCancel={(event) => finishPointer(event, true)}
+        onLostPointerCapture={(event) => finishPointer(event, true)}
+        onDoubleClick={handleDoubleClick}
         onKeyDown={handleKeyDown}
       />
+
+      <div className="world-map__viewport-controls" role="group" aria-label="舆图缩放">
+        <button
+          type="button"
+          data-map-zoom-out="true"
+          onClick={() => zoomAtCenter(camera.zoom / 1.35)}
+          disabled={camera.zoom <= MAP_MIN_ZOOM + 0.001}
+          aria-label={`缩小舆图，当前${Math.round(camera.zoom * 100)}%`}
+        >
+          <Minus size={16} aria-hidden="true" />
+        </button>
+        <output aria-label={`当前舆图缩放${Math.round(camera.zoom * 100)}%`}>
+          {Math.round(camera.zoom * 100)}%
+        </output>
+        <button
+          type="button"
+          data-map-zoom-in="true"
+          onClick={() => zoomAtCenter(camera.zoom * 1.35)}
+          disabled={camera.zoom >= MAP_MAX_ZOOM - 0.001}
+          aria-label={`放大舆图，当前${Math.round(camera.zoom * 100)}%`}
+        >
+          <Plus size={16} aria-hidden="true" />
+        </button>
+        <button
+          type="button"
+          data-map-reset="true"
+          onClick={resetCamera}
+          disabled={camera.zoom <= MAP_MIN_ZOOM + 0.001 && Math.abs(camera.panX) < 0.1 && Math.abs(camera.panY) < 0.1}
+          aria-label="归位舆图"
+          title="归位舆图（0）"
+        >
+          <ScanLine size={16} aria-hidden="true" />
+        </button>
+      </div>
+
+      {!hasInteracted && regions.length > 0 ? (
+        <p className="world-map__gesture-hint" aria-hidden="true">
+          <span className="world-map__gesture-hint-desktop">滚轮缩放 · 放大后拖动</span>
+          <span className="world-map__gesture-hint-touch">双指缩放 · 放大后单指拖动</span>
+        </p>
+      ) : null}
+
+      {tapFeedback ? (
+        <span
+          key={tapFeedback.id}
+          className="world-map__tap-feedback"
+          style={{ left: tapFeedback.x, top: tapFeedback.y }}
+          aria-hidden="true"
+        />
+      ) : null}
 
       {hover && tooltipStyle ? (
         <div className="world-map__tooltip" style={tooltipStyle} aria-hidden="true">

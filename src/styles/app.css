@@ -361,12 +361,18 @@
     right: 10px;
   }
 
+  .observer-world-tools button {
+    width: 40px;
+    height: 40px;
+  }
+
   .observer-world-summary {
     left: 10px;
   }
 
   .observer-map-primer-trigger {
     left: 10px;
+    min-height: 44px;
   }
 
   .observer-history-lens {
@@ -377,7 +383,7 @@
 
 @media (max-width: 480px) {
   :root {
-    --observer-chronicle-height: 136px;
+    --observer-chronicle-height: calc(136px + var(--observer-safe-bottom));
   }
 
   .observer-app > .quarter-pulse {
@@ -385,15 +391,20 @@
   }
 
   .observer-world-tools {
+    top: 10px;
     right: 10px;
     left: 10px;
     justify-content: flex-end;
-    gap: 2px;
+    gap: 0;
+    overflow-x: auto;
+    overscroll-behavior-x: contain;
     box-sizing: border-box;
   }
 
   .observer-world-tools button {
-    width: 30px;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 44px;
   }
 
   .observer-world-tools__rule {
@@ -402,11 +413,11 @@
   }
 
   .observer-world-summary {
-    top: 58px;
+    top: 70px;
   }
 
   .observer-map-primer-trigger {
-    top: 99px;
+    top: 112px;
   }
 
   .observer-history-lens {
@@ -416,6 +427,19 @@
 
   .observer-history-lens button:first-of-type {
     display: none;
+  }
+}
+
+@media (max-width: 370px) {
+  .observer-world-tools::after {
+    position: absolute;
+    top: 4px;
+    right: 0;
+    bottom: 4px;
+    width: 18px;
+    background: linear-gradient(90deg, transparent, rgb(239 233 216 / 96%));
+    content: '';
+    pointer-events: none;
   }
 }
 

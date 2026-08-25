@@ -22,6 +22,7 @@ export function ObserverLeads({
   onInspect,
   onToggleWatch,
 }: ObserverLeadsProps) {
+  const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
 
   if (!leads.length) return null;
@@ -30,6 +31,7 @@ export function ObserverLeads({
     <aside
       className="observer-leads"
       data-observer-leads="true"
+      data-mobile-open={mobileOpen || undefined}
       data-mobile-expanded={mobileExpanded || undefined}
       aria-labelledby="observer-leads-title"
     >
@@ -43,11 +45,23 @@ export function ObserverLeads({
         <button
           type="button"
           className="observer-leads__mobile-toggle"
-          aria-expanded={mobileExpanded}
-          aria-label={mobileExpanded ? '收起另外两条观察线索' : '展开全部三条观察线索'}
-          onClick={() => setMobileExpanded((current) => !current)}
+          data-fully-expanded={mobileExpanded || undefined}
+          aria-expanded={mobileOpen}
+          aria-label={!mobileOpen ? '展开第一条观察线索' : mobileExpanded ? '收起观察线索' : '展开全部三条观察线索'}
+          onClick={() => {
+            if (!mobileOpen) {
+              setMobileOpen(true);
+              return;
+            }
+            if (!mobileExpanded) {
+              setMobileExpanded(true);
+              return;
+            }
+            setMobileExpanded(false);
+            setMobileOpen(false);
+          }}
         >
-          <span>{mobileExpanded ? '收起' : `全部 ${leads.length}`}</span>
+          <span>{!mobileOpen ? '看一条' : mobileExpanded ? '收起' : `全部 ${leads.length}`}</span>
           <ChevronDown size={13} aria-hidden="true" />
         </button>
       </header>
@@ -104,4 +118,3 @@ export function ObserverLeads({
     </aside>
   );
 }
-

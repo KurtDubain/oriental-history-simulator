@@ -14,7 +14,9 @@
   --observer-warning: #aa682d;
   --observer-serif: "Noto Serif SC", "Songti SC", STSong, serif;
   --observer-sans: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
-  --observer-topbar-height: 70px;
+  --observer-safe-top: env(safe-area-inset-top, 0px);
+  --observer-safe-bottom: env(safe-area-inset-bottom, 0px);
+  --observer-topbar-height: calc(70px + var(--observer-safe-top));
   --observer-chronicle-height: 90px;
 }
 
@@ -62,7 +64,8 @@
   align-items: center;
   min-width: 0;
   height: var(--observer-topbar-height);
-  padding: 0 18px 0 14px;
+  padding: var(--observer-safe-top) 18px 0 14px;
+  box-sizing: border-box;
   border-bottom: 1px solid var(--observer-line-strong);
   background: rgb(235 227 207 / 92%);
   box-shadow: 0 1px 0 rgb(255 255 255 / 45%) inset;
@@ -173,6 +176,10 @@
   padding: 0 5px;
   border-right: 1px solid var(--observer-line);
   color: var(--observer-ink-faint);
+}
+
+.observer-speed-cycle {
+  display: none;
 }
 
 .observer-speed > svg {
@@ -1540,6 +1547,11 @@ button.observer-causal-chain__evidence:hover {
   to { opacity: 1; transform: translateX(0); }
 }
 
+@keyframes observer-inspector-mobile-reveal {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
 @keyframes observer-tab-reveal {
   from { opacity: 0; transform: translateY(3px); }
   to { opacity: 1; transform: translateY(0); }
@@ -1571,6 +1583,8 @@ button.observer-causal-chain__evidence:hover {
     right: 0;
     bottom: var(--observer-chronicle-height);
     width: min(350px, calc(100vw - 60px));
+    grid-column: auto;
+    grid-row: auto;
     box-shadow: -18px 0 40px rgb(42 40 34 / 14%);
   }
 
@@ -1581,8 +1595,8 @@ button.observer-causal-chain__evidence:hover {
 
 @media (max-width: 760px) {
   :root {
-    --observer-chronicle-height: 120px;
-    --observer-topbar-height: 64px;
+    --observer-chronicle-height: calc(120px + var(--observer-safe-bottom));
+    --observer-topbar-height: calc(64px + var(--observer-safe-top));
   }
 
   .observer-app {
@@ -1611,6 +1625,10 @@ button.observer-causal-chain__evidence:hover {
     box-shadow: 0 10px 30px rgb(38 35 29 / 16%);
     overscroll-behavior-x: contain;
     scroll-snap-type: x proximity;
+  }
+
+  .observer-app[data-inspector-open="true"] .observer-navigation {
+    display: none;
   }
 
   .observer-navigation__views {
@@ -1657,7 +1675,37 @@ button.observer-causal-chain__evidence:hover {
   }
 
   .observer-inspector {
-    width: min(350px, calc(100vw - 12px));
+    right: 0;
+    left: 0;
+    width: auto;
+    padding: 14px 14px calc(24px + var(--observer-safe-bottom));
+    border-left: 0;
+    box-shadow: 0 -10px 38px rgb(42 40 34 / 14%);
+    animation-name: observer-inspector-mobile-reveal;
+  }
+
+  .observer-inspector__actions .observer-icon-button,
+  .observer-inspector-tabs button {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .observer-inspector__header {
+    position: sticky;
+    z-index: 3;
+    top: -14px;
+    margin: -14px -14px 0;
+    padding: 14px 14px 12px;
+    border-bottom: 1px solid var(--observer-line);
+    background: rgb(239 232 215 / 96%);
+    backdrop-filter: blur(10px);
+  }
+
+  .observer-inspector__jump .observer-text-link {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    padding: 0 4px;
   }
 
   .observer-topbar {
@@ -1680,6 +1728,36 @@ button.observer-causal-chain__evidence:hover {
   .observer-time-controls {
     grid-column: 2;
     grid-row: 1;
+    gap: 4px;
+  }
+
+  .observer-speed-cycle {
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 3px;
+    padding: 0;
+    border: 1px solid var(--observer-line-strong);
+    border-radius: 2px;
+    color: var(--observer-ink-soft);
+    background: transparent;
+    font-size: 9px;
+    font-weight: 750;
+    cursor: pointer;
+  }
+
+  .observer-speed-cycle:focus-visible {
+    outline: 2px solid var(--observer-vermilion);
+    outline-offset: 2px;
+  }
+
+  .observer-time-controls .observer-icon-button,
+  .observer-advance-button {
+    width: 44px;
+    height: 44px;
   }
 
   .observer-date {
@@ -1710,7 +1788,7 @@ button.observer-causal-chain__evidence:hover {
   }
 
   .observer-advance-button {
-    width: 36px;
+    width: 44px;
     padding: 0;
   }
 

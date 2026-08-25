@@ -45,7 +45,11 @@ import {
 } from './components/NavigationRail';
 import { RosterPanel, type RosterItem } from './components/RosterPanel';
 import { TopBar, type PlaybackSpeed } from './components/TopBar';
-import { WorldMap } from './components/WorldMap';
+import {
+  DEFAULT_MAP_CAMERA,
+  WorldMap,
+  type MapCamera,
+} from './components/WorldMap';
 import { WorldCollectionPanel } from './components/WorldCollectionPanel';
 import { WorldStart } from './components/WorldStart';
 import {
@@ -249,6 +253,7 @@ interface SnapshotOptions {
   worldSaveCount: number;
   primerOpen: boolean;
   primerStep: MapPrimerStep;
+  mapCamera: MapCamera;
 }
 
 function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
@@ -488,6 +493,11 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
     interface: {
       view: options.view,
       overlay: options.overlay,
+      mapViewport: {
+        zoom: Number(options.mapCamera.zoom.toFixed(3)),
+        panX: Number(options.mapCamera.panX.toFixed(1)),
+        panY: Number(options.mapCamera.panY.toFixed(1)),
+      },
       selected,
       selectedEventId: options.selectedEventId,
       archiveOpen: options.archiveOpen,
@@ -621,6 +631,8 @@ export function App() {
   const [speed, setSpeed] = useState<PlaybackSpeed>(1);
   const [activeView, setActiveView] = useState<ObserverView>('world');
   const [overlay, setOverlay] = useState<MapOverlay>('political');
+  const [mapCamera, setMapCamera] = useState<MapCamera>(() => ({ ...DEFAULT_MAP_CAMERA }));
+  const [mapCameraKey, setMapCameraKey] = useState(0);
   const [selection, setSelection] = useState<Selection>(null);
   const [followed, setFollowed] = useState<Set<string>>(() => new Set());
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -681,6 +693,7 @@ export function App() {
     worldSaveCount: worldSaves.length,
     primerOpen,
     primerStep,
+    mapCamera,
   });
 
   const commitWorld = useCallback((nextWorld: WorldState) => {
@@ -766,6 +779,8 @@ export function App() {
     setResumeHistoryAfterEvent(false);
     setActiveView('world');
     setOverlay('political');
+    setMapCamera({ ...DEFAULT_MAP_CAMERA });
+    setMapCameraKey((current) => current + 1);
     setStartOpen(false);
     setStartError(null);
     setFatalError(null);
@@ -1133,6 +1148,7 @@ export function App() {
     worldSaveCount: worldSaves.length,
     primerOpen,
     primerStep,
+    mapCamera,
   };
   useEffect(() => {
     window.render_game_to_text = () => makeTextSnapshot(worldRef.current, snapshotOptionsRef.current);
@@ -1653,6 +1669,8 @@ export function App() {
               selectedRegionId={selection?.kind === 'region' ? selection.id : null}
               selectedObject={selection && selection.kind !== 'region' && selection.kind !== 'country' && selection.kind !== 'family' && selection.kind !== 'person' ? selection : null}
               overlay={historicalView ? 'political' : overlay}
+              cameraKey={mapCameraKey}
+              onCameraChange={setMapCamera}
               onSelectRegion={(id) => {
                 setSelection({ kind: 'region', id });
                 setActiveView('world');

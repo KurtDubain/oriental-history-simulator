@@ -51,6 +51,7 @@ export function TopBar({
   onSpeedChange,
 }: TopBarProps) {
   const currentSeason = SEASONS[season];
+  const nextSpeed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
 
   return (
     <header className="observer-topbar">
@@ -93,6 +94,18 @@ export function TopBar({
               </button>
             ))}
           </div>
+        ) : null}
+
+        {onSpeedChange ? (
+          <button
+            type="button"
+            className="observer-speed-cycle"
+            aria-label={`当前${speed}倍速，点按切换至${nextSpeed}倍速`}
+            onClick={() => onSpeedChange(nextSpeed)}
+          >
+            <Gauge size={15} strokeWidth={1.7} aria-hidden="true" />
+            <span>{speed}×</span>
+          </button>
         ) : null}
 
         <button
