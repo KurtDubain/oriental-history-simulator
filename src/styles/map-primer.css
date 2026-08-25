@@ -1,0 +1,496 @@
+.map-primer-layer {
+  position: fixed;
+  z-index: 140;
+  inset: 0;
+  color: var(--observer-ink, #272822);
+  font-family: var(--observer-sans, Inter, "PingFang SC", sans-serif);
+}
+
+.map-primer-layer__backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: rgb(35 34 29 / 38%);
+  backdrop-filter: blur(1.5px);
+  cursor: default;
+  animation: map-primer-backdrop-in 180ms ease-out both;
+}
+
+.map-primer {
+  position: absolute;
+  top: 50%;
+  left: max(92px, calc(50vw - 530px));
+  display: flex;
+  width: min(510px, calc(100vw - 116px));
+  max-height: calc(100dvh - 28px);
+  flex-direction: column;
+  overflow: auto;
+  border: 1px solid var(--observer-line-strong, rgb(48 47 40 / 28%));
+  border-top: 3px solid var(--observer-vermilion, #9c352b);
+  background:
+    linear-gradient(90deg, transparent 35px, rgb(156 53 43 / 8%) 36px, transparent 37px),
+    var(--observer-paper-bright, #f1ead9);
+  box-shadow: 24px 28px 70px rgb(30 28 23 / 30%);
+  transform: translateY(-50%);
+  animation: map-primer-sheet-in 220ms cubic-bezier(.22, .8, .3, 1) both;
+}
+
+.map-primer::after {
+  position: absolute;
+  z-index: -1;
+  inset: 0;
+  pointer-events: none;
+  content: "";
+  opacity: .15;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 140 140' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.9' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.16'/%3E%3C/svg%3E");
+  mix-blend-mode: multiply;
+}
+
+.map-primer__header {
+  display: grid;
+  grid-template-columns: 36px minmax(0, 1fr) 38px;
+  align-items: center;
+  min-height: 72px;
+  padding: 12px 12px 11px 16px;
+  gap: 11px;
+  border-bottom: 1px solid var(--observer-line, rgb(48 47 40 / 16%));
+}
+
+.map-primer__seal {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid var(--observer-vermilion-dark, #79271f);
+  color: #f3ead7;
+  background: var(--observer-vermilion, #9c352b);
+  box-shadow: inset 0 0 0 2px rgb(255 244 220 / 18%);
+}
+
+.map-primer__header > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.map-primer__header > div > span,
+.map-primer__copy > span {
+  color: var(--observer-vermilion-dark, #79271f);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .2em;
+}
+
+.map-primer__header h2 {
+  margin: 0;
+  font-family: var(--observer-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 19px;
+  font-weight: 650;
+  letter-spacing: .08em;
+}
+
+.map-primer__header > button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  color: var(--observer-ink-soft, #656357);
+  background: transparent;
+  cursor: pointer;
+}
+
+.map-primer__header > button:hover {
+  color: var(--observer-vermilion-dark, #79271f);
+  background: var(--observer-vermilion-wash, rgb(156 53 43 / 10%));
+}
+
+.map-primer__steps {
+  padding: 11px 22px 5px 52px;
+}
+
+.map-primer__steps ol {
+  position: relative;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.map-primer__steps ol::before {
+  position: absolute;
+  top: 11px;
+  right: 16.66%;
+  left: 16.66%;
+  height: 1px;
+  background: var(--observer-line-strong, rgb(48 47 40 / 28%));
+  content: "";
+}
+
+.map-primer__steps li {
+  position: relative;
+  display: grid;
+  justify-items: center;
+}
+
+.map-primer__steps button {
+  display: grid;
+  min-width: 52px;
+  padding: 0 5px;
+  justify-items: center;
+  gap: 4px;
+  border: 0;
+  color: var(--observer-ink-faint, #8a8677);
+  background: transparent;
+  cursor: pointer;
+}
+
+.map-primer__steps button > span {
+  display: grid;
+  width: 23px;
+  height: 23px;
+  place-items: center;
+  border: 1px solid var(--observer-line-strong, rgb(48 47 40 / 28%));
+  border-radius: 50%;
+  font-size: 9px;
+  font-weight: 750;
+  background: var(--observer-paper-bright, #f1ead9);
+}
+
+.map-primer__steps button small {
+  font-family: var(--observer-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 10px;
+  letter-spacing: .1em;
+}
+
+.map-primer__steps li[data-active="true"] button,
+.map-primer__steps li[data-past="true"] button {
+  color: var(--observer-vermilion-dark, #79271f);
+}
+
+.map-primer__steps li[data-active="true"] button > span {
+  border-color: var(--observer-vermilion, #9c352b);
+  color: #f8efdc;
+  background: var(--observer-vermilion, #9c352b);
+  box-shadow: 0 0 0 3px var(--observer-vermilion-wash, rgb(156 53 43 / 10%));
+}
+
+.map-primer__steps li[data-past="true"] button > span {
+  border-color: rgb(121 39 31 / 45%);
+}
+
+.map-primer__diagram {
+  position: relative;
+  flex: 0 0 auto;
+  margin: 3px 17px 0 48px;
+  border-top: 1px solid var(--observer-line-strong, rgb(48 47 40 / 28%));
+  border-bottom: 1px solid var(--observer-line-strong, rgb(48 47 40 / 28%));
+  background:
+    linear-gradient(rgb(52 51 44 / 4%) 1px, transparent 1px),
+    linear-gradient(90deg, rgb(52 51 44 / 4%) 1px, transparent 1px),
+    rgb(220 211 189 / 38%);
+  background-size: 18px 18px;
+}
+
+.map-primer__diagram svg {
+  display: block;
+  width: 100%;
+  height: 202px;
+  overflow: visible;
+}
+
+.map-primer__diagram figcaption {
+  position: absolute;
+  top: 8px;
+  right: 9px;
+  color: var(--observer-ink-faint, #8a8677);
+  font-size: 7px;
+  font-weight: 750;
+  letter-spacing: .16em;
+}
+
+.map-primer__coast {
+  fill: rgb(238 231 213 / 82%);
+  stroke: #484a42;
+  stroke-width: 1.2;
+}
+
+.map-primer__terrain,
+.map-primer__polities,
+.map-primer__nodes,
+.map-primer__history-flow {
+  transition: opacity 180ms ease, transform 220ms ease;
+  transform-origin: center;
+}
+
+.map-primer__terrain text,
+.map-primer__nodes text,
+.map-primer__history-flow text {
+  fill: #626158;
+  font-family: var(--observer-sans, sans-serif);
+  font-size: 10px;
+  font-weight: 650;
+  letter-spacing: .08em;
+}
+
+.map-primer__mountain-field {
+  fill: url(#map-primer-mountain-hatch);
+  stroke: rgb(72 73 66 / 34%);
+  stroke-width: .7;
+}
+
+#map-primer-mountain-hatch line {
+  stroke: rgb(70 72 65 / 22%);
+  stroke-width: 2;
+}
+
+.map-primer__mountain-line {
+  fill: none;
+  stroke: #575a51;
+  stroke-width: 1.8;
+}
+
+.map-primer__river {
+  fill: none;
+  stroke: #657980;
+  stroke-linecap: round;
+  stroke-width: 3;
+}
+
+.map-primer__river--branch { stroke-width: 1.6; }
+
+.map-primer__polities > path:not(.map-primer__frontier) {
+  stroke: rgb(58 55 48 / 40%);
+  stroke-width: .8;
+}
+
+.map-primer__polities [data-polity="one"] { fill: #a49b78; }
+.map-primer__polities [data-polity="two"] { fill: #7f9286; }
+.map-primer__polities [data-polity="three"] { fill: #9e7d70; }
+.map-primer__polities [data-polity="four"] { fill: #878395; }
+
+.map-primer__frontier {
+  fill: none;
+  stroke: var(--observer-vermilion, #9c352b);
+  stroke-dasharray: 4 3;
+  stroke-width: 1.6;
+}
+
+.map-primer__nodes rect {
+  fill: #f3ead7;
+  stroke: var(--observer-vermilion-dark, #79271f);
+  stroke-width: 2;
+}
+
+.map-primer__nodes path {
+  fill: none;
+  stroke: var(--observer-vermilion-dark, #79271f);
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
+.map-primer__history-flow path {
+  fill: none;
+  stroke: var(--observer-vermilion, #9c352b);
+  stroke-width: 1.7;
+}
+
+#map-primer-arrow path { fill: var(--observer-vermilion, #9c352b); }
+
+.map-primer__history-flow circle {
+  fill: var(--observer-paper-bright, #f1ead9);
+  stroke: var(--observer-vermilion, #9c352b);
+  stroke-width: 2;
+}
+
+.map-primer__diagram[data-step="terrain"] .map-primer__polities { opacity: .08; }
+.map-primer__diagram[data-step="terrain"] .map-primer__nodes { opacity: .12; }
+.map-primer__diagram[data-step="terrain"] .map-primer__history-flow { opacity: 0; transform: translateY(8px); }
+.map-primer__diagram[data-step="situation"] .map-primer__terrain { opacity: .36; }
+.map-primer__diagram[data-step="situation"] .map-primer__polities { opacity: .8; }
+.map-primer__diagram[data-step="situation"] .map-primer__nodes { opacity: 1; }
+.map-primer__diagram[data-step="situation"] .map-primer__history-flow { opacity: 0; transform: translateY(8px); }
+.map-primer__diagram[data-step="history"] .map-primer__terrain,
+.map-primer__diagram[data-step="history"] .map-primer__polities,
+.map-primer__diagram[data-step="history"] .map-primer__nodes { opacity: .16; transform: translateY(-8px) scale(.96); }
+.map-primer__diagram[data-step="history"] .map-primer__history-flow { opacity: 1; transform: translateY(-18px); }
+
+.map-primer__copy {
+  display: grid;
+  padding: 17px 26px 13px 53px;
+  gap: 5px;
+}
+
+.map-primer__copy h3 {
+  margin: 0;
+  font-family: var(--observer-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 22px;
+  font-weight: 650;
+  letter-spacing: .06em;
+}
+
+.map-primer__copy p {
+  margin: 0;
+  color: var(--observer-ink-soft, #656357);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.map-primer__reading,
+.map-primer__advanced {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 5px !important;
+  padding-top: 8px;
+  border-top: 1px dotted var(--observer-line-strong, rgb(48 47 40 / 28%));
+}
+
+.map-primer__reading svg,
+.map-primer__advanced svg {
+  flex: 0 0 auto;
+  margin-top: 2px;
+  color: var(--observer-vermilion-dark, #79271f);
+}
+
+.map-primer__advanced {
+  color: var(--observer-vermilion-dark, #79271f) !important;
+  font-weight: 650;
+}
+
+.map-primer__footer {
+  display: grid;
+  grid-template-columns: 100px minmax(34px, 1fr) minmax(148px, auto);
+  align-items: center;
+  min-height: 60px;
+  padding: 9px 16px 10px 48px;
+  gap: 10px;
+  border-top: 1px solid var(--observer-line-strong, rgb(48 47 40 / 28%));
+}
+
+.map-primer__footer button {
+  display: inline-flex;
+  min-height: 38px;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 0 13px;
+  border: 1px solid var(--observer-line-strong, rgb(48 47 40 / 28%));
+  color: var(--observer-ink-soft, #656357);
+  background: transparent;
+  cursor: pointer;
+}
+
+.map-primer__footer button:hover:not(:disabled) {
+  border-color: rgb(121 39 31 / 48%);
+  color: var(--observer-vermilion-dark, #79271f);
+  background: var(--observer-vermilion-wash, rgb(156 53 43 / 10%));
+}
+
+.map-primer__footer button:disabled {
+  opacity: .32;
+  cursor: not-allowed;
+}
+
+.map-primer__footer > span {
+  justify-self: center;
+  color: var(--observer-ink-faint, #8a8677);
+  font-family: var(--observer-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 12px;
+}
+
+.map-primer__footer > span i {
+  margin: 0 3px;
+  font-size: 9px;
+  font-style: normal;
+}
+
+.map-primer__footer .map-primer__primary {
+  border-color: var(--observer-vermilion-dark, #79271f);
+  color: #f7edd8;
+  background: var(--observer-vermilion, #9c352b);
+  box-shadow: inset 0 0 0 1px rgb(255 245 221 / 12%);
+}
+
+.map-primer__footer .map-primer__primary:hover {
+  color: #fff5e3;
+  background: var(--observer-vermilion-dark, #79271f);
+}
+
+.map-primer button:focus-visible {
+  outline: 2px solid var(--observer-vermilion, #9c352b);
+  outline-offset: 2px;
+}
+
+@keyframes map-primer-backdrop-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes map-primer-sheet-in {
+  from { opacity: 0; transform: translateY(calc(-50% + 12px)); }
+  to { opacity: 1; transform: translateY(-50%); }
+}
+
+@media (max-width: 600px) {
+  .map-primer-layer__backdrop { background: rgb(35 34 29 / 31%); }
+
+  .map-primer {
+    top: auto;
+    right: 8px;
+    bottom: max(8px, env(safe-area-inset-bottom));
+    left: 8px;
+    width: auto;
+    max-height: calc(100dvh - 16px - env(safe-area-inset-bottom));
+    transform: none;
+    animation-name: map-primer-mobile-in;
+  }
+
+  .map-primer__header {
+    min-height: 66px;
+    padding-left: 12px;
+  }
+
+  .map-primer__header h2 { font-size: 17px; }
+  .map-primer__steps { padding: 10px 17px 4px 42px; }
+  .map-primer__diagram { margin-right: 12px; margin-left: 41px; }
+  .map-primer__diagram svg { height: clamp(150px, 24dvh, 190px); }
+  .map-primer__copy { padding: 14px 16px 11px 43px; }
+  .map-primer__copy h3 { font-size: 20px; }
+  .map-primer__copy p { font-size: 10.5px; }
+
+  .map-primer__footer {
+    grid-template-columns: 84px minmax(28px, 1fr) minmax(132px, auto);
+    min-height: 58px;
+    padding: 8px 12px 9px 41px;
+    gap: 7px;
+  }
+
+  .map-primer__footer button { min-height: 40px; padding: 0 10px; font-size: 11px; }
+}
+
+@media (max-height: 650px) {
+  .map-primer__diagram svg { height: 150px; }
+  .map-primer__copy { padding-top: 11px; padding-bottom: 9px; }
+  .map-primer__copy h3 { font-size: 19px; }
+}
+
+@keyframes map-primer-mobile-in {
+  from { opacity: 0; transform: translateY(14px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map-primer-layer__backdrop,
+  .map-primer { animation: none; }
+  .map-primer__terrain,
+  .map-primer__polities,
+  .map-primer__nodes,
+  .map-primer__history-flow { transition: none; }
+}

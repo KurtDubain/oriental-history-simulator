@@ -35,6 +35,54 @@ async function openFreshWorld(page) {
   await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).productVersion === '1.0.0');
 }
 
+async function exerciseMapPrimer(page) {
+  const before = await snapshot(page);
+  assert.equal(before.observer.primerOpen, true, '首次新建世界应打开三步读图导览');
+  assert.equal(before.observer.primerStep, 'terrain');
+  const originalHash = before.deterministicWorldHash;
+  const primer = page.locator('.map-primer');
+  await primer.waitFor();
+  assert.equal(await primer.getAttribute('role'), 'dialog');
+  assert.equal(await primer.getAttribute('aria-modal'), 'true');
+  assert.equal(await page.locator('.observer-app').evaluate((element) => element.inert), true);
+  await assertFocusTrapped(page, '.map-primer', 10);
+
+  await primer.locator('[data-map-primer-action]').click();
+  const terrainRead = await waitForSnapshot(
+    page,
+    (current) => current.observer.primerStep === 'situation' && current.interface.overlay === 'none',
+  );
+  assert.equal(terrainRead.deterministicWorldHash, originalHash, '切换地势观察不得改变世界哈希');
+
+  await primer.locator('[data-map-primer-action]').click();
+  const situationRead = await waitForSnapshot(
+    page,
+    (current) => current.observer.primerStep === 'history' && current.interface.overlay === 'political',
+  );
+  assert.equal(situationRead.deterministicWorldHash, originalHash, '切换政治观察不得改变世界哈希');
+
+  await primer.locator('[data-map-primer-action]').click();
+  const advanced = await waitForSnapshot(page, (current, turn) => current.time.turn === turn + 1, before.time.turn);
+  assert.notEqual(advanced.deterministicWorldHash, originalHash, '导览中的推进一季应写入新历史');
+  assert.equal(advanced.observer.primerOpen, true);
+  assert.match(await primer.textContent(), /一季已过/);
+
+  await primer.locator('[data-map-primer-action]').click();
+  await primer.waitFor({ state: 'detached' });
+  await page.waitForSelector('#observer-causal-drawer');
+  const traced = await snapshot(page);
+  assert.equal(traced.observer.primerOpen, false);
+  assert.ok(traced.interface.selectedEventId, '导览应打开刚过去一季的可追溯史事');
+  await page.locator('#observer-causal-drawer button[aria-label="关闭因果链"]').click();
+  await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
+  assert.equal(
+    await page.evaluate(() => localStorage.getItem('canghai-map-primer-complete-v1')),
+    '1',
+    '完成导览应保存非权威偏好标记',
+  );
+  return snapshot(page);
+}
+
 async function waitForSnapshot(page, predicate, argument, timeout = 15_000) {
   await page.waitForFunction(
     ({ source, argument: innerArgument }) => {
@@ -174,7 +222,7 @@ async function findThreeClickCausalPath(page) {
     return null;
   };
 
-  let references = await tryEvents(page.locator('.observer-chronicle__event'));
+  let references = await tryEvents(page.locator('[data-testid="quarter-pulse-event"]'));
   if (references) return references;
   await page.click('button[data-history-workbench-trigger="true"]');
   await page.waitForSelector('.history-workbench');
@@ -201,7 +249,7 @@ async function exerciseObserverDesk(page, initialHash) {
   assert.equal(await desk.getAttribute('aria-modal'), 'true');
   await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '关闭观察台');
   assert.match(await desk.textContent(), new RegExp(followedLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
-  assert.equal(await desk.locator('[role="progressbar"]').getAttribute('aria-valuenow'), '2');
+  assert.ok(Number(await desk.locator('[role="progressbar"]').getAttribute('aria-valuenow')) >= 2);
 
   const masterSwitch = desk.locator('.observer-desk__master-switch input');
   assert.equal(await masterSwitch.isChecked(), true);
@@ -414,9 +462,14 @@ try {
   assert.equal(initial.mandate.recentIntervention, null);
   assert.equal(initial.observer.guideCompleted, 1);
   assert.equal(initial.observer.watchedCount, 0);
+  assert.equal(initial.observer.primerOpen, true);
+  assert.equal(initial.interface.selected, null, '新建世界应先展示完整舆图，不抢先展开地区档案');
   assert.ok(Buffer.byteLength(initialText, 'utf8') < SNAPSHOT_LIMIT, '文本观察快照必须小于128KiB');
 
-  await exerciseObserverDesk(page, initial.deterministicWorldHash);
+  const afterPrimer = await exerciseMapPrimer(page);
+  await page.screenshot({ path: `${ARTIFACT_DIR}/geographic-world-map.png`, fullPage: true });
+  await selectFirstMapObject(page, 'region', '地域档案');
+  await exerciseObserverDesk(page, afterPrimer.deterministicWorldHash);
   const afterAutomaticPause = await exerciseAutomaticPause(page);
   assert.ok(afterAutomaticPause.time.turn >= 1);
 
@@ -494,11 +547,26 @@ try {
   assert.ok(Array.isArray(afterManual.lastTurnLedger.knowledge.prototypeIds));
   assert.ok(Array.isArray(afterManual.lastTurnLedger.maritime.fleetIds));
   assert.ok(afterManual.lastTurnLedger.logistics.seaUsage > 0);
-  const chronicleScroll = await page.locator('.observer-chronicle__list').evaluate((element) => ({
-    left: element.scrollLeft,
-    maximum: element.scrollWidth - element.clientWidth,
-  }));
-  assert.equal(chronicleScroll.left, chronicleScroll.maximum, '史册应自动展示最新事件');
+  const quarterPulse = page.locator('[data-testid="quarter-pulse"]');
+  assert.equal(await quarterPulse.getAttribute('data-turn'), String(afterManual.lastTurnLedger.turn));
+  const quarterEventIds = await quarterPulse.locator('[data-testid="quarter-pulse-event"]').evaluateAll((nodes) => (
+    nodes.map((node) => node.getAttribute('data-event-id'))
+  ));
+  assert.ok(quarterEventIds.length <= 3);
+  assert.ok(quarterEventIds.every((eventId) => afterManual.lastTurnLedger.eventIds.includes(eventId)), '季报不得混入旧史');
+  assert.ok(Number(await page.locator('.world-map').getAttribute('data-highlighted-region-count')) > 0, '本季相关地区应在舆图上保留低调高亮');
+  const formatSigned = (value) => {
+    const rounded = Math.round(value);
+    const digits = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(Math.abs(rounded));
+    return rounded > 0 ? `+${digits}` : rounded < 0 ? `−${digits}` : '±0';
+  };
+  const populationNet = afterManual.lastTurnLedger.population.end - afterManual.lastTurnLedger.population.start;
+  assert.match(await quarterPulse.locator('[data-testid="quarter-pulse-ledger-population"]').textContent(), new RegExp(formatSigned(populationNet).replace('+', '\\+')));
+  await quarterPulse.locator('[data-testid="quarter-pulse-ledger-population"]').click();
+  await page.waitForSelector('#observer-causal-drawer');
+  assert.equal((await snapshot(page)).interface.overlay, 'population');
+  await page.locator('#observer-causal-drawer button[aria-label="关闭因果链"]').click();
+  await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
   const hashBeforeBrowsing = afterManual.deterministicWorldHash;
 
   const afterHistoryBrowse = await exerciseHistoryWorkbench(page, afterManual);
@@ -603,6 +671,7 @@ try {
   const reloaded = await snapshot(page);
   assert.equal(reloaded.productVersion, '1.0.0');
   assert.equal(reloaded.worldSchemaVersion, 3);
+  assert.equal(reloaded.observer.primerOpen, false, '续读不应重复弹出首次读图导览');
   assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 3存档续读应恢复完全相同的世界');
   assert.deepEqual(desktopErrors, []);
 
@@ -612,6 +681,15 @@ try {
   collectBrowserErrors(mobilePage, mobileErrors);
   await openFreshWorld(mobilePage);
   assert.equal((await snapshot(mobilePage)).productVersion, '1.0.0');
+  assert.equal((await snapshot(mobilePage)).observer.primerOpen, true);
+  const mobilePrimer = mobilePage.locator('.map-primer');
+  await mobilePrimer.waitFor();
+  await assertWithinViewport(mobilePage, '.map-primer', '移动端读图导览不可横向溢出');
+  await waitForVisualSettled(mobilePrimer);
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-map-primer-390x844.png`, fullPage: true });
+  await mobilePrimer.locator('[data-map-primer-skip]').click();
+  await mobilePrimer.waitFor({ state: 'detached' });
+  assert.equal((await snapshot(mobilePage)).observer.primerOpen, false);
   assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
 
   await mobilePage.locator('button[data-observer-desk-trigger="true"]').click();

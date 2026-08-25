@@ -5,17 +5,34 @@
   min-height: 280px;
   overflow: hidden;
   isolation: isolate;
-  background: #e7dfca;
+  background:
+    linear-gradient(135deg, rgb(238 232 214 / 76%), rgb(183 201 195 / 42%)),
+    #d8d5c3;
   box-shadow:
-    inset 0 0 0 1px rgb(49 47 41 / 12%),
-    inset 0 0 70px rgb(70 58 42 / 9%);
+    inset 0 0 0 1px rgb(49 47 41 / 15%),
+    inset 0 0 84px rgb(54 68 64 / 12%),
+    0 1px 0 rgb(255 252 239 / 48%);
 }
 
 .world-map::before {
   position: absolute;
   z-index: 2;
   inset: 0;
-  border: 1px solid rgb(255 252 239 / 28%);
+  border: 1px solid rgb(255 252 239 / 36%);
+  box-shadow:
+    inset 0 0 0 1px rgb(45 52 47 / 6%),
+    inset 0 0 42px rgb(53 63 59 / 6%);
+  content: "";
+  pointer-events: none;
+}
+
+.world-map::after {
+  position: absolute;
+  z-index: 2;
+  inset: 7px;
+  border-color: rgb(52 59 53 / 13%);
+  border-style: solid;
+  border-width: 1px 0 0 1px;
   content: "";
   pointer-events: none;
 }
@@ -34,7 +51,14 @@
 }
 
 .world-map__canvas:focus-visible {
-  box-shadow: inset 0 0 0 2px rgb(163 58 46 / 56%);
+  box-shadow:
+    inset 0 0 0 2px rgb(163 58 46 / 62%),
+    inset 0 0 24px rgb(163 58 46 / 5%);
+}
+
+.world-map[data-overlay="political"] .world-map__canvas,
+.world-map[data-overlay="none"] .world-map__canvas {
+  filter: contrast(1.015) saturate(0.96);
 }
 
 .world-map[data-overlay="disease"] .world-map__canvas {
@@ -52,9 +76,11 @@
   width: 172px;
   padding: 10px 11px 9px;
   color: #292b27;
-  background: rgb(244 238 223 / 94%);
+  background: rgb(244 238 223 / 96%);
   border-top: 2px solid #a33a2e;
-  box-shadow: 0 10px 26px rgb(44 39 31 / 18%);
+  box-shadow:
+    0 10px 26px rgb(44 39 31 / 18%),
+    inset 0 0 0 1px rgb(49 47 41 / 7%);
   pointer-events: none;
   animation: world-map-tooltip 120ms ease-out both;
   backdrop-filter: blur(5px);

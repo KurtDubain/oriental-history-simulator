@@ -3,12 +3,11 @@ import {
   Download,
   Eye,
   Expand,
-  Info,
   Library,
+  Map as MapIcon,
   RotateCcw,
   Save,
   Sparkles,
-  X,
 } from 'lucide-react';
 import {
   useCallback,
@@ -19,11 +18,20 @@ import {
   type ReactNode,
 } from 'react';
 import { CausalDrawer, type CausalFactor, type CausalReference } from './components/CausalDrawer';
-import { Chronicle, type ChronicleEvent } from './components/Chronicle';
 import { HistoryWorkbench } from './components/HistoryWorkbench';
 import { Inspector } from './components/Inspector';
 import { MandatePanel, type MandateMessage, type MandateTarget } from './components/MandatePanel';
+import {
+  MapPrimer,
+  type MapPrimerCloseReason,
+  type MapPrimerStep,
+} from './components/MapPrimer';
 import { ObserverDesk } from './components/ObserverDesk';
+import {
+  QuarterPulse,
+  type QuarterPulseEvent,
+  type QuarterPulseLedger,
+} from './components/QuarterPulse';
 import {
   HistoricalArchive,
   type ArchiveDossier,
@@ -124,9 +132,11 @@ type Selection =
   | null;
 
 type AdvanceSource = 'manual' | 'auto';
+type OpenWorldSource = 'create' | 'continue' | 'import' | 'collection';
 
 const DEFAULT_SEED = '沧衡-甲子';
 const BASE_AUTOPLAY_INTERVAL = 1_800;
+const MAP_PRIMER_STORAGE_KEY = 'canghai-map-primer-complete-v1';
 const compact = new Intl.NumberFormat('zh-CN', {
   notation: 'compact',
   maximumFractionDigits: 1,
@@ -235,6 +245,8 @@ interface SnapshotOptions {
   pauseReason: string | null;
   collectionOpen: boolean;
   worldSaveCount: number;
+  primerOpen: boolean;
+  primerStep: MapPrimerStep;
 }
 
 function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
@@ -246,6 +258,8 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
       seedInputVisible: options.startOpen,
       collectionOpen: options.collectionOpen,
       worldSaveCount: options.worldSaveCount,
+      primerOpen: options.primerOpen,
+      primerStep: options.primerStep,
       actions: ['开启新纪', '续读旧史', '世界收藏', '导入史册'],
     });
   }
@@ -455,6 +469,8 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
       lastPauseReason: options.pauseReason,
       collectionOpen: options.collectionOpen,
       worldSaveCount: options.worldSaveCount,
+      primerOpen: options.primerOpen,
+      primerStep: options.primerStep,
     },
     interface: {
       view: options.view,
@@ -463,6 +479,8 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
       selectedEventId: options.selectedEventId,
       archiveOpen: options.archiveOpen,
       mandateOpen: options.mandateOpen,
+      primerOpen: options.primerOpen,
+      primerStep: options.primerStep,
       selectedDetail,
       selectedEvent: selectedEventDetail,
       visibleRoster: visibleRoster.slice(0, 60),
@@ -519,8 +537,13 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
       influence: item.politicalInfluence,
     })) : [],
     lastTurnLedger: report ? {
+      turn: report.turn,
+      year: report.year,
+      season: report.season,
+      eventIds: report.eventIds,
       population: report.population,
       food: report.food,
+      wealth: report.wealth,
       trade: {
         shipments: report.trade.shipments.length,
         deliveredValue: report.trade.valueTransferred,
@@ -589,7 +612,8 @@ export function App() {
   const [followed, setFollowed] = useState<Set<string>>(() => new Set());
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [focusedArmyId, setFocusedArmyId] = useState<string | null>(null);
-  const [showGuide, setShowGuide] = useState(true);
+  const [primerOpen, setPrimerOpen] = useState(false);
+  const [primerStep, setPrimerStep] = useState<MapPrimerStep>('terrain');
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [resumeArchiveAfterEvent, setResumeArchiveAfterEvent] = useState(false);
   const [mandateOpen, setMandateOpen] = useState(false);
@@ -617,9 +641,12 @@ export function App() {
   const observerDeskTriggerRef = useRef<HTMLButtonElement>(null);
   const historyTriggerRef = useRef<HTMLButtonElement>(null);
   const collectionTriggerRef = useRef<HTMLButtonElement>(null);
+  const primerTriggerRef = useRef<HTMLButtonElement>(null);
   const collectionReturnFocusRef = useRef<HTMLElement | null>(null);
   const observerSettingsRef = useRef(observerSettings);
   const advanceRef = useRef<(source: AdvanceSource) => boolean>(() => false);
+  const primerAdvanceDoneRef = useRef(false);
+  const primerNewestEventIdRef = useRef<string | null>(null);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
   const snapshotOptionsRef = useRef<SnapshotOptions>({
     startOpen,
@@ -639,6 +666,8 @@ export function App() {
     pauseReason: pauseMatch?.reason ?? null,
     collectionOpen,
     worldSaveCount: worldSaves.length,
+    primerOpen,
+    primerStep,
   });
 
   const commitWorld = useCallback((nextWorld: WorldState) => {
@@ -688,10 +717,10 @@ export function App() {
 
   useEffect(() => {
     if (!worldShellRef.current) return;
-    worldShellRef.current.inert = startOpen || archiveOpen || mandateOpen || observerDeskOpen || collectionOpen || activeView === 'chronicle';
-  }, [activeView, archiveOpen, collectionOpen, mandateOpen, observerDeskOpen, startOpen, world]);
+    worldShellRef.current.inert = startOpen || archiveOpen || mandateOpen || observerDeskOpen || collectionOpen || primerOpen || activeView === 'chronicle';
+  }, [activeView, archiveOpen, collectionOpen, mandateOpen, observerDeskOpen, primerOpen, startOpen, world]);
 
-  const openWorld = useCallback((nextWorld: WorldState) => {
+  const openWorld = useCallback((nextWorld: WorldState, source: OpenWorldSource) => {
     const validWorld = assertValidWorld(nextWorld);
     const defaultRegionId = validWorld.regions.find((region) => (
       validWorld.polities.some((polity) => polity.alive && polity.capitalRegionId === region.id)
@@ -708,7 +737,7 @@ export function App() {
     commitWorld(validWorld);
     setSeed(validWorld.seed);
     const compactViewport = window.matchMedia('(max-width: 760px)').matches;
-    setSelection(!compactViewport && defaultRegionId ? { kind: 'region', id: defaultRegionId } : null);
+    setSelection(source !== 'create' && !compactViewport && defaultRegionId ? { kind: 'region', id: defaultRegionId } : null);
     setSelectedEventId(null);
     setArchiveOpen(false);
     setMandateOpen(false);
@@ -727,7 +756,16 @@ export function App() {
     setStartOpen(false);
     setStartError(null);
     setFatalError(null);
-    setShowGuide(validWorld.turn === 0);
+    let primerPreviouslyCompleted = false;
+    try {
+      primerPreviouslyCompleted = localStorage.getItem(MAP_PRIMER_STORAGE_KEY) === '1';
+    } catch {
+      // If preferences cannot be read, showing the short primer is the safer first-run behavior.
+    }
+    primerAdvanceDoneRef.current = false;
+    primerNewestEventIdRef.current = null;
+    setPrimerStep('terrain');
+    setPrimerOpen(source === 'create' && validWorld.turn === 0 && !primerPreviouslyCompleted);
     runningRef.current = false;
     setRunning(false);
     clockAccumulatorRef.current = 0;
@@ -737,7 +775,7 @@ export function App() {
     setStartBusy(true);
     setStartError(null);
     try {
-      openWorld(createWorld(seed.trim()));
+      openWorld(createWorld(seed.trim()), 'create');
     } catch (error) {
       setStartError(error instanceof Error ? error.message : '无法创建世界。');
     } finally {
@@ -751,7 +789,7 @@ export function App() {
     try {
       const saved = await loadWorld();
       if (!saved) throw new Error('没有找到可续读的本地史册。');
-      openWorld(deserializeWorld(saved.payload));
+      openWorld(deserializeWorld(saved.payload), 'continue');
     } catch (error) {
       setStartError(error instanceof Error ? error.message : '无法读取本地史册。');
     } finally {
@@ -764,7 +802,7 @@ export function App() {
     setStartError(null);
     try {
       const payload = await readWorldFile(file);
-      openWorld(deserializeWorld(payload));
+      openWorld(deserializeWorld(payload), 'import');
       setToast('已导入史册，因果记录与世界状态均已恢复。');
     } catch (error) {
       setStartError(error instanceof Error ? error.message : '该文件无法作为史册读取。');
@@ -887,7 +925,7 @@ export function App() {
     try {
       const saved = await loadWorldFromSlot(slot);
       if (!saved) throw new Error('该世界槽位已经不存在。');
-      openWorld(deserializeWorld(saved.payload));
+      openWorld(deserializeWorld(saved.payload), 'collection');
       setToast(`已读取“${saved.label ?? '世界存档'}”。`);
       await refreshWorldSaves();
     } finally {
@@ -1020,6 +1058,8 @@ export function App() {
         event.target.isContentEditable
         || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(event.target.tagName)
       )) return;
+      const options = snapshotOptionsRef.current;
+      if (options.primerOpen) return;
       const key = event.key.toLowerCase();
       if (key === 'f') {
         event.preventDefault();
@@ -1027,7 +1067,6 @@ export function App() {
         else void document.documentElement.requestFullscreen();
         return;
       }
-      const options = snapshotOptionsRef.current;
       if (
         options.startOpen
         || options.archiveOpen
@@ -1079,6 +1118,8 @@ export function App() {
     pauseReason: pauseMatch?.reason ?? null,
     collectionOpen,
     worldSaveCount: worldSaves.length,
+    primerOpen,
+    primerStep,
   };
   useEffect(() => {
     window.render_game_to_text = () => makeTextSnapshot(worldRef.current, snapshotOptionsRef.current);
@@ -1123,6 +1164,71 @@ export function App() {
   const handleOverlayChange = useCallback((nextOverlay: MapOverlay) => {
     setOverlay(nextOverlay);
     if (nextOverlay !== 'political') completeGuideStep('overlay-switched');
+  }, [completeGuideStep]);
+
+  const handleOpenMapPrimer = useCallback(() => {
+    if (!worldRef.current) return;
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    setSelectedEventId(null);
+    setArchiveOpen(false);
+    setMandateOpen(false);
+    setObserverDeskOpen(false);
+    setCollectionOpen(false);
+    setResumeArchiveAfterEvent(false);
+    setResumeHistoryAfterEvent(false);
+    archiveFocusRestoreAllowedRef.current = false;
+    setHistoricalView(null);
+    setActiveView('world');
+    primerAdvanceDoneRef.current = false;
+    primerNewestEventIdRef.current = null;
+    setPrimerStep('terrain');
+    if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
+    setPrimerOpen(true);
+  }, []);
+
+  const handleCloseMapPrimer = useCallback((_reason: MapPrimerCloseReason) => {
+    try {
+      localStorage.setItem(MAP_PRIMER_STORAGE_KEY, '1');
+    } catch {
+      // Primer completion is a preference only; storage failures must not block the world.
+    }
+    setPrimerOpen(false);
+  }, []);
+
+  const handlePrimerAdvance = useCallback(() => {
+    if (primerAdvanceDoneRef.current) return;
+    const current = worldRef.current;
+    if (!current) return;
+    const oldHistoryLength = current.history.length;
+    if (!advanceRef.current('manual')) return;
+    primerAdvanceDoneRef.current = true;
+    const next = worldRef.current;
+    if (!next) return;
+    const newEvents = next.history.slice(oldHistoryLength);
+    const newestMeaningful = [...newEvents].reverse().find((event) => event.importance >= 3 && event.causes.length > 0)
+      ?? [...newEvents].reverse().find((event) => event.causes.length > 0)
+      ?? newEvents.at(-1)
+      ?? null;
+    primerNewestEventIdRef.current = newestMeaningful?.id ?? null;
+  }, []);
+
+  const handlePrimerOpenWhy = useCallback(() => {
+    const current = worldRef.current;
+    if (!current) return;
+    const eventId = primerNewestEventIdRef.current
+      ?? [...current.history].reverse().find((event) => event.importance >= 3 && event.causes.length > 0)?.id
+      ?? current.history.at(-1)?.id
+      ?? null;
+    if (!eventId) {
+      setToast('这一季没有留下可追溯的重大史事，可继续推进后再查看。');
+      return;
+    }
+    completeGuideStep('cause-traced');
+    setResumeArchiveAfterEvent(false);
+    setResumeHistoryAfterEvent(false);
+    setSelectedEventId(eventId);
   }, [completeGuideStep]);
 
   const handleViewChange = useCallback((nextView: ObserverView) => {
@@ -1203,9 +1309,38 @@ export function App() {
   const familyItems = useMemo(() => world ? familyRoster(world) : [], [world]);
   const peopleItems = useMemo(() => world ? peopleRoster(world) : [], [world]);
   const militaryItems = useMemo(() => world ? militaryRoster(world) : [], [world]);
-  const recentChronicle = useMemo(() => world
-    ? world.history.slice(-8).map((event) => toChronicleEvent(world, event))
-    : [], [world]);
+  const quarterEvents = useMemo<QuarterPulseEvent[]>(() => {
+    if (!world?.lastTurn) return [];
+    const eventIds = new Set(world.lastTurn.eventIds);
+    return world.history
+      .filter((event) => eventIds.has(event.id) && event.kind !== 'quarter_summary')
+      .map((event) => {
+        const chronicle = toChronicleEvent(world, event);
+        return {
+          id: event.id,
+          title: chronicle.title,
+          category: chronicle.category,
+          importance: event.importance,
+          location: chronicle.location,
+        };
+      });
+  }, [world]);
+  const quarterHighlightedRegionIds = useMemo(() => {
+    if (!world?.lastTurn || historicalView) return [];
+    const eventIds = new Set(world.lastTurn.eventIds);
+    const importantEvents = world.history
+      .filter((event) => eventIds.has(event.id) && event.kind !== 'quarter_summary')
+      .sort((left, right) => right.importance - left.importance)
+      .slice(0, 3);
+    const regionIds = new Set(world.lastTurn.health.outbreakRegionIds);
+    for (const event of importantEvents) {
+      event.regionIds.forEach((id) => regionIds.add(id));
+      event.stateDeltas
+        .filter((delta) => delta.entityType === 'region')
+        .forEach((delta) => regionIds.add(delta.entityId));
+    }
+    return [...regionIds].filter((id) => world.regions.some((region) => region.id === id)).slice(0, 16);
+  }, [historicalView, world]);
   const selectedHistoryEvent = useMemo(() => (
     world && selectedEventId ? world.history.find((event) => event.id === selectedEventId) ?? null : null
   ), [selectedEventId, world]);
@@ -1324,11 +1459,23 @@ export function App() {
     return system ? <Inspector kind="system" data={system} {...shared} /> : null;
   }, [commitObserverSettings, followed, handleSelectArchiveEntity, handleSelectScopedEvent, selection, world]);
 
-  const selectChronicleEvent = useCallback((event: ChronicleEvent) => {
+  const selectQuarterEvent = useCallback((eventId: string) => {
     setResumeArchiveAfterEvent(false);
-    setSelectedEventId(event.id);
+    setSelectedEventId(eventId);
     completeGuideStep('cause-traced');
   }, [completeGuideStep]);
+
+  const selectQuarterLedger = useCallback((ledger: QuarterPulseLedger) => {
+    handleOverlayChange(ledger === 'population' ? 'population' : ledger === 'food' ? 'food' : 'trade');
+    const current = worldRef.current;
+    if (!current?.lastTurn) return;
+    const reportIds = new Set(current.lastTurn.eventIds);
+    const summary = [...current.history].reverse().find((event) => (
+      reportIds.has(event.id) && event.kind === 'quarter_summary'
+    ));
+    if (summary) selectQuarterEvent(summary.id);
+    else setToast('本季总账已经显示，史册尚未生成独立总账条目。');
+  }, [handleOverlayChange, selectQuarterEvent]);
 
   const inspectEvidence = useCallback((factor: CausalFactor) => {
     if (factor.evidence) setToast(`凭证：${factor.evidence}`);
@@ -1426,7 +1573,7 @@ export function App() {
           ref={worldShellRef}
           className="observer-app"
           data-inspector-open={Boolean(inspector)}
-          aria-hidden={startOpen || archiveOpen || mandateOpen || observerDeskOpen || collectionOpen || activeView === 'chronicle' || undefined}
+          aria-hidden={startOpen || archiveOpen || mandateOpen || observerDeskOpen || collectionOpen || primerOpen || activeView === 'chronicle' || undefined}
         >
           <TopBar
             title="沧衡纪"
@@ -1463,6 +1610,7 @@ export function App() {
               fleets={mapFleets}
               flows={mapFlows}
               markers={mapMarkers}
+              highlightedRegionIds={quarterHighlightedRegionIds}
               selectedRegionId={selection?.kind === 'region' ? selection.id : null}
               selectedObject={selection && selection.kind !== 'region' && selection.kind !== 'country' && selection.kind !== 'family' && selection.kind !== 'person' ? selection : null}
               overlay={historicalView ? 'political' : overlay}
@@ -1481,6 +1629,19 @@ export function App() {
               <span><small>当代政权</small><strong>{livingPolityCount}</strong></span>
               <span data-alert={activeWarCount > 0 || undefined}><small>进行中战事</small><strong>{activeWarCount}</strong></span>
             </div>
+
+            <button
+              ref={primerTriggerRef}
+              type="button"
+              className="observer-map-primer-trigger"
+              data-map-primer-trigger="true"
+              onClick={handleOpenMapPrimer}
+              aria-label="打开三步读图导览"
+              title="三步读图"
+            >
+              <MapIcon size={14} strokeWidth={1.6} aria-hidden="true" />
+              <span>读图</span>
+            </button>
 
             <div className="observer-world-tools" aria-label="世界与存档工具">
               <button
@@ -1562,17 +1723,6 @@ export function App() {
               </aside>
             ) : null}
 
-            {showGuide ? (
-              <aside className="observer-guide" aria-label="观察提示">
-                <Info size={17} aria-hidden="true" />
-                <div>
-                  <strong>你是观察者，不是君主</strong>
-                  <p>点选州域阅读档案，推进一季观看世界自行发展；点击底部史事可追溯“为什么”。N 下一季，空格自动推演，H 打开史册。</p>
-                </div>
-                <button type="button" onClick={() => setShowGuide(false)} aria-label="关闭观察提示"><X size={16} aria-hidden="true" /></button>
-              </aside>
-            ) : null}
-
             {rosterConfig ? (
               <RosterPanel
                 key={activeView}
@@ -1596,11 +1746,11 @@ export function App() {
 
           {inspector}
 
-          <Chronicle
-            events={recentChronicle}
-            selectedEventId={selectedEventId}
-            onSelectEvent={selectChronicleEvent}
-            heading={world.lastTurn ? `${world.lastTurn.year}年${world.lastTurn.season}季与近事` : '开篇史事'}
+          <QuarterPulse
+            report={world.lastTurn}
+            events={quarterEvents}
+            onSelectEvent={selectQuarterEvent}
+            onSelectLedger={selectQuarterLedger}
           />
 
           <CausalDrawer
@@ -1637,6 +1787,17 @@ export function App() {
       ) : (
         <main className="observer-boot-underlay" aria-hidden="true" />
       )}
+
+      <MapPrimer
+        open={primerOpen && Boolean(world)}
+        currentStep={primerStep}
+        onStep={setPrimerStep}
+        onClose={handleCloseMapPrimer}
+        onSelectOverlay={handleOverlayChange}
+        onAdvance={handlePrimerAdvance}
+        onOpenWhy={handlePrimerOpenWhy}
+        returnFocusTo={primerTriggerRef.current}
+      />
 
       <HistoricalArchive
         open={archiveOpen && Boolean(archiveDossier)}

@@ -15,7 +15,7 @@
   --observer-serif: "Noto Serif SC", "Songti SC", STSong, serif;
   --observer-sans: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
   --observer-topbar-height: 70px;
-  --observer-chronicle-height: 188px;
+  --observer-chronicle-height: 90px;
 }
 
 .observer-app {
@@ -1581,7 +1581,7 @@ button.observer-causal-chain__evidence:hover {
 
 @media (max-width: 760px) {
   :root {
-    --observer-chronicle-height: 164px;
+    --observer-chronicle-height: 120px;
   }
 
   .observer-topbar {
