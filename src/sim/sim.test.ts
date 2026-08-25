@@ -107,6 +107,8 @@ function createSchema2Fixture(seed: string): string {
     const polity = polities.find((item) => item.id === character.polityId);
     if (!retainedRegionIds.has(String(character.locationRegionId))) character.locationRegionId = polity?.capitalRegionId;
     if (character.governedRegionId && !retainedRegionIds.has(String(character.governedRegionId))) character.governedRegionId = null;
+    for (const biography of character.biography as JsonObject[]) delete biography.factId;
+    character.biographyDigest = stableHash(character.biography);
     for (const key of ['commandingFleetId', 'health', 'activeDiseaseId', 'protectedUntilTurn']) delete character[key];
   }
   for (const polity of polities) {
@@ -174,6 +176,8 @@ function createSchema2Fixture(seed: string): string {
     event.regionIds = (event.regionIds as string[]).filter((id) => retainedRegionIds.has(id));
     event.summary = '48处州域、5方政权与120名核心人物进入同一条可推演的历史。';
     event.evidence = ['固定地图含48个区域', '初始政权5个', '初始核心人物120名'];
+    delete event.sourceFactIds;
+    delete event.situationIds;
     for (const cause of event.causes as JsonObject[]) delete cause.refs;
   }
 
@@ -192,6 +196,9 @@ function createSchema2Fixture(seed: string): string {
   legacy.commitments = commitments;
   legacy.history = history;
   legacy.historyDigest = stableHash(history[0]);
+  delete legacy.facts;
+  delete legacy.factDigest;
+  delete legacy.legacyArchiveBoundary;
   delete legacy.mapContentVersion;
   for (const key of [
     'seaZones', 'seaLanes', 'portLinks', 'ports', 'fleets', 'tradeCorridors',
@@ -207,7 +214,7 @@ function createSchema2Fixture(seed: string): string {
   counters.relationship = suffixMaximum(relationships);
   counters.office = suffixMaximum(offices);
   counters.commitment = suffixMaximum(commitments);
-  for (const key of ['fleet', 'tradeCorridor', 'navalOperation', 'shipment', 'shipProject']) delete counters[key];
+  for (const key of ['fleet', 'tradeCorridor', 'navalOperation', 'shipment', 'shipProject', 'fact']) delete counters[key];
   legacy.hash = computeWorldHash(legacy as unknown as WorldState);
   return JSON.stringify(legacy);
 }
@@ -306,10 +313,34 @@ function createSchema1Fixture(seed: string): string {
   return JSON.stringify(legacy);
 }
 
+function createSchema3Fixture(seed: string): string {
+  const legacy = JSON.parse(serializeWorld(createWorld(seed))) as JsonObject;
+  legacy.schemaVersion = 3;
+  delete legacy.facts;
+  delete legacy.factDigest;
+  delete legacy.legacyArchiveBoundary;
+  const counters = legacy.counters as JsonObject;
+  delete counters.fact;
+  for (const event of legacy.history as JsonObject[]) {
+    delete event.sourceFactIds;
+    delete event.situationIds;
+  }
+  for (const character of legacy.characters as JsonObject[]) {
+    for (const biography of character.biography as JsonObject[]) delete biography.factId;
+    character.biographyDigest = stableHash(character.biography);
+  }
+  legacy.historyDigest = (legacy.history as JsonObject[]).reduce(
+    (digest, event, index) => index === 0 ? stableHash(event) : stableHash([digest, event]),
+    '',
+  );
+  legacy.hash = computeWorldHash(legacy as unknown as WorldState);
+  return JSON.stringify(legacy);
+}
+
 describe('V0.3 deterministic history simulation', () => {
   it('creates the fixed 82-region, 10-sea, 8-polity and 192-character starting world', () => {
     const world = createWorld('沧海一粟');
-    expect(world.schemaVersion).toBe(3);
+    expect(world.schemaVersion).toBe(4);
     expect(world.mapContentVersion).toBe('v03-82');
     expect(world.regions).toHaveLength(82);
     expect(world.seaZones).toHaveLength(10);
@@ -358,7 +389,7 @@ describe('V0.3 deterministic history simulation', () => {
   it('migrates a true schema-1 save without rewriting history or granting new land and fleets', () => {
     const schema1 = JSON.parse(createSchema1Fixture('旧档迁移一')) as JsonObject;
     const restored = deserializeWorld(JSON.stringify(schema1));
-    expect(restored.schemaVersion).toBe(3);
+    expect(restored.schemaVersion).toBe(4);
     expect(restored.mapContentVersion).toBe('legacy-v02-48');
     expect(restored.regions).toHaveLength(30);
     expect(restored.characters).toHaveLength(80);
@@ -368,12 +399,14 @@ describe('V0.3 deterministic history simulation', () => {
     expect(restored.diplomacy).toHaveLength(10);
     expect(restored.fleets).toHaveLength(0);
     expect(restored.characters.every((character) => character.rebellionReadiness === 0)).toBe(true);
-    expect(restored.history).toEqual(schema1.history);
+    expect(restored.history.map(({ sourceFactIds: _sourceFactIds, situationIds: _situationIds, ...event }) => event)).toEqual(schema1.history);
+    expect(restored.facts).toEqual([]);
+    expect(restored.legacyArchiveBoundary).toMatchObject({ sourceSchemaVersion: 1, turn: Number(schema1.turn), historyEventCount: restored.history.length });
     expect(restored.hash).toBe(computeWorldHash(restored));
     expect(validateWorld(restored)).toEqual([]);
   });
 
-  it('migrates a true schema-2 save without rewriting its history digest or granting new land and fleets', () => {
+  it('migrates a true schema-2 save with an authenticated legacy boundary and no free fleets', () => {
     const schema2 = JSON.parse(createSchema2Fixture('旧档迁移二')) as JsonObject;
     const retainedBackground = schema2.backgroundPeople as JsonObject[];
     const unpromotedByRegion = retainedBackground.reduce<Record<string, number>>((counts, person) => {
@@ -391,15 +424,39 @@ describe('V0.3 deterministic history simulation', () => {
         'bg:r_hedong:1', 'bg:r_hedong:2', 'bg:r_hedong:3', 'bg:r_hedong:4',
       ]);
     const restoredV2 = deserializeWorld(JSON.stringify(schema2));
-    expect(restoredV2.schemaVersion).toBe(3);
+    expect(restoredV2.schemaVersion).toBe(4);
     expect(restoredV2.mapContentVersion).toBe('legacy-v02-48');
     expect(restoredV2.regions).toHaveLength(48);
     expect(restoredV2.characters).toHaveLength(120);
     expect(restoredV2.fleets).toHaveLength(0);
-    expect(restoredV2.history).toEqual(schema2.history);
-    expect(restoredV2.historyDigest).toBe(schema2.historyDigest);
+    expect(restoredV2.history.map(({ sourceFactIds: _sourceFactIds, situationIds: _situationIds, ...event }) => event)).toEqual(schema2.history);
+    expect(restoredV2.facts).toEqual([]);
+    expect(restoredV2.legacyArchiveBoundary).toMatchObject({ sourceSchemaVersion: 2, turn: Number(schema2.turn), historyEventCount: restoredV2.history.length });
+    expect(restoredV2.legacyArchiveBoundary?.historyDigest).toBe(schema2.historyDigest);
     expect(restoredV2.hash).toBe(computeWorldHash(restoredV2));
     expect(validateWorld(restoredV2)).toEqual([]);
+  });
+
+  it('migrates a schema-3 archive without fabricating historical facts', () => {
+    const schema3 = JSON.parse(createSchema3Fixture('旧档迁移三')) as JsonObject;
+    const restored = deserializeWorld(JSON.stringify(schema3));
+    expect(restored.schemaVersion).toBe(4);
+    expect(restored.facts).toEqual([]);
+    expect(restored.counters.fact).toBe(0);
+    expect(restored.legacyArchiveBoundary).toMatchObject({
+      sourceSchemaVersion: 3,
+      turn: Number(schema3.turn),
+      historyEventCount: (schema3.history as JsonObject[]).length,
+      historyDigest: schema3.historyDigest,
+    });
+    expect(restored.history.map(({ sourceFactIds: _sourceFactIds, situationIds: _situationIds, ...event }) => event)).toEqual(schema3.history);
+    expect(restored.hash).toBe(computeWorldHash(restored));
+    expect(validateWorld(restored)).toEqual([]);
+    const continued = advanceWorld(restored);
+    expect(continued.facts.length).toBeGreaterThan(0);
+    expect(continued.facts.every((fact) => fact.turn >= (continued.legacyArchiveBoundary?.turn ?? -1))).toBe(true);
+    expect(continued.historyDigest).not.toBe(continued.legacyArchiveBoundary?.historyDigest);
+    expect(validateWorld(continued)).toEqual([]);
   });
 
   it('keeps observer focus outside authoritative world state', () => {

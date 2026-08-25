@@ -296,8 +296,10 @@ describe('V0.2 coupled social simulation', () => {
     ))).toBe(true);
     expect(world.history.filter((event) => event.kind === 'deputy_promoted').every((promotion) => {
       const promotedId = promotion.stateDeltas.find((delta) => delta.field === 'commanderId')?.after;
-      return typeof promotedId === 'string' && world.history.some((battle) => (
-        battle.kind === 'battle' && battle.turn <= promotion.turn && battle.actorIds.includes(promotedId)
+      return typeof promotedId === 'string' && world.facts.some((fact) => (
+        fact.kind === 'battle'
+        && fact.turn <= promotion.turn
+        && [fact.payload.attacker, ...fact.payload.defenders].some((force) => force.deputyCommanderId === promotedId)
       ));
     })).toBe(true);
     expect(world.characters.filter((character) => character.alive && character.tier !== '配角').length).toBeLessThanOrEqual(240);

@@ -4,6 +4,7 @@ import {
   SEA_ZONE_DEFINITIONS,
 } from './data';
 import { keyedInt, keyedRandom, stableCompare } from './random';
+import { emitSimulationFact, projectFactLinks, type BattleFact, type SimulationFact } from './facts';
 import { practiceEffect } from './v03-life';
 import type { V03Emit, V03TurnContext } from './v03-context';
 import {
@@ -1594,6 +1595,20 @@ function resolveLanding(world: WorldState, operation: NavalOperationState, conte
   const variance = 0.9 + keyedRandom(world.seed, world.turn, 'landing', operation.id) * 0.2;
   const won = attackPower * variance > defensePower;
   const soldiersBefore = army.soldiers;
+  const moraleBefore = army.morale;
+  const defenderSnapshots = defenders.map((defender) => ({
+    armyId: defender.id,
+    polityId: defender.polityId,
+    commanderId: defender.commanderId,
+    deputyCommanderId: defender.deputyCommanderId,
+    soldiersBefore: defender.soldiers,
+    soldiersAfter: defender.soldiers,
+    moraleBefore: defender.morale,
+    moraleAfter: defender.morale,
+    trainingBefore: defender.training,
+    supplyBefore: defender.supply,
+    losses: 0,
+  }));
   const losses = Math.min(army.soldiers - 1, whole(army.soldiers * (won ? 0.08 : 0.27)));
   army.soldiers -= losses;
   context.population.militaryDeaths += losses;
@@ -1601,8 +1616,73 @@ function resolveLanding(world: WorldState, operation: NavalOperationState, conte
   target.population -= militiaLoss;
   context.population.civilianDeaths += militiaLoss;
   const previousController = target.controllerId;
+  const battleFact = emitSimulationFact(world, context, {
+    kind: 'battle',
+    category: '海洋',
+    importance: 4,
+    actorIds: [
+      army.commanderId,
+      ...(army.deputyCommanderId ? [army.deputyCommanderId] : []),
+      ...defenders.flatMap((defender) => [defender.commanderId, ...(defender.deputyCommanderId ? [defender.deputyCommanderId] : [])]),
+    ],
+    polityIds: [army.polityId, previousController],
+    regionIds: [operation.originRegionId, target.id],
+    causes: [
+      { label: '舰队运输', role: '结构', weight: 0.2, evidence: `参与舰队${operation.fleetIds.length}支` },
+      { label: '沿途海权', role: '条件', weight: 0.24, evidence: `航路${operation.seaZonePath.join('→')}` },
+      { label: '攻防实力', role: '条件', weight: 0.31, evidence: `攻方${Math.round(attackPower * variance)}、守方${Math.round(defensePower)}` },
+      { label: '登陆结算', role: '结果', weight: 0.25, evidence: `攻方损失${losses}，民兵损失${militiaLoss}` },
+    ],
+    stateDeltas: [{ entityType: 'army', entityId: army.id, field: 'soldiers', before: soldiersBefore, after: army.soldiers, delta: -losses }],
+    sourceFactIds: [],
+    payload: {
+      warId: war.id,
+      targetRegionId: target.id,
+      routeId: `naval-operation:${operation.id}`,
+      attackerWon: won,
+      attackerPower: attackPower * variance,
+      defenderPower: defensePower,
+      militiaLosses: militiaLoss,
+      attacker: {
+        armyId: army.id,
+        polityId: army.polityId,
+        commanderId: army.commanderId,
+        deputyCommanderId: army.deputyCommanderId,
+        soldiersBefore,
+        soldiersAfter: army.soldiers,
+        moraleBefore,
+        moraleAfter: army.morale,
+        trainingBefore: army.training,
+        supplyBefore: army.supply,
+        losses,
+      },
+      defenders: defenderSnapshots,
+    },
+  }) as BattleFact;
+  let territoryFact: SimulationFact | null = null;
   if (won) {
     target.controllerId = army.polityId;
+    territoryFact = emitSimulationFact(world, context, {
+      kind: 'territory_control_changed',
+      category: '海洋',
+      importance: 4,
+      actorIds: [army.commanderId],
+      polityIds: [army.polityId, previousController],
+      regionIds: [target.id],
+      causes: [
+        { label: '登陆胜利', role: '触发', weight: 0.68, evidence: `${battleFact.id}确认登陆军建立滩头` },
+        { label: '港岸接管', role: '结果', weight: 0.32, evidence: `${target.name}控制权转入${army.polityId}` },
+      ],
+      stateDeltas: [{ entityType: 'region', entityId: target.id, field: 'controllerId', before: previousController, after: army.polityId }],
+      sourceFactIds: [battleFact.id],
+      payload: {
+        regionId: target.id,
+        previousControllerId: previousController,
+        nextControllerId: army.polityId,
+        reason: 'amphibious_landing',
+        warId: war.id,
+      },
+    });
     army.regionId = target.id;
     army.food += operation.foodLoaded;
     operation.foodLoaded = 0;
@@ -1641,6 +1721,7 @@ function resolveLanding(world: WorldState, operation: NavalOperationState, conte
       ...(won ? [{ entityType: 'region' as const, entityId: target.id, field: 'controllerId', before: previousController, after: army.polityId }] : []),
       { entityType: 'navalOperation', entityId: operation.id, field: 'stage', before: '登陆', after: operation.stage },
     ],
+    ...projectFactLinks(territoryFact ? [battleFact, territoryFact] : battleFact),
   });
 }
 

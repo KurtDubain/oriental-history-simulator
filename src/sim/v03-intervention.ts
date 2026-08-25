@@ -120,6 +120,8 @@ function appendEvent(world: WorldState, input: InterventionEventInput): HistoryE
     causes: input.causes,
     evidence: input.causes.map((cause) => cause.evidence),
     stateDeltas: input.stateDeltas,
+    sourceFactIds: [],
+    situationIds: [],
   };
   world.history.push(event);
   world.historyDigest = world.history.length === 1

@@ -46,6 +46,7 @@ function emptyContext(world: WorldState): V03TurnContext {
     year: world.year,
     season: world.season,
     events: [],
+    facts: [],
     population: {
       start: totalPopulation(world), births: 0, civilianDeaths: 0, militaryDeaths: 0,
       recruited: 0, demobilized: 0, end: 0,
@@ -96,6 +97,8 @@ function testEmitter(context: V03TurnContext): V03Emit {
       causes: input.causes,
       evidence: input.evidence ?? [],
       stateDeltas: input.stateDeltas ?? [],
+      sourceFactIds: input.sourceFactIds ?? [],
+      situationIds: input.situationIds ?? [],
     };
     context.events.push(event);
     return event;

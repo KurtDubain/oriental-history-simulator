@@ -2,7 +2,7 @@
 
 > 对应设计：[NEXT_SYSTEM_DESIGN.md](./NEXT_SYSTEM_DESIGN.md)
 > 性能依据：[SIMULATION_PERFORMANCE_AUDIT.md](./SIMULATION_PERFORMANCE_AUDIT.md)
-> 任务状态：均未开始；本轮没有实现 P0/P1 功能
+> 任务状态：Phase A 已完成；下一实现入口为 Phase B 的 Situation 纵向切片
 
 ## 1. 路线总览
 
@@ -61,24 +61,24 @@ Phase F UX、地图 LOD 与发布打磨
 
 ### Dependencies
 
-- 当前 schema 3 存读档、确定性和 87 项测试保持绿色。
-- 先冻结 Fact 命名、ID 与 digest 规则。
+- schema 1/2/3 存档保持可读，当前运行时正式升级为 schema 4。
+- Fact 命名、ID、digest 与 legacy boundary 规则已经冻结并由迁移测试保护。
 
 ### Tasks
 
-- [ ] **A00 — 修正审计基线**：更新旧 `v02-audit` 的 schema 2 假设，明确历史审计与当前 schema 3/4 的用途。
-- [ ] **A01 — 端到端性能埋点**：分别测 clone、各系统、hash、runtime/full validation、React commit、Canvas、serialize 和 IndexedDB。
-- [ ] **A02 — schema 4 设计与迁移夹具**：新增迁移边界、计数器、digest；保留 schema 1/2/3 读取。
-- [ ] **A03 — Turn Fact Buffer**：让领域系统在季度上下文中写 typed Fact，不直接要求公开史册。
-- [ ] **A04 — BattleFact**：每次 `resolveBattle` 在军团可能解散前无条件记录双方军团、主副将、战前后状态、胜负和损失。
-- [ ] **A05 — Territory/Appointment/Life Fact 最小集**：覆盖领土转移、任免、死亡、婚姻，支撑 Situation 与回拨。
-- [ ] **A06 — 副将职业改读 Fact**：首次参战、战功、经历与晋升证据不再读取 Chronicle `battle`。
-- [ ] **A07 — Chronicle Projector 双写**：保留现有 HistoryEvent/UI，但其条目引用 sourceFactIds；普通小战可不公开。
-- [ ] **A08 — 历史回拨兼容桥**：新世界优先读 Territory Fact，旧档继续读 HistoryEvent delta。
-- [ ] **A09 — Runtime Validation**：生产每季只校验本季账、changedIds、Fact/Event 增量 digest 和 hash。
-- [ ] **A10 — Full Validation 保留**：创建、读档、导入、手动保存、测试和审计继续完整扫描。
-- [ ] **A11 — AutosaveCoordinator**：dirty generation、single-flight、latest-only、8 季/5 秒 idle、暂停与后台 flush。
-- [ ] **A12 — Phase A 回归矩阵**：春夏秋战斗、同季多战、战后军团解散、史册裁剪、旧档迁移、4×/8× 写盘。
+- [x] **A00 — 修正审计基线**：更新旧 `v02-audit` 的 schema 2 假设，明确历史审计与当前 schema 3/4 的用途。
+- [x] **A01 — 端到端性能埋点**：分别测 clone、各系统、hash、runtime/full validation、React commit、Canvas、serialize 和 IndexedDB。
+- [x] **A02 — schema 4 设计与迁移夹具**：新增迁移边界、计数器、digest；保留 schema 1/2/3 读取。
+- [x] **A03 — Turn Fact Buffer**：让领域系统在季度上下文中写 typed Fact，不直接要求公开史册。
+- [x] **A04 — BattleFact**：每次 `resolveBattle` 在军团可能解散前无条件记录双方军团、主副将、战前后状态、胜负和损失。
+- [x] **A05 — Territory/Appointment/Life Fact 最小集**：覆盖领土转移、任免、死亡、婚姻，支撑 Situation 与回拨。
+- [x] **A06 — 副将职业改读 Fact**：首次参战、战功、经历与晋升证据不再读取 Chronicle `battle`。
+- [x] **A07 — Chronicle Projector 双写**：保留现有 HistoryEvent/UI，但其条目引用 sourceFactIds；普通小战可不公开。
+- [x] **A08 — 历史回拨兼容桥**：新世界优先读 Territory Fact，旧档继续读 HistoryEvent delta。
+- [x] **A09 — Runtime Validation**：生产每季只校验本季账、changedIds、Fact/Event 增量 digest 和 hash。
+- [x] **A10 — Full Validation 保留**：创建、读档、导入、手动保存、测试和审计继续完整扫描。
+- [x] **A11 — AutosaveCoordinator**：dirty generation、single-flight、latest-only、8 季/5 秒 idle、暂停与后台 flush。
+- [x] **A12 — Phase A 回归矩阵**：春夏秋战斗、同季多战、战后军团解散、史册裁剪、旧档迁移、4×/8× 写盘。
 
 ### Risks
 
@@ -102,6 +102,14 @@ Phase F UX、地图 LOD 与发布打磨
 - 暂停后 2 秒内 IndexedDB 是最新世界。
 - schema 3 原始史册、familyId、领土和 hash 验证不被改写。
 - 全部既有测试、生产构建和浏览器 E2E 通过。
+
+### Completion Evidence（2026-08-25）
+
+- 120 项 Vitest、TypeScript/生产构建、桌面与 390×844 Chromium E2E 全部通过。
+- 3 个种子 × 80 季 Phase A 审计：模拟 P95 56.559ms，runtime validation P95 25.087ms，最大存档 6.746MiB。
+- 百年检查点：0/20/50/100 年存档 0.702/6.319/10.312/13.359MiB；100 年模拟 P95 70.043ms，runtime validation P95 47.344ms。
+- 4×/8× 各连续一分钟的 fake-clock 写盘测试均不超过 12 次，并发写入上限为 1；真实 Chromium 验证暂停后 2 秒内自动存档达到最新 turn/hash。
+- 春、夏、秋、冬与同季多战均进入 BattleFact；已解散军团仍保留战前后参与者快照，Chronicle 裁剪不改变世界 hash。
 
 ## 4. Phase B — Situation 可玩纵向切片
 
@@ -365,17 +373,17 @@ Phase F UX、地图 LOD 与发布打磨
 
 ## 9. 立即执行的下一 Sprint
 
-第一轮只做 Phase A 的最小闭环，建议按以下严格顺序：
+第一轮 Phase A 最小闭环已经按以下顺序完成；下一轮从第 10 项开始：
 
-1. [ ] A01：端到端性能埋点与 0/20/50/100 年基线。
-2. [ ] A02：schema 4 迁移夹具与 legacy boundary。
-3. [ ] A03：Turn Fact Buffer。
-4. [ ] A04：BattleFact，覆盖春季与同季多战。
-5. [ ] A06：副将成长改读 Fact。
-6. [ ] A07：Chronicle Projector 双写，证明展示裁剪不影响 hash。
-7. [ ] A09/A10：Runtime/Full Validation 分离。
-8. [ ] A11：AutosaveCoordinator。
-9. [ ] A12：完整 release regression。
+1. [x] A01：端到端性能埋点与 0/20/50/100 年基线。
+2. [x] A02：schema 4 迁移夹具与 legacy boundary。
+3. [x] A03：Turn Fact Buffer。
+4. [x] A04：BattleFact，覆盖春季与同季多战。
+5. [x] A06：副将成长改读 Fact。
+6. [x] A07：Chronicle Projector 双写，证明展示裁剪不影响 hash。
+7. [x] A09/A10：Runtime/Full Validation 分离。
+8. [x] A11：AutosaveCoordinator。
+9. [x] A12：完整 release regression。
 10. [ ] B01/B03：只建立 Situation reducer 与“军权危机”检测器，暂不扩类型。
 
 这一 Sprint 的演示目标只有一句话：

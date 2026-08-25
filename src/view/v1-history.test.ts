@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createWorld } from '../sim';
-import type { HistoryEvent, WorldState } from '../sim/types';
+import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
 import {
   buildHistoryRelatedEntities,
   clampHistoryTurn,
@@ -34,6 +34,8 @@ function historyEvent(
     evidence: [],
     stateDeltas: [],
     ...input,
+    sourceFactIds: input.sourceFactIds ?? [],
+    situationIds: input.situationIds ?? [],
   };
 }
 
@@ -43,6 +45,32 @@ function historyWorld(): WorldState {
   world.year = 2;
   world.season = '春';
   return world;
+}
+
+function territoryFact(
+  id: string,
+  turn: number,
+  regionId: string,
+  previousControllerId: string,
+  nextControllerId: string,
+): Extract<SimulationFact, { kind: 'territory_control_changed' }> {
+  const date = historyTurnDate(turn);
+  return {
+    id,
+    turn,
+    year: date.year,
+    season: date.season,
+    kind: 'territory_control_changed',
+    category: '军事',
+    importance: 4,
+    actorIds: [],
+    polityIds: [previousControllerId, nextControllerId],
+    regionIds: [regionId],
+    causes: [{ label: '测试控制权', role: '结果', weight: 1, evidence: `${previousControllerId}→${nextControllerId}` }],
+    stateDeltas: [{ entityType: 'region', entityId: regionId, field: 'controllerId', before: previousControllerId, after: nextControllerId }],
+    sourceFactIds: [],
+    payload: { regionId, previousControllerId, nextControllerId, reason: 'battle_capture', warId: null },
+  };
 }
 
 describe('V1 history territory reconstruction', () => {
@@ -55,11 +83,15 @@ describe('V1 history territory reconstruction', () => {
     secondPolity.foundedTurn = 1;
     secondPolity.eliminatedTurn = 3;
     secondPolity.alive = false;
+    const firstCapture = territoryFact('fact_capture', 1, region.id, firstPolity.id, secondPolity.id);
+    const recapture = territoryFact('fact_recapture', 3, region.id, secondPolity.id, firstPolity.id);
+    world.facts = [firstCapture, recapture];
     world.history = [
       historyEvent('opening', 0, { importance: 5 }),
       historyEvent('first-capture', 1, {
         category: '军事',
         importance: 4,
+        sourceFactIds: [firstCapture.id],
         stateDeltas: [{
           entityType: 'region', entityId: region.id, field: 'controllerId',
           before: firstPolity.id, after: secondPolity.id,
@@ -68,9 +100,12 @@ describe('V1 history territory reconstruction', () => {
       historyEvent('recapture', 3, {
         category: '军事',
         importance: 5,
+        sourceFactIds: [recapture.id],
+        // Deliberately conflicts with the fact. Rewind must ignore this
+        // presentation delta instead of reversing the same transfer twice.
         stateDeltas: [{
           entityType: 'region', entityId: region.id, field: 'controllerId',
-          before: secondPolity.id, after: firstPolity.id,
+          before: firstPolity.id, after: firstPolity.id,
         }],
       }),
     ];
@@ -90,6 +125,42 @@ describe('V1 history territory reconstruction', () => {
     expect(afterElimination.controllerByRegionId[region.id]).toBe(firstPolity.id);
     expect(afterElimination.extantPolities.some((polity) => polity.id === secondPolity.id)).toBe(false);
     expect(region.controllerId).toBe(currentController);
+  });
+
+  it('combines post-migration territory facts with bounded legacy event fallback', () => {
+    const world = historyWorld();
+    const firstPolity = world.polities[0];
+    const secondPolity = world.polities[1];
+    const region = world.regions.find((item) => item.controllerId === firstPolity.id) ?? world.regions[0];
+    region.controllerId = firstPolity.id;
+    const legacyCapture = historyEvent('legacy-capture', 1, {
+      stateDeltas: [{ entityType: 'region', entityId: region.id, field: 'controllerId', before: firstPolity.id, after: secondPolity.id }],
+    });
+    const newRecapture = territoryFact('fact_new_recapture', 4, region.id, secondPolity.id, firstPolity.id);
+    world.history = [historyEvent('legacy-opening', 0), legacyCapture, historyEvent('projected-recapture', 4, { sourceFactIds: [newRecapture.id] })];
+    world.facts = [newRecapture];
+    world.legacyArchiveBoundary = {
+      sourceSchemaVersion: 3,
+      turn: 2,
+      historyEventCount: 2,
+      historyDigest: 'legacy-digest',
+    };
+
+    const before = JSON.stringify({ controller: region.controllerId, history: world.history, facts: world.facts });
+    expect(reconstructHistoricalTerritory(world, 0).controllerByRegionId[region.id]).toBe(firstPolity.id);
+    expect(reconstructHistoricalTerritory(world, 2).controllerByRegionId[region.id]).toBe(secondPolity.id);
+    expect(JSON.stringify({ controller: region.controllerId, history: world.history, facts: world.facts })).toBe(before);
+  });
+
+  it('marks malformed territory facts partial instead of trusting presentation deltas', () => {
+    const world = historyWorld();
+    world.facts = [{
+      ...territoryFact('fact_malformed', 4, world.regions[0].id, world.polities[0].id, world.polities[1].id),
+      payload: null,
+    } as unknown as SimulationFact];
+    const view = reconstructHistoricalTerritory(world, 0);
+    expect(view.confidence).toBe('partial');
+    expect(view.skippedControllerChanges).toBe(1);
   });
 
   it('clamps dates to the recorded world boundary', () => {

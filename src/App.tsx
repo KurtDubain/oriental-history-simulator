@@ -12,6 +12,7 @@ import {
 import {
   useCallback,
   useEffect,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -53,6 +54,18 @@ import {
 import { WorldCollectionPanel } from './components/WorldCollectionPanel';
 import { WorldStart } from './components/WorldStart';
 import {
+  createAutosaveCoordinator,
+  type AutosaveCoordinator,
+} from './persistence/autosave-coordinator';
+import {
+  getRuntimePerformanceSnapshot,
+  measureRuntimePhaseAsync,
+  measureRuntimePhase,
+  recordRuntimeMetric,
+  resetRuntimePerformanceMetrics,
+  runtimeNow,
+} from './performance/runtime-profiler';
+import {
   deleteWorldSlot,
   downloadWorld,
   duplicateWorldSlot,
@@ -66,13 +79,15 @@ import {
   type WorldSaveSummary,
 } from './persistence/storage';
 import {
-  advanceWorld,
+  advanceWorldDetailed,
   applyV03Intervention,
   availableMandate,
   createWorld,
   deserializeWorld,
   isV03InterventionEvent,
   serializeWorld,
+  measureRuntimeValidation,
+  SIMULATION_SYSTEM_PHASES,
   validateWorld,
   type V03InterventionAction,
   type WorldState,
@@ -176,9 +191,22 @@ function historyRoster(world: WorldState): RosterItem[] {
 }
 
 function assertValidWorld(candidate: WorldState): WorldState {
-  const violations = validateWorld(candidate);
+  const violations = measureRuntimePhase(
+    'validation.full',
+    () => validateWorld(candidate),
+    candidate.turn,
+  );
   if (violations.length) {
     throw new Error(`世界校验失败：${violations.slice(0, 3).map((item) => item.message).join('；')}`);
+  }
+  return candidate;
+}
+
+function assertValidRuntimeTurn(previous: WorldState, candidate: WorldState): WorldState {
+  const measurement = measureRuntimeValidation(previous, candidate);
+  recordRuntimeMetric('validation.runtime', measurement.durationMs, candidate.turn);
+  if (measurement.violations.length) {
+    throw new Error(`季度校验失败：${measurement.violations.slice(0, 3).map((item) => item.message).join('；')}`);
   }
   return candidate;
 }
@@ -466,6 +494,7 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
     coordinates: 'map world coordinates use origin top-left, x rightward, y downward, range 1000x700',
     time: { turn: world.turn, year: world.year, season: world.season },
     deterministicWorldHash: world.hash,
+    runtimePerformance: getRuntimePerformanceSnapshot(),
     seed: world.seed,
     playback: { running: options.running, speed: options.speed },
     observer: {
@@ -672,6 +701,8 @@ export function App() {
   const advanceRef = useRef<(source: AdvanceSource) => boolean>(() => false);
   const primerAdvanceDoneRef = useRef(false);
   const primerNewestEventIdRef = useRef<string | null>(null);
+  const reactCommitStartedAtRef = useRef<{ startedAt: number; turn: number } | null>(null);
+  const autosaveCoordinatorRef = useRef<AutosaveCoordinator | null>(null);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
   const snapshotOptionsRef = useRef<SnapshotOptions>({
     startOpen,
@@ -697,8 +728,42 @@ export function App() {
   });
 
   const commitWorld = useCallback((nextWorld: WorldState) => {
+    reactCommitStartedAtRef.current = { startedAt: runtimeNow(), turn: nextWorld.turn };
     worldRef.current = nextWorld;
     setWorld(nextWorld);
+    autosaveCoordinatorRef.current?.markDirty({
+      turn: nextWorld.turn,
+      serialize: () => measureRuntimePhase(
+        'persistence.serialize',
+        () => serializeWorld(nextWorld),
+        nextWorld.turn,
+      ),
+    });
+  }, []);
+
+  useLayoutEffect(() => {
+    const pending = reactCommitStartedAtRef.current;
+    if (!pending || pending.turn !== world?.turn) return;
+    recordRuntimeMetric('react.commit', runtimeNow() - pending.startedAt, pending.turn);
+    reactCommitStartedAtRef.current = null;
+  }, [world]);
+
+  const resetAutosaveCoordinator = useCallback((initialSavedTurn: number) => {
+    autosaveCoordinatorRef.current?.dispose();
+    const coordinator = createAutosaveCoordinator({
+      initialSavedTurn,
+      save: (payload, context) => measureRuntimePhaseAsync(
+        'persistence.indexeddb',
+        () => saveWorld(payload),
+        context.turn,
+      ),
+      onSaved: () => setHasSave(true),
+      onError: (error) => {
+        setToast(error instanceof Error ? error.message : '本地史册保存失败。');
+      },
+    });
+    autosaveCoordinatorRef.current = coordinator;
+    return coordinator;
   }, []);
 
   const refreshWorldSaves = useCallback(async () => {
@@ -724,16 +789,27 @@ export function App() {
   }, [observerSettings, world]);
 
   useEffect(() => {
-    if (!world) return undefined;
-    const timeout = window.setTimeout(() => {
-      saveWorld(serializeWorld(world))
-        .then(() => setHasSave(true))
-        .catch((error: unknown) => {
-          setToast(error instanceof Error ? error.message : '本地史册保存失败。');
-        });
-    }, 380);
-    return () => window.clearTimeout(timeout);
-  }, [world]);
+    if (running) return;
+    void autosaveCoordinatorRef.current?.flush('pause');
+  }, [running]);
+
+  useEffect(() => {
+    const flushBackground = () => {
+      if (document.visibilityState === 'hidden') {
+        void autosaveCoordinatorRef.current?.flush('background');
+      }
+    };
+    const flushPage = () => {
+      void autosaveCoordinatorRef.current?.flush('background');
+    };
+    document.addEventListener('visibilitychange', flushBackground);
+    window.addEventListener('pagehide', flushPage);
+    return () => {
+      document.removeEventListener('visibilitychange', flushBackground);
+      window.removeEventListener('pagehide', flushPage);
+      autosaveCoordinatorRef.current?.dispose();
+    };
+  }, []);
 
   useEffect(() => {
     if (!toast) return undefined;
@@ -747,7 +823,9 @@ export function App() {
   }, [activeView, archiveOpen, collectionOpen, mandateOpen, observerDeskOpen, primerOpen, startOpen, world]);
 
   const openWorld = useCallback((nextWorld: WorldState, source: OpenWorldSource) => {
+    resetRuntimePerformanceMetrics();
     const validWorld = assertValidWorld(nextWorld);
+    resetAutosaveCoordinator(source === 'continue' ? validWorld.turn : 0);
     const defaultRegionId = validWorld.regions.find((region) => (
       validWorld.polities.some((polity) => polity.alive && polity.capitalRegionId === region.id)
     ))?.id ?? validWorld.regions[0]?.id;
@@ -797,7 +875,7 @@ export function App() {
     runningRef.current = false;
     setRunning(false);
     clockAccumulatorRef.current = 0;
-  }, [commitWorld]);
+  }, [commitWorld, resetAutosaveCoordinator]);
 
   const handleCreate = useCallback(() => {
     setStartBusy(true);
@@ -843,14 +921,25 @@ export function App() {
     const current = worldRef.current;
     if (!current) return;
     try {
-      await saveWorld(serializeWorld(current));
+      const validCurrent = assertValidWorld(current);
+      const coordinator = autosaveCoordinatorRef.current ?? resetAutosaveCoordinator(0);
+      coordinator.markDirty({
+        turn: validCurrent.turn,
+        serialize: () => measureRuntimePhase(
+          'persistence.serialize',
+          () => serializeWorld(validCurrent),
+          validCurrent.turn,
+        ),
+      });
+      const result = await coordinator.flush('manual');
+      if (result.status === 'failed') throw result.error;
       setHasSave(true);
       await refreshWorldSaves();
       setToast(`已将第 ${current.year} 年${current.season}的世界写入本地史册。`);
     } catch (error) {
       setToast(error instanceof Error ? error.message : '本地史册保存失败。');
     }
-  }, [refreshWorldSaves]);
+  }, [refreshWorldSaves, resetAutosaveCoordinator]);
 
   const handleOpenMandate = useCallback(() => {
     runningRef.current = false;
@@ -877,11 +966,12 @@ export function App() {
       const intervention = next.history.slice(historyLength).find(isV03InterventionEvent);
       commitWorld(next);
       try {
-        await saveWorld(serializeWorld(next));
+        const flushResult = await autosaveCoordinatorRef.current?.flush('intervention');
+        if (flushResult?.status === 'failed') throw flushResult.error;
         setHasSave(true);
-        const result = intervention?.title ?? '有限天意已经写入世界';
-        setMandateMessage({ tone: 'success', text: `${result}。分支凭证与状态差量已存入史册。` });
-        setToast(`天意已落笔：${result}`);
+        const interventionResult = intervention?.title ?? '有限天意已经写入世界';
+        setMandateMessage({ tone: 'success', text: `${interventionResult}。分支凭证与状态差量已存入史册。` });
+        setToast(`天意已落笔：${interventionResult}`);
       } catch (error) {
         const reason = error instanceof Error ? error.message : '本地史册保存失败';
         setMandateMessage({ tone: 'error', text: `天意已经生效，但自动保存失败：${reason}。请手动导出史册。` });
@@ -901,8 +991,13 @@ export function App() {
   const handleExport = useCallback(() => {
     const current = worldRef.current;
     if (!current) return;
-    downloadWorld(serializeWorld(current), `沧衡纪_${current.seed}_第${current.year}年${current.season}.json`);
-    setToast('已将完整世界、随机种子与因果史册导出。');
+    try {
+      const validCurrent = assertValidWorld(current);
+      downloadWorld(serializeWorld(validCurrent), `沧衡纪_${validCurrent.seed}_第${validCurrent.year}年${validCurrent.season}.json`);
+      setToast('已将完整世界、随机种子与因果史册导出。');
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '世界未通过完整校验，无法导出。');
+    }
   }, []);
 
   const handleOpenCollection = useCallback(async () => {
@@ -938,9 +1033,10 @@ export function App() {
     if (!current) throw new Error('请先开启或读取一个世界，再收藏当前分支。');
     setCollectionBusy(true);
     try {
+      const validCurrent = assertValidWorld(current);
       const saves = await listWorldSaves();
-      const slot = availableCollectionSlot(`world_${current.hash.slice(0, 8)}_t${current.turn}`, saves);
-      await saveWorldToSlot(serializeWorld(current), slot, label);
+      const slot = availableCollectionSlot(`world_${validCurrent.hash.slice(0, 8)}_t${validCurrent.turn}`, saves);
+      await saveWorldToSlot(serializeWorld(validCurrent), slot, label);
       await refreshWorldSaves();
       setToast(`“${label}”已存入世界收藏。`);
     } finally {
@@ -951,6 +1047,8 @@ export function App() {
   const handleLoadCollectionSlot = useCallback(async (slot: string) => {
     setCollectionBusy(true);
     try {
+      const pendingSave = await autosaveCoordinatorRef.current?.flush('pause');
+      if (pendingSave?.status === 'failed') throw pendingSave.error;
       const saved = await loadWorldFromSlot(slot);
       if (!saved) throw new Error('该世界槽位已经不存在。');
       openWorld(deserializeWorld(saved.payload), 'collection');
@@ -1007,7 +1105,8 @@ export function App() {
     const current = worldRef.current;
     if (current) {
       try {
-        await saveWorld(serializeWorld(current));
+        const result = await autosaveCoordinatorRef.current?.flush('pause');
+        if (result?.status === 'failed') throw result.error;
         setHasSave(true);
       } catch {
         // The in-memory world remains intact and can still be exported.
@@ -1023,7 +1122,16 @@ export function App() {
     advancingRef.current = true;
     try {
       const oldHistoryLength = current.history.length;
-      const next = assertValidWorld(advanceWorld(current));
+      const detailed = advanceWorldDetailed(current);
+      const advanced = detailed.world;
+      recordRuntimeMetric('simulation.clone', detailed.timings.cloneMs, current.turn);
+      recordRuntimeMetric('simulation.systems', detailed.timings.systemsMs, current.turn);
+      recordRuntimeMetric('simulation.hash', detailed.timings.hashMs, current.turn);
+      recordRuntimeMetric('simulation.total', detailed.timings.totalMs, current.turn);
+      for (const system of SIMULATION_SYSTEM_PHASES) {
+        recordRuntimeMetric(`simulation.system.${system}`, detailed.timings.systems[system], current.turn);
+      }
+      const next = assertValidRuntimeTurn(current, advanced);
       commitWorld(next);
       const newEvents = next.history.slice(oldHistoryLength);
       const pauseCandidates = newEvents.map(historyEventToPauseCandidate);

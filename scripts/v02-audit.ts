@@ -11,7 +11,9 @@ import {
 
 // Historical regression harness retained for comparing V0.2 social-system
 // distributions. It is not the V0.3 release gate; use scripts/v03-audit.ts for
-// schema-3 map, ocean, flow, disease, migration and knowledge acceptance.
+// map, ocean, flow, disease, migration and knowledge acceptance. New worlds
+// use the current runtime schema; "V0.2" below names the audited social contract,
+// not a serialized schema version.
 
 const SHORT_SEED_COUNT = positiveIntegerFromEnv('V02_AUDIT_SHORT_SEEDS', 64);
 const SHORT_QUARTERS = positiveIntegerFromEnv('V02_AUDIT_SHORT_QUARTERS', 200);
@@ -22,6 +24,7 @@ const STRUCTURAL_ONLY = process.env.V02_AUDIT_STRUCTURAL_ONLY === '1';
 const MAX_IMPORT_BYTES = 16 * 1024 * 1024;
 const RELATION_EDGE_FACTOR_LIMIT = 24;
 const MAJOR_POLITICAL_EVENT_KINDS = new Set(['succession', 'usurpation', 'rebellion', 'coup', 'purge']);
+const CURRENT_RUNTIME_SCHEMA_VERSION = 4;
 
 type BackgroundCareerStage = 'commander' | 'powerBroker' | 'ruler' | 'rebelLeader';
 
@@ -152,7 +155,7 @@ function assertMetric(value: number, label: string, minimum = 0, maximum = 100):
 }
 
 function assertQuarterState(world: WorldState, label: string): void {
-  assert(world.schemaVersion === 2, `${label} 不是 schema 2 世界`);
+  assert(world.schemaVersion === CURRENT_RUNTIME_SCHEMA_VERSION, `${label} 不是当前 schema ${CURRENT_RUNTIME_SCHEMA_VERSION} 世界`);
   for (const region of world.regions) {
     assert(
       Number.isSafeInteger(region.population) && region.population >= 0
@@ -204,11 +207,23 @@ function assertBiographyFact(
   character: CharacterState,
   fact: BiographyFact,
   eventById: Map<string, WorldState['history'][number]>,
+  factById: Map<string, WorldState['facts'][number]>,
   previousTurn: number,
   label: string,
 ): void {
   assert(fact.turn >= previousTurn && fact.turn <= world.turn, `${label} ${character.id} 传记时间逆序：${fact.id}`);
   assert(fact.summary.trim().length > 0, `${label} ${character.id} 传记事实没有摘要：${fact.id}`);
+  if (fact.factId !== null) {
+    const sourceFact = factById.get(fact.factId);
+    assert(sourceFact, `${label} ${character.id} 传记引用不存在模拟事实：${fact.factId}`);
+    assert(fact.eventId === null, `${label} ${character.id} 传记不得同时引用事件与模拟事实：${fact.id}`);
+    assert(sourceFact.turn === fact.turn, `${label} ${character.id} 传记与模拟事实季度不一致：${fact.id}`);
+    assert(
+      sourceFact.actorIds.includes(character.id),
+      `${label} ${character.id} 的“${fact.kind}”不是模拟事实 ${fact.factId}/${sourceFact.kind} 的参与者`,
+    );
+    return;
+  }
   if (fact.eventId === null) {
     assert(fact.turn <= 0, `${label} ${character.id} 的后天传记事实缺少事件来源：${fact.id}`);
     return;
@@ -237,6 +252,7 @@ function assertV02References(world: WorldState, label: string): void {
   const armyById = new Map(world.armies.map((item) => [item.id, item]));
   const factionById = new Map(world.factions.map((item) => [item.id, item]));
   const eventById = new Map(world.history.map((item) => [item.id, item]));
+  const factById = new Map(world.facts.map((item) => [item.id, item]));
 
   for (const event of world.history.filter((item) => MAJOR_POLITICAL_EVENT_KINDS.has(item.kind))) {
     assert(event.causes.length >= 3, `${label} 政治大事 ${event.id}/${event.kind} 少于三项因果证据`);
@@ -299,7 +315,7 @@ function assertV02References(world: WorldState, label: string): void {
     assert(duplicates(character.biography.map((fact) => fact.id)).length === 0, `${label} ${character.id} 传记事实 ID 重复`);
     let previousTurn = Number.NEGATIVE_INFINITY;
     for (const fact of character.biography) {
-      assertBiographyFact(world, character, fact, eventById, previousTurn, label);
+      assertBiographyFact(world, character, fact, eventById, factById, previousTurn, label);
       previousTurn = fact.turn;
     }
   }
@@ -860,8 +876,8 @@ const beforeSave = runWorld(persistenceSeed, splitTurn, false).world;
 const restored = deserializeWorld(serializeWorld(beforeSave));
 let resumed = restored;
 for (let turn = splitTurn; turn < SHORT_QUARTERS; turn += 1) resumed = advanceWorld(resumed);
-assert(resumed.hash === uninterrupted.hash, 'schema 2 保存续跑与不中断运行哈希不同');
-assert(serializeWorld(resumed) === serializeWorld(uninterrupted), 'schema 2 保存续跑与不中断运行序列化不同');
+assert(resumed.hash === uninterrupted.hash, '当前 schema 保存续跑与不中断运行哈希不同');
+assert(serializeWorld(resumed) === serializeWorld(uninterrupted), '当前 schema 保存续跑与不中断运行序列化不同');
 
 const longFinalPolityDistribution: Record<number, number> = {};
 const longSaveBytes: number[] = [];
@@ -974,7 +990,8 @@ assert(p95 < 1_000, `季度模拟 P95 ${p95.toFixed(2)}ms，疑似出现性能�
 
 const output = {
   audit: 'V0.2 historical social regression (not the V0.3 release gate)',
-  contractSchemaVersion: 2,
+  auditedContractVersion: 'V0.2',
+  runtimeSchemaVersion: CURRENT_RUNTIME_SCHEMA_VERSION,
   structuralOnly: STRUCTURAL_ONLY,
   shortRun: {
     seeds: SHORT_SEED_COUNT,

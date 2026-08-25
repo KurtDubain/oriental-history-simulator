@@ -5,6 +5,7 @@ import { validateWorld } from './invariants';
 import { migrateV01SocialState } from './v02';
 import { createV03LifeSystems } from './v03-life';
 import { createV03OceanSystems } from './v03-ocean';
+import type { LegacyArchiveBoundary, SimulationFact } from './facts';
 
 function migrateV02Systems(world: WorldState): void {
   (world as unknown as { schemaVersion: number }).schemaVersion = 3;
@@ -69,6 +70,40 @@ function migrateV02Systems(world: WorldState): void {
   }
 }
 
+function historyDigestOf(world: Pick<WorldState, 'history'>): string {
+  return world.history.reduce(
+    (digest, event, index) => index === 0 ? stableHash(event) : stableHash([digest, event]),
+    '',
+  );
+}
+
+function factDigestOf(facts: readonly SimulationFact[]): string {
+  return facts.reduce((digest, fact) => stableHash([digest, fact]), stableHash([]));
+}
+
+function migrateLegacyFacts(world: WorldState, boundary: LegacyArchiveBoundary): void {
+  // Schema 1-3 had Chronicle records but no authoritative fact archive. Keep an
+  // explicit boundary so readers can use old event deltas without pretending
+  // those narrative records were facts that the old simulation never emitted.
+  (world as unknown as { schemaVersion: number }).schemaVersion = 4;
+  world.facts = [];
+  world.factDigest = stableHash([]);
+  world.legacyArchiveBoundary = boundary;
+  world.counters.fact = 0;
+  for (const event of world.history) {
+    event.sourceFactIds = [];
+    event.situationIds = [];
+  }
+  // The migrated archive continues from the authenticated legacy chain tail.
+  // Empty schema-4 link arrays do not force an O(legacy history) rewrite.
+  world.historyDigest = boundary.historyDigest;
+  for (const character of world.characters) {
+    for (const biography of character.biography ?? []) biography.factId = null;
+    character.biographyDigest = stableHash(character.biography ?? []);
+  }
+  if (world.lastTurn) world.lastTurn.factIds = [];
+}
+
 export function serializeWorld(world: WorldState): string {
   return stableStringify(world);
 }
@@ -83,9 +118,22 @@ export function deserializeWorld(serialized: string): WorldState {
   if (!parsed || typeof parsed !== 'object') throw new Error('存档缺少世界对象');
   const rawWorld = parsed as Record<string, unknown>;
   const originalVersion = Number(rawWorld.schemaVersion);
-  if (originalVersion !== 1 && originalVersion !== 2 && originalVersion !== 3) throw new Error(`不支持的存档版本 ${String(rawWorld.schemaVersion)}`);
+  if (originalVersion !== 1 && originalVersion !== 2 && originalVersion !== 3 && originalVersion !== 4) throw new Error(`不支持的存档版本 ${String(rawWorld.schemaVersion)}`);
   const world = parsed as unknown as WorldState;
   if (world.hash !== computeWorldHash(world)) throw new Error('存档哈希校验失败，内容可能已损坏或被篡改');
+  if (originalVersion === 4) {
+    if (!Array.isArray(world.facts) || world.factDigest !== factDigestOf(world.facts)) {
+      throw new Error('事实档案摘要校验失败，内容可能已损坏或被篡改');
+    }
+  }
+  const legacyBoundary: LegacyArchiveBoundary | null = originalVersion < 4
+    ? {
+        sourceSchemaVersion: originalVersion as 1 | 2 | 3,
+        turn: world.turn,
+        historyEventCount: world.history.length,
+        historyDigest: typeof world.historyDigest === 'string' ? world.historyDigest : historyDigestOf(world),
+      }
+    : null;
   let migrated = false;
   for (const character of world.characters) {
     if (!Number.isFinite(character.rebellionReadiness)) {
@@ -104,10 +152,7 @@ export function deserializeWorld(serialized: string): WorldState {
     migrated = true;
   }
   if (typeof world.historyDigest !== 'string') {
-    world.historyDigest = world.history.reduce(
-      (digest, event, index) => index === 0 ? stableHash(event) : stableHash([digest, event]),
-      '',
-    );
+    world.historyDigest = historyDigestOf(world);
     migrated = true;
   }
   if (originalVersion === 1 || !Array.isArray(world.families)) {
@@ -145,6 +190,10 @@ export function deserializeWorld(serialized: string): WorldState {
   }
   if (originalVersion < 3) {
     migrateV02Systems(world);
+    migrated = true;
+  }
+  if (legacyBoundary) {
+    migrateLegacyFacts(world, legacyBoundary);
     migrated = true;
   }
   if (migrated) world.hash = computeWorldHash(world);

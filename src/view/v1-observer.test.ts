@@ -45,6 +45,8 @@ function historyEvent(patch: Partial<HistoryEvent> = {}): HistoryEvent {
       after: 'character-heir',
     }],
     ...patch,
+    sourceFactIds: patch.sourceFactIds ?? [],
+    situationIds: patch.situationIds ?? [],
   };
 }
 

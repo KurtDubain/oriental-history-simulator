@@ -1,7 +1,9 @@
 import { FAMILY_NAMES, GIVEN_NAMES } from './data';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
+import { emitSimulationFact, projectFactLinks } from './facts';
 import type {
   BackgroundPersonState,
+  BiographyFact,
   CharacterState,
   CommitmentKind,
   CommitmentState,
@@ -15,6 +17,7 @@ import type {
   OfficeAppointment,
   PolityState,
   RelationshipState,
+  SimulationFact,
   Season,
   StateDelta,
   WorldState,
@@ -25,6 +28,7 @@ interface V02TurnContext {
   year: number;
   season: Season;
   events: HistoryEvent[];
+  facts: SimulationFact[];
 }
 
 interface V02EventInput {
@@ -39,6 +43,8 @@ interface V02EventInput {
   causes: EventCause[];
   evidence?: string[];
   stateDeltas?: StateDelta[];
+  sourceFactIds?: string[];
+  situationIds?: string[];
 }
 
 type EmitEvent = (input: V02EventInput) => HistoryEvent;
@@ -80,6 +86,30 @@ function addBiography(
     summary,
     importance,
     eventId: event.id,
+    factId: null,
+  });
+  if (character.biography.length > MAX_BIOGRAPHY_FACTS) {
+    character.biography.splice(0, character.biography.length - MAX_BIOGRAPHY_FACTS);
+  }
+  character.biographyDigest = stableHash(character.biography);
+}
+
+function addFactBiography(
+  character: CharacterState,
+  fact: SimulationFact,
+  kind: string,
+  summary: string,
+  importance: BiographyFact['importance'] = fact.importance,
+): void {
+  if (character.biography.some((item) => item.factId === fact.id && item.kind === kind)) return;
+  character.biography.push({
+    id: `${character.id}:bio:${fact.id}:${kind}`,
+    turn: fact.turn,
+    kind,
+    summary,
+    importance,
+    eventId: null,
+    factId: fact.id,
   });
   if (character.biography.length > MAX_BIOGRAPHY_FACTS) {
     character.biography.splice(0, character.biography.length - MAX_BIOGRAPHY_FACTS);
@@ -692,6 +722,7 @@ export function createV02WorldSystems(world: WorldState, foundingEventId: string
         summary: `${character.name}以${character.role}身份进入纪年。`,
         importance: character.role === '君主' ? 4 : 1,
         eventId: foundingEventId,
+        factId: null,
       }];
       character.biographyDigest = stableHash(character.biography);
     }
@@ -718,6 +749,7 @@ export function createV02WorldSystems(world: WorldState, foundingEventId: string
 
 function applyMarriage(
   world: WorldState,
+  context: V02TurnContext,
   left: CharacterState,
   right: CharacterState,
   diplomatic: boolean,
@@ -733,6 +765,32 @@ function applyMarriage(
     leftFamily.prestige = Math.round(clamp(leftFamily.prestige + 2));
     rightFamily.prestige = Math.round(clamp(rightFamily.prestige + 2));
   }
+  const fact = emitSimulationFact(world, context, {
+    kind: 'marriage',
+    category: diplomatic ? '外交' : '政治',
+    importance: diplomatic ? 4 : 2,
+    actorIds: [left.id, right.id],
+    polityIds: [left.polityId, right.polityId],
+    regionIds: [left.locationRegionId, right.locationRegionId],
+    causes: [
+      { label: '适婚条件', role: '条件', weight: 0.25, evidence: `双方年龄${left.age}/${right.age}且此前无配偶` },
+      { label: '家族利益', role: '结构', weight: 0.3, evidence: `${leftFamily?.name ?? left.familyName}与${rightFamily?.name ?? right.familyName}互补声望与影响` },
+      { label: diplomatic ? '国家信任' : '关系亲和', role: '选择', weight: 0.3, evidence: diplomatic ? '婚盟服务于国家间信任与安全' : '双方人格、年龄和家族网络相容' },
+      { label: '婚盟结果', role: '结果', weight: 0.15, evidence: '配偶与家族联盟关系已写入权威状态' },
+    ],
+    stateDeltas: [
+      { entityType: 'character', entityId: left.id, field: 'spouseIds', before: null, after: right.id },
+      { entityType: 'character', entityId: right.id, field: 'spouseIds', before: null, after: left.id },
+    ],
+    sourceFactIds: [],
+    payload: {
+      leftCharacterId: left.id,
+      rightCharacterId: right.id,
+      leftFamilyId: left.familyId,
+      rightFamilyId: right.familyId,
+      diplomatic,
+    },
+  });
   const event = emit({
     category: diplomatic ? '外交' : '政治',
     kind: diplomatic ? 'diplomatic_marriage' : 'marriage',
@@ -754,6 +812,7 @@ function applyMarriage(
       { entityType: 'character', entityId: left.id, field: 'spouseIds', before: null, after: right.id },
       { entityType: 'character', entityId: right.id, field: 'spouseIds', before: null, after: left.id },
     ],
+    ...projectFactLinks(fact),
   });
   for (const [source, target] of [[left, right], [right, left]] as const) {
     const relation = ensureRelationship(world, source.id, target.id);
@@ -886,11 +945,13 @@ function createChild(world: WorldState, parents: readonly [CharacterState, Chara
 }
 
 function processDeathsAndAdulthood(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
-  const deathEvents = context.events.filter((event) => event.kind === 'character_death');
-  for (const event of deathEvents) {
-    const deceased = world.characters.find((character) => character.id === event.actorIds[0]);
+  const deathFacts = context.facts.filter((fact): fact is Extract<SimulationFact, { kind: 'character_death' }> => fact.kind === 'character_death');
+  for (const deathFact of deathFacts) {
+    const deceased = world.characters.find((character) => character.id === deathFact.payload.characterId);
     if (!deceased) continue;
-    addBiography(deceased, event, '逝世');
+    const projectedDeath = context.events.find((event) => event.sourceFactIds.includes(deathFact.id));
+    if (projectedDeath) addBiography(deceased, projectedDeath, '逝世');
+    else addFactBiography(deceased, deathFact, '逝世', `${deceased.name}卒，享年${deathFact.payload.age}岁。`);
     const family = world.families.find((item) => item.id === deceased.familyId);
     if (!family) continue;
     const oldHeadId = family.headId;
@@ -973,6 +1034,7 @@ function processDeathsAndAdulthood(world: WorldState, context: V02TurnContext, e
         { label: '继承结果', role: '结果', weight: 0.2, evidence: `私人产业${estate}完整转入${inheritor?.name ?? family.name}${successor ? `；家主为${successor.name}` : ''}` },
       ],
       stateDeltas,
+      ...projectFactLinks(deathFact),
     });
     if (successor) addBiography(successor, inheritanceEvent, '继任家主');
     if (inheritor && inheritor.id !== successor?.id) addBiography(inheritor, inheritanceEvent, '承接遗产');
@@ -1027,7 +1089,7 @@ function processLocalMarriages(world: WorldState, context: V02TurnContext, emit:
     }
     const pair = pairs.sort((left, right) => right.score - left.score || stableCompare(left.left.id, right.left.id))[0];
     if (pair && pair.score >= 72) {
-      applyMarriage(world, pair.left, pair.right, false, emit);
+      applyMarriage(world, context, pair.left, pair.right, false, emit);
       marriagesFormed += 1;
     }
   }
@@ -1480,7 +1542,7 @@ export function processV02Diplomacy(world: WorldState, context: V02TurnContext, 
       .filter((character) => character.politicalClass === '宗室' && character.age >= 18 && character.age <= 44 && character.spouseIds.length === 0)
       .sort((a, b) => b.influence - a.influence || stableCompare(a.id, b.id))[0];
     if (!leftCandidate || !rightCandidate) continue;
-    const event = applyMarriage(world, leftCandidate, rightCandidate, true, emit);
+    const event = applyMarriage(world, context, leftCandidate, rightCandidate, true, emit);
     relation.marriageIds.push(event.id);
     relation.trust = Math.round(clamp(relation.trust + 18));
     relation.grievance = Math.round(clamp(relation.grievance - 10));
@@ -1560,20 +1622,23 @@ function recordTurningPointBiographies(world: WorldState, context: V02TurnContex
 }
 
 export function processV02MilitaryCareers(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
-  const battleEvents = context.events.filter((event) => event.kind === 'battle');
-  for (const battle of battleEvents) {
-    const participatingArmies = world.armies.filter((army) => battle.actorIds.includes(army.commanderId));
-    for (const army of participatingArmies) {
-      const deputy = army.deputyCommanderId
-        ? world.characters.find((character) => character.id === army.deputyCommanderId && character.alive)
-        : undefined;
-      if (!deputy || !battle.actorIds.includes(deputy.id)) continue;
+  const battleFacts = context.facts.filter((fact): fact is Extract<SimulationFact, { kind: 'battle' }> => fact.kind === 'battle');
+  const creditedParticipations = new Set<string>();
+  for (const battle of battleFacts) {
+    for (const participation of [battle.payload.attacker, ...battle.payload.defenders]) {
+      if (!participation.deputyCommanderId) continue;
+      const creditKey = `${battle.id}:${participation.deputyCommanderId}`;
+      if (creditedParticipations.has(creditKey)) continue;
+      creditedParticipations.add(creditKey);
+      const deputy = world.characters.find((character) => character.id === participation.deputyCommanderId && character.alive);
+      if (!deputy) continue;
+      const armyName = world.armies.find((army) => army.id === participation.armyId)?.name ?? participation.armyId;
       const before = deputy.merit;
       deputy.deputyExperience = Math.round(clamp(deputy.deputyExperience + 4));
       deputy.merit = Math.round(clamp(deputy.merit + 3));
       deputy.renown = Math.round(clamp(deputy.renown + 1));
       if (!deputy.biography.some((fact) => fact.kind === '首次参战')) {
-        addBiography(deputy, battle, '首次参战', `${deputy.name}首次以${army.name}副将身份见于战役记录。`, 2);
+        addFactBiography(deputy, battle, '首次参战', `${deputy.name}首次以${armyName}副将身份见于事实档案。`, 2);
       }
       const threshold = [25, 50, 75].find((value) => before < value && deputy.merit >= value);
       if (threshold) {
@@ -1583,16 +1648,17 @@ export function processV02MilitaryCareers(world: WorldState, context: V02TurnCon
           title: `${deputy.name}以副将战功显名`,
           summary: `${deputy.name}在连续战役中积累可核验战功，开始具备独立统军的声望与经验。`,
           importance: threshold >= 50 ? 3 : 2,
-          actorIds: [deputy.id, army.commanderId],
-          polityIds: [army.polityId],
-          regionIds: [army.regionId],
+          actorIds: [deputy.id, participation.commanderId],
+          polityIds: [participation.polityId],
+          regionIds: [battle.payload.targetRegionId],
           causes: [
-            { label: '副将岗位', role: '结构', weight: 0.22, evidence: `${deputy.name}是${army.name}登记副将` },
-            { label: '战役经历', role: '条件', weight: 0.3, evidence: `副将经验${deputy.deputyExperience}，本季参与${battle.title}` },
+            { label: '副将岗位', role: '结构', weight: 0.22, evidence: `${battle.id}记录${deputy.name}为${armyName}副将` },
+            { label: '战役经历', role: '条件', weight: 0.3, evidence: `副将经验${deputy.deputyExperience}，本季参与${battle.payload.targetRegionId}会战` },
             { label: '能力表现', role: '选择', weight: 0.23, evidence: `统率${deputy.leadership}、谋略${deputy.cunning}` },
             { label: '声望结果', role: '结果', weight: 0.25, evidence: `战功${before}→${deputy.merit}，越过${threshold}门槛` },
           ],
           stateDeltas: [{ entityType: 'character', entityId: deputy.id, field: 'merit', before, after: deputy.merit, delta: deputy.merit - before }],
+          ...projectFactLinks(battle),
         });
         addBiography(deputy, event, '副将显名');
       }
@@ -1786,7 +1852,7 @@ function officeKey(office: Pick<OfficeAppointment, 'polityId' | 'kind' | 'holder
   return [office.polityId, office.kind, office.holderId, office.regionId ?? '', office.armyId ?? '', office.fleetId ?? ''].join(':');
 }
 
-export function syncOfficeAppointments(world: WorldState, turn: number): void {
+export function syncOfficeAppointments(world: WorldState, turn: number, context?: V02TurnContext): void {
   for (const background of world.backgroundPeople.filter((person) => person.promotedCharacterId === null)) {
     const controllerId = world.regions.find((region) => region.id === background.regionId)?.controllerId;
     if (controllerId) background.polityId = controllerId;
@@ -1798,19 +1864,74 @@ export function syncOfficeAppointments(world: WorldState, turn: number): void {
     if (!desiredKeys.has(officeKey(office))) {
       office.active = false;
       office.endedTurn = turn;
+      if (context) {
+        emitSimulationFact(world, context, {
+          kind: 'appointment_ended',
+          category: '政治',
+          importance: office.rank >= 80 ? 2 : 1,
+          actorIds: [office.holderId],
+          polityIds: [office.polityId],
+          regionIds: office.regionId ? [office.regionId] : [],
+          causes: [
+            { label: '职位失配', role: '条件', weight: 0.65, evidence: `${office.kind}已不再对应当前统治、军令或官署状态` },
+            { label: '任命终止', role: '结果', weight: 0.35, evidence: `${office.id}于第${turn}回合结束` },
+          ],
+          stateDeltas: [{ entityType: 'office', entityId: office.id, field: 'active', before: true, after: false }],
+          sourceFactIds: [],
+          payload: {
+            appointmentId: office.id,
+            action: 'ended',
+            officeKind: office.kind,
+            holderId: office.holderId,
+            polityId: office.polityId,
+            regionId: office.regionId,
+            armyId: office.armyId,
+            fleetId: office.fleetId ?? null,
+            rank: office.rank,
+          },
+        });
+      }
     }
   }
   const activeKeys = new Set(world.offices.filter((office) => office.active).map(officeKey));
   for (const office of desired) {
     if (activeKeys.has(officeKey(office))) continue;
     world.counters.office += 1;
-    world.offices.push({
+    const appointment: OfficeAppointment = {
       id: `office_${String(world.counters.office).padStart(5, '0')}`,
       ...office,
       appointedTurn: turn,
       endedTurn: null,
       active: true,
-    });
+    };
+    world.offices.push(appointment);
+    if (context) {
+      emitSimulationFact(world, context, {
+        kind: 'appointment_started',
+        category: '政治',
+        importance: appointment.rank >= 80 ? 2 : 1,
+        actorIds: [appointment.holderId],
+        polityIds: [appointment.polityId],
+        regionIds: appointment.regionId ? [appointment.regionId] : [],
+        causes: [
+          { label: '当前职权', role: '结构', weight: 0.65, evidence: `${appointment.holderId}实际承担${appointment.kind}对应职责` },
+          { label: '任命生效', role: '结果', weight: 0.35, evidence: `${appointment.id}于第${turn}回合开始` },
+        ],
+        stateDeltas: [{ entityType: 'office', entityId: appointment.id, field: 'active', before: false, after: true }],
+        sourceFactIds: [],
+        payload: {
+          appointmentId: appointment.id,
+          action: 'started',
+          officeKind: appointment.kind,
+          holderId: appointment.holderId,
+          polityId: appointment.polityId,
+          regionId: appointment.regionId,
+          armyId: appointment.armyId,
+          fleetId: appointment.fleetId ?? null,
+          rank: appointment.rank,
+        },
+      });
+    }
   }
 }
 
@@ -1850,6 +1971,7 @@ export function migrateV01SocialState(world: WorldState): void {
       summary: `${character.name}的早年经历来自V0.1史册，迁移没有改写既有历史。`,
       importance: character.role === '君主' ? 3 : 1,
       eventId: legacyEventId,
+      factId: null,
     }];
     character.biographyDigest = stableHash(character.biography);
     character.tier = '核心';

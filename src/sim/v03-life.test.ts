@@ -66,7 +66,7 @@ function testWorld(): WorldState {
   c.neighbors = [b.id]; c.routeIds = ['route_bc'];
 
   return {
-    schemaVersion: 3,
+    schemaVersion: 4,
     mapContentVersion: 'v03-82',
     seed: 'v03-life-test',
     turn: 0,
@@ -99,8 +99,8 @@ function testWorld(): WorldState {
     wars: [],
     families: [], relationships: [], factions: [], diplomacy: [], offices: [], backgroundPeople: [], commitments: [],
     tradeCorridors: [], navalOperations: [], shipbuildingProjects: [], pathogens: [], infections: [], practices: [], practiceStates: [],
-    history: [], historyDigest: '', lastTurn: null,
-    counters: { character: 3, army: 0, polity: 1, war: 0, event: 0, family: 0, faction: 0, relationship: 0, office: 0, commitment: 0, fleet: 0, tradeCorridor: 0, navalOperation: 0, shipment: 0, shipProject: 0 },
+    history: [], historyDigest: '', facts: [], factDigest: '', legacyArchiveBoundary: null, lastTurn: null,
+    counters: { character: 3, army: 0, polity: 1, war: 0, event: 0, family: 0, faction: 0, relationship: 0, office: 0, commitment: 0, fleet: 0, tradeCorridor: 0, navalOperation: 0, shipment: 0, shipProject: 0, fact: 0 },
     hash: '',
   };
 }
@@ -108,7 +108,7 @@ function testWorld(): WorldState {
 function context(world: WorldState): V03TurnContext {
   const population = world.regions.reduce((sum, item) => sum + item.population, 0);
   return {
-    turn: world.turn, year: world.year, season: world.season, events: [],
+    turn: world.turn, year: world.year, season: world.season, events: [], facts: [],
     population: { start: population, births: 0, civilianDeaths: 0, militaryDeaths: 0, recruited: 0, demobilized: 0, end: 0 },
     food: { start: 0, produced: 0, civilianConsumed: 0, armyConsumed: 0, spoiled: 0, warDestroyed: 0, transferred: 0, end: 0 },
     wealth: { start: 0, produced: 0, householdConsumed: 0, warDestroyed: 0, taxed: 0, militaryPayments: 0, end: 0 },
@@ -133,6 +133,7 @@ function eventSink(target: HistoryEvent[]): V03Emit {
       id: `event_${target.length + 1}`, turn: 0, year: 1, season: '春', category: input.category, kind: input.kind,
       title: input.title, summary: input.summary, importance: input.importance, actorIds: input.actorIds ?? [], polityIds: input.polityIds ?? [],
       regionIds: input.regionIds ?? [], causes: input.causes, evidence: input.evidence ?? input.causes.map((cause) => cause.evidence), stateDeltas: input.stateDeltas ?? [],
+      sourceFactIds: input.sourceFactIds ?? [], situationIds: input.situationIds ?? [],
     };
     target.push(event);
     return event;

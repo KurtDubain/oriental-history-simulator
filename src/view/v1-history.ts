@@ -108,20 +108,57 @@ export function reconstructHistoricalTerritory(
   const regionIds = new Set(world.regions.map((region) => region.id));
   let reversedControllerChanges = 0;
   let skippedControllerChanges = 0;
+  const rawFacts = (world as unknown as { facts?: unknown }).facts;
+  const hasFactArchive = Array.isArray(rawFacts);
+  const facts: unknown[] = hasFactArchive ? rawFacts : [];
+  const boundary = hasFactArchive && world.legacyArchiveBoundary ? world.legacyArchiveBoundary : null;
 
-  for (let eventIndex = world.history.length - 1; eventIndex >= 0; eventIndex -= 1) {
-    const event = world.history[eventIndex];
-    if (event.turn <= turn) continue;
+  // Schema 4 territory facts are authoritative. Chronicle events linked to
+  // them are deliberately not replayed, preventing one control transfer from
+  // being reversed twice merely because its prose was also projected.
+  for (let factIndex = facts.length - 1; factIndex >= 0; factIndex -= 1) {
+    const candidate = facts[factIndex];
+    if (!candidate || typeof candidate !== 'object') {
+      skippedControllerChanges += 1;
+      continue;
+    }
+    const fact = candidate as Record<string, unknown>;
+    if (fact.kind !== 'territory_control_changed') continue;
+    if (typeof fact.turn !== 'number' || fact.turn <= turn) continue;
+    const payload = fact.payload && typeof fact.payload === 'object'
+      ? fact.payload as Record<string, unknown>
+      : null;
+    if (
+      !payload
+      || typeof payload.regionId !== 'string'
+      || !regionIds.has(payload.regionId)
+      || typeof payload.previousControllerId !== 'string'
+      || typeof payload.nextControllerId !== 'string'
+    ) {
+      skippedControllerChanges += 1;
+      continue;
+    }
+    controllerByRegionId[payload.regionId] = payload.previousControllerId;
+    reversedControllerChanges += 1;
+  }
 
-    for (let deltaIndex = event.stateDeltas.length - 1; deltaIndex >= 0; deltaIndex -= 1) {
-      const delta = event.stateDeltas[deltaIndex];
-      if (delta.entityType !== 'region' || delta.field !== 'controllerId') continue;
-      if (!regionIds.has(delta.entityId) || typeof delta.before !== 'string') {
-        skippedControllerChanges += 1;
-        continue;
+  const reverseLegacyEvents = !hasFactArchive || (boundary !== null && turn < boundary.turn);
+  if (reverseLegacyEvents) {
+    const legacyEventCount = boundary?.historyEventCount ?? world.history.length;
+    for (let eventIndex = Math.min(legacyEventCount, world.history.length) - 1; eventIndex >= 0; eventIndex -= 1) {
+      const event = world.history[eventIndex];
+      if (event.turn <= turn) continue;
+
+      for (let deltaIndex = event.stateDeltas.length - 1; deltaIndex >= 0; deltaIndex -= 1) {
+        const delta = event.stateDeltas[deltaIndex];
+        if (delta.entityType !== 'region' || delta.field !== 'controllerId') continue;
+        if (!regionIds.has(delta.entityId) || typeof delta.before !== 'string') {
+          skippedControllerChanges += 1;
+          continue;
+        }
+        controllerByRegionId[delta.entityId] = delta.before;
+        reversedControllerChanges += 1;
       }
-      controllerByRegionId[delta.entityId] = delta.before;
-      reversedControllerChanges += 1;
     }
   }
 
@@ -147,16 +184,24 @@ export function reconstructHistoricalTerritory(
   let eventsAtTurn = 0;
   let majorEventsThroughTurn = 0;
   let majorEventsAtTurn = 0;
-  let controllerChangesThroughTurn = 0;
+  let controllerChangesThroughTurn = facts.filter((candidate) => {
+    if (!candidate || typeof candidate !== 'object') return false;
+    const fact = candidate as Record<string, unknown>;
+    return fact.kind === 'territory_control_changed' && typeof fact.turn === 'number' && fact.turn <= turn;
+  }).length;
 
-  for (const event of world.history) {
+  for (const [eventIndex, event] of world.history.entries()) {
     if (event.turn > turn) continue;
     eventsThroughTurn += 1;
     categoryCountsThroughTurn[event.category] += 1;
     if (event.importance >= 4) majorEventsThroughTurn += 1;
-    controllerChangesThroughTurn += event.stateDeltas.filter(
-      (delta) => delta.entityType === 'region' && delta.field === 'controllerId',
-    ).length;
+    const isLegacyProjection = !hasFactArchive
+      || (boundary !== null && eventIndex < boundary.historyEventCount);
+    if (isLegacyProjection) {
+      controllerChangesThroughTurn += event.stateDeltas.filter(
+        (delta) => delta.entityType === 'region' && delta.field === 'controllerId',
+      ).length;
+    }
     if (event.turn !== turn) continue;
     eventsAtTurn += 1;
     categoryCountsAtTurn[event.category] += 1;

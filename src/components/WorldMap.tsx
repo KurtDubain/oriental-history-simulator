@@ -12,6 +12,7 @@ import {
 } from "react";
 
 import "../styles/world-map.css";
+import { recordRuntimeMetric, runtimeNow } from "../performance/runtime-profiler";
 import {
   MAP_DECORATIVE_ISLETS,
   MAP_LAND_SHAPES,
@@ -1902,6 +1903,7 @@ export function WorldMap({
     canvas.height = Math.max(1, Math.round(size.height * size.dpr));
     const context = canvas.getContext("2d");
     if (!context) return;
+    const drawStartedAt = runtimeNow();
     drawMap(
       context,
       size,
@@ -1919,6 +1921,7 @@ export function WorldMap({
       hover?.region.id,
       camera,
     );
+    recordRuntimeMetric('canvas.draw', runtimeNow() - drawStartedAt);
   }, [camera, highlightedRegionIds, hover?.region.id, overlay, presentation, selectedObject, selectedRegionId, size]);
 
   const localPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {

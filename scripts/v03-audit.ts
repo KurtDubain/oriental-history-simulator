@@ -75,7 +75,7 @@ function totalCommodity(world: WorldState, commodity: CommodityKind): number {
 }
 
 function assertOpeningWorld(world: WorldState): void {
-  if (world.schemaVersion !== 3 || world.mapContentVersion !== 'v03-82') {
+  if (world.schemaVersion !== 4 || world.mapContentVersion !== 'v03-82') {
     fail(world.seed, world.turn, `新世界版本错误 ${world.schemaVersion}/${world.mapContentVersion}`);
   }
   if (world.regions.length !== 82 || world.seaZones.length !== 10
@@ -158,9 +158,23 @@ function auditQuarter(before: WorldState, world: WorldState, commodityBefore: Re
   }
   if (report.trade.shipments.length > 512) fail(world.seed, world.turn, '季度Shipment超过512上限');
   if (world.tradeCorridors.length > 160) fail(world.seed, world.turn, '商路超过160上限');
-  for (const usage of [...report.logistics.routeUsage, ...report.logistics.seaUsage]) {
+  for (const usage of report.logistics.routeUsage) {
     if (usage.reserved < 0 || usage.reserved > usage.capacity) {
       fail(world.seed, world.turn, `共享运力超额 ${usage.reserved}/${usage.capacity}`);
+    }
+  }
+  for (const usage of report.logistics.seaUsage) {
+    const laneCapacity = world.seaLanes.find((lane) => lane.id === usage.edgeId)?.capacity;
+    const linkCapacity = world.portLinks.find((link) => link.id === usage.edgeId)?.capacity;
+    const physicalMaximum = laneCapacity !== undefined ? Math.floor(laneCapacity * 1.05) : linkCapacity;
+    if (physicalMaximum === undefined
+      || !Number.isSafeInteger(usage.capacity)
+      || !Number.isSafeInteger(usage.reserved)
+      || usage.capacity < 0
+      || usage.reserved < 0
+      || usage.capacity > physicalMaximum
+      || usage.reserved > physicalMaximum) {
+      fail(world.seed, world.turn, `动态海运快照越过物理上限 ${usage.edgeId} ${usage.reserved}/${usage.capacity}/${physicalMaximum ?? 'missing'}`);
     }
   }
   for (const region of world.regions) {

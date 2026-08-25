@@ -1,3 +1,6 @@
+import type { LegacyArchiveBoundary, SimulationFact } from './facts/types';
+export type { LegacyArchiveBoundary, SimulationFact } from './facts/types';
+
 export const SEASONS = ['春', '夏', '秋', '冬'] as const;
 
 export type Season = (typeof SEASONS)[number];
@@ -158,6 +161,7 @@ export interface BiographyFact {
   summary: string;
   importance: 1 | 2 | 3 | 4 | 5;
   eventId: string | null;
+  factId: string | null;
 }
 
 export interface CharacterState {
@@ -627,6 +631,8 @@ export interface HistoryEvent {
   causes: EventCause[];
   evidence: string[];
   stateDeltas: StateDelta[];
+  sourceFactIds: string[];
+  situationIds: string[];
 }
 
 export interface PopulationLedger {
@@ -739,6 +745,7 @@ export interface TurnReport {
   knowledge: KnowledgeLedger;
   maritime: MaritimeLedger;
   eventIds: string[];
+  factIds: string[];
 }
 
 export interface WorldCounters {
@@ -757,10 +764,11 @@ export interface WorldCounters {
   navalOperation: number;
   shipment: number;
   shipProject: number;
+  fact: number;
 }
 
 export interface WorldState {
-  schemaVersion: 3;
+  schemaVersion: 4;
   mapContentVersion: MapContentVersion;
   seed: string;
   turn: number;
@@ -793,6 +801,9 @@ export interface WorldState {
   practiceStates: RegionPracticeState[];
   history: HistoryEvent[];
   historyDigest: string;
+  facts: SimulationFact[];
+  factDigest: string;
+  legacyArchiveBoundary: LegacyArchiveBoundary | null;
   lastTurn: TurnReport | null;
   counters: WorldCounters;
   hash: string;

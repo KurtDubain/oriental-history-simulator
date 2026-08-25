@@ -18,6 +18,7 @@ function contextFor(world: WorldState, turn = world.turn, season = world.season)
     year: Math.floor(turn / 4) + 1,
     season,
     events: [],
+    facts: [],
     population: { start: 0, births: 0, civilianDeaths: 0, militaryDeaths: 0, recruited: 0, demobilized: 0, end: 0 },
     food: { start: 0, produced: 0, civilianConsumed: 0, armyConsumed: 0, spoiled: 0, warDestroyed: 0, transferred: 0, end: 0 },
     wealth: { start: 0, produced: 0, householdConsumed: 0, warDestroyed: 0, taxed: 0, militaryPayments: 0, end: 0 },
@@ -51,6 +52,8 @@ function emitter(events: HistoryEvent[], context: V03TurnContext): V03Emit {
       causes: input.causes,
       evidence: input.evidence ?? input.causes.map((cause) => cause.evidence),
       stateDeltas: input.stateDeltas ?? [],
+      sourceFactIds: input.sourceFactIds ?? [],
+      situationIds: input.situationIds ?? [],
     };
     events.push(event);
     context.events.push(event);

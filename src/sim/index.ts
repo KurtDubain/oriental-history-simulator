@@ -1,5 +1,30 @@
-export { advanceWorld, advanceWorldBy, computeWorldHash, createWorld, getDateForTurn } from './engine';
-export { assertWorld, validateWorld } from './invariants';
+export {
+  advanceWorld,
+  advanceWorldBy,
+  advanceWorldDetailed,
+  computeWorldHash,
+  createWorld,
+  getDateForTurn,
+} from './engine';
+export type { DetailedAdvanceResult } from './engine';
+export { SIMULATION_SYSTEM_PHASES } from './advance-timing';
+export type { SimulationAdvanceTimings, SimulationSystemPhase } from './advance-timing';
+export {
+  assertTurnRuntime,
+  assertWorld,
+  deriveRuntimeTurnArtifacts,
+  measureFullValidation,
+  measureRuntimeValidation,
+  validateTurnRuntime,
+  validateWorld,
+  validateWorldFull,
+} from './invariants';
+export type {
+  RuntimeAppendOnlyChainArtifact,
+  RuntimeEntityKind,
+  RuntimeTurnArtifacts,
+  ValidationMeasurement,
+} from './invariants';
 export { createObserverState, focusObserver, toggleFollow } from './observer';
 export { deserializeWorld, serializeWorld } from './persistence';
 export { keyedChance, keyedInt, keyedPick, keyedRandom, stableHash, stableStringify } from './random';
@@ -13,3 +38,4 @@ export {
 } from './v03-intervention';
 export type { V03InterventionAction } from './v03-intervention';
 export * from './types';
+export * from './facts';

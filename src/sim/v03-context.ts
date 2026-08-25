@@ -6,12 +6,14 @@ import type {
   StateDelta,
   TurnReport,
 } from './types';
+import type { SimulationFact } from './facts/types';
 
 export interface V03TurnContext {
   turn: number;
   year: number;
   season: Season;
   events: HistoryEvent[];
+  facts: SimulationFact[];
   population: TurnReport['population'];
   food: TurnReport['food'];
   wealth: TurnReport['wealth'];
@@ -38,6 +40,8 @@ export interface V03EventInput {
   causes: EventCause[];
   evidence?: string[];
   stateDeltas?: StateDelta[];
+  sourceFactIds?: string[];
+  situationIds?: string[];
 }
 
 export type V03Emit = (input: V03EventInput) => HistoryEvent;

@@ -7,6 +7,12 @@ import {
   type PolityDefinition,
 } from './data';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
+import { emitSimulationFact, projectFactLinks, type BattleFact, type SimulationFact } from './facts';
+import {
+  SIMULATION_SYSTEM_PHASES,
+  type SimulationAdvanceTimings,
+  type SimulationSystemPhase,
+} from './advance-timing';
 import type { V03TurnContext } from './v03-context';
 import {
   createV03LifeSystems,
@@ -64,6 +70,8 @@ interface EventInput {
   causes: EventCause[];
   evidence?: string[];
   stateDeltas?: StateDelta[];
+  sourceFactIds?: string[];
+  situationIds?: string[];
 }
 
 const INITIAL_CHARACTER_COUNT_PER_POLITY = 24;
@@ -427,11 +435,14 @@ function initialHistoryEvent(world: WorldState): HistoryEvent {
     ],
     evidence: [`固定地图含${world.regions.length}个区域与${world.seaZones.length}片海域`, `初始政权${world.polities.length}个`, `初始核心人物${world.characters.length}名`],
     stateDeltas: [],
+    sourceFactIds: [],
+    situationIds: [],
   };
 }
 
 export function computeWorldHash(world: WorldState): string {
-  if ((world as unknown as { schemaVersion: number }).schemaVersion === 1) {
+  const schemaVersion = (world as unknown as { schemaVersion: number }).schemaVersion;
+  if (schemaVersion === 1) {
     const legacy: Record<string, unknown> = { ...world };
     delete legacy.hash;
     delete legacy.history;
@@ -440,7 +451,7 @@ export function computeWorldHash(world: WorldState): string {
   // Unbounded narrative archives are authenticated by historyDigest and compact
   // per-character biographyDigest. Only current/decision-relevant institutional
   // records enter the quarterly snapshot hash, preventing an O(history) tick.
-  const characters = world.characters.map((character) => {
+  const legacyCharacters = world.characters.map((character) => {
     const { biography: _biography, ...authoritativeCharacter } = character;
     void _biography;
     return authoritativeCharacter;
@@ -454,7 +465,7 @@ export function computeWorldHash(world: WorldState): string {
     regions: world.regions,
     routes: world.routes,
     polities: world.polities,
-    characters,
+    characters: legacyCharacters,
     armies: world.armies,
     wars: world.wars.filter((war) => war.active),
     families: world.families,
@@ -471,8 +482,8 @@ export function computeWorldHash(world: WorldState): string {
     lastTurn: world.lastTurn,
     counters: world.counters,
   };
-  if ((world as unknown as { schemaVersion: number }).schemaVersion === 2) return stableHash(v02Snapshot);
-  return stableHash({
+  if (schemaVersion === 2) return stableHash(v02Snapshot);
+  const v03Snapshot = {
     ...v02Snapshot,
     mapContentVersion: world.mapContentVersion,
     seaZones: world.seaZones,
@@ -487,6 +498,43 @@ export function computeWorldHash(world: WorldState): string {
     infections: world.infections,
     practices: world.practices,
     practiceStates: world.practiceStates,
+  };
+  if (schemaVersion === 3) return stableHash(v03Snapshot);
+
+  // Chronicle prose is a projection in schema 4. Facts and current state are
+  // authoritative; changing a display threshold must not alter simulation.
+  const characters = world.characters.map((character) => {
+    const {
+      biography: _biography,
+      biographyDigest: _biographyDigest,
+      ...authoritativeCharacter
+    } = character;
+    void _biography;
+    void _biographyDigest;
+    return authoritativeCharacter;
+  });
+  const counters = { ...world.counters, event: 0 };
+  const lastTurn = world.lastTurn
+    ? { ...world.lastTurn, eventIds: [] }
+    : null;
+  const {
+    historyDigest: _historyDigest,
+    characters: _legacyCharacterSnapshot,
+    counters: _legacyCounters,
+    lastTurn: _legacyLastTurn,
+    ...schema4Base
+  } = v03Snapshot;
+  void _historyDigest;
+  void _legacyCharacterSnapshot;
+  void _legacyCounters;
+  void _legacyLastTurn;
+  return stableHash({
+    ...schema4Base,
+    characters,
+    counters,
+    lastTurn,
+    factDigest: world.factDigest,
+    legacyArchiveBoundary: world.legacyArchiveBoundary,
   });
 }
 
@@ -508,7 +556,7 @@ export function createWorld(seed: string): WorldState {
     return createPolity(seed, definition, ruler, regions);
   });
   const world: WorldState = {
-    schemaVersion: 3,
+    schemaVersion: 4,
     mapContentVersion: 'v03-82',
     seed,
     turn: 0,
@@ -541,8 +589,11 @@ export function createWorld(seed: string): WorldState {
     practiceStates: [],
     history: [],
     historyDigest: '',
+    facts: [],
+    factDigest: stableHash([]),
+    legacyArchiveBoundary: null,
     lastTurn: null,
-    counters: { character: characters.length, army: 0, polity: polities.length, war: 0, event: 1, family: 0, faction: 0, relationship: 0, office: 0, commitment: 0, fleet: 0, tradeCorridor: 0, navalOperation: 0, shipment: 0, shipProject: 0 },
+    counters: { character: characters.length, army: 0, polity: polities.length, war: 0, event: 1, family: 0, faction: 0, relationship: 0, office: 0, commitment: 0, fleet: 0, tradeCorridor: 0, navalOperation: 0, shipment: 0, shipProject: 0, fact: 0 },
     hash: '',
   };
   createInitialArmies(world);
@@ -589,6 +640,8 @@ function pushEvent(world: WorldState, context: MutableTurnContext, input: EventI
     })),
     evidence: input.evidence ?? input.causes.map((cause) => cause.evidence),
     stateDeltas: input.stateDeltas ?? [],
+    sourceFactIds: [...new Set(input.sourceFactIds ?? [])].sort(stableCompare),
+    situationIds: [...new Set(input.situationIds ?? [])].sort(stableCompare),
   };
   context.events.push(event);
   world.history.push(event);
@@ -773,8 +826,30 @@ function dissolveHeirlessPolity(
     .sort(stableCompare);
   const treasuryBefore = polity.treasury;
   const recipientTreasuryBefore = recipient.treasury;
+  const territoryFacts: SimulationFact[] = [];
   for (const region of world.regions.filter((candidate) => candidate.controllerId === polity.id)) {
     region.controllerId = recipient.id;
+    territoryFacts.push(emitSimulationFact(world, context, {
+      kind: 'territory_control_changed',
+      category: '政治',
+      importance: region.strategicValue >= 9 ? 3 : 2,
+      actorIds: [...(deceasedRuler ? [deceasedRuler.id] : []), recipient.rulerId],
+      polityIds: [polity.id, recipient.id],
+      regionIds: [region.id],
+      causes: [
+        { label: '统治谱系断绝', role: '触发', weight: 0.6, evidence: `${polity.name}已无可接续的统治者` },
+        { label: '行政接管', role: '结果', weight: 0.4, evidence: `${region.name}官署并入${recipient.name}` },
+      ],
+      stateDeltas: [{ entityType: 'region', entityId: region.id, field: 'controllerId', before: polity.id, after: recipient.id }],
+      sourceFactIds: [],
+      payload: {
+        regionId: region.id,
+        previousControllerId: polity.id,
+        nextControllerId: recipient.id,
+        reason: 'administrative_transfer',
+        warId: null,
+      },
+    }));
   }
   for (const army of [...world.armies].filter((candidate) => candidate.polityId === polity.id)) {
     removeArmy(world, army, context, true);
@@ -845,6 +920,7 @@ function dissolveHeirlessPolity(
         after: recipient.id,
       })),
     ],
+    ...projectFactLinks(territoryFacts),
   });
   return true;
 }
@@ -1036,12 +1112,35 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
     }
     const polity = world.polities.find((item) => item.id === character.polityId);
     if (polity?.rulerId === character.id) polity.rulerId = '';
+    const deathImportance = oldRole === '君主' ? 4 : oldRole === '将领' ? 2 : 1;
+    const deathFact = emitSimulationFact(world, context, {
+      kind: 'character_death',
+      category: '政治',
+      importance: deathImportance,
+      actorIds: [character.id],
+      polityIds: [character.polityId],
+      regionIds: [character.locationRegionId],
+      causes: [
+        { label: '年龄风险', role: '结构', weight: 0.52, evidence: `年龄${character.age}岁，基础年度死亡风险${(baseDeathChance * 100).toFixed(1)}%` },
+        { label: '健康状态', role: '条件', weight: 0.3, evidence: `健康${character.health}将综合风险调整为${(deathChance * 100).toFixed(1)}%${diseaseAtDeath ? `，染患${diseaseAtDeath}` : ''}` },
+        { label: '死亡裁决', role: '结果', weight: 0.18, evidence: '人物生命状态与所任职位已同步结算' },
+      ],
+      stateDeltas: [{ entityType: 'character', entityId: character.id, field: 'alive', before: true, after: false }],
+      sourceFactIds: [],
+      payload: {
+        characterId: character.id,
+        age: character.age,
+        role: oldRole,
+        health: character.health,
+        diseaseId: diseaseAtDeath,
+      },
+    });
     pushEvent(world, context, {
       category: '政治',
       kind: 'character_death',
       title: `${character.name}逝世`,
       summary: `${oldRole}${character.name}卒，享年${character.age}岁，其职位与权力来源随之空缺。`,
-      importance: oldRole === '君主' ? 4 : oldRole === '将领' ? 2 : 1,
+      importance: deathImportance,
       actorIds: [character.id],
       polityIds: [character.polityId],
       regionIds: [character.locationRegionId],
@@ -1053,6 +1152,7 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
       stateDeltas: [
         { entityType: 'character', entityId: character.id, field: 'alive', before: true, after: false },
       ],
+      ...projectFactLinks(deathFact),
     });
   }
 
@@ -1845,6 +1945,27 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
     false,
     'rebellion',
   );
+  const territoryFact = emitSimulationFact(world, context, {
+    kind: 'territory_control_changed',
+    category: '政治',
+    importance: 5,
+    actorIds: [character.id, parent.rulerId],
+    polityIds: [parent.id, newPolity.id],
+    regionIds: [region.id],
+    causes: [
+      { label: '地方起兵', role: '触发', weight: 0.62, evidence: `${character.name}已完成财源、军力与政治准备` },
+      { label: '脱离宗主', role: '结果', weight: 0.38, evidence: `${region.name}转入${newPolity.name}实际控制` },
+    ],
+    stateDeltas: [{ entityType: 'region', entityId: region.id, field: 'controllerId', before: oldController, after: rebelId }],
+    sourceFactIds: [],
+    payload: {
+      regionId: region.id,
+      previousControllerId: oldController,
+      nextControllerId: rebelId,
+      reason: 'rebellion',
+      warId: rebellionWar.id,
+    },
+  });
   const crackdownDeltas: StateDelta[] = [];
   for (const governor of world.characters.filter((item) => (
     item.alive
@@ -1897,6 +2018,7 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
         : [{ entityType: 'army' as const, entityId: mobilizedArmy.id, field: 'soldiers', before: 0, after: mobilizedArmy.soldiers, delta: mobilizedArmy.soldiers }]),
       ...crackdownDeltas,
     ],
+    ...projectFactLinks(territoryFact),
   });
   repairAppointments(world, context);
 }
@@ -2106,6 +2228,7 @@ function captureRegion(
   army: ArmyState,
   region: RegionState,
   previousControllerId: string,
+  battleFact: BattleFact,
 ): void {
   const attacker = world.polities.find((polity) => polity.id === army.polityId) as PolityState;
   const defender = world.polities.find((polity) => polity.id === previousControllerId) as PolityState;
@@ -2137,6 +2260,27 @@ function captureRegion(
   region.devastation = Math.round(clamp(region.devastation + 9 + region.cityLevel * 2));
   region.unrest = Math.round(clamp(region.unrest + 14));
   region.controllerId = attacker.id;
+  const territoryFact = emitSimulationFact(world, context, {
+    kind: 'territory_control_changed',
+    category: '军事',
+    importance: region.strategicValue >= 9 ? 4 : 3,
+    actorIds: [army.commanderId, attacker.rulerId, defender.rulerId],
+    polityIds: [attacker.id, defender.id],
+    regionIds: [region.id],
+    causes: [
+      { label: '战役胜利', role: '触发', weight: 0.65, evidence: `${battleFact.id}确认${army.name}保持战场控制` },
+      { label: '区域接管', role: '结果', weight: 0.35, evidence: `${region.name}由${defender.name}转入${attacker.name}` },
+    ],
+    stateDeltas: [{ entityType: 'region', entityId: region.id, field: 'controllerId', before: previousControllerId, after: attacker.id }],
+    sourceFactIds: [battleFact.id],
+    payload: {
+      regionId: region.id,
+      previousControllerId,
+      nextControllerId: attacker.id,
+      reason: 'battle_capture',
+      warId: war.id,
+    },
+  });
   const formerGovernor = world.characters.find((character) => character.governedRegionId === region.id);
   if (formerGovernor) formerGovernor.governedRegionId = null;
   rebuildTerritories(world);
@@ -2180,6 +2324,7 @@ function captureRegion(
       stateDeltas: [
         { entityType: 'polity', entityId: defender.id, field: 'capitalRegionId', before: oldCapital, after: newCapital.id },
       ],
+      ...projectFactLinks(territoryFact),
     });
   }
 
@@ -2209,6 +2354,7 @@ function captureRegion(
       { entityType: 'polity', entityId: attacker.id, field: 'legitimacy', before: attackerLegitimacyBefore, after: attacker.legitimacy, delta: attacker.legitimacy - attackerLegitimacyBefore },
       { entityType: 'polity', entityId: defender.id, field: 'legitimacy', before: defenderLegitimacyBefore, after: defender.legitimacy, delta: defender.legitimacy - defenderLegitimacyBefore },
     ],
+    ...projectFactLinks(territoryFact),
   });
 }
 
@@ -2224,6 +2370,8 @@ function resolveBattle(
   const defenders = world.armies.filter((army) => army.polityId === defenderId && army.regionId === target.id);
   const defenderSoldiersBefore = new Map(defenders.map((army) => [army.id, army.soldiers]));
   const defenderMoraleBefore = new Map(defenders.map((army) => [army.id, army.morale]));
+  const defenderSupplyBefore = new Map(defenders.map((army) => [army.id, army.supply]));
+  const defenderTrainingBefore = new Map(defenders.map((army) => [army.id, army.training]));
   const attackerMoraleBefore = attackerArmy.morale;
   const attackerSupplyBefore = attackerArmy.supply;
   const attackerTrainingBefore = attackerArmy.training;
@@ -2276,6 +2424,86 @@ function resolveBattle(
     commander.renown = Math.round(clamp(commander.renown + (attackerWon ? 1 : 4)));
   }
 
+  const battleCauses: EventCause[] = [
+    { label: '兵力与素质', weight: 0.34, evidence: `攻方战力${Math.round(attackerPower)}，守方战力${Math.round(defenderPower)}` },
+    { label: '指挥能力', weight: 0.22, evidence: `攻方主帅统率${attackerCommander?.leadership ?? 0}，守方参战主帅${defenderCommanders.map((item) => item.leadership).join('/') || '无常备军'}` },
+    { label: '地形城防', weight: 0.2, evidence: `${target.terrain}、防御${target.defense}，守方倍率${terrainMultiplier.toFixed(2)}` },
+    { label: '结算前补给士气', weight: 0.16, evidence: `结算前攻方补给${attackerSupplyBefore}、士气${attackerMoraleBefore}、训练${attackerTrainingBefore}；守方：${defenderReadinessBefore}` },
+    { label: '有限战场误差', weight: 0.08, evidence: `攻方${attackerVariance.toFixed(2)}，守方${defenderVariance.toFixed(2)}` },
+  ];
+  const battleDeltas: StateDelta[] = [
+    { entityType: 'army', entityId: attackerArmy.id, field: 'soldiers', before: attackerBefore, after: attackerArmy.soldiers, delta: -attackerLosses },
+    { entityType: 'army', entityId: attackerArmy.id, field: 'morale', before: attackerMoraleBefore, after: attackerArmy.morale, delta: attackerArmy.morale - attackerMoraleBefore },
+    ...defenders.map((army) => ({
+      entityType: 'army' as const,
+      entityId: army.id,
+      field: 'soldiers',
+      before: defenderSoldiersBefore.get(army.id) ?? army.soldiers,
+      after: army.soldiers,
+      delta: army.soldiers - (defenderSoldiersBefore.get(army.id) ?? army.soldiers),
+    })),
+    ...defenders.map((army) => ({
+      entityType: 'army' as const,
+      entityId: army.id,
+      field: 'morale',
+      before: defenderMoraleBefore.get(army.id) ?? army.morale,
+      after: army.morale,
+      delta: army.morale - (defenderMoraleBefore.get(army.id) ?? army.morale),
+    })),
+  ];
+  // Emit before retreat/disband/capture so destroyed armies and their deputy
+  // assignments remain available to career and Chronicle projectors.
+  const battleFact = emitSimulationFact(world, context, {
+    kind: 'battle',
+    category: '军事',
+    importance: 3,
+    actorIds: [
+      attackerArmy.commanderId,
+      ...(attackerArmy.deputyCommanderId ? [attackerArmy.deputyCommanderId] : []),
+      ...defenders.flatMap((army) => [army.commanderId, ...(army.deputyCommanderId ? [army.deputyCommanderId] : [])]),
+    ],
+    polityIds: [attackerArmy.polityId, defenderId],
+    regionIds: [target.id, attackerArmy.regionId],
+    causes: battleCauses,
+    stateDeltas: battleDeltas,
+    sourceFactIds: [],
+    payload: {
+      warId: war.id,
+      targetRegionId: target.id,
+      routeId: route.id,
+      attackerWon,
+      attackerPower,
+      defenderPower,
+      militiaLosses,
+      attacker: {
+        armyId: attackerArmy.id,
+        polityId: attackerArmy.polityId,
+        commanderId: attackerArmy.commanderId,
+        deputyCommanderId: attackerArmy.deputyCommanderId,
+        soldiersBefore: attackerBefore,
+        soldiersAfter: attackerArmy.soldiers,
+        moraleBefore: attackerMoraleBefore,
+        moraleAfter: attackerArmy.morale,
+        trainingBefore: attackerTrainingBefore,
+        supplyBefore: attackerSupplyBefore,
+        losses: attackerLosses,
+      },
+      defenders: defenders.map((army) => ({
+        armyId: army.id,
+        polityId: army.polityId,
+        commanderId: army.commanderId,
+        deputyCommanderId: army.deputyCommanderId,
+        soldiersBefore: defenderSoldiersBefore.get(army.id) ?? army.soldiers,
+        soldiersAfter: army.soldiers,
+        moraleBefore: defenderMoraleBefore.get(army.id) ?? army.morale,
+        moraleAfter: army.morale,
+        trainingBefore: defenderTrainingBefore.get(army.id) ?? army.training,
+        supplyBefore: defenderSupplyBefore.get(army.id) ?? army.supply,
+        losses: (defenderSoldiersBefore.get(army.id) ?? army.soldiers) - army.soldiers,
+      })),
+    },
+  }) as BattleFact;
+
   if (chronicleBattle) pushEvent(world, context, {
     category: '军事',
     kind: 'battle',
@@ -2289,33 +2517,9 @@ function resolveBattle(
     ],
     polityIds: [attackerArmy.polityId, defenderId],
     regionIds: [target.id, attackerArmy.regionId],
-    causes: [
-      { label: '兵力与素质', weight: 0.34, evidence: `攻方战力${Math.round(attackerPower)}，守方战力${Math.round(defenderPower)}` },
-      { label: '指挥能力', weight: 0.22, evidence: `攻方主帅统率${attackerCommander?.leadership ?? 0}，守方参战主帅${defenderCommanders.map((item) => item.leadership).join('/') || '无常备军'}` },
-      { label: '地形城防', weight: 0.2, evidence: `${target.terrain}、防御${target.defense}，守方倍率${terrainMultiplier.toFixed(2)}` },
-      { label: '结算前补给士气', weight: 0.16, evidence: `结算前攻方补给${attackerSupplyBefore}、士气${attackerMoraleBefore}、训练${attackerTrainingBefore}；守方：${defenderReadinessBefore}` },
-      { label: '有限战场误差', weight: 0.08, evidence: `攻方${attackerVariance.toFixed(2)}，守方${defenderVariance.toFixed(2)}` },
-    ],
-    stateDeltas: [
-      { entityType: 'army', entityId: attackerArmy.id, field: 'soldiers', before: attackerBefore, after: attackerArmy.soldiers, delta: -attackerLosses },
-      { entityType: 'army', entityId: attackerArmy.id, field: 'morale', before: attackerMoraleBefore, after: attackerArmy.morale, delta: attackerArmy.morale - attackerMoraleBefore },
-      ...defenders.map((army) => ({
-        entityType: 'army' as const,
-        entityId: army.id,
-        field: 'soldiers',
-        before: defenderSoldiersBefore.get(army.id) ?? army.soldiers,
-        after: army.soldiers,
-        delta: army.soldiers - (defenderSoldiersBefore.get(army.id) ?? army.soldiers),
-      })),
-      ...defenders.map((army) => ({
-        entityType: 'army' as const,
-        entityId: army.id,
-        field: 'morale',
-        before: defenderMoraleBefore.get(army.id) ?? army.morale,
-        after: army.morale,
-        delta: army.morale - (defenderMoraleBefore.get(army.id) ?? army.morale),
-      })),
-    ],
+    causes: battleCauses,
+    stateDeltas: battleDeltas,
+    ...projectFactLinks(battleFact),
   });
 
   if (attackerWon && attackerArmy.soldiers > 0) {
@@ -2323,7 +2527,7 @@ function resolveBattle(
     attackerArmy.regionId = target.id;
     attackerArmy.lastMovedTurn = context.turn;
     if (attackerCommander) attackerCommander.locationRegionId = target.id;
-    captureRegion(world, context, war, attackerArmy, target, defenderId);
+    captureRegion(world, context, war, attackerArmy, target, defenderId, battleFact);
   } else {
     for (const defender of [...defenders]) {
       if (defender.soldiers < MIN_ARMY_SIZE) removeArmy(world, defender, context, true);
@@ -2466,6 +2670,7 @@ function createTurnContext(world: WorldState): MutableTurnContext {
     // the following quarter's report so eventIds remains the exact ordered set
     // for that historical turn without replaying the mutation.
     events: [...boundaryInterventions],
+    facts: [],
     population: {
       start: totalPopulation(world),
       births: 0,
@@ -2609,6 +2814,7 @@ function cloneWorld(world: WorldState): WorldState {
       carrierCharacterIds: [...state.carrierCharacterIds],
     })),
     history: [...world.history],
+    facts: [...world.facts],
     counters: { ...world.counters },
   };
 }
@@ -2682,37 +2888,84 @@ function finalizeTurn(world: WorldState, context: MutableTurnContext): void {
     knowledge: context.knowledge,
     maritime: context.maritime,
     eventIds: context.events.map((event) => event.id),
+    factIds: context.facts.map((fact) => fact.id),
+  };
+}
+
+export interface DetailedAdvanceResult {
+  world: WorldState;
+  timings: SimulationAdvanceTimings;
+}
+
+type SimulationClock = () => number;
+
+function simulationClock(): number {
+  return typeof performance !== 'undefined' && typeof performance.now === 'function'
+    ? performance.now()
+    : Date.now();
+}
+
+export function advanceWorldDetailed(
+  currentWorld: WorldState,
+  now: SimulationClock = simulationClock,
+): DetailedAdvanceResult {
+  const totalStartedAt = now();
+  const cloneStartedAt = now();
+  const world = cloneWorld(currentWorld);
+  const cloneMs = Math.max(0, now() - cloneStartedAt);
+  const context = createTurnContext(world);
+  const systems = Object.fromEntries(
+    SIMULATION_SYSTEM_PHASES.map((phase) => [phase, 0]),
+  ) as Record<SimulationSystemPhase, number>;
+  const runSystem = (phase: SimulationSystemPhase, operation: () => void): void => {
+    const startedAt = now();
+    operation();
+    systems[phase] = Math.max(0, now() - startedAt);
+  };
+  const systemsStartedAt = now();
+  runSystem('environment', () => processRegions(world, context));
+  runSystem('economy_trade', () => processV03EconomyAndTrade(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('migration', () => processV03Migration(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('character_lifecycle', () => processCharacterLifecycle(world, context));
+  runSystem('society', () => processV02Society(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('core_politics', () => processPolitics(world, context));
+  runSystem('social_politics', () => processV02Politics(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('rebellions', () => processRebellions(world, context));
+  runSystem('army_maintenance', () => maintainArmies(world, context));
+  runSystem('social_diplomacy', () => processV02Diplomacy(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('war_declarations', () => processWarDeclarations(world, context));
+  runSystem('diplomacy', () => processV03Diplomacy(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('military', () => processMilitary(world, context));
+  runSystem('maritime', () => processV03Maritime(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('disease', () => processV03Disease(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('knowledge', () => processV03Knowledge(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('military_careers', () => processV02MilitaryCareers(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('appointments', () => syncOfficeAppointments(world, context.turn, context));
+  runSystem('quarter_finalize', () => {
+    finalizeTurn(world, context);
+    world.turn += 1;
+    const nextDate = getDateForTurn(world.turn);
+    world.year = nextDate.year;
+    world.season = nextDate.season;
+  });
+  const systemsMs = Math.max(0, now() - systemsStartedAt);
+  const hashStartedAt = now();
+  world.hash = computeWorldHash(world);
+  const hashMs = Math.max(0, now() - hashStartedAt);
+  return {
+    world,
+    timings: {
+      cloneMs,
+      systemsMs,
+      hashMs,
+      totalMs: Math.max(0, now() - totalStartedAt),
+      systems,
+    },
   };
 }
 
 export function advanceWorld(currentWorld: WorldState): WorldState {
-  const world = cloneWorld(currentWorld);
-  const context = createTurnContext(world);
-  processRegions(world, context);
-  processV03EconomyAndTrade(world, context, (input) => pushEvent(world, context, input));
-  processV03Migration(world, context, (input) => pushEvent(world, context, input));
-  processCharacterLifecycle(world, context);
-  processV02Society(world, context, (input) => pushEvent(world, context, input));
-  processPolitics(world, context);
-  processV02Politics(world, context, (input) => pushEvent(world, context, input));
-  processRebellions(world, context);
-  maintainArmies(world, context);
-  processV02Diplomacy(world, context, (input) => pushEvent(world, context, input));
-  processWarDeclarations(world, context);
-  processV03Diplomacy(world, context, (input) => pushEvent(world, context, input));
-  processMilitary(world, context);
-  processV03Maritime(world, context, (input) => pushEvent(world, context, input));
-  processV03Disease(world, context, (input) => pushEvent(world, context, input));
-  processV03Knowledge(world, context, (input) => pushEvent(world, context, input));
-  processV02MilitaryCareers(world, context, (input) => pushEvent(world, context, input));
-  syncOfficeAppointments(world, context.turn);
-  finalizeTurn(world, context);
-  world.turn += 1;
-  const nextDate = getDateForTurn(world.turn);
-  world.year = nextDate.year;
-  world.season = nextDate.season;
-  world.hash = computeWorldHash(world);
-  return world;
+  return advanceWorldDetailed(currentWorld).world;
 }
 
 export function advanceWorldBy(currentWorld: WorldState, turns: number): WorldState {

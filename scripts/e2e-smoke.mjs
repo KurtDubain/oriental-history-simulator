@@ -27,6 +27,47 @@ async function snapshot(page) {
   return JSON.parse(await snapshotText(page));
 }
 
+function assertRuntimePhase(state, phase, message) {
+  const metric = state.runtimePerformance?.phases?.[phase];
+  assert.ok(metric, message ?? `缺少 ${phase} 性能样本`);
+  assert.ok(metric.count >= 1, `${phase} 至少应记录一次`);
+  assert.ok(metric.latestMs >= 0 && metric.p95Ms >= 0 && metric.maxMs >= metric.p95Ms, `${phase} 指标必须有效`);
+  return metric;
+}
+
+async function readAutosaveWorld(page) {
+  return page.evaluate(() => new Promise((resolve, reject) => {
+    const request = indexedDB.open('canghai-history-v01', 1);
+    request.onerror = () => reject(request.error ?? new Error('无法打开自动存档数据库'));
+    request.onsuccess = () => {
+      const database = request.result;
+      const transaction = database.transaction('world-saves', 'readonly');
+      const row = transaction.objectStore('world-saves').get('autosave');
+      row.onerror = () => reject(row.error ?? new Error('无法读取自动存档'));
+      row.onsuccess = () => {
+        try {
+          resolve(row.result?.payload ? JSON.parse(row.result.payload) : null);
+        } catch (error) {
+          reject(error);
+        } finally {
+          database.close();
+        }
+      };
+    };
+  }));
+}
+
+async function waitForLatestAutosave(page, expected, timeoutMs = 2_000) {
+  const deadline = Date.now() + timeoutMs;
+  let saved = null;
+  while (Date.now() <= deadline) {
+    saved = await readAutosaveWorld(page);
+    if (saved?.turn === expected.time.turn && saved?.hash === expected.deterministicWorldHash) return saved;
+    await page.waitForTimeout(50);
+  }
+  assert.fail(`暂停后 ${timeoutMs}ms 内自动存档未达到 T${expected.time.turn}/${expected.deterministicWorldHash}，实际 ${saved?.turn ?? 'none'}/${saved?.hash ?? 'none'}`);
+}
+
 async function openFreshWorld(page) {
   await page.goto(APP_URL, { waitUntil: 'networkidle' });
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'start-world');
@@ -606,7 +647,7 @@ try {
   const initial = JSON.parse(initialText);
   assert.equal(initial.mode, 'observing');
   assert.equal(initial.productVersion, '1.0.0');
-  assert.equal(initial.worldSchemaVersion, 3);
+  assert.equal(initial.worldSchemaVersion, 4);
   assert.match(initial.mapContentVersion, /^v03/);
   assert.equal(initial.totals.regions, 82);
   assert.equal(initial.totals.seaZones, 10);
@@ -624,6 +665,9 @@ try {
   assert.equal(initial.observer.watchedCount, 0);
   assert.equal(initial.observer.primerOpen, true);
   assert.equal(initial.interface.selected, null, '新建世界应先展示完整舆图，不抢先展开地区档案');
+  assertRuntimePhase(initial, 'validation.full', '新建世界必须记录全量校验耗时');
+  assertRuntimePhase(initial, 'react.commit', '新建世界必须记录 React 提交耗时');
+  assertRuntimePhase(initial, 'canvas.draw', '新建世界必须记录 Canvas 绘制耗时');
   assert.ok(Buffer.byteLength(initialText, 'utf8') < SNAPSHOT_LIMIT, '文本观察快照必须小于128KiB');
   const mapTopology = await page.locator('.world-map').evaluate((element) => ({
     layout: element.getAttribute('data-map-layout'),
@@ -644,6 +688,8 @@ try {
   await exerciseObserverDesk(page, afterPrimer.deterministicWorldHash);
   const afterAutomaticPause = await exerciseAutomaticPause(page);
   assert.ok(afterAutomaticPause.time.turn >= 1);
+  const pausedAutosave = await waitForLatestAutosave(page, afterAutomaticPause);
+  assert.equal(pausedAutosave.schemaVersion, 4, '暂停落盘必须写入 schema 4 世界');
 
   await auditLayerDialog(page);
   await page.locator('button[data-mandate-trigger="true"]').click();
@@ -704,6 +750,15 @@ try {
   assert.equal(afterCooldown.mandate.usedThisTurn, false);
   const afterManual = await advanceTo(page, 4);
   assert.equal(afterManual.time.turn, 4);
+  for (const phase of [
+    'simulation.clone',
+    'simulation.systems',
+    'simulation.hash',
+    'simulation.total',
+    'validation.runtime',
+    'react.commit',
+    'canvas.draw',
+  ]) assertRuntimePhase(afterManual, phase, `推进季度后必须记录 ${phase}`);
   assert.equal(
     afterManual.lastTurnLedger.population.end,
     afterManual.lastTurnLedger.population.start
@@ -835,6 +890,10 @@ try {
 
   await page.click('button[aria-label="保存当前世界"]');
   await page.waitForTimeout(500);
+  const afterSave = await snapshot(page);
+  assertRuntimePhase(afterSave, 'validation.full', '手动保存必须执行全量校验');
+  assertRuntimePhase(afterSave, 'persistence.serialize', '手动保存必须记录序列化耗时');
+  assertRuntimePhase(afterSave, 'persistence.indexeddb', '手动保存必须记录 IndexedDB 写入耗时');
   await page.click('button[aria-label="返回世界书页"]');
   await page.waitForSelector('#continue-world');
   assert.equal(await page.locator('.observer-app').evaluate((element) => element.inert), true);
@@ -842,9 +901,9 @@ try {
   await page.waitForSelector('.world-map__canvas');
   const reloaded = await snapshot(page);
   assert.equal(reloaded.productVersion, '1.0.0');
-  assert.equal(reloaded.worldSchemaVersion, 3);
+  assert.equal(reloaded.worldSchemaVersion, 4);
   assert.equal(reloaded.observer.primerOpen, false, '续读不应重复弹出首次读图导览');
-  assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 3存档续读应恢复完全相同的世界');
+  assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 4存档续读应恢复完全相同的世界');
   assert.deepEqual(desktopErrors, []);
 
   const mobileContext = await browser.newContext({

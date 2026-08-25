@@ -1,8 +1,8 @@
 # 《沧衡纪》vNext 模拟性能审计
 
 > 审计日期：2026-08-25
-> 审计基线：V1.0 / schema 3 / commit `b350438`
-> 性质：只读审计；没有为了得到数据修改模拟代码
+> 原始审计基线：V1.0 / schema 3 / commit `b350438`
+> 复测基线：Phase A / schema 4；原始段落保留，1.1 节记录实施后结果
 
 ## 1. 执行结论
 
@@ -14,6 +14,19 @@
 4. `cloneWorld` 每季深拷贝全部人物传记、关系记忆和已结束领域对象；这是中长期风险，但还不是第一刀。
 
 正确顺序是：先测量完整用户链路，再拆运行时校验、重做自动保存、建立 Fact/Archive 边界，最后根据目标移动设备数据决定是否 Worker 化。
+
+### 1.1 Phase A 实施后复测（2026-08-25）
+
+Phase A 已将生产季度改为增量 runtime validation，并用 single-flight/latest-only 协调器替换逐世界变更自动保存。`npm run test:audit:phase-a` 现在直接输出 clone、19 个领域阶段、hash、runtime/full validation、serialize 的 P50/P95/max；浏览器文本快照另包含 React commit、Canvas 与 IndexedDB 样本。
+
+| 样本 | 模拟 P95 | Runtime validation P95 | Full validation P95 | 最大存档 |
+|---|---:|---:|---:|---:|
+| 3 种子 × 80 季 | 56.559ms | 25.087ms | 157.282ms | 6.746MiB |
+| 1 种子 × 400 季 | 70.043ms | 47.344ms | 315.060ms | 13.359MiB |
+
+百年样本的 0/20/50/100 年存档分别为 0.702/6.319/10.312/13.359MiB，仍低于当前 16MiB 导入上限。runtime validator 的代理陷阱测试证明它不遍历既有 History/Fact archive；其长期增幅来自当前实体、账本和 hash 规模，而非重新扫描完整史册。Full validation 仍随档案增长，但只在创建、读档、导入、干预、手动保存、测试和审计边界运行。
+
+当前主要热段已经可见：80 季多种子样本中 `economy_trade` P95 24.331ms，hash P95 23.368ms。它们是下一次性能优化的首要证据点，不需要现在引入 Worker。
 
 ## 2. 测量结果
 
