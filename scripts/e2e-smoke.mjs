@@ -1,0 +1,684 @@
+import assert from 'node:assert/strict';
+import { mkdir } from 'node:fs/promises';
+import { chromium } from 'playwright';
+import { createServer } from 'vite';
+
+const APP_URL = 'http://127.0.0.1:4173';
+const SNAPSHOT_LIMIT = 128 * 1024;
+const ARTIFACT_DIR = 'output/v1-release-visual';
+
+const server = await createServer({
+  logLevel: 'error',
+  server: { host: '127.0.0.1', port: 4173, strictPort: true },
+});
+
+function collectBrowserErrors(page, target) {
+  page.on('console', (message) => {
+    if (message.type() === 'error') target.push(message.text());
+  });
+  page.on('pageerror', (error) => target.push(String(error)));
+}
+
+async function snapshotText(page) {
+  return page.evaluate(() => window.render_game_to_text());
+}
+
+async function snapshot(page) {
+  return JSON.parse(await snapshotText(page));
+}
+
+async function openFreshWorld(page) {
+  await page.goto(APP_URL, { waitUntil: 'networkidle' });
+  assert.equal(await page.evaluate(() => document.activeElement?.id), 'start-world');
+  await page.click('#start-world');
+  await page.waitForSelector('.world-map__canvas');
+  await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).productVersion === '1.0.0');
+}
+
+async function waitForSnapshot(page, predicate, argument, timeout = 15_000) {
+  await page.waitForFunction(
+    ({ source, argument: innerArgument }) => {
+      const current = JSON.parse(window.render_game_to_text());
+      return Function('current', 'argument', `return (${source})(current, argument);`)(current, innerArgument);
+    },
+    { source: predicate.toString(), argument },
+    { timeout },
+  );
+  return snapshot(page);
+}
+
+async function assertFocusTrapped(page, dialogSelector, tabCount = 16) {
+  for (let index = 0; index < tabCount; index += 1) {
+    await page.keyboard.press('Tab');
+    assert.equal(
+      await page.evaluate((selector) => Boolean(document.activeElement?.closest(selector)), dialogSelector),
+      true,
+      `${dialogSelector} 应把键盘焦点留在弹层内`,
+    );
+  }
+}
+
+async function assertWithinViewport(page, selector, message) {
+  await page.waitForFunction((target) => {
+    const element = document.querySelector(target);
+    if (!element) return false;
+    const bounds = element.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= window.innerWidth + 1;
+  }, selector);
+  const bounds = await page.locator(selector).boundingBox();
+  assert.ok(bounds && bounds.x >= 0 && bounds.x + bounds.width <= 391, message);
+  return bounds;
+}
+
+async function waitForVisualSettled(locator) {
+  await locator.evaluate(async (element) => {
+    await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
+  });
+}
+
+async function selectLayer(page, layer) {
+  const trigger = page.getByRole('button', { name: /^舆图叠层/ });
+  if (!(await page.locator('#observer-layer-sheet').isVisible().catch(() => false))) await trigger.click();
+  await page.waitForSelector('#observer-layer-sheet');
+  await page.locator(`[data-layer-id="${layer}"]`).click();
+  await page.waitForSelector(`.world-map[data-overlay="${layer}"]`);
+  assert.equal((await snapshot(page)).interface.overlay, layer);
+}
+
+async function auditLayerDialog(page, mobile = false) {
+  const trigger = page.getByRole('button', { name: /^舆图叠层/ });
+  await trigger.click();
+  const sheet = page.locator('#observer-layer-sheet');
+  await sheet.waitFor();
+  assert.equal(await sheet.getAttribute('role'), 'dialog');
+  assert.equal(await sheet.getAttribute('aria-modal'), 'true');
+  assert.equal(await sheet.locator('[role="radio"]').count(), 10);
+  for (let index = 0; index < 14; index += 1) {
+    await page.keyboard.press('Tab');
+    assert.equal(await page.evaluate(() => Boolean(document.activeElement?.closest('#observer-layer-sheet'))), true);
+  }
+  if (mobile) {
+    const layout = await sheet.evaluate((element) => {
+      const rect = element.getBoundingClientRect();
+      const section = element.querySelector('.layer-picker__groups section');
+      return {
+        left: rect.left,
+        right: rect.right,
+        sectionDisplay: section ? getComputedStyle(section).display : null,
+      };
+    });
+    assert.ok(layout.left >= 0 && layout.right <= 390, '移动端叠层弹页不可越出视口');
+    assert.equal(layout.sectionDisplay, 'block', '移动端叠层应为单列');
+  }
+  await page.keyboard.press('Escape');
+  await sheet.waitFor({ state: 'detached' });
+  assert.ok((await page.evaluate(() => document.activeElement?.getAttribute('aria-label')))?.startsWith('舆图叠层'));
+}
+
+async function advanceOneQuarter(page) {
+  const before = await snapshot(page);
+  const nextTurn = before.time.turn + 1;
+  await page.click('button[aria-label="推进至下一季"]');
+  await page.waitForFunction(
+    (turn) => JSON.parse(window.render_game_to_text()).time.turn >= turn,
+    nextTurn,
+    { timeout: 15_000 },
+  );
+  return snapshot(page);
+}
+
+async function advanceTo(page, turn) {
+  let current = await snapshot(page);
+  while (current.time.turn < turn) current = await advanceOneQuarter(page);
+  return current;
+}
+
+async function selectFirstMapObject(page, expectedKind, expectedDossier) {
+  const canvas = page.locator('.world-map__canvas');
+  await canvas.focus();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(
+    (kind) => JSON.parse(window.render_game_to_text()).interface.selectedDetail?.kind === kind,
+    expectedKind,
+  );
+  const selected = await snapshot(page);
+  assert.equal(selected.interface.selected.kind, expectedKind);
+  assert.equal(selected.interface.selectedDetail.kind, expectedKind);
+  assert.equal((await page.locator('.observer-inspector__kind').textContent())?.trim(), expectedDossier);
+  return selected;
+}
+
+async function expandAnyStructuredReference(page) {
+  const factors = page.locator('.observer-causal-chain__factor');
+  for (let factorIndex = 0; factorIndex < await factors.count(); factorIndex += 1) {
+    const evidence = factors.nth(factorIndex).locator('button.observer-causal-chain__evidence');
+    if (!(await evidence.count())) continue;
+    await evidence.click();
+    const references = factors.nth(factorIndex).locator('.observer-causal-chain__references');
+    if (await references.count()) return references;
+  }
+  return null;
+}
+
+async function findThreeClickCausalPath(page) {
+  const tryEvents = async (events, returnsToHistory = false) => {
+    const count = Math.min(await events.count(), 60);
+    for (let index = 0; index < count; index += 1) {
+      await events.nth(index).click();
+      await page.waitForSelector('#observer-causal-drawer');
+      const references = await expandAnyStructuredReference(page);
+      if (references) return references;
+      await page.click('#observer-causal-drawer button[aria-label="关闭因果链"]');
+      if (returnsToHistory) await page.waitForSelector('.history-workbench');
+    }
+    return null;
+  };
+
+  let references = await tryEvents(page.locator('.observer-chronicle__event'));
+  if (references) return references;
+  await page.click('button[data-history-workbench-trigger="true"]');
+  await page.waitForSelector('.history-workbench');
+  references = await tryEvents(page.locator('.history-workbench__event-list > li > button'), true);
+  assert.ok(references, '至少一条史事应提供可点击的结构化因果凭证');
+  return references;
+}
+
+async function exerciseObserverDesk(page, initialHash) {
+  const inspector = page.locator('.observer-inspector');
+  await inspector.waitFor();
+  const followButton = inspector.locator('button[aria-label^="关注"]');
+  assert.equal(await followButton.count(), 1, '默认州域档案应允许被关注');
+  const followedLabel = (await followButton.getAttribute('aria-label')).replace(/^关注/, '');
+  await followButton.click();
+  await waitForSnapshot(page, (current) => current.observer.watchedCount === 1);
+  assert.equal((await snapshot(page)).deterministicWorldHash, initialHash, '关注对象不得改写世界哈希');
+
+  const trigger = page.locator('button[data-observer-desk-trigger="true"]');
+  await trigger.click();
+  const desk = page.locator('.observer-desk');
+  await desk.waitFor();
+  assert.equal(await desk.getAttribute('role'), 'dialog');
+  assert.equal(await desk.getAttribute('aria-modal'), 'true');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '关闭观察台');
+  assert.match(await desk.textContent(), new RegExp(followedLabel.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  assert.equal(await desk.locator('[role="progressbar"]').getAttribute('aria-valuenow'), '2');
+
+  const masterSwitch = desk.locator('.observer-desk__master-switch input');
+  assert.equal(await masterSwitch.isChecked(), true);
+  await masterSwitch.uncheck();
+  assert.equal(await desk.locator('.observer-desk__rules input:not(:disabled)').count(), 0, '总开关关闭后规则应不可编辑');
+  await masterSwitch.check();
+  const threshold = desk.locator('select[aria-label="重大史事暂停阈值"]');
+  await threshold.selectOption('2');
+  assert.equal(await threshold.inputValue(), '2');
+  assert.ok(await desk.locator('.observer-desk__rules label:has-text("战争") input:checked').count());
+  await assertFocusTrapped(page, '.observer-desk');
+  await page.screenshot({ path: `${ARTIFACT_DIR}/observer-desk.png`, fullPage: true });
+  await page.keyboard.press('Escape');
+  await desk.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-observer-desk-trigger') === 'true');
+
+  const stored = await page.evaluate(() => {
+    const key = Object.keys(localStorage).find((candidate) => candidate.startsWith('canghai-observer-desk-v1:'));
+    return key ? JSON.parse(localStorage.getItem(key)) : null;
+  });
+  assert.equal(stored.watchlist.length, 1);
+  assert.equal(stored.pauseRules.importanceThreshold, 2);
+  return { followedLabel, trigger };
+}
+
+async function exerciseAutomaticPause(page) {
+  await page.getByRole('button', { name: '8 倍速推演' }).click();
+  const speedState = await waitForSnapshot(page, (current) => current.playback.speed === 8);
+  assert.equal(speedState.playback.speed, 8);
+  assert.equal(await page.getByRole('button', { name: '8 倍速推演' }).getAttribute('aria-pressed'), 'true');
+
+  const turnBefore = speedState.time.turn;
+  await page.getByRole('button', { name: '开始自动推演' }).click();
+  for (let burst = 0; burst < 10; burst += 1) {
+    await page.evaluate(() => window.advanceTime(300));
+    await page.waitForTimeout(40);
+    const state = await snapshot(page);
+    if (state.time.turn > turnBefore && !state.playback.running) break;
+  }
+  const paused = await snapshot(page);
+  assert.ok(paused.time.turn > turnBefore, '自动推演至少应推进一季');
+  assert.equal(paused.playback.running, false, '符合规则的史事应暂停自动推演');
+  assert.equal(typeof paused.observer.lastPauseReason, 'string');
+  assert.ok(paused.observer.lastPauseReason.length > 0);
+  assert.ok(paused.observer.guideCompleted >= 3, '推进季度应写入首次试玩进度');
+
+  await page.locator('button[data-observer-desk-trigger="true"]').click();
+  const pauseNote = page.locator('.observer-desk__pause-note');
+  await pauseNote.waitFor();
+  assert.match(await pauseNote.textContent(), /时间已停/);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.observer-desk', { state: 'detached' });
+  return paused;
+}
+
+async function exerciseHistoryWorkbench(page, current) {
+  const hashBefore = current.deterministicWorldHash;
+  const trigger = page.locator('button[data-history-workbench-trigger="true"]');
+  await trigger.click();
+  const workbench = page.locator('.history-workbench');
+  await workbench.waitFor();
+  assert.equal(await workbench.getAttribute('role'), 'dialog');
+  assert.equal(await workbench.getAttribute('aria-modal'), 'true');
+  await page.waitForFunction(() => document.activeElement?.matches('.history-workbench input[type="search"]'));
+  const opened = await snapshot(page);
+  assert.equal(opened.observer.historyWorkbenchOpen, true);
+  assert.equal(opened.observer.historicalTurn, null);
+
+  const eventButtons = workbench.locator('.history-workbench__event-list > li > button');
+  assert.ok(await eventButtons.count(), '历史工作台应列出已发生史事');
+  const firstTitle = (await eventButtons.first().locator('strong').textContent()).trim();
+  const search = workbench.locator('input[type="search"]');
+  await search.fill(firstTitle);
+  await page.waitForFunction((title) => {
+    const buttons = [...document.querySelectorAll('.history-workbench__event-list > li > button')];
+    return buttons.length > 0 && buttons.every((button) => button.textContent.includes(title));
+  }, firstTitle);
+  assert.ok(await eventButtons.count());
+  await search.fill('');
+  await page.waitForFunction(() => document.querySelectorAll('.history-workbench__event-list > li > button').length > 1);
+
+  const targetTurn = Math.max(0, current.time.turn - 2);
+  const slider = workbench.locator('input[type="range"][aria-label="选择历史季度"]');
+  assert.equal(Number(await slider.getAttribute('max')), current.time.turn);
+  await slider.evaluate((element, nextTurn) => {
+    const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')?.set;
+    setter?.call(element, String(nextTurn));
+    element.dispatchEvent(new Event('input', { bubbles: true }));
+    element.dispatchEvent(new Event('change', { bubbles: true }));
+  }, targetTurn);
+  await waitForSnapshot(page, (state, turn) => state.observer.historicalTurn === turn, targetTurn);
+  assert.equal(await page.locator('.observer-stage').getAttribute('data-historical-turn'), String(targetTurn));
+  assert.equal(await page.locator('.world-map').getAttribute('data-overlay'), 'political');
+  assert.equal((await snapshot(page)).deterministicWorldHash, hashBefore, '季度回拨只读，不得改变世界哈希');
+  await page.screenshot({ path: `${ARTIFACT_DIR}/history-workbench.png`, fullPage: true });
+  await assertFocusTrapped(page, '.history-workbench');
+  await workbench.locator('.history-workbench__close').click();
+  await workbench.waitFor({ state: 'detached' });
+  assert.ok(await page.locator('.observer-history-lens').count(), '关闭史册后应保留只读历史舆图镜片');
+  await page.screenshot({ path: `${ARTIFACT_DIR}/historical-map-readonly.png`, fullPage: true });
+  assert.equal(await page.getByRole('button', { name: '推进至下一季' }).isDisabled(), true);
+  assert.equal((await snapshot(page)).time.turn, current.time.turn);
+  assert.equal((await snapshot(page)).deterministicWorldHash, hashBefore);
+  await page.locator('.observer-history-lens').getByRole('button', { name: '归还当下' }).click();
+  await page.waitForSelector('.observer-history-lens', { state: 'detached' });
+  const restored = await waitForSnapshot(page, (state) => state.observer.historicalTurn === null);
+  assert.equal(restored.deterministicWorldHash, hashBefore);
+  assert.equal(await page.getByRole('button', { name: '推进至下一季' }).isDisabled(), false);
+  return restored;
+}
+
+async function exerciseWorldCollectionIfAvailable(page) {
+  const trigger = page.locator('button[data-world-collection-trigger="true"], button[aria-label^="打开世界收藏"]');
+  if (!(await trigger.count())) return { tested: false };
+
+  const savedState = await snapshot(page);
+  const savedHash = savedState.deterministicWorldHash;
+  await trigger.first().click();
+  const panel = page.locator('.world-collection');
+  await panel.waitFor();
+  await page.waitForFunction(() => document.querySelector('.world-collection')?.getAttribute('aria-busy') === 'false');
+  assert.equal(await panel.getAttribute('role'), 'dialog');
+  assert.equal(await panel.getAttribute('aria-modal'), 'true');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('aria-label') === '关闭世界收藏');
+
+  const label = `明日试玩本-${savedState.time.turn}`;
+  await panel.locator('input[placeholder="例如：北海兴亡录"]').fill(label);
+  await panel.getByRole('button', { name: '存入收藏' }).click();
+  const rowFor = (name) => panel.getByRole('button', { name: `删除${name}`, exact: true })
+    .locator('xpath=ancestor::li[contains(@class,"world-collection__row")]');
+  const originalRow = rowFor(label);
+  await originalRow.waitFor();
+  assert.match(await originalRow.textContent(), new RegExp(savedHash.slice(0, 12)));
+
+  await originalRow.getByRole('button', { name: `修改${label}的名称` }).click();
+  const renamed = `${label}·改`;
+  await panel.getByRole('textbox', { name: `修改${label}的名称` }).fill(renamed);
+  await panel.getByRole('button', { name: '确认改名' }).click();
+  const renamedRow = rowFor(renamed);
+  await renamedRow.waitFor();
+
+  const namedCountBeforeCopy = await panel.locator('.world-collection__row').count();
+  const namesBeforeCopy = await panel.locator('.world-collection__name strong').allTextContents();
+  await renamedRow.getByRole('button', { name: `复制${renamed}为新收藏` }).click();
+  await page.waitForFunction((before) => document.querySelectorAll('.world-collection__row').length > before, namedCountBeforeCopy);
+  const namesAfterCopy = await panel.locator('.world-collection__name strong').allTextContents();
+  const duplicateName = namesAfterCopy.find((name) => !namesBeforeCopy.includes(name))?.trim();
+  assert.ok(duplicateName);
+  await page.screenshot({ path: `${ARTIFACT_DIR}/world-collection.png`, fullPage: true });
+  await panel.getByRole('button', { name: '关闭世界收藏' }).click();
+  await panel.waitFor({ state: 'detached' });
+
+  const advanced = await advanceOneQuarter(page);
+  assert.notEqual(advanced.deterministicWorldHash, savedHash, '推进后当前世界应离开已收藏快照');
+  await trigger.first().click();
+  await panel.waitFor();
+  await page.waitForFunction(() => document.querySelector('.world-collection')?.getAttribute('aria-busy') === 'false');
+  const loadRow = rowFor(renamed);
+  const loadButton = loadRow.getByRole('button', { name: '读取' });
+  assert.equal(await loadButton.isDisabled(), false);
+  await loadButton.click();
+  await page.waitForSelector('.world-collection', { state: 'detached' });
+  const loaded = await waitForSnapshot(page, (state, hash) => state.deterministicWorldHash === hash, savedHash);
+  assert.equal(loaded.time.turn, savedState.time.turn);
+
+  await trigger.first().click();
+  await panel.waitFor();
+  await page.waitForFunction(() => document.querySelector('.world-collection')?.getAttribute('aria-busy') === 'false');
+  for (const name of [duplicateName, renamed]) {
+    const row = rowFor(name);
+    if (!(await row.count())) continue;
+    await row.getByRole('button', { name: `删除${name}` }).click();
+    await row.getByRole('button', { name: '确认删除' }).click();
+    await row.waitFor({ state: 'detached' });
+  }
+  await panel.getByRole('button', { name: '关闭世界收藏' }).click();
+  await panel.waitFor({ state: 'detached' });
+  return { tested: true, hash: savedHash };
+}
+
+let browser;
+try {
+  await mkdir(ARTIFACT_DIR, { recursive: true });
+  await server.listen();
+  browser = await chromium.launch({ headless: true });
+
+  const desktopContext = await browser.newContext({ viewport: { width: 1_280, height: 720 } });
+  const page = await desktopContext.newPage();
+  const desktopErrors = [];
+  collectBrowserErrors(page, desktopErrors);
+  await openFreshWorld(page);
+
+  const initialText = await snapshotText(page);
+  const initial = JSON.parse(initialText);
+  assert.equal(initial.mode, 'observing');
+  assert.equal(initial.productVersion, '1.0.0');
+  assert.equal(initial.worldSchemaVersion, 3);
+  assert.match(initial.mapContentVersion, /^v03/);
+  assert.equal(initial.totals.regions, 82);
+  assert.equal(initial.totals.seaZones, 10);
+  assert.ok(initial.totals.ports > 0);
+  assert.ok(initial.totals.fleets > 0);
+  assert.ok(initial.totals.livingPolities >= 5);
+  assert.ok(initial.totals.livingCharacters > 0 && initial.totals.livingCharacters <= 240);
+  assert.ok(initial.totals.families > 0);
+  assert.ok(initial.totals.activeOutbreaks > 0);
+  assert.ok(initial.totals.population > 0);
+  assert.equal(initial.mandate.available, 8);
+  assert.equal(initial.mandate.usedThisTurn, false);
+  assert.equal(initial.mandate.recentIntervention, null);
+  assert.equal(initial.observer.guideCompleted, 1);
+  assert.equal(initial.observer.watchedCount, 0);
+  assert.ok(Buffer.byteLength(initialText, 'utf8') < SNAPSHOT_LIMIT, '文本观察快照必须小于128KiB');
+
+  await exerciseObserverDesk(page, initial.deterministicWorldHash);
+  const afterAutomaticPause = await exerciseAutomaticPause(page);
+  assert.ok(afterAutomaticPause.time.turn >= 1);
+
+  await auditLayerDialog(page);
+  await page.locator('button[data-mandate-trigger="true"]').click();
+  await page.getByRole('button', { name: /准备在.+降下一级灾害/ }).click();
+  await page.waitForSelector('.mandate-panel__confirmation');
+  assert.ok(await page.getByRole('button', { name: /确认在.+降下一级灾害/ }).count(), '灾害必须经过第二次确认');
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.mandate-panel__confirmation', { state: 'detached' });
+  assert.ok(await page.locator('.mandate-panel').count(), '首次 Esc 只应撤销灾害确认');
+  await page.locator('.mandate-panel button[aria-label="关闭天意"]').click();
+  const politicalPixels = await page.locator('.world-map__canvas').evaluate((canvas) => canvas.toDataURL());
+  await selectLayer(page, 'naval');
+  const navalPixels = await page.locator('.world-map__canvas').evaluate((canvas) => canvas.toDataURL());
+  assert.notEqual(politicalPixels, navalPixels, '疆界与海权叠层应绘出不同画面');
+  await selectFirstMapObject(page, 'seaZone', '海域档案');
+
+  await page.click('button[data-observer-view="military"]');
+  const militaryRoster = page.locator('.roster-panel[data-roster-title="天下军旅"]');
+  await militaryRoster.waitFor();
+  const fleetId = initial.mapObjects.fleets[0].id;
+  await militaryRoster.locator(`[data-roster-id="${fleetId}"]`).click();
+  await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.selectedDetail?.kind === 'fleet');
+  assert.equal((await page.locator('.observer-inspector__kind').textContent())?.trim(), '舰队档案');
+
+  await page.click('button[data-observer-view="polities"]');
+  await page.waitForSelector('.roster-panel[data-roster-title="天下列国"]');
+  await page.locator('.roster-panel button[data-roster-id]').first().click();
+  const beforeIntervention = await snapshot(page);
+  const legitimacyBefore = beforeIntervention.interface.selectedDetail.legitimacy;
+  const hashBeforeIntervention = beforeIntervention.deterministicWorldHash;
+  const mandateTrigger = page.locator('button[data-mandate-trigger="true"]');
+  await mandateTrigger.click();
+  await page.waitForSelector('.mandate-panel[role="dialog"]');
+  assert.equal(await page.locator('.observer-app').evaluate((element) => element.inert), true);
+  assert.match(await page.locator('.mandate-panel__ledger').textContent(), /8点可用天命/);
+  await page.getByRole('button', { name: /提升.+合法性3点/ }).click();
+  await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).mandate.usedThisTurn === true);
+  const afterIntervention = await snapshot(page);
+  assert.notEqual(afterIntervention.deterministicWorldHash, hashBeforeIntervention, '有限干预必须形成新的确定性世界分支');
+  assert.equal(afterIntervention.interface.selectedDetail.legitimacy, legitimacyBefore + 3);
+  assert.equal(afterIntervention.mandate.available, 0);
+  assert.equal(afterIntervention.mandate.recentIntervention.kind, 'observer_intervention_modify_mandate');
+  assert.match(afterIntervention.mandate.recentIntervention.costEvidence, /消耗2点/);
+  assert.equal(afterIntervention.recentHistory.at(-1).title, afterIntervention.mandate.recentIntervention.title);
+  await page.waitForSelector('.mandate-panel__message[data-tone="success"]');
+  assert.equal(await page.getByRole('button', { name: /提升.+合法性3点/ }).isDisabled(), true);
+  await page.locator('.mandate-panel button[aria-label="关闭天意"]').click();
+  await page.waitForSelector('.mandate-panel', { state: 'detached' });
+  assert.equal(await page.evaluate(() => document.activeElement?.getAttribute('data-mandate-trigger')), 'true');
+  await mandateTrigger.click();
+  assert.match(await page.locator('.mandate-panel__ledger').textContent(), /本季已经落笔/);
+  assert.equal(await page.getByRole('button', { name: /降低.+合法性3点/ }).isDisabled(), true);
+  await page.locator('.mandate-panel button[aria-label="关闭天意"]').click();
+  await page.click('button[data-observer-view="world"]');
+
+  const afterCooldown = await advanceOneQuarter(page);
+  assert.equal(afterCooldown.mandate.available, 6);
+  assert.equal(afterCooldown.mandate.usedThisTurn, false);
+  const afterManual = await advanceTo(page, 4);
+  assert.equal(afterManual.time.turn, 4);
+  assert.equal(
+    afterManual.lastTurnLedger.population.end,
+    afterManual.lastTurnLedger.population.start
+      + afterManual.lastTurnLedger.population.births
+      - afterManual.lastTurnLedger.population.civilianDeaths
+      - afterManual.lastTurnLedger.population.militaryDeaths,
+    '人口账本必须守恒闭合',
+  );
+  assert.ok(afterManual.totals.activeTradeCorridors > 0);
+  assert.ok(afterManual.lastTurnLedger.trade.shipments > 0);
+  assert.ok(afterManual.lastTurnLedger.migration.departed > 0);
+  assert.ok(afterManual.lastTurnLedger.health.infectiousEnd >= 0);
+  assert.ok(Array.isArray(afterManual.lastTurnLedger.knowledge.prototypeIds));
+  assert.ok(Array.isArray(afterManual.lastTurnLedger.maritime.fleetIds));
+  assert.ok(afterManual.lastTurnLedger.logistics.seaUsage > 0);
+  const chronicleScroll = await page.locator('.observer-chronicle__list').evaluate((element) => ({
+    left: element.scrollLeft,
+    maximum: element.scrollWidth - element.clientWidth,
+  }));
+  assert.equal(chronicleScroll.left, chronicleScroll.maximum, '史册应自动展示最新事件');
+  const hashBeforeBrowsing = afterManual.deterministicWorldHash;
+
+  const afterHistoryBrowse = await exerciseHistoryWorkbench(page, afterManual);
+  assert.equal(afterHistoryBrowse.deterministicWorldHash, hashBeforeBrowsing);
+
+  await selectLayer(page, 'trade');
+  assert.ok((await snapshot(page)).interface.topFlows.length > 0);
+  await selectFirstMapObject(page, 'tradeCorridor', '商路档案');
+
+  await selectLayer(page, 'migration');
+  assert.ok((await snapshot(page)).interface.topFlows.length > 0);
+  await selectFirstMapObject(page, 'migration', '迁徙档案');
+
+  await selectLayer(page, 'disease');
+  await selectFirstMapObject(page, 'outbreak', '疫病档案');
+
+  await selectLayer(page, 'knowledge');
+  await selectFirstMapObject(page, 'practice', '知识档案');
+
+  await selectLayer(page, 'food');
+  assert.equal(await page.locator('.world-map').getAttribute('data-overlay'), 'food');
+  await selectLayer(page, 'population');
+  await selectLayer(page, 'war');
+
+  const references = await findThreeClickCausalPath(page);
+  assert.ok(await references.locator('button').count());
+  await references.locator('button').first().click();
+  await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
+  const causalTarget = await snapshot(page);
+  assert.ok(['region', 'country', 'family', 'person', 'seaZone', 'fleet', 'tradeCorridor', 'practice', 'outbreak', 'migration'].includes(causalTarget.interface.selectedDetail.kind));
+
+  await page.click('button[data-observer-view="polities"]');
+  await page.waitForSelector('.roster-panel[data-roster-title="天下列国"]');
+  await page.locator('.roster-panel button[data-roster-id]').first().click();
+  await page.getByRole('tab', { name: '海贸' }).click();
+  const selectedCountry = await snapshot(page);
+  assert.equal(selectedCountry.interface.selectedDetail.kind, 'country');
+  assert.equal(typeof selectedCountry.interface.selectedDetail.tradeRevenue, 'number');
+  assert.ok(Array.isArray(selectedCountry.interface.selectedDetail.maritimeAssets.fleets));
+
+  await page.click('button[data-observer-view="families"]');
+  await page.waitForSelector('.roster-panel[data-roster-title="天下世家"]');
+  await page.locator('.roster-panel button[data-roster-id]').first().click();
+  const selectedFamily = await snapshot(page);
+  assert.equal(selectedFamily.interface.selectedDetail.kind, 'family');
+  assert.ok(selectedFamily.interface.selectedDetail.members.length > 0);
+  assert.ok(selectedFamily.visibleFamilies.length > 0);
+
+  await page.click('button[data-observer-view="people"]');
+  await page.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
+  const personRows = page.locator('.roster-panel button[data-roster-id]');
+  await personRows.first().click();
+  let selectedPerson = await snapshot(page);
+  for (let index = 1; !selectedPerson.interface.selectedDetail.relationships?.length && index < Math.min(20, await personRows.count()); index += 1) {
+    await personRows.nth(index).click();
+    selectedPerson = await snapshot(page);
+  }
+  assert.equal(selectedPerson.interface.selectedDetail.kind, 'person');
+  assert.ok(selectedPerson.interface.selectedDetail.biography.length > 0);
+  assert.ok(selectedPerson.interface.selectedDetail.relationships?.length > 0, '人物名录中应有可观察的关系网络');
+  await page.getByRole('tab', { name: '关系' }).click();
+  const relationshipMap = page.locator('.observer-relationship-map');
+  await relationshipMap.waitFor();
+  const relationshipNodes = relationshipMap.locator('[role="button"]');
+  assert.ok(await relationshipNodes.count(), '人物关系星图应提供可键盘操作的相关人物');
+  const relationshipHash = selectedPerson.deterministicWorldHash;
+  const relationshipSourceId = selectedPerson.interface.selected.id;
+  await relationshipNodes.first().focus();
+  await page.screenshot({ path: `${ARTIFACT_DIR}/relationship-constellation.png`, fullPage: true });
+  await page.keyboard.press('Enter');
+  const relatedPerson = await waitForSnapshot(page, (state, sourceId) => (
+    state.interface.selected?.kind === 'person' && state.interface.selected.id !== sourceId
+  ), relationshipSourceId);
+  assert.equal(relatedPerson.deterministicWorldHash, relationshipHash, '关系星图跳转不得改变世界哈希');
+
+  const observedText = await snapshotText(page);
+  const observed = JSON.parse(observedText);
+  assert.equal(observed.deterministicWorldHash, hashBeforeBrowsing, '纯观察操作不应改变世界哈希');
+  assert.equal(observed.observer.guideCompleted, 5, '首次试玩的五项真实操作应全部完成');
+  assert.ok(Buffer.byteLength(observedText, 'utf8') < SNAPSHOT_LIMIT, '对象档案展开后文本快照仍须小于128KiB');
+
+  await page.locator('button[data-observer-desk-trigger="true"]').click();
+  const completedGuide = page.locator('.observer-desk [role="progressbar"]');
+  await completedGuide.waitFor();
+  assert.equal(await completedGuide.getAttribute('aria-valuenow'), '5');
+  assert.match(await page.locator('.observer-desk__guide footer').textContent(), /已掌握观察世界的基本方法/);
+  await page.keyboard.press('Escape');
+  await page.waitForSelector('.observer-desk', { state: 'detached' });
+
+  const collectionResult = await exerciseWorldCollectionIfAvailable(page);
+  if (collectionResult.tested) {
+    assert.equal((await snapshot(page)).deterministicWorldHash, hashBeforeBrowsing, '读取收藏应恢复已命名分支');
+  }
+
+  await page.click('button[aria-label="保存当前世界"]');
+  await page.waitForTimeout(500);
+  await page.click('button[aria-label="返回世界书页"]');
+  await page.waitForSelector('#continue-world');
+  assert.equal(await page.locator('.observer-app').evaluate((element) => element.inert), true);
+  await page.click('#continue-world');
+  await page.waitForSelector('.world-map__canvas');
+  const reloaded = await snapshot(page);
+  assert.equal(reloaded.productVersion, '1.0.0');
+  assert.equal(reloaded.worldSchemaVersion, 3);
+  assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 3存档续读应恢复完全相同的世界');
+  assert.deepEqual(desktopErrors, []);
+
+  const mobileContext = await browser.newContext({ viewport: { width: 390, height: 844 } });
+  const mobilePage = await mobileContext.newPage();
+  const mobileErrors = [];
+  collectBrowserErrors(mobilePage, mobileErrors);
+  await openFreshWorld(mobilePage);
+  assert.equal((await snapshot(mobilePage)).productVersion, '1.0.0');
+  assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
+
+  await mobilePage.locator('button[data-observer-desk-trigger="true"]').click();
+  const mobileObserverDesk = mobilePage.locator('.observer-desk');
+  await mobileObserverDesk.waitFor();
+  await assertWithinViewport(mobilePage, '.observer-desk', '移动端观察台不可横向溢出');
+  await waitForVisualSettled(mobileObserverDesk);
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-observer-desk-390x844.png`, fullPage: true });
+  await mobilePage.keyboard.press('Escape');
+  await mobileObserverDesk.waitFor({ state: 'detached' });
+
+  await mobilePage.locator('button[data-history-workbench-trigger="true"]').click();
+  const mobileHistory = mobilePage.locator('.history-workbench');
+  await mobileHistory.waitFor();
+  await assertWithinViewport(mobilePage, '.history-workbench', '移动端历史工作台不可横向溢出');
+  await waitForVisualSettled(mobileHistory);
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-history-390x844.png`, fullPage: true });
+  await mobilePage.keyboard.press('Escape');
+  await mobileHistory.waitFor({ state: 'detached' });
+
+  const mobileCollectionTrigger = mobilePage.locator('button[data-world-collection-trigger="true"], button[aria-label^="打开世界收藏"]');
+  if (await mobileCollectionTrigger.count()) {
+    await mobileCollectionTrigger.first().click();
+    const mobileCollection = mobilePage.locator('.world-collection');
+    await mobileCollection.waitFor();
+    await assertWithinViewport(mobilePage, '.world-collection', '移动端世界收藏不可横向溢出');
+    await waitForVisualSettled(mobileCollection);
+    await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-world-collection-390x844.png`, fullPage: true });
+    await mobilePage.keyboard.press('Escape');
+    await mobileCollection.waitFor({ state: 'detached' });
+  }
+
+  await mobilePage.locator('button[data-mandate-trigger="true"]').click();
+  const mobileMandate = mobilePage.locator('.mandate-panel');
+  await mobileMandate.waitFor();
+  await mobilePage.waitForFunction(() => {
+    const panel = document.querySelector('.mandate-panel');
+    if (!panel) return false;
+    const bounds = panel.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= window.innerWidth + 1;
+  });
+  const mandateBounds = await mobileMandate.boundingBox();
+  assert.ok(mandateBounds && mandateBounds.x >= 0 && mandateBounds.x + mandateBounds.width <= 391, '移动端天意窄页不可横向溢出');
+  assert.match(await mobileMandate.textContent(), /先在舆图或名录中选择/);
+  await mobilePage.keyboard.press('Escape');
+  await mobileMandate.waitFor({ state: 'detached' });
+  assert.equal(await mobilePage.evaluate(() => document.activeElement?.getAttribute('data-mandate-trigger')), 'true');
+  await auditLayerDialog(mobilePage, true);
+  await selectLayer(mobilePage, 'disease');
+  await selectFirstMapObject(mobilePage, 'outbreak', '疫病档案');
+  await mobilePage.waitForFunction(() => {
+    const inspector = document.querySelector('.observer-inspector');
+    if (!inspector) return false;
+    const bounds = inspector.getBoundingClientRect();
+    return bounds.left >= 0 && bounds.right <= window.innerWidth + 1;
+  });
+  const inspectorBounds = await mobilePage.locator('.observer-inspector').boundingBox();
+  assert.ok(inspectorBounds && inspectorBounds.x >= 0 && inspectorBounds.x + inspectorBounds.width <= 391, '移动端对象档案不可横向溢出');
+  const mobileText = await snapshotText(mobilePage);
+  assert.ok(Buffer.byteLength(mobileText, 'utf8') < SNAPSHOT_LIMIT);
+  assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
+  assert.deepEqual(mobileErrors, []);
+
+  await mobileContext.close();
+  await desktopContext.close();
+  process.stdout.write(`E2E V1 passed: turn ${reloaded.time.turn}, hash ${reloaded.deterministicWorldHash}, snapshot ${Buffer.byteLength(observedText, 'utf8')} bytes, collection ${collectionResult.tested ? 'covered' : 'not wired'}\n`);
+} finally {
+  await browser?.close();
+  await server.close();
+}

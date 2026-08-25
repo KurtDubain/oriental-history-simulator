@@ -1,0 +1,1734 @@
+import {
+  Archive,
+  Download,
+  Eye,
+  Expand,
+  Info,
+  Library,
+  RotateCcw,
+  Save,
+  Sparkles,
+  X,
+} from 'lucide-react';
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type ReactNode,
+} from 'react';
+import { CausalDrawer, type CausalFactor, type CausalReference } from './components/CausalDrawer';
+import { Chronicle, type ChronicleEvent } from './components/Chronicle';
+import { HistoryWorkbench } from './components/HistoryWorkbench';
+import { Inspector } from './components/Inspector';
+import { MandatePanel, type MandateMessage, type MandateTarget } from './components/MandatePanel';
+import { ObserverDesk } from './components/ObserverDesk';
+import {
+  HistoricalArchive,
+  type ArchiveDossier,
+  type ArchiveEntityKind,
+} from './components/HistoricalArchive';
+import {
+  NavigationRail,
+  type MapOverlay,
+  type ObserverView,
+} from './components/NavigationRail';
+import { RosterPanel, type RosterItem } from './components/RosterPanel';
+import { TopBar, type PlaybackSpeed } from './components/TopBar';
+import { WorldMap } from './components/WorldMap';
+import { WorldCollectionPanel } from './components/WorldCollectionPanel';
+import { WorldStart } from './components/WorldStart';
+import {
+  deleteWorldSlot,
+  downloadWorld,
+  duplicateWorldSlot,
+  listWorldSaves,
+  loadWorld,
+  loadWorldFromSlot,
+  readWorldFile,
+  renameWorldSlot,
+  saveWorld,
+  saveWorldToSlot,
+  type WorldSaveSummary,
+} from './persistence/storage';
+import {
+  advanceWorld,
+  applyV03Intervention,
+  availableMandate,
+  createWorld,
+  deserializeWorld,
+  isV03InterventionEvent,
+  serializeWorld,
+  validateWorld,
+  type V03InterventionAction,
+  type WorldState,
+} from './sim';
+import {
+  familyRoster,
+  militaryRoster,
+  peopleRoster,
+  polityRoster,
+  toCausalEvent,
+  toChronicleEvent,
+  toCountryInspector,
+  toCountryArchive,
+  toFamilyArchive,
+  toFamilyInspector,
+  toMapArmies,
+  toMapFleets,
+  toMapFlows,
+  toMapMarkers,
+  toMapRegions,
+  toMapRoutes,
+  toMapSeaZones,
+  toPersonInspector,
+  toPersonArchive,
+  toRegionInspector,
+  toSystemInspector,
+} from './view/adapters';
+import {
+  type HistoricalTerritoryView,
+} from './view/v1-history';
+import {
+  OBSERVER_DESK_STORAGE_KEY,
+  applyObserverEventAlerts,
+  completeObserverGuideStep,
+  createObserverDeskSettings,
+  evaluateObserverPause,
+  historyEventToPauseCandidate,
+  observerGuideProgress,
+  observerWatchKey,
+  parseObserverDeskSettings,
+  removeObserverWatch,
+  serializeObserverDeskSettings,
+  upsertObserverWatch,
+  type ObserverDeskSettings,
+  type ObserverGuideStepId,
+  type ObserverPauseMatch,
+  type ObserverWatchItem,
+} from './view/v1-observer';
+import './styles/app.css';
+
+type Selection =
+  | { kind: 'region'; id: string }
+  | { kind: 'country'; id: string }
+  | { kind: 'family'; id: string }
+  | { kind: 'person'; id: string }
+  | { kind: 'seaZone'; id: string }
+  | { kind: 'fleet'; id: string }
+  | { kind: 'tradeCorridor'; id: string }
+  | { kind: 'practice'; id: string }
+  | { kind: 'outbreak'; id: string }
+  | { kind: 'migration'; id: string }
+  | null;
+
+type AdvanceSource = 'manual' | 'auto';
+
+const DEFAULT_SEED = '沧衡-甲子';
+const BASE_AUTOPLAY_INTERVAL = 1_800;
+const compact = new Intl.NumberFormat('zh-CN', {
+  notation: 'compact',
+  maximumFractionDigits: 1,
+});
+
+const HISTORY_COLORS: Record<string, string> = {
+  世界: '#777267',
+  人口: '#6b765f',
+  经济: '#8b743f',
+  政治: '#8f3d33',
+  军事: '#6e4741',
+  外交: '#556f70',
+  海洋: '#526e75',
+  疾病: '#9b3c31',
+  知识: '#697255',
+  迁徙: '#796953',
+};
+
+function historyRoster(world: WorldState): RosterItem[] {
+  return world.history
+    .slice(-72)
+    .reverse()
+    .map((event) => ({
+      id: event.id,
+      title: event.title,
+      subtitle: `第 ${event.year} 年·${event.season} · ${event.category}`,
+      meta: `${event.causes.length} 条因由`,
+      accent: HISTORY_COLORS[event.category],
+      alert: event.importance >= 4,
+    }));
+}
+
+function assertValidWorld(candidate: WorldState): WorldState {
+  const violations = validateWorld(candidate);
+  if (violations.length) {
+    throw new Error(`世界校验失败：${violations.slice(0, 3).map((item) => item.message).join('；')}`);
+  }
+  return candidate;
+}
+
+function selectedEntityLabel(world: WorldState, selection: Selection): string | null {
+  if (!selection) return null;
+  if (selection.kind === 'region') return world.regions.find((item) => item.id === selection.id)?.name ?? null;
+  if (selection.kind === 'country') return world.polities.find((item) => item.id === selection.id)?.name ?? null;
+  if (selection.kind === 'family') return world.families?.find((item) => item.id === selection.id)?.name ?? null;
+  if (selection.kind === 'person') return world.characters.find((item) => item.id === selection.id)?.name ?? null;
+  if (selection.kind === 'seaZone') return world.seaZones.find((item) => item.id === selection.id)?.name ?? null;
+  if (selection.kind === 'fleet') return world.fleets.find((item) => item.id === selection.id)?.name ?? null;
+  if (selection.kind === 'practice') return world.practices.find((item) => item.id === selection.id)?.name ?? null;
+  const system = toSystemInspector(world, selection.kind, selection.id);
+  return system?.name ?? null;
+}
+
+function observerStorageKey(seed: string): string {
+  return `${OBSERVER_DESK_STORAGE_KEY}:${encodeURIComponent(seed)}`;
+}
+
+function availableCollectionSlot(prefix: string, saves: WorldSaveSummary[]): string {
+  const occupied = new Set(saves.filter((save) => !save.isAutosave).map((save) => save.slot));
+  for (let index = 1; index <= 99; index += 1) {
+    const candidate = index === 1 ? prefix : `${prefix}_${index}`;
+    if (!occupied.has(candidate)) return candidate;
+  }
+  throw new Error('无法分配新的世界收藏槽位。');
+}
+
+function watchItemForSelection(world: WorldState, selection: Exclude<Selection, null>): ObserverWatchItem | null {
+  const label = selectedEntityLabel(world, selection);
+  if (!label) return null;
+  let detail = '等待下一条相关史事';
+  if (selection.kind === 'country') {
+    const item = world.polities.find((candidate) => candidate.id === selection.id);
+    if (item) detail = `${item.alive ? item.governmentForm : '已亡政权'} · ${item.controlledRegionIds.length}州域`;
+  } else if (selection.kind === 'family') {
+    const item = world.families.find((candidate) => candidate.id === selection.id);
+    if (item) detail = `${item.memberIds.length}名成员 · 声望${Math.round(item.prestige)}`;
+  } else if (selection.kind === 'person') {
+    const item = world.characters.find((candidate) => candidate.id === selection.id);
+    if (item) detail = `${item.alive ? item.role : '已故'} · ${item.age}岁 · 影响${Math.round(item.influence)}`;
+  } else if (selection.kind === 'region') {
+    const item = world.regions.find((candidate) => candidate.id === selection.id);
+    const owner = item ? world.polities.find((candidate) => candidate.id === item.controllerId) : null;
+    if (item) detail = `${owner?.name ?? '无主'} · 人口${compact.format(item.population)} · 动荡${Math.round(item.unrest)}`;
+  } else {
+    const system = toSystemInspector(world, selection.kind, selection.id);
+    if (system) detail = system.subtitle;
+  }
+  return { kind: selection.kind, id: selection.id, label, detail, alert: false };
+}
+
+interface SnapshotOptions {
+  startOpen: boolean;
+  running: boolean;
+  speed: PlaybackSpeed;
+  view: ObserverView;
+  overlay: MapOverlay;
+  selection: Selection;
+  selectedEventId: string | null;
+  archiveOpen: boolean;
+  mandateOpen: boolean;
+  observerDeskOpen: boolean;
+  historyWorkbenchOpen: boolean;
+  historicalTurn: number | null;
+  watchedCount: number;
+  guideCompleted: number;
+  pauseReason: string | null;
+  collectionOpen: boolean;
+  worldSaveCount: number;
+}
+
+function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
+  if (!world) {
+    return JSON.stringify({
+      mode: 'start',
+      productVersion: '1.0.0',
+      title: '沧衡纪',
+      seedInputVisible: options.startOpen,
+      collectionOpen: options.collectionOpen,
+      worldSaveCount: options.worldSaveCount,
+      actions: ['开启新纪', '续读旧史', '世界收藏', '导入史册'],
+    });
+  }
+
+  const selected = options.selection ? { ...options.selection, label: selectedEntityLabel(world, options.selection) } : null;
+  const polityName = (id: string) => world.polities.find((item) => item.id === id)?.name ?? id;
+  const regionName = (id: string | null) => world.regions.find((item) => item.id === id)?.name ?? id;
+  const characterName = (id: string) => world.characters.find((item) => item.id === id)?.name ?? id;
+  const families = Array.isArray(world.families) ? world.families : [];
+  const relationships = Array.isArray(world.relationships) ? world.relationships : [];
+  const factions = Array.isArray(world.factions) ? world.factions : [];
+  const diplomacy = Array.isArray(world.diplomacy) ? world.diplomacy : [];
+  const familyName = (id: string | null | undefined) => families.find((item) => item.id === id)?.name ?? id ?? null;
+  let selectedDetail: object | null = null;
+  if (options.selection?.kind === 'region') {
+    const item = world.regions.find((region) => region.id === options.selection?.id);
+    if (item) selectedDetail = {
+      kind: 'region',
+      id: item.id,
+      name: item.name,
+      terrain: item.terrain,
+      climate: item.climate,
+      controller: polityName(item.controllerId),
+      population: item.population,
+      food: item.food,
+      foodSeasons: Number((item.food / Math.max(1, item.population)).toFixed(2)),
+      wealth: item.wealth,
+      cityLevel: item.cityLevel,
+      defense: item.defense,
+      unrest: item.unrest,
+      devastation: item.devastation,
+    };
+  } else if (options.selection?.kind === 'country') {
+    const item = world.polities.find((polity) => polity.id === options.selection?.id);
+    if (item) selectedDetail = {
+      kind: 'country',
+      id: item.id,
+      name: item.name,
+      alive: item.alive,
+      dynasty: item.dynastyName,
+      ruler: characterName(item.rulerId),
+      capital: regionName(item.capitalRegionId),
+      regions: item.controlledRegionIds.map((id) => regionName(id)),
+      treasury: item.treasury,
+      legitimacy: item.legitimacy,
+      authority: item.authority,
+      administration: item.administration,
+      warWeariness: item.warWeariness,
+      governmentForm: item.governmentForm,
+      rulingFamily: familyName(item.rulingFamilyId),
+      courtInfluence: item.courtInfluence,
+      tradeRevenue: item.tradeRevenue,
+      navalBudget: item.navalBudget,
+      maritimeOrientation: item.maritimeOrientation,
+      maritimeAssets: {
+        fleets: world.fleets.filter((fleet) => fleet.polityId === item.id).map((fleet) => fleet.id),
+        ports: world.ports
+          .filter((port) => world.regions.find((region) => region.id === port.regionId)?.controllerId === item.id)
+          .map((port) => port.id),
+      },
+      factions: factions.filter((entry) => entry.polityId === item.id && entry.active !== false).map((entry) => ({
+        id: entry.id,
+        name: entry.name,
+        kind: entry.kind,
+        leader: characterName(entry.leaderId),
+        power: entry.power,
+        cohesion: entry.cohesion,
+        agenda: entry.agenda,
+      })),
+      diplomacy: diplomacy.filter((entry) => entry.polityAId === item.id || entry.polityBId === item.id).map((entry) => ({
+        with: polityName(entry.polityAId === item.id ? entry.polityBId : entry.polityAId),
+        status: entry.status,
+        trust: entry.trust,
+        grievance: entry.grievance,
+        tradeDependency: entry.tradeDependency,
+      })),
+    };
+  } else if (options.selection?.kind === 'family') {
+    const item = families.find((candidate) => candidate.id === options.selection?.id);
+    if (item) selectedDetail = {
+      kind: 'family',
+      id: item.id,
+      name: item.name,
+      polity: polityName(item.polityId),
+      founder: characterName(item.founderId),
+      head: characterName(item.headId),
+      branch: item.branchName,
+      members: item.memberIds.map(characterName),
+      prestige: item.prestige,
+      wealth: item.wealth,
+      politicalInfluence: item.politicalInfluence,
+      traditions: item.traditions,
+      marriageAlliances: item.marriageAllianceFamilyIds.map(familyName),
+      historyEventIds: world.history
+        .filter((event) => event.actorIds.some((id) => item.memberIds.includes(id))
+          || event.stateDeltas.some((delta) => delta.entityType === 'family' && delta.entityId === item.id))
+        .map((event) => event.id),
+    };
+  } else if (options.selection?.kind === 'person') {
+    const item = world.characters.find((character) => character.id === options.selection?.id);
+    if (item) selectedDetail = {
+      kind: 'person',
+      id: item.id,
+      name: item.name,
+      alive: item.alive,
+      age: item.age,
+      sex: item.sex,
+      polity: polityName(item.polityId),
+      role: item.role,
+      location: regionName(item.locationRegionId),
+      governedRegion: regionName(item.governedRegionId),
+      commandingArmyId: item.commandingArmyId,
+      abilities: { leadership: item.leadership, governance: item.governance, cunning: item.cunning },
+      personality: { ambition: item.ambition, loyalty: item.loyalty, caution: item.caution },
+      renown: item.renown,
+      lifeStage: item.lifeStage,
+      politicalClass: item.politicalClass,
+      tier: item.tier,
+      family: familyName(item.familyId),
+      parents: (item.parentIds ?? []).map(characterName),
+      spouses: (item.spouseIds ?? []).map(characterName),
+      influence: item.influence,
+      personalWealth: item.personalWealth,
+      merit: item.merit,
+      deputyExperience: item.deputyExperience,
+      insubordination: item.insubordination,
+      biography: Array.isArray(item.biography) ? item.biography.slice(-20) : [],
+      relationships: relationships
+        .filter((entry) => entry.sourceId === item.id || entry.targetId === item.id)
+        .slice(0, 10)
+        .map((entry) => ({
+          with: characterName(entry.sourceId === item.id ? entry.targetId : entry.sourceId),
+          kinship: entry.kinship,
+          affinity: entry.affinity,
+          trust: entry.trust,
+          fear: entry.fear,
+          grievance: entry.grievance,
+          gratitude: entry.gratitude,
+          memories: entry.memories,
+        })),
+    };
+  } else if (options.selection) {
+    const system = toSystemInspector(world, options.selection.kind, options.selection.id);
+    if (system) selectedDetail = system;
+  }
+  const selectedEvent = options.selectedEventId
+    ? world.history.find((event) => event.id === options.selectedEventId)
+    : undefined;
+  const selectedEventDetail = selectedEvent ? {
+    id: selectedEvent.id,
+    date: `${selectedEvent.year}年${selectedEvent.season}`,
+    category: selectedEvent.category,
+    kind: selectedEvent.kind,
+    title: selectedEvent.title,
+    summary: selectedEvent.summary,
+    importance: selectedEvent.importance,
+    actors: selectedEvent.actorIds.map(characterName),
+    polities: selectedEvent.polityIds.map(polityName),
+    regions: selectedEvent.regionIds.map((id) => regionName(id)),
+    causes: selectedEvent.causes.map((cause) => ({ label: cause.label, role: cause.role, evidence: cause.evidence, refs: cause.refs ?? [] })),
+    stateDeltas: selectedEvent.stateDeltas.slice(0, 12),
+  } : null;
+  const visibleRoster = options.view === 'polities'
+    ? polityRoster(world)
+    : options.view === 'families'
+      ? familyRoster(world)
+      : options.view === 'people'
+        ? peopleRoster(world)
+        : options.view === 'military'
+          ? militaryRoster(world)
+          : options.view === 'chronicle'
+            ? historyRoster(world)
+            : [];
+  const topFlows = (options.historicalTurn === null ? toMapFlows(world, options.overlay) : []).map((flow) => ({
+    id: flow.id,
+    kind: flow.kind,
+    from: [flow.from.x, flow.from.y],
+    to: [flow.to.x, flow.to.y],
+    magnitude: flow.magnitude,
+    label: flow.label,
+    target: { kind: flow.selectedKind, id: flow.selectedId },
+  }));
+  const importantRegions = world.regions
+    .slice()
+    .sort((left, right) => Number(left.id === options.selection?.id) - Number(right.id === options.selection?.id)
+      || right.strategicValue - left.strategicValue)
+    .slice(0, 40);
+  const report = world.lastTurn;
+  const interventionHistory = world.history.filter(isV03InterventionEvent);
+  const latestIntervention = interventionHistory.at(-1);
+  return JSON.stringify({
+    mode: options.startOpen ? 'world-menu' : 'observing',
+    productVersion: '1.0.0',
+    worldSchemaVersion: world.schemaVersion,
+    mapContentVersion: world.mapContentVersion,
+    coordinates: 'map world coordinates use origin top-left, x rightward, y downward, range 1000x700',
+    time: { turn: world.turn, year: world.year, season: world.season },
+    deterministicWorldHash: world.hash,
+    seed: world.seed,
+    playback: { running: options.running, speed: options.speed },
+    observer: {
+      deskOpen: options.observerDeskOpen,
+      historyWorkbenchOpen: options.historyWorkbenchOpen,
+      historicalTurn: options.historicalTurn,
+      watchedCount: options.watchedCount,
+      guideCompleted: options.guideCompleted,
+      lastPauseReason: options.pauseReason,
+      collectionOpen: options.collectionOpen,
+      worldSaveCount: options.worldSaveCount,
+    },
+    interface: {
+      view: options.view,
+      overlay: options.overlay,
+      selected,
+      selectedEventId: options.selectedEventId,
+      archiveOpen: options.archiveOpen,
+      mandateOpen: options.mandateOpen,
+      selectedDetail,
+      selectedEvent: selectedEventDetail,
+      visibleRoster: visibleRoster.slice(0, 60),
+      rosterTotal: visibleRoster.length,
+      topFlows,
+    },
+    mandate: {
+      available: availableMandate(world),
+      cadence: 'once_per_quarter',
+      usedThisTurn: latestIntervention?.turn === world.turn,
+      recentIntervention: latestIntervention ? {
+        id: latestIntervention.id,
+        kind: latestIntervention.kind,
+        turn: latestIntervention.turn,
+        date: `${latestIntervention.year}年${latestIntervention.season}`,
+        title: latestIntervention.title,
+        summary: latestIntervention.summary,
+        costEvidence: latestIntervention.causes.find((cause) => cause.label === '天命消耗')?.evidence ?? null,
+        stateDeltas: latestIntervention.stateDeltas.slice(0, 8),
+      } : null,
+    },
+    totals: {
+      regions: world.regions.length,
+      livingPolities: world.polities.filter((item) => item.alive).length,
+      livingCharacters: world.characters.filter((item) => item.alive).length,
+      families: families.length,
+      armies: world.armies.length,
+      fleets: world.fleets.length,
+      seaZones: world.seaZones.length,
+      ports: world.ports.length,
+      activeTradeCorridors: world.tradeCorridors.filter((item) => item.active).length,
+      activeOutbreaks: world.infections.filter((item) => item.infectious > 0).length,
+      infectious: world.infections.reduce((sum, item) => sum + item.infectious, 0),
+      knownPractices: new Set(world.practiceStates.filter((item) => item.mastery > 0 && item.lostTurn === null).map((item) => item.practiceId)).size,
+      migrationsThisTurn: report?.trade.shipments.filter((item) => item.kind === '迁徙').length ?? 0,
+      activeWars: world.wars.filter((item) => item.active).length,
+      population: world.regions.reduce((sum, item) => sum + item.population, 0)
+        + world.armies.reduce((sum, item) => sum + item.soldiers, 0),
+    },
+    recentHistory: world.history.slice(-8).map((event) => ({
+      id: event.id,
+      date: `${event.year}年${event.season}`,
+      title: event.title,
+      importance: event.importance,
+      causes: event.causes.map((cause) => cause.evidence),
+    })),
+    visibleFamilies: options.view === 'families' ? families.slice(0, 60).map((item) => ({
+      id: item.id,
+      name: item.name,
+      polity: polityName(item.polityId),
+      head: characterName(item.headId),
+      members: item.memberIds.length,
+      prestige: item.prestige,
+      influence: item.politicalInfluence,
+    })) : [],
+    lastTurnLedger: report ? {
+      population: report.population,
+      food: report.food,
+      trade: {
+        shipments: report.trade.shipments.length,
+        deliveredValue: report.trade.valueTransferred,
+        tariffs: report.trade.tariffsTransferred,
+        produced: report.trade.produced,
+        consumed: report.trade.consumed,
+        lost: report.trade.lost,
+      },
+      migration: report.migration,
+      health: report.health,
+      knowledge: report.knowledge,
+      maritime: report.maritime,
+      logistics: { routeUsage: report.logistics.routeUsage.length, seaUsage: report.logistics.seaUsage.length },
+    } : null,
+    polities: world.polities.filter((item) => item.alive).slice(0, 16).map((item) => ({
+      id: item.id,
+      name: item.name,
+      ruler: characterName(item.rulerId),
+      capital: regionName(item.capitalRegionId),
+      regions: item.controlledRegionIds.length,
+      treasury: item.treasury,
+      legitimacy: item.legitimacy,
+      authority: item.authority,
+      administration: item.administration,
+      atWar: world.wars.some((war) => war.active && (war.attackerId === item.id || war.defenderId === item.id)),
+    })),
+    mapObjects: {
+      regions: importantRegions.map((region) => ({
+      id: region.id,
+      name: region.name,
+      center: [region.x, region.y],
+      controllerId: region.controllerId,
+      population: region.population,
+      foodSeasons: Number((region.food / Math.max(1, region.population)).toFixed(2)),
+      unrest: region.unrest,
+      })),
+      seaZones: world.seaZones.map((zone) => ({ id: zone.id, name: zone.name, center: [zone.x, zone.y], controllerId: zone.controllerId, contested: zone.contested, traffic: zone.traffic })),
+      fleets: world.fleets.slice(0, 24).map((fleet) => ({ id: fleet.id, name: fleet.name, polityId: fleet.polityId, seaZoneId: fleet.seaZoneId, portRegionId: fleet.portRegionId, mission: fleet.mission, readiness: fleet.readiness })),
+      armies: world.armies.slice(0, 24).map((army) => ({
+      id: army.id,
+      name: army.name,
+      polityId: army.polityId,
+      regionId: army.regionId,
+      soldiers: army.soldiers,
+      morale: army.morale,
+      supply: army.supply,
+      })),
+    },
+  });
+}
+
+export function App() {
+  const [world, setWorld] = useState<WorldState | null>(null);
+  const [seed, setSeed] = useState(DEFAULT_SEED);
+  const [startOpen, setStartOpen] = useState(true);
+  const [hasSave, setHasSave] = useState(false);
+  const [startBusy, setStartBusy] = useState(false);
+  const [startError, setStartError] = useState<string | null>(null);
+  const [fatalError, setFatalError] = useState<string | null>(null);
+  const [toast, setToast] = useState<string | null>(null);
+  const [running, setRunning] = useState(false);
+  const [speed, setSpeed] = useState<PlaybackSpeed>(1);
+  const [activeView, setActiveView] = useState<ObserverView>('world');
+  const [overlay, setOverlay] = useState<MapOverlay>('political');
+  const [selection, setSelection] = useState<Selection>(null);
+  const [followed, setFollowed] = useState<Set<string>>(() => new Set());
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [focusedArmyId, setFocusedArmyId] = useState<string | null>(null);
+  const [showGuide, setShowGuide] = useState(true);
+  const [archiveOpen, setArchiveOpen] = useState(false);
+  const [resumeArchiveAfterEvent, setResumeArchiveAfterEvent] = useState(false);
+  const [mandateOpen, setMandateOpen] = useState(false);
+  const [mandateBusy, setMandateBusy] = useState(false);
+  const [mandateMessage, setMandateMessage] = useState<MandateMessage | null>(null);
+  const [observerDeskOpen, setObserverDeskOpen] = useState(false);
+  const [observerSettings, setObserverSettings] = useState<ObserverDeskSettings>(() => createObserverDeskSettings());
+  const [pauseMatch, setPauseMatch] = useState<ObserverPauseMatch | null>(null);
+  const [historicalView, setHistoricalView] = useState<HistoricalTerritoryView | null>(null);
+  const [resumeHistoryAfterEvent, setResumeHistoryAfterEvent] = useState(false);
+  const [collectionOpen, setCollectionOpen] = useState(false);
+  const [collectionBusy, setCollectionBusy] = useState(false);
+  const [worldSaves, setWorldSaves] = useState<WorldSaveSummary[]>([]);
+
+  const worldRef = useRef<WorldState | null>(null);
+  const worldShellRef = useRef<HTMLElement>(null);
+  const runningRef = useRef(false);
+  const speedRef = useRef<PlaybackSpeed>(1);
+  const clockAccumulatorRef = useRef(0);
+  const externalClockUntilRef = useRef(0);
+  const advancingRef = useRef(false);
+  const archiveReturnFocusRef = useRef<HTMLElement | null>(null);
+  const archiveFocusRestoreAllowedRef = useRef(false);
+  const mandateTriggerRef = useRef<HTMLButtonElement>(null);
+  const observerDeskTriggerRef = useRef<HTMLButtonElement>(null);
+  const historyTriggerRef = useRef<HTMLButtonElement>(null);
+  const collectionTriggerRef = useRef<HTMLButtonElement>(null);
+  const collectionReturnFocusRef = useRef<HTMLElement | null>(null);
+  const observerSettingsRef = useRef(observerSettings);
+  const advanceRef = useRef<(source: AdvanceSource) => boolean>(() => false);
+  const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
+  const snapshotOptionsRef = useRef<SnapshotOptions>({
+    startOpen,
+    running,
+    speed,
+    view: activeView,
+    overlay,
+    selection,
+    selectedEventId,
+    archiveOpen,
+    mandateOpen,
+    observerDeskOpen,
+    historyWorkbenchOpen: activeView === 'chronicle',
+    historicalTurn: historicalView?.turn ?? null,
+    watchedCount: observerSettings.watchlist.length,
+    guideCompleted: observerGuideProgress(observerSettings).completed,
+    pauseReason: pauseMatch?.reason ?? null,
+    collectionOpen,
+    worldSaveCount: worldSaves.length,
+  });
+
+  const commitWorld = useCallback((nextWorld: WorldState) => {
+    worldRef.current = nextWorld;
+    setWorld(nextWorld);
+  }, []);
+
+  const refreshWorldSaves = useCallback(async () => {
+    const saves = await listWorldSaves();
+    setWorldSaves(saves);
+    setHasSave(saves.some((save) => save.isAutosave && save.status === 'ready'));
+    return saves;
+  }, []);
+
+  useEffect(() => {
+    refreshWorldSaves().catch(() => setHasSave(false));
+  }, [refreshWorldSaves]);
+
+  useEffect(() => {
+    observerSettingsRef.current = observerSettings;
+    setFollowed(new Set(observerSettings.watchlist.map((item) => observerWatchKey(item.kind, item.id))));
+    if (!world) return;
+    try {
+      localStorage.setItem(observerStorageKey(world.seed), serializeObserverDeskSettings(observerSettings));
+    } catch {
+      // Observer preferences are non-authoritative; a blocked localStorage must not stop play.
+    }
+  }, [observerSettings, world]);
+
+  useEffect(() => {
+    if (!world) return undefined;
+    const timeout = window.setTimeout(() => {
+      saveWorld(serializeWorld(world))
+        .then(() => setHasSave(true))
+        .catch((error: unknown) => {
+          setToast(error instanceof Error ? error.message : '本地史册保存失败。');
+        });
+    }, 380);
+    return () => window.clearTimeout(timeout);
+  }, [world]);
+
+  useEffect(() => {
+    if (!toast) return undefined;
+    const timeout = window.setTimeout(() => setToast(null), 3_600);
+    return () => window.clearTimeout(timeout);
+  }, [toast]);
+
+  useEffect(() => {
+    if (!worldShellRef.current) return;
+    worldShellRef.current.inert = startOpen || archiveOpen || mandateOpen || observerDeskOpen || collectionOpen || activeView === 'chronicle';
+  }, [activeView, archiveOpen, collectionOpen, mandateOpen, observerDeskOpen, startOpen, world]);
+
+  const openWorld = useCallback((nextWorld: WorldState) => {
+    const validWorld = assertValidWorld(nextWorld);
+    const defaultRegionId = validWorld.regions.find((region) => (
+      validWorld.polities.some((polity) => polity.alive && polity.capitalRegionId === region.id)
+    ))?.id ?? validWorld.regions[0]?.id;
+    let restoredObserver = createObserverDeskSettings();
+    try {
+      restoredObserver = parseObserverDeskSettings(localStorage.getItem(observerStorageKey(validWorld.seed)));
+    } catch {
+      // Continue with safe defaults when localStorage is unavailable.
+    }
+    restoredObserver = completeObserverGuideStep(restoredObserver, 'world-opened');
+    observerSettingsRef.current = restoredObserver;
+    setObserverSettings(restoredObserver);
+    commitWorld(validWorld);
+    setSeed(validWorld.seed);
+    const compactViewport = window.matchMedia('(max-width: 760px)').matches;
+    setSelection(!compactViewport && defaultRegionId ? { kind: 'region', id: defaultRegionId } : null);
+    setSelectedEventId(null);
+    setArchiveOpen(false);
+    setMandateOpen(false);
+    setObserverDeskOpen(false);
+    setCollectionOpen(false);
+    setMandateMessage(null);
+    setResumeArchiveAfterEvent(false);
+    archiveFocusRestoreAllowedRef.current = false;
+    setFocusedArmyId(null);
+    setFollowed(new Set(restoredObserver.watchlist.map((item) => observerWatchKey(item.kind, item.id))));
+    setPauseMatch(null);
+    setHistoricalView(null);
+    setResumeHistoryAfterEvent(false);
+    setActiveView('world');
+    setOverlay('political');
+    setStartOpen(false);
+    setStartError(null);
+    setFatalError(null);
+    setShowGuide(validWorld.turn === 0);
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+  }, [commitWorld]);
+
+  const handleCreate = useCallback(() => {
+    setStartBusy(true);
+    setStartError(null);
+    try {
+      openWorld(createWorld(seed.trim()));
+    } catch (error) {
+      setStartError(error instanceof Error ? error.message : '无法创建世界。');
+    } finally {
+      setStartBusy(false);
+    }
+  }, [openWorld, seed]);
+
+  const handleContinue = useCallback(async () => {
+    setStartBusy(true);
+    setStartError(null);
+    try {
+      const saved = await loadWorld();
+      if (!saved) throw new Error('没有找到可续读的本地史册。');
+      openWorld(deserializeWorld(saved.payload));
+    } catch (error) {
+      setStartError(error instanceof Error ? error.message : '无法读取本地史册。');
+    } finally {
+      setStartBusy(false);
+    }
+  }, [openWorld]);
+
+  const handleImport = useCallback(async (file: File) => {
+    setStartBusy(true);
+    setStartError(null);
+    try {
+      const payload = await readWorldFile(file);
+      openWorld(deserializeWorld(payload));
+      setToast('已导入史册，因果记录与世界状态均已恢复。');
+    } catch (error) {
+      setStartError(error instanceof Error ? error.message : '该文件无法作为史册读取。');
+    } finally {
+      setStartBusy(false);
+    }
+  }, [openWorld]);
+
+  const handleManualSave = useCallback(async () => {
+    const current = worldRef.current;
+    if (!current) return;
+    try {
+      await saveWorld(serializeWorld(current));
+      setHasSave(true);
+      await refreshWorldSaves();
+      setToast(`已将第 ${current.year} 年${current.season}的世界写入本地史册。`);
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '本地史册保存失败。');
+    }
+  }, [refreshWorldSaves]);
+
+  const handleOpenMandate = useCallback(() => {
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    setSelectedEventId(null);
+    setMandateMessage(null);
+    setMandateOpen(true);
+  }, []);
+
+  const handleCloseMandate = useCallback(() => {
+    setMandateOpen(false);
+    window.setTimeout(() => mandateTriggerRef.current?.focus(), 0);
+  }, []);
+
+  const handleApplyMandate = useCallback(async (action: V03InterventionAction): Promise<boolean> => {
+    const current = worldRef.current;
+    if (!current || mandateBusy) return false;
+    setMandateBusy(true);
+    setMandateMessage(null);
+    try {
+      const historyLength = current.history.length;
+      const next = assertValidWorld(applyV03Intervention(current, action));
+      const intervention = next.history.slice(historyLength).find(isV03InterventionEvent);
+      commitWorld(next);
+      try {
+        await saveWorld(serializeWorld(next));
+        setHasSave(true);
+        const result = intervention?.title ?? '有限天意已经写入世界';
+        setMandateMessage({ tone: 'success', text: `${result}。分支凭证与状态差量已存入史册。` });
+        setToast(`天意已落笔：${result}`);
+      } catch (error) {
+        const reason = error instanceof Error ? error.message : '本地史册保存失败';
+        setMandateMessage({ tone: 'error', text: `天意已经生效，但自动保存失败：${reason}。请手动导出史册。` });
+        setToast('天意已经生效，但本地保存失败。');
+      }
+      return true;
+    } catch (error) {
+      const reason = error instanceof Error ? error.message : '本次天意无法生效。';
+      setMandateMessage({ tone: 'error', text: reason });
+      setToast(reason);
+      return false;
+    } finally {
+      setMandateBusy(false);
+    }
+  }, [commitWorld, mandateBusy]);
+
+  const handleExport = useCallback(() => {
+    const current = worldRef.current;
+    if (!current) return;
+    downloadWorld(serializeWorld(current), `沧衡纪_${current.seed}_第${current.year}年${current.season}.json`);
+    setToast('已将完整世界、随机种子与因果史册导出。');
+  }, []);
+
+  const handleOpenCollection = useCallback(async () => {
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    setSelectedEventId(null);
+    collectionReturnFocusRef.current = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null;
+    setCollectionOpen(true);
+    setCollectionBusy(true);
+    try {
+      await refreshWorldSaves();
+    } catch (error) {
+      setToast(error instanceof Error ? error.message : '无法读取本机世界收藏。');
+    } finally {
+      setCollectionBusy(false);
+    }
+  }, [refreshWorldSaves]);
+
+  const handleCloseCollection = useCallback(() => {
+    setCollectionOpen(false);
+    requestAnimationFrame(() => {
+      const trigger = collectionTriggerRef.current
+        ?? document.querySelector<HTMLElement>('#open-world-collection');
+      trigger?.focus();
+    });
+  }, []);
+
+  const handleSaveCurrentToCollection = useCallback(async (label: string) => {
+    const current = worldRef.current;
+    if (!current) throw new Error('请先开启或读取一个世界，再收藏当前分支。');
+    setCollectionBusy(true);
+    try {
+      const saves = await listWorldSaves();
+      const slot = availableCollectionSlot(`world_${current.hash.slice(0, 8)}_t${current.turn}`, saves);
+      await saveWorldToSlot(serializeWorld(current), slot, label);
+      await refreshWorldSaves();
+      setToast(`“${label}”已存入世界收藏。`);
+    } finally {
+      setCollectionBusy(false);
+    }
+  }, [refreshWorldSaves]);
+
+  const handleLoadCollectionSlot = useCallback(async (slot: string) => {
+    setCollectionBusy(true);
+    try {
+      const saved = await loadWorldFromSlot(slot);
+      if (!saved) throw new Error('该世界槽位已经不存在。');
+      openWorld(deserializeWorld(saved.payload));
+      setToast(`已读取“${saved.label ?? '世界存档'}”。`);
+      await refreshWorldSaves();
+    } finally {
+      setCollectionBusy(false);
+    }
+  }, [openWorld, refreshWorldSaves]);
+
+  const handleRenameCollectionSlot = useCallback(async (slot: string, label: string) => {
+    setCollectionBusy(true);
+    try {
+      await renameWorldSlot(slot, label);
+      await refreshWorldSaves();
+      setToast(`世界已改名为“${label}”。`);
+    } finally {
+      setCollectionBusy(false);
+    }
+  }, [refreshWorldSaves]);
+
+  const handleDuplicateCollectionSlot = useCallback(async (sourceSlot: string) => {
+    setCollectionBusy(true);
+    try {
+      const saves = await listWorldSaves();
+      const source = saves.find((save) => save.slot === sourceSlot && save.status === 'ready');
+      if (!source) throw new Error('找不到要复制的世界。');
+      const baseHash = source.hash?.slice(0, 8) ?? 'branch';
+      const targetSlot = availableCollectionSlot(`branch_${baseHash}_t${source.turn ?? 0}`, saves);
+      const label = `${source.label.slice(0, 72)} · 分支`;
+      await duplicateWorldSlot(sourceSlot, targetSlot, label);
+      await refreshWorldSaves();
+      setToast(`已从“${source.label}”复制一个独立分支。`);
+    } finally {
+      setCollectionBusy(false);
+    }
+  }, [refreshWorldSaves]);
+
+  const handleDeleteCollectionSlot = useCallback(async (slot: string) => {
+    setCollectionBusy(true);
+    try {
+      await deleteWorldSlot(slot);
+      await refreshWorldSaves();
+      setToast('世界槽位已从本机移除；当前正在观察的世界未改变。');
+    } finally {
+      setCollectionBusy(false);
+    }
+  }, [refreshWorldSaves]);
+
+  const handleNewWorldMenu = useCallback(async () => {
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    const current = worldRef.current;
+    if (current) {
+      try {
+        await saveWorld(serializeWorld(current));
+        setHasSave(true);
+      } catch {
+        // The in-memory world remains intact and can still be exported.
+      }
+    }
+    setStartOpen(true);
+    setStartError(null);
+  }, []);
+
+  const advanceOne = useCallback((source: AdvanceSource): boolean => {
+    const current = worldRef.current;
+    if (!current || advancingRef.current) return false;
+    advancingRef.current = true;
+    try {
+      const oldHistoryLength = current.history.length;
+      const next = assertValidWorld(advanceWorld(current));
+      commitWorld(next);
+      const newEvents = next.history.slice(oldHistoryLength);
+      const pauseCandidates = newEvents.map(historyEventToPauseCandidate);
+      let nextObserverSettings = completeObserverGuideStep(observerSettingsRef.current, 'quarter-advanced');
+      nextObserverSettings = applyObserverEventAlerts(nextObserverSettings, pauseCandidates);
+      observerSettingsRef.current = nextObserverSettings;
+      setObserverSettings(nextObserverSettings);
+      const matchedPause = source === 'auto'
+        ? evaluateObserverPause(nextObserverSettings, pauseCandidates)
+        : null;
+      setPauseMatch(matchedPause);
+      if (matchedPause) {
+        runningRef.current = false;
+        setRunning(false);
+        clockAccumulatorRef.current = 0;
+        setToast(`${matchedPause.reason}：${matchedPause.eventTitle}。自动推演已暂停。`);
+      }
+      return true;
+    } catch (error) {
+      runningRef.current = false;
+      setRunning(false);
+      setFatalError(error instanceof Error ? error.message : '世界推演发生未知错误。');
+      return false;
+    } finally {
+      advancingRef.current = false;
+    }
+  }, [commitWorld]);
+  advanceRef.current = advanceOne;
+
+  const driveClock = useCallback((milliseconds: number) => {
+    if (!runningRef.current || milliseconds <= 0) return;
+    clockAccumulatorRef.current += Math.min(milliseconds, 60_000);
+    let steps = 0;
+    while (runningRef.current && steps < 32) {
+      const interval = BASE_AUTOPLAY_INTERVAL / speedRef.current;
+      if (clockAccumulatorRef.current < interval) break;
+      clockAccumulatorRef.current -= interval;
+      if (!advanceRef.current('auto')) break;
+      steps += 1;
+    }
+  }, []);
+
+  useEffect(() => {
+    let animationFrame = 0;
+    let lastTime = performance.now();
+    const tick = (now: number) => {
+      const elapsed = Math.min(250, Math.max(0, now - lastTime));
+      lastTime = now;
+      if (now >= externalClockUntilRef.current) driveClock(elapsed);
+      animationFrame = requestAnimationFrame(tick);
+    };
+    animationFrame = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(animationFrame);
+  }, [driveClock]);
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.repeat) return;
+      if (event.target instanceof HTMLElement && (
+        event.target.isContentEditable
+        || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(event.target.tagName)
+      )) return;
+      const key = event.key.toLowerCase();
+      if (key === 'f') {
+        event.preventDefault();
+        if (document.fullscreenElement) void document.exitFullscreen();
+        else void document.documentElement.requestFullscreen();
+        return;
+      }
+      const options = snapshotOptionsRef.current;
+      if (
+        options.startOpen
+        || options.archiveOpen
+        || options.mandateOpen
+        || options.observerDeskOpen
+        || options.collectionOpen
+        || options.historyWorkbenchOpen
+        || options.historicalTurn !== null
+        || options.selectedEventId
+      ) return;
+      if (key === 'n') {
+        event.preventDefault();
+        advanceRef.current('manual');
+      } else if (key === ' ') {
+        event.preventDefault();
+        setRunning((current) => {
+          const next = !current;
+          runningRef.current = next;
+          if (!next) clockAccumulatorRef.current = 0;
+          return next;
+        });
+      } else if (key === 'h') {
+        event.preventDefault();
+        runningRef.current = false;
+        setRunning(false);
+        clockAccumulatorRef.current = 0;
+        setActiveView('chronicle');
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
+  snapshotOptionsRef.current = {
+    startOpen,
+    running,
+    speed,
+    view: activeView,
+    overlay,
+    selection,
+    selectedEventId,
+    archiveOpen,
+    mandateOpen,
+    observerDeskOpen,
+    historyWorkbenchOpen: activeView === 'chronicle',
+    historicalTurn: historicalView?.turn ?? null,
+    watchedCount: observerSettings.watchlist.length,
+    guideCompleted: observerGuideProgress(observerSettings).completed,
+    pauseReason: pauseMatch?.reason ?? null,
+    collectionOpen,
+    worldSaveCount: worldSaves.length,
+  };
+  useEffect(() => {
+    window.render_game_to_text = () => makeTextSnapshot(worldRef.current, snapshotOptionsRef.current);
+    window.advanceTime = (milliseconds: number) => {
+      externalClockUntilRef.current = performance.now() + 1_000;
+      driveClock(Math.max(0, milliseconds));
+    };
+    return () => {
+      delete window.render_game_to_text;
+      delete window.advanceTime;
+    };
+  }, [driveClock]);
+
+  const handleToggleRunning = useCallback(() => {
+    if (historicalView) {
+      setToast('正在回望旧季；请先“归还当下”再继续推演。');
+      return;
+    }
+    setPauseMatch(null);
+    setRunning((current) => {
+      const next = !current;
+      runningRef.current = next;
+      if (!next) clockAccumulatorRef.current = 0;
+      return next;
+    });
+  }, [historicalView]);
+
+  const handleSpeedChange = useCallback((nextSpeed: PlaybackSpeed) => {
+    speedRef.current = nextSpeed;
+    setSpeed(nextSpeed);
+  }, []);
+
+  const commitObserverSettings = useCallback((nextSettings: ObserverDeskSettings) => {
+    observerSettingsRef.current = nextSettings;
+    setObserverSettings(nextSettings);
+  }, []);
+
+  const completeGuideStep = useCallback((step: ObserverGuideStepId) => {
+    commitObserverSettings(completeObserverGuideStep(observerSettingsRef.current, step));
+  }, [commitObserverSettings]);
+
+  const handleOverlayChange = useCallback((nextOverlay: MapOverlay) => {
+    setOverlay(nextOverlay);
+    if (nextOverlay !== 'political') completeGuideStep('overlay-switched');
+  }, [completeGuideStep]);
+
+  const handleViewChange = useCallback((nextView: ObserverView) => {
+    if (nextView === 'chronicle') {
+      runningRef.current = false;
+      setRunning(false);
+      clockAccumulatorRef.current = 0;
+      setSelectedEventId(null);
+    }
+    setActiveView(nextView);
+  }, []);
+
+  const handleOpenObserverDesk = useCallback(() => {
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    setSelectedEventId(null);
+    setObserverDeskOpen(true);
+  }, []);
+
+  const handleCloseObserverDesk = useCallback(() => {
+    setObserverDeskOpen(false);
+    window.setTimeout(() => observerDeskTriggerRef.current?.focus(), 0);
+  }, []);
+
+  const handleHistoricalTurnChange = useCallback((turn: number, view: HistoricalTerritoryView) => {
+    const current = worldRef.current;
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    setOverlay('political');
+    setHistoricalView(current && turn < current.turn ? view : null);
+  }, []);
+
+  const handleResetHistoricalView = useCallback(() => {
+    setHistoricalView(null);
+  }, []);
+
+  const handleFullscreen = useCallback(() => {
+    if (document.fullscreenElement) void document.exitFullscreen();
+    else void document.documentElement.requestFullscreen();
+  }, []);
+
+  const mapRegions = useMemo(() => {
+    if (!world) return [];
+    const current = toMapRegions(world);
+    if (!historicalView) return current;
+    const polities = new Map(world.polities.map((item) => [item.id, item]));
+    return current.map((region) => {
+      const controllerId = historicalView.controllerByRegionId[region.id];
+      const owner = controllerId ? polities.get(controllerId) : undefined;
+      return {
+        ...region,
+        polityId: owner?.id,
+        polityName: owner?.name,
+        polityColor: owner?.color,
+      };
+    });
+  }, [historicalView, world]);
+  const mapRoutes = useMemo(() => world ? toMapRoutes(world) : [], [world]);
+  const mapArmies = useMemo(() => world && !historicalView ? toMapArmies(world) : [], [historicalView, world]);
+  const mapSeaZones = useMemo(() => {
+    if (!world) return [];
+    const zones = toMapSeaZones(world);
+    return historicalView ? zones.map((zone) => ({
+      ...zone,
+      controllerName: undefined,
+      controllerColor: undefined,
+      contested: false,
+      traffic: 0,
+      powerShare: 0,
+    })) : zones;
+  }, [historicalView, world]);
+  const mapFleets = useMemo(() => world && !historicalView ? toMapFleets(world) : [], [historicalView, world]);
+  const mapFlows = useMemo(() => world && !historicalView ? toMapFlows(world, overlay) : [], [historicalView, overlay, world]);
+  const mapMarkers = useMemo(() => world && !historicalView ? toMapMarkers(world, overlay) : [], [historicalView, overlay, world]);
+  const polityItems = useMemo(() => world ? polityRoster(world) : [], [world]);
+  const familyItems = useMemo(() => world ? familyRoster(world) : [], [world]);
+  const peopleItems = useMemo(() => world ? peopleRoster(world) : [], [world]);
+  const militaryItems = useMemo(() => world ? militaryRoster(world) : [], [world]);
+  const recentChronicle = useMemo(() => world
+    ? world.history.slice(-8).map((event) => toChronicleEvent(world, event))
+    : [], [world]);
+  const selectedHistoryEvent = useMemo(() => (
+    world && selectedEventId ? world.history.find((event) => event.id === selectedEventId) ?? null : null
+  ), [selectedEventId, world]);
+  const archiveDossier = useMemo<ArchiveDossier | null>(() => {
+    if (!world || !selection) return null;
+    if (selection.kind === 'country') {
+      const item = world.polities.find((candidate) => candidate.id === selection.id);
+      return item ? toCountryArchive(world, item) : null;
+    }
+    if (selection.kind === 'family') {
+      const item = world.families?.find((candidate) => candidate.id === selection.id);
+      return item ? toFamilyArchive(world, item) : null;
+    }
+    if (selection.kind === 'person') {
+      const item = world.characters.find((candidate) => candidate.id === selection.id);
+      return item ? toPersonArchive(world, item) : null;
+    }
+    return null;
+  }, [selection, world]);
+
+  const rosterConfig = useMemo(() => {
+    if (activeView === 'polities') return {
+      title: '天下列国', eyebrow: '政权根基', items: polityItems, emptyMessage: '天下已无成形政权。',
+    };
+    if (activeView === 'families') return {
+      title: '天下世家', eyebrow: '门第与传承', items: familyItems, emptyMessage: '尚无被谱牒记名的家族。',
+    };
+    if (activeView === 'people') return {
+      title: '时人群像', eyebrow: '声望与所求', items: peopleItems, emptyMessage: '暂无可记名人物。',
+    };
+    if (activeView === 'military') return {
+      title: '天下军旅', eyebrow: '兵力与补给', items: militaryItems, emptyMessage: '天下暂无宏观军团。',
+    };
+    return null;
+  }, [activeView, familyItems, militaryItems, peopleItems, polityItems]);
+
+  const handleRosterSelect = useCallback((id: string) => {
+    const current = worldRef.current;
+    if (!current) return;
+    if (activeView === 'polities') {
+      setSelection({ kind: 'country', id });
+      return;
+    }
+    if (activeView === 'families') {
+      setSelection({ kind: 'family', id });
+      return;
+    }
+    if (activeView === 'people') {
+      setSelection({ kind: 'person', id });
+      return;
+    }
+    if (activeView === 'military') {
+      const army = current.armies.find((item) => item.id === id);
+      const fleet = current.fleets.find((item) => item.id === id);
+      setFocusedArmyId(id);
+      if (army) setSelection({ kind: 'person', id: army.commanderId });
+      else if (fleet) setSelection({ kind: 'fleet', id: fleet.id });
+      return;
+    }
+    if (activeView === 'chronicle') setSelectedEventId(id);
+  }, [activeView]);
+
+  const handleSelectArchiveEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
+    setSelectedEventId(null);
+    setSelection({ kind, id });
+    setActiveView(kind === 'country' ? 'polities' : kind === 'family' ? 'families' : kind === 'person' ? 'people' : 'world');
+  }, []);
+
+  const handleSelectScopedEvent = useCallback((eventId: string) => {
+    archiveFocusRestoreAllowedRef.current = false;
+    setResumeArchiveAfterEvent(archiveOpen);
+    setArchiveOpen(false);
+    setSelectedEventId(eventId);
+    completeGuideStep('cause-traced');
+  }, [archiveOpen, completeGuideStep]);
+
+  const inspector = useMemo<ReactNode>(() => {
+    if (!world || !selection) return null;
+    const followKey = `${selection.kind}:${selection.id}`;
+    const shared = {
+      isFollowing: followed.has(followKey),
+      onToggleFollow: () => {
+        const item = watchItemForSelection(world, selection);
+        if (!item) return;
+        const nextSettings = followed.has(followKey)
+          ? removeObserverWatch(observerSettingsRef.current, item.kind, item.id)
+          : upsertObserverWatch(observerSettingsRef.current, item);
+        commitObserverSettings(nextSettings);
+      },
+      onClose: () => setSelection(null),
+      onOpenArchive: selection.kind === 'country' || selection.kind === 'family' || selection.kind === 'person' ? () => {
+        archiveReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        archiveFocusRestoreAllowedRef.current = true;
+        setArchiveOpen(true);
+      } : undefined,
+      onSelectEntity: handleSelectArchiveEntity,
+      onSelectEvent: handleSelectScopedEvent,
+    };
+    if (selection.kind === 'region') {
+      const item = world.regions.find((candidate) => candidate.id === selection.id);
+      return item ? <Inspector kind="region" data={toRegionInspector(world, item)} {...shared} /> : null;
+    }
+    if (selection.kind === 'country') {
+      const item = world.polities.find((candidate) => candidate.id === selection.id);
+      return item ? <Inspector kind="country" data={toCountryInspector(world, item)} {...shared} /> : null;
+    }
+    if (selection.kind === 'family') {
+      const item = world.families?.find((candidate) => candidate.id === selection.id);
+      return item ? <Inspector kind="family" data={toFamilyInspector(world, item)} {...shared} /> : null;
+    }
+    if (selection.kind === 'person') {
+      const item = world.characters.find((candidate) => candidate.id === selection.id);
+      return item ? <Inspector kind="person" data={toPersonInspector(world, item)} {...shared} /> : null;
+    }
+    const system = toSystemInspector(world, selection.kind, selection.id);
+    return system ? <Inspector kind="system" data={system} {...shared} /> : null;
+  }, [commitObserverSettings, followed, handleSelectArchiveEntity, handleSelectScopedEvent, selection, world]);
+
+  const selectChronicleEvent = useCallback((event: ChronicleEvent) => {
+    setResumeArchiveAfterEvent(false);
+    setSelectedEventId(event.id);
+    completeGuideStep('cause-traced');
+  }, [completeGuideStep]);
+
+  const inspectEvidence = useCallback((factor: CausalFactor) => {
+    if (factor.evidence) setToast(`凭证：${factor.evidence}`);
+  }, []);
+
+  const handleSelectWatchItem = useCallback((item: ObserverWatchItem) => {
+    setSelection({ kind: item.kind, id: item.id });
+    setActiveView(item.kind === 'country' ? 'polities' : item.kind === 'family' ? 'families' : item.kind === 'person' ? 'people' : 'world');
+    setObserverDeskOpen(false);
+    setPauseMatch(null);
+  }, []);
+
+  const handleGuideAction = useCallback((step: ObserverGuideStepId) => {
+    const current = worldRef.current;
+    if (!current) return;
+    if (step === 'world-opened') {
+      completeGuideStep(step);
+      return;
+    }
+    if (step === 'quarter-advanced') {
+      setObserverDeskOpen(false);
+      requestAnimationFrame(() => advanceRef.current('manual'));
+      return;
+    }
+    if (step === 'overlay-switched') {
+      handleOverlayChange('trade');
+      setObserverDeskOpen(false);
+      return;
+    }
+    if (step === 'cause-traced') {
+      const event = current.history.at(-1);
+      if (event) {
+        completeGuideStep(step);
+        setSelectedEventId(event.id);
+        setObserverDeskOpen(false);
+      }
+      return;
+    }
+    const target = selection ?? (current.regions[0] ? { kind: 'region' as const, id: current.regions[0].id } : null);
+    if (!target) return;
+    const item = watchItemForSelection(current, target);
+    if (!item) return;
+    commitObserverSettings(upsertObserverWatch(observerSettingsRef.current, item));
+    setSelection(target);
+    setActiveView('world');
+  }, [commitObserverSettings, completeGuideStep, handleOverlayChange, selection]);
+
+  const mandateTarget = useMemo<MandateTarget | null>(() => {
+    if (!world || !selection) return null;
+    if (selection.kind === 'country') {
+      const polity = world.polities.find((item) => item.id === selection.id && item.alive);
+      return polity ? { id: polity.id, kind: 'country', name: polity.name, detail: `合法性 ${Math.round(polity.legitimacy)} · 仅可微调三点` } : null;
+    }
+    if (selection.kind === 'person') {
+      const character = world.characters.find((item) => item.id === selection.id && item.alive);
+      return character ? { id: character.id, kind: 'person', name: character.name, detail: `${character.role} · 影响 ${Math.round(character.influence)} · 声望 ${Math.round(character.renown)}` } : null;
+    }
+    if (selection.kind === 'region') {
+      const region = world.regions.find((item) => item.id === selection.id);
+      return region ? { id: region.id, kind: 'region', name: region.name, detail: `人口 ${compact.format(region.population)} · 破坏 ${Math.round(region.devastation)}` } : null;
+    }
+    return null;
+  }, [selection, world]);
+  const mandateAvailable = world ? availableMandate(world) : 0;
+  const latestIntervention = world ? [...world.history].reverse().find(isV03InterventionEvent) ?? null : null;
+  const mandateUsedThisTurn = Boolean(world && latestIntervention?.turn === world.turn);
+
+  const totalPopulation = world
+    ? world.regions.reduce((sum, item) => sum + item.population, 0)
+      + world.armies.reduce((sum, item) => sum + item.soldiers, 0)
+    : 0;
+  const activeWarCount = world?.wars.filter((item) => item.active).length ?? 0;
+  const livingPolityCount = world?.polities.filter((item) => item.alive).length ?? 0;
+  const lowSupplyCount = world?.armies.filter((item) => item.supply < 45 || item.morale < 40).length ?? 0;
+  const currentCollectionSlot = world
+    ? worldSaves.find((save) => save.status === 'ready' && save.hash === world.hash)?.slot
+    : undefined;
+  const namedWorldSaveCount = worldSaves.filter((save) => !save.isAutosave).length;
+  const rosterSelectedId = activeView === 'polities' && selection?.kind === 'country'
+    ? selection.id
+    : activeView === 'families' && selection?.kind === 'family'
+      ? selection.id
+    : activeView === 'people' && selection?.kind === 'person'
+      ? selection.id
+      : activeView === 'military'
+        ? focusedArmyId
+        : activeView === 'chronicle'
+          ? selectedEventId
+          : null;
+
+  return (
+    <>
+      {world ? (
+        <main
+          ref={worldShellRef}
+          className="observer-app"
+          data-inspector-open={Boolean(inspector)}
+          aria-hidden={startOpen || archiveOpen || mandateOpen || observerDeskOpen || collectionOpen || activeView === 'chronicle' || undefined}
+        >
+          <TopBar
+            title="沧衡纪"
+            eraName="初元"
+            year={world.year}
+            season={world.season}
+            turn={world.turn}
+            isRunning={running}
+            speed={speed}
+            canAdvance={!fatalError && !historicalView}
+            onToggleRunning={handleToggleRunning}
+            onAdvance={() => advanceOne('manual')}
+            onSpeedChange={handleSpeedChange}
+          />
+
+          <NavigationRail
+            activeView={activeView}
+            activeOverlay={overlay}
+            militaryAlertCount={activeWarCount + lowSupplyCount}
+            onViewChange={handleViewChange}
+            onOverlayChange={handleOverlayChange}
+          />
+
+          <section
+            className="observer-stage"
+            aria-label="世界观察舆图"
+            data-historical-turn={historicalView?.turn ?? undefined}
+          >
+            <WorldMap
+              regions={mapRegions}
+              routes={mapRoutes}
+              armies={mapArmies}
+              seaZones={mapSeaZones}
+              fleets={mapFleets}
+              flows={mapFlows}
+              markers={mapMarkers}
+              selectedRegionId={selection?.kind === 'region' ? selection.id : null}
+              selectedObject={selection && selection.kind !== 'region' && selection.kind !== 'country' && selection.kind !== 'family' && selection.kind !== 'person' ? selection : null}
+              overlay={historicalView ? 'political' : overlay}
+              onSelectRegion={(id) => {
+                setSelection({ kind: 'region', id });
+                setActiveView('world');
+              }}
+              onSelectObject={(kind, id) => {
+                setSelection({ kind, id });
+                setActiveView('world');
+              }}
+            />
+
+            <div className="observer-world-summary" aria-label="世界总览">
+              <span><small>天下人口</small><strong>{compact.format(totalPopulation)}</strong></span>
+              <span><small>当代政权</small><strong>{livingPolityCount}</strong></span>
+              <span data-alert={activeWarCount > 0 || undefined}><small>进行中战事</small><strong>{activeWarCount}</strong></span>
+            </div>
+
+            <div className="observer-world-tools" aria-label="世界与存档工具">
+              <button
+                ref={observerDeskTriggerRef}
+                type="button"
+                data-observer-desk-trigger="true"
+                data-alert={observerSettings.watchlist.some((item) => item.alert) || undefined}
+                onClick={handleOpenObserverDesk}
+                aria-label={`打开观察台，关注${observerSettings.watchlist.length}项`}
+                title={`观察台 · ${observerSettings.watchlist.length}项关注`}
+              >
+                <Eye size={16} aria-hidden="true" />
+              </button>
+              <button
+                ref={historyTriggerRef}
+                type="button"
+                data-history-workbench-trigger="true"
+                onClick={() => handleViewChange('chronicle')}
+                aria-label="打开历史工作台，快捷键 H"
+                title="历史工作台（H）"
+              >
+                <Archive size={16} aria-hidden="true" />
+              </button>
+              <button
+                ref={collectionTriggerRef}
+                type="button"
+                data-world-collection-trigger="true"
+                onClick={handleOpenCollection}
+                aria-label={`打开世界收藏，现有${namedWorldSaveCount}个命名世界`}
+                title={`世界收藏 · ${namedWorldSaveCount}`}
+              >
+                <Library size={16} aria-hidden="true" />
+              </button>
+              <span className="observer-world-tools__rule" aria-hidden="true" />
+              <button
+                ref={mandateTriggerRef}
+                type="button"
+                data-mandate-trigger="true"
+                data-mandate-available={mandateAvailable}
+                onClick={handleOpenMandate}
+                aria-label={mandateUsedThisTurn ? '打开天意，本季已经干预' : `打开天意，本季可用${mandateAvailable}点`}
+                title={mandateUsedThisTurn ? '本季天意已用' : `天意 · ${mandateAvailable}点`}
+              >
+                <Sparkles size={16} aria-hidden="true" />
+              </button>
+              <span className="observer-world-tools__rule" aria-hidden="true" />
+              <button type="button" onClick={handleManualSave} aria-label="保存当前世界" title="保存当前世界">
+                <Save size={16} aria-hidden="true" />
+              </button>
+              <button type="button" onClick={handleExport} aria-label="导出完整史册" title="导出完整史册">
+                <Download size={16} aria-hidden="true" />
+              </button>
+              <span className="observer-world-tools__rule" aria-hidden="true" />
+              <button type="button" onClick={handleFullscreen} aria-label="切换全屏，快捷键 F" title="全屏（F）">
+                <Expand size={16} aria-hidden="true" />
+              </button>
+              <button type="button" onClick={handleNewWorldMenu} aria-label="返回世界书页" title="新纪、续读或导入">
+                <RotateCcw size={16} aria-hidden="true" />
+              </button>
+            </div>
+
+            <div className="observer-world-signature" aria-label="确定性世界签名">
+              <span>SEED {world.seed}</span>
+              <strong>{world.hash}</strong>
+            </div>
+
+            {historicalView ? (
+              <aside className="observer-history-lens" role="status" aria-label="历史舆图正在显示">
+                <div>
+                  <span>历史舆图 · 只读</span>
+                  <strong>第 {historicalView.year} 年 · {historicalView.season}季</strong>
+                  <small>
+                    距今 {world.turn - historicalView.turn} 季 · {historicalView.extantPolities.length} 个政权 ·
+                    {historicalView.confidence === 'complete' ? ' 差量链完整' : ' 差量链有缺页'} · 档案仍为当下
+                  </small>
+                </div>
+                <button type="button" onClick={() => handleViewChange('chronicle')}>查阅史册</button>
+                <button type="button" onClick={handleResetHistoricalView}>归还当下</button>
+              </aside>
+            ) : null}
+
+            {showGuide ? (
+              <aside className="observer-guide" aria-label="观察提示">
+                <Info size={17} aria-hidden="true" />
+                <div>
+                  <strong>你是观察者，不是君主</strong>
+                  <p>点选州域阅读档案，推进一季观看世界自行发展；点击底部史事可追溯“为什么”。N 下一季，空格自动推演，H 打开史册。</p>
+                </div>
+                <button type="button" onClick={() => setShowGuide(false)} aria-label="关闭观察提示"><X size={16} aria-hidden="true" /></button>
+              </aside>
+            ) : null}
+
+            {rosterConfig ? (
+              <RosterPanel
+                key={activeView}
+                title={rosterConfig.title}
+                eyebrow={rosterConfig.eyebrow}
+                items={rosterConfig.items}
+                selectedId={rosterSelectedId}
+                emptyMessage={rosterConfig.emptyMessage}
+                onSelect={handleRosterSelect}
+                onClose={() => setActiveView('world')}
+              />
+            ) : null}
+
+            {fatalError ? (
+              <div className="observer-fatal" role="alert">
+                <strong>推演已停止</strong>
+                <p>{fatalError}当前世界仍可保存或导出，不会继续写入错误状态。</p>
+              </div>
+            ) : null}
+          </section>
+
+          {inspector}
+
+          <Chronicle
+            events={recentChronicle}
+            selectedEventId={selectedEventId}
+            onSelectEvent={selectChronicleEvent}
+            heading={world.lastTurn ? `${world.lastTurn.year}年${world.lastTurn.season}季与近事` : '开篇史事'}
+          />
+
+          <CausalDrawer
+            open={Boolean(selectedHistoryEvent)}
+            event={selectedHistoryEvent ? toCausalEvent(world, selectedHistoryEvent) : null}
+            onClose={() => {
+              setSelectedEventId(null);
+              if (resumeArchiveAfterEvent) {
+                archiveFocusRestoreAllowedRef.current = true;
+                setArchiveOpen(true);
+                setResumeArchiveAfterEvent(false);
+              } else if (resumeHistoryAfterEvent) {
+                setActiveView('chronicle');
+                setResumeHistoryAfterEvent(false);
+              }
+            }}
+            onInspectEvidence={inspectEvidence}
+            onSelectReference={(reference: CausalReference) => {
+              archiveFocusRestoreAllowedRef.current = false;
+              setResumeArchiveAfterEvent(false);
+              setResumeHistoryAfterEvent(false);
+              setSelectedEventId(null);
+              handleSelectArchiveEntity(reference.kind, reference.id);
+            }}
+            onSelectSubject={(kind, id) => {
+              archiveFocusRestoreAllowedRef.current = false;
+              setResumeArchiveAfterEvent(false);
+              setResumeHistoryAfterEvent(false);
+              setSelectedEventId(null);
+              handleSelectArchiveEntity(kind, id);
+            }}
+          />
+        </main>
+      ) : (
+        <main className="observer-boot-underlay" aria-hidden="true" />
+      )}
+
+      <HistoricalArchive
+        open={archiveOpen && Boolean(archiveDossier)}
+        dossier={archiveDossier}
+        onClose={() => {
+          archiveFocusRestoreAllowedRef.current = true;
+          setArchiveOpen(false);
+          setResumeArchiveAfterEvent(false);
+        }}
+        onSelectEntity={handleSelectArchiveEntity}
+        onSelectEvent={handleSelectScopedEvent}
+        returnFocusTo={archiveReturnFocusRef.current}
+        shouldRestoreFocus={shouldRestoreArchiveFocus}
+      />
+
+      <MandatePanel
+        open={mandateOpen && Boolean(world)}
+        available={mandateAvailable}
+        usedThisTurn={mandateUsedThisTurn}
+        target={mandateTarget}
+        busy={mandateBusy}
+        message={mandateMessage}
+        recentIntervention={latestIntervention ? {
+          title: latestIntervention.title,
+          date: `第 ${latestIntervention.year} 年 · ${latestIntervention.season}`,
+        } : null}
+        onApply={handleApplyMandate}
+        onClose={handleCloseMandate}
+        returnFocusTo={mandateTriggerRef.current}
+      />
+
+      {world ? (
+        <HistoryWorkbench
+          open={activeView === 'chronicle'}
+          world={world}
+          turn={historicalView?.turn ?? world.turn}
+          onSelectEvent={(eventId) => {
+            completeGuideStep('cause-traced');
+            setResumeHistoryAfterEvent(true);
+            setActiveView('world');
+            setSelectedEventId(eventId);
+          }}
+          onTurnChange={handleHistoricalTurnChange}
+          onClose={() => setActiveView('world')}
+          onReset={handleResetHistoricalView}
+          returnFocusTo={historyTriggerRef.current}
+        />
+      ) : null}
+
+      <ObserverDesk
+        open={observerDeskOpen && Boolean(world)}
+        settings={observerSettings}
+        onSettingsChange={commitObserverSettings}
+        onClose={handleCloseObserverDesk}
+        onSelectWatchItem={handleSelectWatchItem}
+        onGuideAction={handleGuideAction}
+        pauseMatch={pauseMatch}
+        returnFocusTo={observerDeskTriggerRef.current}
+      />
+
+      <WorldCollectionPanel
+        open={collectionOpen}
+        saves={worldSaves}
+        currentSlot={currentCollectionSlot}
+        busy={collectionBusy}
+        canSaveCurrent={Boolean(world)}
+        onLoad={handleLoadCollectionSlot}
+        onDelete={handleDeleteCollectionSlot}
+        onRename={handleRenameCollectionSlot}
+        onDuplicate={handleDuplicateCollectionSlot}
+        onSaveCurrent={handleSaveCurrentToCollection}
+        onClose={handleCloseCollection}
+        returnFocusTo={collectionReturnFocusRef.current}
+      />
+
+      <WorldStart
+        open={startOpen && !collectionOpen}
+        seed={seed}
+        hasSave={hasSave}
+        busy={startBusy}
+        error={startError}
+        onSeedChange={setSeed}
+        onCreate={handleCreate}
+        onContinue={handleContinue}
+        onOpenCollection={handleOpenCollection}
+        collectionCount={namedWorldSaveCount}
+        onImport={handleImport}
+        onCancel={world ? () => setStartOpen(false) : undefined}
+      />
+
+      {toast ? <div className="observer-toast" role="status">{toast}</div> : null}
+
+    </>
+  );
+}

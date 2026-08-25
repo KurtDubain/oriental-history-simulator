@@ -1,0 +1,203 @@
+.world-map {
+  position: relative;
+  width: 100%;
+  height: 100%;
+  min-height: 280px;
+  overflow: hidden;
+  isolation: isolate;
+  background: #e7dfca;
+  box-shadow:
+    inset 0 0 0 1px rgb(49 47 41 / 12%),
+    inset 0 0 70px rgb(70 58 42 / 9%);
+}
+
+.world-map::before {
+  position: absolute;
+  z-index: 2;
+  inset: 0;
+  border: 1px solid rgb(255 252 239 / 28%);
+  content: "";
+  pointer-events: none;
+}
+
+.world-map__canvas {
+  position: absolute;
+  z-index: 0;
+  inset: 0;
+  display: block;
+  max-width: 100%;
+  max-height: 100%;
+  outline: none;
+  touch-action: manipulation;
+  user-select: none;
+  animation: world-map-reveal 480ms cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.world-map__canvas:focus-visible {
+  box-shadow: inset 0 0 0 2px rgb(163 58 46 / 56%);
+}
+
+.world-map[data-overlay="disease"] .world-map__canvas {
+  filter: saturate(0.94);
+}
+
+.world-map[data-overlay="naval"] .world-map__canvas,
+.world-map[data-overlay="trade"] .world-map__canvas {
+  filter: saturate(0.9) contrast(1.015);
+}
+
+.world-map__tooltip {
+  position: absolute;
+  z-index: 4;
+  width: 172px;
+  padding: 10px 11px 9px;
+  color: #292b27;
+  background: rgb(244 238 223 / 94%);
+  border-top: 2px solid #a33a2e;
+  box-shadow: 0 10px 26px rgb(44 39 31 / 18%);
+  pointer-events: none;
+  animation: world-map-tooltip 120ms ease-out both;
+  backdrop-filter: blur(5px);
+}
+
+.world-map__tooltip-heading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.world-map__tooltip-heading strong {
+  overflow: hidden;
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: 0.9rem;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-map__tooltip-heading span {
+  flex: none;
+  color: #716c61;
+  font-size: 0.63rem;
+  letter-spacing: 0.08em;
+}
+
+.world-map__tooltip-rule {
+  height: 1px;
+  margin: 7px 0 5px;
+  background: linear-gradient(90deg, rgb(41 43 39 / 28%), transparent);
+}
+
+.world-map__tooltip dl,
+.world-map__tooltip dd {
+  margin: 0;
+}
+
+.world-map__tooltip dl {
+  display: grid;
+  gap: 3px;
+}
+
+.world-map__tooltip dl > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 0.67rem;
+  line-height: 1.4;
+}
+
+.world-map__tooltip dt {
+  color: #7b7467;
+}
+
+.world-map__tooltip dd {
+  overflow: hidden;
+  color: #343530;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.world-map__empty {
+  position: absolute;
+  z-index: 3;
+  top: 50%;
+  left: 50%;
+  display: grid;
+  width: min(280px, calc(100% - 40px));
+  gap: 8px;
+  color: #514f47;
+  text-align: center;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+}
+
+.world-map__empty::before,
+.world-map__empty::after {
+  width: 38px;
+  height: 1px;
+  margin: 0 auto 4px;
+  background: #a33a2e;
+  content: "";
+}
+
+.world-map__empty::after {
+  order: 3;
+  margin: 4px auto 0;
+  opacity: 0.35;
+}
+
+.world-map__empty span {
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: 1.25rem;
+  letter-spacing: 0.18em;
+}
+
+.world-map__empty small {
+  color: #7b7467;
+  font-size: 0.67rem;
+  letter-spacing: 0.08em;
+}
+
+@keyframes world-map-reveal {
+  from {
+    opacity: 0;
+    transform: scale(1.008);
+  }
+
+  to {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes world-map-tooltip {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (max-width: 680px) {
+  .world-map {
+    min-height: 320px;
+  }
+
+  .world-map__tooltip {
+    width: 160px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .world-map__canvas,
+  .world-map__tooltip {
+    animation: none;
+  }
+}

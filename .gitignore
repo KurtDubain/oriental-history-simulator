@@ -1,0 +1,14 @@
+node_modules/
+dist/
+output/
+test-artifacts/
+coverage/
+.vite/
+*.tsbuildinfo
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.env
+.env.*
+!.env.example

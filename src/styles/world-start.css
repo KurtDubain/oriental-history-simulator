@@ -1,0 +1,323 @@
+.world-start {
+  position: fixed;
+  z-index: 100;
+  inset: 0;
+  display: grid;
+  min-height: 100svh;
+  place-items: center;
+  overflow: hidden;
+  color: #24241f;
+  background:
+    linear-gradient(90deg, rgb(112 91 61 / 7%) 1px, transparent 1px) 0 0 / 72px 72px,
+    linear-gradient(rgb(112 91 61 / 5%) 1px, transparent 1px) 0 0 / 72px 72px,
+    radial-gradient(circle at 74% 24%, rgb(177 55 42 / 8%), transparent 26%),
+    #e9e1cf;
+  animation: world-start-enter 520ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.world-start::before,
+.world-start::after {
+  position: absolute;
+  content: "";
+  border: 1px solid rgb(42 43 36 / 14%);
+  border-radius: 50%;
+}
+
+.world-start::before {
+  width: min(64vw, 860px);
+  aspect-ratio: 1;
+  transform: translate(43%, -45%);
+}
+
+.world-start::after {
+  width: min(36vw, 480px);
+  aspect-ratio: 1;
+  transform: translate(-105%, 70%);
+}
+
+.world-start__grain {
+  position: absolute;
+  inset: 0;
+  opacity: 0.24;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.12'/%3E%3C/svg%3E");
+}
+
+.world-start__close {
+  position: absolute;
+  z-index: 3;
+  top: clamp(1rem, 3vw, 2rem);
+  right: clamp(1rem, 3vw, 2rem);
+  display: grid;
+  width: 40px;
+  height: 40px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid rgb(39 39 32 / 24%);
+  border-radius: 50%;
+  color: #5f5b51;
+  background: rgb(247 242 227 / 42%);
+  cursor: pointer;
+}
+
+.world-start__close:hover {
+  border-color: #a43a2f;
+  color: #a43a2f;
+}
+
+.world-start__content {
+  position: relative;
+  z-index: 1;
+  width: min(560px, calc(100vw - 48px));
+  transform: translateY(-2vh);
+  text-align: center;
+}
+
+.world-start__kicker {
+  margin: 0 0 1.25rem;
+  color: #a43a2f;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.24em;
+}
+
+.world-start h1 {
+  margin: 0;
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: clamp(4.8rem, 12vw, 9rem);
+  font-weight: 560;
+  letter-spacing: 0.16em;
+  line-height: 0.98;
+  text-indent: 0.16em;
+}
+
+.world-start__lede {
+  margin: 1.35rem 0 2.8rem;
+  color: #555348;
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: 1rem;
+  letter-spacing: 0.06em;
+}
+
+.world-start__seed {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 1rem;
+  padding: 0.8rem 0;
+  border-block: 1px solid rgb(39 39 32 / 22%);
+  text-align: left;
+}
+
+.world-start__seed span {
+  color: #747064;
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.world-start__seed input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  color: #282820;
+  background: transparent;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.86rem;
+  letter-spacing: 0.03em;
+}
+
+.world-start__seed:focus-within {
+  border-color: #a43a2f;
+}
+
+.world-start__note,
+.world-start__error {
+  min-height: 1.2rem;
+  margin: 0.65rem 0 0;
+  color: #7b776c;
+  font-size: 0.7rem;
+}
+
+.world-start__scenarios {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  margin-top: 1.15rem;
+  border-block: 1px solid rgb(39 39 32 / 16%);
+}
+
+.world-start__scenarios button {
+  display: grid;
+  min-width: 0;
+  padding: 0.72rem 0.78rem;
+  border: 0;
+  color: #5f5b51;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.world-start__scenarios button + button {
+  border-left: 1px solid rgb(39 39 32 / 16%);
+}
+
+.world-start__scenarios button:hover:not(:disabled),
+.world-start__scenarios button:focus-visible,
+.world-start__scenarios button[data-selected="true"] {
+  color: #842d25;
+  background: rgb(164 58 47 / 7%);
+}
+
+.world-start__scenarios button:focus-visible {
+  outline: 2px solid #a43a2f;
+  outline-offset: -2px;
+}
+
+.world-start__scenarios strong,
+.world-start__scenarios small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.world-start__scenarios strong {
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: 0.76rem;
+  letter-spacing: 0.07em;
+  white-space: nowrap;
+}
+
+.world-start__scenarios small {
+  margin-top: 0.25rem;
+  color: #858074;
+  font-size: 0.61rem;
+  line-height: 1.45;
+}
+
+.world-start__error {
+  color: #a43a2f;
+}
+
+.world-start__actions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.65rem;
+  margin-top: 1.7rem;
+}
+
+.world-start__actions button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  padding: 0 1rem;
+  border: 1px solid rgb(39 39 32 / 25%);
+  border-radius: 2px;
+  cursor: pointer;
+  background: rgb(247 242 227 / 48%);
+  font-size: 0.76rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  transition: transform 150ms ease, border-color 150ms ease, background 150ms ease;
+}
+
+.world-start__actions button:hover:not(:disabled) {
+  transform: translateY(-2px);
+  border-color: #a43a2f;
+}
+
+.world-start__actions button:focus-visible {
+  outline: 2px solid #a43a2f;
+  outline-offset: 3px;
+}
+
+.world-start__actions .world-start__primary {
+  border-color: #9a352b;
+  color: #f9f4e7;
+  background: #9a352b;
+}
+
+.world-start__actions button:disabled {
+  cursor: progress;
+  opacity: 0.48;
+}
+
+.world-start__file {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.world-start__footer {
+  position: absolute;
+  z-index: 1;
+  right: clamp(1.25rem, 4vw, 4rem);
+  bottom: clamp(1.1rem, 3vw, 2.5rem);
+  left: clamp(1.25rem, 4vw, 4rem);
+  display: flex;
+  justify-content: space-between;
+  padding-top: 0.75rem;
+  border-top: 1px solid rgb(39 39 32 / 16%);
+  color: #767268;
+  font-size: 0.65rem;
+  letter-spacing: 0.09em;
+}
+
+@keyframes world-start-enter {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+@media (max-width: 620px) {
+  .world-start__content {
+    transform: translateY(-4vh);
+  }
+
+  .world-start h1 {
+    font-size: clamp(4.2rem, 24vw, 6.5rem);
+  }
+
+  .world-start__seed {
+    grid-template-columns: 1fr;
+    gap: 0.4rem;
+  }
+
+  .world-start__actions {
+    display: grid;
+    grid-template-columns: 1fr;
+  }
+
+  .world-start__scenarios {
+    grid-template-columns: 1fr;
+  }
+
+  .world-start__scenarios button + button {
+    border-top: 1px solid rgb(39 39 32 / 13%);
+    border-left: 0;
+  }
+
+  .world-start__scenarios small {
+    white-space: nowrap;
+  }
+
+  .world-start__footer span:nth-child(2) {
+    display: none;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .world-start,
+  .world-start__actions button {
+    animation: none;
+    transition: none;
+  }
+}

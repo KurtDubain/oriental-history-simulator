@@ -1,0 +1,34 @@
+{
+  "name": "oriental-history-simulator",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1",
+    "play": "npm run build && vite preview --host 127.0.0.1 --open",
+    "build": "tsc -b && vite build",
+    "test": "vitest",
+    "test:run": "vitest run",
+    "test:e2e": "node scripts/e2e-smoke.mjs",
+    "test:audit": "npm run test:audit:v03",
+    "test:audit:v01": "vite-node scripts/seed-audit.ts",
+    "test:audit:v02": "vite-node scripts/v02-audit.ts",
+    "test:audit:v03": "vite-node scripts/v03-audit.ts",
+    "test:release": "npm run test:run && npm run build && npm run test:e2e && npm run test:audit",
+    "preview": "vite preview --host 127.0.0.1"
+  },
+  "dependencies": {
+    "lucide-react": "0.468.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "18.3.18",
+    "@types/react-dom": "18.3.5",
+    "@vitejs/plugin-react": "4.7.0",
+    "playwright": "1.49.1",
+    "typescript": "5.7.3",
+    "vite": "5.4.21",
+    "vitest": "2.1.9"
+  }
+}

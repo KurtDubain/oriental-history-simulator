@@ -1,0 +1,174 @@
+.layer-picker {
+  position: relative;
+  margin-top: auto;
+}
+
+.layer-picker__backdrop {
+  position: fixed;
+  z-index: 88;
+  inset: 0;
+  border: 0;
+  background: rgb(43 41 34 / 16%);
+  cursor: default;
+  animation: observer-backdrop-reveal 150ms ease-out both;
+}
+
+.layer-picker__sheet {
+  position: fixed;
+  z-index: 89;
+  bottom: calc(var(--observer-chronicle-height) + 14px);
+  left: 84px;
+  width: min(320px, calc(100vw - 104px));
+  max-height: min(630px, calc(100dvh - var(--observer-topbar-height) - var(--observer-chronicle-height) - 28px));
+  overflow: auto;
+  border: 1px solid var(--observer-line-strong);
+  color: var(--observer-ink);
+  background: rgb(242 235 218 / 98%);
+  box-shadow: 18px 18px 48px rgb(40 37 30 / 18%);
+  animation: layer-sheet-reveal 180ms ease-out both;
+}
+
+.layer-picker__sheet > header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 15px 14px 13px;
+  border-bottom: 1px solid var(--observer-line-strong);
+  background: rgb(242 235 218 / 97%);
+}
+
+.layer-picker__sheet header span,
+.layer-picker__sheet h3 {
+  color: var(--observer-vermilion-dark);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.18em;
+}
+
+.layer-picker__sheet h2 {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 4px 0 0;
+  font-family: var(--observer-serif);
+  font-size: 20px;
+  font-weight: 620;
+  letter-spacing: 0.08em;
+}
+
+.layer-picker__sheet header > button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  color: var(--observer-ink-soft);
+  background: transparent;
+}
+
+.layer-picker__groups section {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  border-bottom: 1px solid var(--observer-line);
+}
+
+.layer-picker__groups h3 {
+  margin: 0;
+  padding: 16px 9px;
+  border-right: 1px solid var(--observer-line);
+  writing-mode: vertical-rl;
+}
+
+.layer-picker__groups [role="radiogroup"] {
+  min-width: 0;
+}
+
+.layer-picker__groups [role="radio"] {
+  display: grid;
+  width: 100%;
+  min-height: 54px;
+  grid-template-columns: 25px minmax(0, 1fr) 16px;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 11px;
+  border: 0;
+  color: var(--observer-ink-soft);
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.layer-picker__groups [role="radio"] + [role="radio"] {
+  border-top: 1px dotted var(--observer-line-strong);
+}
+
+.layer-picker__groups [role="radio"]:hover,
+.layer-picker__groups [role="radio"][aria-checked="true"] {
+  color: var(--observer-vermilion-dark);
+  background: linear-gradient(90deg, rgb(156 53 43 / 7%), transparent 90%);
+}
+
+.layer-picker__groups [role="radio"] > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.layer-picker__groups strong {
+  font-family: var(--observer-serif);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.layer-picker__groups small {
+  overflow: hidden;
+  color: var(--observer-ink-faint);
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-picker__sheet button:focus-visible {
+  outline: 2px solid var(--observer-vermilion);
+  outline-offset: -2px;
+}
+
+@keyframes layer-sheet-reveal {
+  from { opacity: 0; transform: translateX(-8px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (max-width: 760px) {
+  .layer-picker__sheet {
+    right: 8px;
+    bottom: calc(var(--observer-chronicle-height) + 8px);
+    left: 76px;
+    width: auto;
+    max-height: calc(100dvh - var(--observer-topbar-height) - var(--observer-chronicle-height) - 16px);
+  }
+
+  .layer-picker__groups section {
+    display: block;
+  }
+
+  .layer-picker__groups h3 {
+    padding: 10px 12px 7px;
+    border-right: 0;
+    writing-mode: horizontal-tb;
+  }
+
+  .layer-picker__groups [role="radio"] {
+    min-height: 48px;
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .layer-picker__backdrop,
+  .layer-picker__sheet { animation: none; }
+}

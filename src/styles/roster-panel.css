@@ -1,0 +1,206 @@
+.roster-panel {
+  position: absolute;
+  z-index: 12;
+  top: 22px;
+  bottom: 22px;
+  left: 24px;
+  display: grid;
+  width: min(390px, calc(100% - 48px));
+  grid-template-rows: auto auto minmax(0, 1fr);
+  overflow: hidden;
+  border: 1px solid rgb(42 43 36 / 20%);
+  border-radius: 3px;
+  background: rgb(239 233 216 / 96%);
+  box-shadow: 0 22px 70px rgb(32 30 24 / 18%);
+  backdrop-filter: blur(16px);
+  animation: roster-enter 220ms cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.roster-panel__header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 1.35rem 1.35rem 1rem;
+  border-bottom: 1px solid rgb(42 43 36 / 14%);
+}
+
+.roster-panel__header span {
+  color: #9d382d;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.17em;
+}
+
+.roster-panel__header h2 {
+  margin: 0.22rem 0 0;
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: 1.6rem;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+}
+
+.roster-panel__header button {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 0;
+  border-radius: 50%;
+  cursor: pointer;
+  background: transparent;
+}
+
+.roster-panel__header button:hover {
+  color: #9d382d;
+  background: rgb(157 56 45 / 8%);
+}
+
+.roster-panel__search {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  margin: 0.85rem 1.35rem;
+  padding: 0.58rem 0;
+  border-bottom: 1px solid rgb(42 43 36 / 24%);
+  color: #726e63;
+}
+
+.roster-panel__search:focus-within {
+  border-color: #9d382d;
+  color: #9d382d;
+}
+
+.roster-panel__search input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  color: #292a25;
+  font-size: 0.76rem;
+}
+
+.roster-panel__list {
+  margin: 0;
+  padding: 0 1.35rem 1.2rem;
+  overflow: auto;
+  list-style: none;
+}
+
+.roster-panel__list li + li {
+  border-top: 1px solid rgb(42 43 36 / 11%);
+}
+
+.roster-panel__list .roster-panel__more > button {
+  display: flex;
+  min-height: 46px;
+  justify-content: center;
+  color: #8a4037;
+  font-size: 0.67rem;
+  letter-spacing: 0.08em;
+}
+
+.roster-panel__list button {
+  display: grid;
+  width: 100%;
+  min-height: 68px;
+  grid-template-columns: 2rem 3px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.7rem 0;
+  border: 0;
+  cursor: pointer;
+  text-align: left;
+  background: transparent;
+}
+
+.roster-panel__list button:hover .roster-panel__body strong,
+.roster-panel__list button[data-selected] .roster-panel__body strong {
+  color: #9d382d;
+}
+
+.roster-panel__list button:focus-visible {
+  outline: 2px solid #9d382d;
+  outline-offset: -1px;
+}
+
+.roster-panel__rank {
+  color: #9a968b;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.65rem;
+}
+
+.roster-panel__accent {
+  width: 3px;
+  height: 31px;
+  border-radius: 1px;
+  background: #777267;
+}
+
+.roster-panel__body {
+  display: grid;
+  min-width: 0;
+  gap: 0.22rem;
+}
+
+.roster-panel__body strong,
+.roster-panel__body small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.roster-panel__body strong {
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: 0.9rem;
+  transition: color 140ms ease;
+}
+
+.roster-panel__body small {
+  color: #777369;
+  font-size: 0.67rem;
+}
+
+.roster-panel__meta {
+  max-width: 7.5rem;
+  color: #625f56;
+  font-size: 0.67rem;
+  text-align: right;
+}
+
+.roster-panel__meta[data-alert] {
+  color: #a23b30;
+  font-weight: 700;
+}
+
+.roster-panel__empty {
+  margin: 3rem 1.35rem;
+  color: #777369;
+  font-family: "Noto Serif SC", "Songti SC", STSong, serif;
+  font-size: 0.82rem;
+  line-height: 1.8;
+  text-align: center;
+}
+
+@keyframes roster-enter {
+  from {
+    opacity: 0;
+    transform: translateX(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+  }
+}
+
+@media (max-width: 780px) {
+  .roster-panel {
+    inset: 12px;
+    width: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .roster-panel {
+    animation: none;
+  }
+}

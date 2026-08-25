@@ -1,0 +1,314 @@
+.mandate-layer {
+  position: fixed;
+  z-index: 142;
+  inset: 0;
+}
+
+.mandate-layer__backdrop {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: rgb(42 39 32 / 28%);
+  backdrop-filter: blur(1px);
+  cursor: default;
+  animation: observer-backdrop-reveal 150ms ease-out both;
+}
+
+.mandate-panel {
+  position: absolute;
+  top: calc(var(--observer-topbar-height) + 14px);
+  right: 18px;
+  bottom: calc(var(--observer-chronicle-height) + 14px);
+  display: flex;
+  width: min(356px, calc(100vw - 104px));
+  min-height: 0;
+  overflow: auto;
+  flex-direction: column;
+  border: 1px solid var(--observer-line-strong);
+  color: var(--observer-ink);
+  background:
+    linear-gradient(90deg, transparent 30px, rgb(157 55 45 / 12%) 30px, rgb(157 55 45 / 12%) 31px, transparent 31px),
+    rgb(243 237 220 / 98%);
+  box-shadow: -20px 22px 60px rgb(37 34 28 / 20%);
+  animation: mandate-panel-reveal 190ms ease-out both;
+}
+
+.mandate-panel__header {
+  position: sticky;
+  z-index: 2;
+  top: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 14px 14px 43px;
+  border-bottom: 1px solid var(--observer-line-strong);
+  background: rgb(243 237 220 / 97%);
+}
+
+.mandate-panel__header span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  color: var(--observer-vermilion-dark);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+}
+
+.mandate-panel__header h2 {
+  margin: 4px 0 0;
+  font-family: var(--observer-serif);
+  font-size: 23px;
+  font-weight: 620;
+  letter-spacing: 0.14em;
+}
+
+.mandate-panel__header > button {
+  display: grid;
+  width: 36px;
+  height: 36px;
+  padding: 0;
+  place-items: center;
+  border: 1px solid transparent;
+  color: var(--observer-ink-soft);
+  background: transparent;
+}
+
+.mandate-panel__ledger {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  align-items: center;
+  min-height: 78px;
+  margin-left: 31px;
+  border-bottom: 1px solid var(--observer-line);
+}
+
+.mandate-panel__ledger > span {
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
+}
+
+.mandate-panel__ledger strong {
+  color: var(--observer-vermilion-dark);
+  font-family: var(--observer-serif);
+  font-size: 32px;
+  font-weight: 540;
+  line-height: 1;
+}
+
+.mandate-panel__ledger small,
+.mandate-panel__ledger p,
+.mandate-panel__target small,
+.mandate-panel__actions small,
+.mandate-panel__recent small {
+  color: var(--observer-ink-faint);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.mandate-panel__ledger p {
+  margin: 0;
+  padding: 13px 14px;
+  border-left: 1px dotted var(--observer-line-strong);
+}
+
+.mandate-panel__ledger[data-used="true"] strong {
+  color: var(--observer-ink-faint);
+}
+
+.mandate-panel__target {
+  display: grid;
+  margin-left: 31px;
+  padding: 15px 14px;
+  gap: 3px;
+  border-bottom: 1px solid var(--observer-line);
+}
+
+.mandate-panel__target > span,
+.mandate-panel__recent > span {
+  color: var(--observer-vermilion-dark);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.14em;
+}
+
+.mandate-panel__target strong,
+.mandate-panel__recent strong {
+  font-family: var(--observer-serif);
+  font-size: 15px;
+  font-weight: 620;
+}
+
+.mandate-panel__empty {
+  margin: 0 0 0 31px;
+  padding: 22px 14px;
+  border-bottom: 1px solid var(--observer-line);
+  color: var(--observer-ink-soft);
+  font-family: var(--observer-serif);
+  font-size: 11px;
+  line-height: 1.8;
+}
+
+.mandate-panel__actions {
+  margin-left: 31px;
+  border-bottom: 1px solid var(--observer-line);
+}
+
+.mandate-panel__actions > button {
+  display: grid;
+  width: 100%;
+  min-height: 66px;
+  grid-template-columns: 24px minmax(0, 1fr) 30px;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 14px;
+  border: 0;
+  color: var(--observer-ink-soft);
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.mandate-panel__actions > button + button {
+  border-top: 1px dotted var(--observer-line-strong);
+}
+
+.mandate-panel__actions > button:hover:not(:disabled),
+.mandate-panel__actions > button:focus-visible {
+  color: var(--observer-vermilion-dark);
+  background: linear-gradient(90deg, rgb(157 55 45 / 7%), transparent 88%);
+}
+
+.mandate-panel__actions button:disabled {
+  opacity: 0.38;
+  cursor: not-allowed;
+}
+
+.mandate-panel__actions button > span {
+  display: grid;
+  gap: 2px;
+}
+
+.mandate-panel__actions button strong {
+  font-family: var(--observer-serif);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.mandate-panel__actions button b {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1px;
+  color: var(--observer-vermilion-dark);
+  font-size: 10px;
+}
+
+.mandate-panel__actions .mandate-panel__disaster {
+  color: var(--observer-vermilion-dark);
+}
+
+.mandate-panel__confirmation {
+  padding: 14px;
+  color: var(--observer-vermilion-dark);
+  background: rgb(157 55 45 / 7%);
+}
+
+.mandate-panel__confirmation > strong {
+  font-family: var(--observer-serif);
+  font-size: 12px;
+}
+
+.mandate-panel__confirmation p {
+  margin: 5px 0 12px;
+  color: var(--observer-ink-soft);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.mandate-panel__confirmation > div {
+  display: flex;
+  justify-content: flex-end;
+  gap: 7px;
+}
+
+.mandate-panel__confirmation button {
+  min-height: 32px;
+  padding: 0 11px;
+  border: 1px solid var(--observer-line-strong);
+  color: var(--observer-ink-soft);
+  background: var(--observer-paper-bright);
+}
+
+.mandate-panel__confirmation button:last-child {
+  border-color: var(--observer-vermilion-dark);
+  color: var(--observer-paper-bright);
+  background: var(--observer-vermilion-dark);
+}
+
+.mandate-panel__message,
+.mandate-panel__recent {
+  margin: 0 0 0 31px;
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--observer-line);
+}
+
+.mandate-panel__message {
+  color: var(--observer-ink-soft);
+  font-size: 10px;
+  line-height: 1.6;
+}
+
+.mandate-panel__message[data-tone="error"] {
+  color: var(--observer-vermilion-dark);
+  background: rgb(157 55 45 / 6%);
+}
+
+.mandate-panel__recent {
+  display: grid;
+  gap: 3px;
+}
+
+.mandate-panel footer {
+  margin-top: auto;
+  padding: 14px 14px 15px 43px;
+  color: var(--observer-ink-faint);
+  font-size: 8px;
+  line-height: 1.65;
+}
+
+.mandate-panel button:focus-visible {
+  outline: 2px solid var(--observer-vermilion);
+  outline-offset: -2px;
+}
+
+@keyframes mandate-panel-reveal {
+  from { opacity: 0; transform: translateX(12px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@media (max-width: 760px) {
+  .mandate-panel {
+    top: calc(var(--observer-topbar-height) + 8px);
+    right: 8px;
+    bottom: calc(var(--observer-chronicle-height) + 8px);
+    width: calc(100vw - 84px);
+  }
+
+  .mandate-panel__ledger {
+    grid-template-columns: 82px minmax(0, 1fr);
+  }
+
+  .mandate-panel__ledger strong {
+    font-size: 27px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mandate-layer__backdrop,
+  .mandate-panel { animation: none; }
+}
