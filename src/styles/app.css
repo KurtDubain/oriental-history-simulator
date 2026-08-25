@@ -23,7 +23,7 @@
 }
 
 .observer-app[data-inspector-open="false"] {
-  grid-template-columns: 76px minmax(0, 1fr) 0;
+  grid-template-columns: 68px minmax(0, 1fr) 0;
 }
 
 .observer-world-summary,
@@ -321,7 +321,7 @@
 
 @media (max-width: 1080px) {
   .observer-app[data-inspector-open="false"] {
-    grid-template-columns: 68px minmax(0, 1fr);
+    grid-template-columns: 60px minmax(0, 1fr);
   }
 
   .observer-app > .quarter-pulse {
@@ -330,6 +330,15 @@
 }
 
 @media (max-width: 760px) {
+  .observer-app[data-inspector-open="false"] {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .observer-stage,
+  .observer-app > .quarter-pulse {
+    grid-column: 1;
+  }
+
   .observer-world-summary > span:nth-child(2),
   .observer-world-summary > span:nth-child(3),
   .observer-world-signature {

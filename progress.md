@@ -8,11 +8,16 @@ Current V1 request: 在已冻结的 V0.3 因果模拟内核上完成明日可试
 
 Current usability request: 将项目整理为 Git 仓库，并优先解决“难玩、UI 层级混乱、没有地图底子”；不改模拟守恒内核，先补地理语法、首次读图闭环和季度变化反馈。
 
+Current map-redesign request: 参考 WorldBox 的地图空间组织，严格让河北、北京、天津、山东、河南、山西、陕西、宁夏、辽宁、吉林、广东、福建、海南、台湾、日本、朝鲜半岛以外全部成为海洋；形成三块主要陆地区域与若干清晰岛屿，并适当放大地图。地形细节从简，优先修正海陆拓扑和整体构图。
+
 ## Product thesis
 
 - Visual thesis: 墨色舆图 × 朱砂史册；暖纸底、炭墨信息、单一朱砂交互色，像一座可操作的历史观测台。
 - Content plan: 顶部纪年与推进；左侧观察导航；中央单 Canvas 世界地图；右侧区域/国家/人物档案；底部季度史册与“为什么”。
 - Interaction thesis: 地图对象采用轻微墨晕高亮；推进季度时让季节与边界平滑过渡；档案与因果链使用克制的滑入和展开。
+- Map redesign visual thesis: 群岛箱庭 × 水墨政区；深浅海面占主导，三块陆地和岛链拥有自然、明确、可一眼辨识的岸线。
+- Map redesign content plan: 地块轮廓是主视觉；州域连续铺色与国号是信息层；城市、军团、港口和季度高亮是最上层，山河仅作低对比辅助。
+- Map redesign interaction thesis: 整块州域命中与提亮；叠层只改变陆地信息，不破坏海陆辨识；季度变化沿受影响州域岸内描边。
 
 ## V0.1 scope
 
@@ -96,3 +101,7 @@ Current usability request: 将项目整理为 Git 仓库，并优先解决“难
 - 2026-08-25 first-session UX: Added a focus-trapped three-step MapPrimer that teaches terrain, political situation and quarterly causality, advances at most one quarter and can open the resulting “why” chain. New worlds start with the full map instead of an auto-open inspector; completion is a non-authoritative global preference and the guide can always be reopened.
 - 2026-08-25 quarterly feedback: Replaced the mixed recent-history footer with a compact authoritative QuarterPulse. It shows exact population/food/wealth net changes, at most three events drawn only from `lastTurn.eventIds`, a clear quiet-quarter state, ledger-to-overlay/cause actions and low-key map highlights for affected/outbreak regions.
 - 2026-08-25 usability QA: Production build and the expanded V1 Chromium flow pass after primer/season-report integration. The browser gate covers desktop completion, no hash mutation while reading layers, exactly one guided quarter, cause opening, mobile primer bounds, current-quarter event membership, ledger values and related-region highlighting. The run ends at turn 4/hash `ecaff723046fe14b`, snapshot 27,813 bytes, with world collection covered.
+- 2026-08-25 WorldBox-style atlas: Replaced route-derived hulls and floating region hexes with a presentation-only fixed atlas. All 82 regions now form continuous Voronoi-like territories clipped to three detached mainlands (north including the northeast, Lingnan, Korean peninsula) plus Hainan, Taiwan, Kyushu, Shikoku and Honshu. Simulation coordinates, hashes and schema remain untouched.
+- 2026-08-25 map topology QA: Added explicit ocean seams, presentation sea anchors, 16 macro geographic labels, hidden three visually invalid cross-sea land routes, calmer political-mode routes/sea zones and wide desktop composition. Focused geography/territory/hit tests pass 12/12; every region display site is clickable in both 1210×560 and 390×644 viewports.
+- 2026-08-25 responsive map shell: The desktop navigation/inspector columns are narrower. At ≤760px the map uses the full viewport width and the navigation becomes a 58px bottom observation dock; layer selection opens above it. Browser inspection at 390×844 reports a 390×644 map stage, successful continuous-territory click selection and zero console errors.
+- 2026-08-25 map redesign release gate: Full Vitest is 79/79, production build and expanded Chromium create→guide→map→inspector→history→collection→mobile flow pass, and production dependency audit reports zero vulnerabilities. The deterministic E2E finishes at turn 4/hash `ecaff723046fe14b`; final desktop and 390×844 atlas captures were visually reviewed.

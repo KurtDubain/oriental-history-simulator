@@ -465,6 +465,16 @@ try {
   assert.equal(initial.observer.primerOpen, true);
   assert.equal(initial.interface.selected, null, '新建世界应先展示完整舆图，不抢先展开地区档案');
   assert.ok(Buffer.byteLength(initialText, 'utf8') < SNAPSHOT_LIMIT, '文本观察快照必须小于128KiB');
+  const mapTopology = await page.locator('.world-map').evaluate((element) => ({
+    layout: element.getAttribute('data-map-layout'),
+    landmasses: element.getAttribute('data-landmass-count'),
+    islands: element.getAttribute('data-island-shape-count'),
+  }));
+  assert.deepEqual(mapTopology, {
+    layout: 'archipelago-v2',
+    landmasses: '3',
+    islands: '5',
+  }, '舆图必须使用固定三大陆与五岛形展示拓扑');
 
   const afterPrimer = await exerciseMapPrimer(page);
   await page.screenshot({ path: `${ARTIFACT_DIR}/geographic-world-map.png`, fullPage: true });
@@ -691,6 +701,21 @@ try {
   await mobilePrimer.waitFor({ state: 'detached' });
   assert.equal((await snapshot(mobilePage)).observer.primerOpen, false);
   assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
+  const mobileMapLayout = await mobilePage.evaluate(() => {
+    const stage = document.querySelector('.observer-stage')?.getBoundingClientRect();
+    const map = document.querySelector('.world-map')?.getBoundingClientRect();
+    const dock = document.querySelector('.observer-navigation')?.getBoundingClientRect();
+    return {
+      stageWidth: stage?.width ?? 0,
+      mapWidth: map?.width ?? 0,
+      dockWidth: dock?.width ?? 0,
+      mapLayout: document.querySelector('.world-map')?.getAttribute('data-map-layout'),
+    };
+  });
+  assert.ok(mobileMapLayout.stageWidth >= 389 && mobileMapLayout.mapWidth >= 389, '移动端舆图必须使用完整视口宽度');
+  assert.ok(mobileMapLayout.dockWidth >= 370, '移动端观察导航应成为全宽底部观察坞');
+  assert.equal(mobileMapLayout.mapLayout, 'archipelago-v2');
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-world-map-390x844.png`, fullPage: true });
 
   await mobilePage.locator('button[data-observer-desk-trigger="true"]').click();
   const mobileObserverDesk = mobilePage.locator('.observer-desk');

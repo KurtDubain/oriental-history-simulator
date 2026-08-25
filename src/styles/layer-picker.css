@@ -145,10 +145,10 @@
 @media (max-width: 760px) {
   .layer-picker__sheet {
     right: 8px;
-    bottom: calc(var(--observer-chronicle-height) + 8px);
-    left: 76px;
+    bottom: calc(var(--observer-chronicle-height) + 72px);
+    left: 8px;
     width: auto;
-    max-height: calc(100dvh - var(--observer-topbar-height) - var(--observer-chronicle-height) - 16px);
+    max-height: calc(100dvh - var(--observer-topbar-height) - var(--observer-chronicle-height) - 80px);
   }
 
   .layer-picker__groups section {

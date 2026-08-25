@@ -10,6 +10,15 @@ import {
 } from "react";
 
 import "../styles/world-map.css";
+import {
+  MAP_LAND_SHAPES,
+  MAP_MACRO_LABELS,
+  MAP_PRESENTATION_HEIGHT,
+  MAP_PRESENTATION_WIDTH,
+  getRegionDisplaySite,
+  getSeaZoneDisplayCenter,
+} from "../view/map-geography";
+import { buildTerritoryCells } from "../view/map-territories";
 
 export interface MapPoint {
   x: number;
@@ -143,12 +152,16 @@ export interface MapViewportTransform {
   scale: number;
   offsetX: number;
   offsetY: number;
+  renderHeight: number;
+  yScale: number;
 }
 
-export const MAP_WORLD_WIDTH = 1000;
-export const MAP_WORLD_HEIGHT = 700;
+export const MAP_WORLD_WIDTH = MAP_PRESENTATION_WIDTH;
+export const MAP_WORLD_HEIGHT = MAP_PRESENTATION_HEIGHT;
 
-const MAP_PADDING = 22;
+const MAP_PADDING = 8;
+const MAP_DESKTOP_RENDER_HEIGHT = 500;
+const MAP_COMPACT_RENDER_HEIGHT = 620;
 const PAPER = "#e7dfca";
 const PAPER_LIGHT = "#f4eedf";
 const INK = "#292b27";
@@ -219,7 +232,7 @@ const polityFallback = (id: string) => {
   return palette[hashString(id) % palette.length];
 };
 
-/** Returns the fixed 1000 × 700 world-to-screen transform used by the canvas. */
+/** Returns the wide illustrated-atlas transform used by the canvas. */
 export function createMapViewportTransform(
   width: number,
   height: number,
@@ -227,11 +240,14 @@ export function createMapViewportTransform(
 ): MapViewportTransform {
   const drawableWidth = Math.max(1, width - padding * 2);
   const drawableHeight = Math.max(1, height - padding * 2);
-  const scale = Math.min(drawableWidth / MAP_WORLD_WIDTH, drawableHeight / MAP_WORLD_HEIGHT);
+  const renderHeight = width < 620 ? MAP_COMPACT_RENDER_HEIGHT : MAP_DESKTOP_RENDER_HEIGHT;
+  const scale = Math.min(drawableWidth / MAP_WORLD_WIDTH, drawableHeight / renderHeight);
   return {
     scale,
     offsetX: (width - MAP_WORLD_WIDTH * scale) / 2,
-    offsetY: (height - MAP_WORLD_HEIGHT * scale) / 2,
+    offsetY: (height - renderHeight * scale) / 2,
+    renderHeight,
+    yScale: renderHeight / MAP_WORLD_HEIGHT,
   };
 }
 
@@ -244,7 +260,7 @@ export function screenToWorldPoint(
   const transform = createMapViewportTransform(width, height, padding);
   return {
     x: (point.x - transform.offsetX) / transform.scale,
-    y: (point.y - transform.offsetY) / transform.scale,
+    y: (point.y - transform.offsetY) / (transform.scale * transform.yScale),
   };
 }
 
@@ -279,9 +295,87 @@ export function regionAtScreenPoint(
   return null;
 }
 
+interface MapPresentationView {
+  regions: MapRegionView[];
+  routes: MapRouteView[];
+  armies: MapArmyView[];
+  seaZones: MapSeaZoneView[];
+  fleets: MapFleetView[];
+  flows: MapFlowView[];
+  markers: MapMarkerView[];
+}
+
+const pointKey = (point: MapPoint) => `${point.x.toFixed(3)}:${point.y.toFixed(3)}`;
+
+/**
+ * Reprojects authoritative simulation objects onto a presentation-only atlas.
+ * No simulation coordinate, save payload, route distance, or deterministic hash
+ * is touched by this layer.
+ */
+export function buildMapPresentation(
+  regions: readonly MapRegionView[],
+  routes: readonly MapRouteView[],
+  armies: readonly MapArmyView[],
+  seaZones: readonly MapSeaZoneView[],
+  fleets: readonly MapFleetView[],
+  flows: readonly MapFlowView[],
+  markers: readonly MapMarkerView[],
+): MapPresentationView {
+  const knownSites = regions.flatMap((region) => {
+    const site = getRegionDisplaySite(region.id);
+    return site ? [site] : [];
+  });
+  const cellByRegionId = new Map(
+    buildTerritoryCells(MAP_LAND_SHAPES, knownSites)
+      .map((cell) => [cell.siteId, cell] as const),
+  );
+  const projectedPointByRawPoint = new Map<string, MapPoint>();
+
+  const presentedRegions = regions.map((region) => {
+    const site = getRegionDisplaySite(region.id);
+    const cell = cellByRegionId.get(region.id);
+    if (!site || !cell) return { ...region, center: { ...region.center }, polygon: [...region.polygon] };
+    const center = { x: site.x, y: site.y };
+    projectedPointByRawPoint.set(pointKey(region.center), center);
+    return {
+      ...region,
+      center,
+      polygon: cell.polygon,
+    };
+  });
+
+  const presentedSeaZones = seaZones.map((zone) => {
+    const center = getSeaZoneDisplayCenter(zone.id) ?? zone.center;
+    projectedPointByRawPoint.set(pointKey(zone.center), center);
+    return { ...zone, center: { ...center } };
+  });
+
+  const projectPoint = (point: MapPoint): MapPoint => {
+    const exact = projectedPointByRawPoint.get(pointKey(point));
+    if (exact) return { ...exact };
+    return { ...point };
+  };
+
+  return {
+    regions: presentedRegions,
+    routes: routes.map((route) => ({
+      ...route,
+      points: route.points?.map(projectPoint),
+    })),
+    armies: armies.map((army) => ({
+      ...army,
+      position: army.position ? projectPoint(army.position) : undefined,
+    })),
+    seaZones: presentedSeaZones,
+    fleets: fleets.map((fleet) => ({ ...fleet, position: projectPoint(fleet.position) })),
+    flows: flows.map((flow) => ({ ...flow, from: projectPoint(flow.from), to: projectPoint(flow.to) })),
+    markers: markers.map((marker) => ({ ...marker, position: projectPoint(marker.position) })),
+  };
+}
+
 const worldToScreen = (point: MapPoint, transform: MapViewportTransform): MapPoint => ({
   x: transform.offsetX + point.x * transform.scale,
-  y: transform.offsetY + point.y * transform.scale,
+  y: transform.offsetY + point.y * transform.scale * transform.yScale,
 });
 
 function makeRegionPath(region: MapRegionView, transform: MapViewportTransform) {
@@ -373,76 +467,39 @@ function pairKey(left: string, right: string) {
   return left < right ? `${left}:${right}` : `${right}:${left}`;
 }
 
-function landRouteComponents(
-  regions: readonly MapRegionView[],
-  routes: readonly MapRouteView[],
-) {
-  const regionById = new Map(regions.map((region) => [region.id, region]));
-  const adjacency = new Map(regions.map((region) => [region.id, new Set<string>()]));
-  for (const route of routes) {
-    if (route.type.toLowerCase() === "sea" || !regionById.has(route.from) || !regionById.has(route.to)) continue;
-    adjacency.get(route.from)?.add(route.to);
-    adjacency.get(route.to)?.add(route.from);
-  }
+const VISUAL_CROSS_SEA_LAND_ROUTES = new Set([
+  pairKey("r_liaodong", "r_pyongyang"),
+  pairKey("r_nanyang", "r_guangzhou"),
+  pairKey("r_runan", "r_quanzhou"),
+]);
 
-  const visited = new Set<string>();
-  const components: MapRegionView[][] = [];
-  for (const region of regions) {
-    if (visited.has(region.id)) continue;
-    const component: MapRegionView[] = [];
-    const pending = [region.id];
-    visited.add(region.id);
-    while (pending.length > 0) {
-      const id = pending.pop();
-      const item = id ? regionById.get(id) : undefined;
-      if (!item) continue;
-      component.push(item);
-      for (const next of adjacency.get(item.id) ?? []) {
-        if (visited.has(next)) continue;
-        visited.add(next);
-        pending.push(next);
-      }
-    }
-    components.push(component);
-  }
-  return components;
+function shouldDrawRoute(route: MapRouteView, overlay: MapOverlay) {
+  const type = route.type.toLowerCase();
+  if (type !== "sea" && VISUAL_CROSS_SEA_LAND_ROUTES.has(pairKey(route.from, route.to))) return false;
+  if (overlay === "political") return type === "river";
+  if (overlay === "naval" || overlay === "trade") return type === "sea" || type === "river";
+  if (overlay === "none") return true;
+  return type === "river";
 }
 
 function deriveGeography(
   regions: readonly MapRegionView[],
   routes: readonly MapRouteView[],
 ): GeographyView {
-  const easternIslandIds = new Set<string>();
-  for (const component of landRouteComponents(regions, routes)) {
-    const minimumX = Math.min(...component.map((region) => region.center.x));
-    const averageX = component.reduce((sum, region) => sum + region.center.x, 0) / Math.max(1, component.length);
-    if (minimumX > MAP_WORLD_WIDTH * 0.84 && averageX > MAP_WORLD_WIDTH * 0.87) {
-      component.forEach((region) => easternIslandIds.add(region.id));
-    }
-  }
-
   const areaFor = (region: MapRegionView): GeographyAreaId => {
-    const { x, y } = region.center;
-    if (easternIslandIds.has(region.id)) return "japan";
-    if (x >= MAP_WORLD_WIDTH * 0.8 && y >= MAP_WORLD_HEIGHT * 0.23 && y <= MAP_WORLD_HEIGHT * 0.56) return "korea";
-    if (
-      y >= MAP_WORLD_HEIGHT * 0.73
-      || (y >= MAP_WORLD_HEIGHT * 0.63 && x >= MAP_WORLD_WIDTH * 0.56 && x < MAP_WORLD_WIDTH * 0.82)
-    ) return "lingnan";
-    if (x >= MAP_WORLD_WIDTH * 0.59 && y < MAP_WORLD_HEIGHT * 0.27) return "northeast";
+    const site = getRegionDisplaySite(region.id);
+    if (!site) return "heartland";
+    if (site.shapeId.startsWith("island_") && !site.shapeId.includes("hainan") && !site.shapeId.includes("taiwan")) return "japan";
+    if (site.shapeId === "land_korea") return "korea";
+    if (site.shapeId === "land_lingnan" || site.shapeId === "island_hainan" || site.shapeId === "island_taiwan") return "lingnan";
+    if (region.id === "r_chengde" || site.x >= 395 && site.y <= 150) return "northeast";
     return "heartland";
   };
 
   const regionById = new Map(regions.map((region) => [region.id, region]));
   const areaByRegionId = new Map(regions.map((region) => [region.id, areaFor(region)]));
+  const shapeByRegionId = new Map(regions.map((region) => [region.id, getRegionDisplaySite(region.id)?.shapeId]));
   const linkByKey = new Map<string, GeographicLink>();
-  const areasCanJoin = (left: GeographyAreaId, right: GeographyAreaId) => (
-    left === right
-    || (left === "heartland" && right === "northeast")
-    || (left === "northeast" && right === "heartland")
-    || (left === "northeast" && right === "korea")
-    || (left === "korea" && right === "northeast")
-  );
   const addLink = (from: MapRegionView, to: MapRegionView) => {
     const key = pairKey(from.id, to.id);
     if (!linkByKey.has(key)) linkByKey.set(key, { from, to });
@@ -453,10 +510,10 @@ function deriveGeography(
     const from = regionById.get(route.from);
     const to = regionById.get(route.to);
     if (!from || !to) continue;
-    const fromArea = areaByRegionId.get(from.id);
-    const toArea = areaByRegionId.get(to.id);
+    const fromShape = shapeByRegionId.get(from.id);
+    const toShape = shapeByRegionId.get(to.id);
     const distance = Math.hypot(from.center.x - to.center.x, from.center.y - to.center.y);
-    if (fromArea && toArea && areasCanJoin(fromArea, toArea) && distance <= 160) addLink(from, to);
+    if (fromShape && fromShape === toShape && distance <= 160) addLink(from, to);
   }
 
   for (let leftIndex = 0; leftIndex < regions.length; leftIndex += 1) {
@@ -465,9 +522,9 @@ function deriveGeography(
     for (let rightIndex = leftIndex + 1; rightIndex < regions.length; rightIndex += 1) {
       const right = regions[rightIndex];
       if (isIslandTerrain(right.terrain)) continue;
-      const leftArea = areaByRegionId.get(left.id);
-      const rightArea = areaByRegionId.get(right.id);
-      if (!leftArea || !rightArea || !areasCanJoin(leftArea, rightArea)) continue;
+      const leftShape = shapeByRegionId.get(left.id);
+      const rightShape = shapeByRegionId.get(right.id);
+      if (!leftShape || leftShape !== rightShape) continue;
       const distance = Math.hypot(left.center.x - right.center.x, left.center.y - right.center.y);
       if (distance <= 108) addLink(left, right);
     }
@@ -485,45 +542,6 @@ function deriveGeography(
     };
   }).filter((area) => area.regions.length > 0);
   return { areas, links };
-}
-
-function convexHull(points: readonly MapPoint[]): MapPoint[] {
-  if (points.length <= 3) return [...points];
-  const sorted = [...points].sort((left, right) => left.x - right.x || left.y - right.y);
-  const cross = (origin: MapPoint, left: MapPoint, right: MapPoint) => (
-    (left.x - origin.x) * (right.y - origin.y) - (left.y - origin.y) * (right.x - origin.x)
-  );
-  const lower: MapPoint[] = [];
-  for (const point of sorted) {
-    while (lower.length >= 2 && cross(lower[lower.length - 2], lower[lower.length - 1], point) <= 0) lower.pop();
-    lower.push(point);
-  }
-  const upper: MapPoint[] = [];
-  for (let index = sorted.length - 1; index >= 0; index -= 1) {
-    const point = sorted[index];
-    while (upper.length >= 2 && cross(upper[upper.length - 2], upper[upper.length - 1], point) <= 0) upper.pop();
-    upper.push(point);
-  }
-  lower.pop();
-  upper.pop();
-  return [...lower, ...upper];
-}
-
-function applySmoothClosedPath(
-  context: CanvasRenderingContext2D,
-  points: readonly MapPoint[],
-  transform: MapViewportTransform,
-) {
-  if (points.length < 2) return;
-  const screenPoints = points.map((point) => worldToScreen(point, transform));
-  const first = screenPoints[0];
-  const last = screenPoints[screenPoints.length - 1];
-  context.moveTo((last.x + first.x) / 2, (last.y + first.y) / 2);
-  screenPoints.forEach((point, index) => {
-    const next = screenPoints[(index + 1) % screenPoints.length];
-    context.quadraticCurveTo(point.x, point.y, (point.x + next.x) / 2, (point.y + next.y) / 2);
-  });
-  context.closePath();
 }
 
 function applySmoothOpenPath(
@@ -578,26 +596,26 @@ function drawSeaField(
 ) {
   const left = transform.offsetX;
   const top = transform.offsetY;
-  const sea = context.createLinearGradient(left, top, left + MAP_WORLD_WIDTH * transform.scale, top + MAP_WORLD_HEIGHT * transform.scale);
-  sea.addColorStop(0, "rgba(149, 164, 157, 0.13)");
-  sea.addColorStop(0.48, "rgba(132, 153, 151, 0.2)");
-  sea.addColorStop(1, "rgba(104, 137, 143, 0.27)");
+  const sea = context.createLinearGradient(left, top, left + MAP_WORLD_WIDTH * transform.scale, top + transform.renderHeight * transform.scale);
+  sea.addColorStop(0, "rgba(126, 151, 151, 0.28)");
+  sea.addColorStop(0.48, "rgba(105, 139, 143, 0.35)");
+  sea.addColorStop(1, "rgba(76, 117, 128, 0.43)");
   context.save();
   context.fillStyle = sea;
-  context.fillRect(left, top, MAP_WORLD_WIDTH * transform.scale, MAP_WORLD_HEIGHT * transform.scale);
+  context.fillRect(left, top, MAP_WORLD_WIDTH * transform.scale, transform.renderHeight * transform.scale);
 
   const easternDepth = context.createRadialGradient(
     left + MAP_WORLD_WIDTH * transform.scale,
-    top + MAP_WORLD_HEIGHT * transform.scale * 0.62,
+    top + transform.renderHeight * transform.scale * 0.62,
     10,
     left + MAP_WORLD_WIDTH * transform.scale,
-    top + MAP_WORLD_HEIGHT * transform.scale * 0.62,
+    top + transform.renderHeight * transform.scale * 0.62,
     Math.max(width, height) * 0.58,
   );
-  easternDepth.addColorStop(0, "rgba(73, 111, 121, 0.16)");
+  easternDepth.addColorStop(0, "rgba(55, 94, 107, 0.24)");
   easternDepth.addColorStop(1, "rgba(73, 111, 121, 0)");
   context.fillStyle = easternDepth;
-  context.fillRect(left, top, MAP_WORLD_WIDTH * transform.scale, MAP_WORLD_HEIGHT * transform.scale);
+  context.fillRect(left, top, MAP_WORLD_WIDTH * transform.scale, transform.renderHeight * transform.scale);
   context.restore();
 }
 
@@ -608,7 +626,7 @@ function drawSeaMarks(
   transform: MapViewportTransform,
 ) {
   context.save();
-  context.strokeStyle = "rgba(61, 91, 96, 0.21)";
+  context.strokeStyle = "rgba(235, 239, 224, 0.2)";
   context.lineWidth = 0.75;
   const spacing = Math.max(43, Math.min(width, height) * 0.095);
   for (let y = transform.offsetY + spacing * 0.55; y < height - transform.offsetY; y += spacing) {
@@ -623,167 +641,60 @@ function drawSeaMarks(
   context.restore();
 }
 
-function regionLandRadius(region: MapRegionView) {
-  const terrain = region.terrain.toLowerCase();
-  if (isIslandTerrain(terrain)) return 19;
-  if (terrain.includes("山") || terrain.includes("mountain")) return 25;
-  if (terrain.includes("海岸") || terrain.includes("coast")) return 27;
-  if (terrain.includes("丘") || terrain.includes("hill")) return 28;
-  return 30;
-}
-
-function drawLandNetworkLayer(
-  context: CanvasRenderingContext2D,
-  regions: readonly MapRegionView[],
-  links: readonly GeographicLink[],
-  transform: MapViewportTransform,
-  color: string,
-  connectorWidth: number,
-  radiusOffset: number,
-) {
-  context.save();
-  context.fillStyle = color;
-  context.strokeStyle = color;
-  context.lineCap = "round";
-  context.lineJoin = "round";
-  context.lineWidth = Math.max(1, connectorWidth * transform.scale);
-  context.beginPath();
-  for (const link of links) {
-    const from = worldToScreen(link.from.center, transform);
-    const to = worldToScreen(link.to.center, transform);
-    context.moveTo(from.x, from.y);
-    context.lineTo(to.x, to.y);
-  }
-  context.stroke();
-
-  for (const region of regions) {
-    const center = worldToScreen(region.center, transform);
-    const radius = Math.max(7, (regionLandRadius(region) + radiusOffset) * transform.scale);
-    const horizontal = radius * (isIslandTerrain(region.terrain) ? 0.86 : 1.08);
-    const vertical = radius * (region.terrain.toLowerCase().includes("coast") || region.terrain.includes("海岸") ? 0.86 : 1);
-    context.beginPath();
-    context.ellipse(center.x, center.y, horizontal, vertical, -0.06, 0, Math.PI * 2);
-    context.fill();
-  }
-  context.restore();
-}
-
-function drawGeographyHullLayer(
-  context: CanvasRenderingContext2D,
-  geography: GeographyView,
-  transform: MapViewportTransform,
-  color: string,
-  lineWidth: number,
-) {
-  context.save();
-  context.fillStyle = color;
-  context.strokeStyle = color;
-  context.lineJoin = "round";
-  context.lineWidth = Math.max(0.6, lineWidth * transform.scale);
-  for (const area of geography.areas) {
-    for (const component of areaComponents(area)) {
-      if (component.length < 2) continue;
-      const hull = convexHull(component.flatMap((region) => region.polygon));
-      if (hull.length < 3) continue;
-      context.beginPath();
-      applySmoothClosedPath(context, hull, transform);
-      context.fill();
-      context.stroke();
-    }
-  }
-  context.restore();
-}
-
 function drawLandFoundation(
   context: CanvasRenderingContext2D,
-  geography: GeographyView,
-  regions: readonly MapRegionView[],
   transform: MapViewportTransform,
 ) {
-  drawGeographyHullLayer(context, geography, transform, "rgba(247, 241, 222, 0.96)", 11);
-  drawLandNetworkLayer(context, regions, geography.links, transform, "rgba(247, 241, 222, 0.96)", 58, 6);
-  drawGeographyHullLayer(context, geography, transform, "rgba(48, 51, 45, 0.58)", 7);
-  drawLandNetworkLayer(context, regions, geography.links, transform, "rgba(48, 51, 45, 0.58)", 54, 3.8);
-  drawGeographyHullLayer(context, geography, transform, "#d8d0b8", 3.2);
-  drawLandNetworkLayer(context, regions, geography.links, transform, "#d8d0b8", 50, 1.6);
-
-  for (const area of geography.areas) {
-    context.save();
-    context.globalAlpha = 0.56;
-    const scopedGeography: GeographyView = { areas: [area], links: area.links };
-    drawGeographyHullLayer(context, scopedGeography, transform, area.tint, 0.8);
-    drawLandNetworkLayer(context, area.regions, area.links, transform, area.tint, 43, -1.5);
-    context.restore();
+  context.save();
+  context.lineJoin = "round";
+  context.shadowColor = "rgba(28, 47, 49, 0.2)";
+  context.shadowBlur = Math.max(3, 8 * transform.scale);
+  for (const shape of MAP_LAND_SHAPES) {
+    context.beginPath();
+    applyLinePath(context, shape.polygon, transform);
+    context.closePath();
+    context.fillStyle = shape.role === "mainland" ? "#d8d0b4" : "#d4ccb0";
+    context.fill();
+    context.strokeStyle = "rgba(242, 235, 214, 0.95)";
+    context.lineWidth = Math.max(2.6, 9 * transform.scale);
+    context.stroke();
   }
-}
-
-function areaComponents(area: GeographyAreaView) {
-  const byId = new Map(area.regions.map((region) => [region.id, region]));
-  const adjacency = new Map(area.regions.map((region) => [region.id, new Set<string>()]));
-  area.links.forEach((link) => {
-    adjacency.get(link.from.id)?.add(link.to.id);
-    adjacency.get(link.to.id)?.add(link.from.id);
-  });
-  const visited = new Set<string>();
-  const result: MapRegionView[][] = [];
-  for (const region of area.regions) {
-    if (visited.has(region.id)) continue;
-    const pending = [region.id];
-    const component: MapRegionView[] = [];
-    visited.add(region.id);
-    while (pending.length > 0) {
-      const id = pending.pop();
-      const item = id ? byId.get(id) : undefined;
-      if (!item) continue;
-      component.push(item);
-      for (const next of adjacency.get(item.id) ?? []) {
-        if (visited.has(next)) continue;
-        visited.add(next);
-        pending.push(next);
-      }
-    }
-    result.push(component);
-  }
-  return result;
+  context.restore();
 }
 
 function drawGeographicContours(
   context: CanvasRenderingContext2D,
-  geography: GeographyView,
   transform: MapViewportTransform,
   compactMap: boolean,
 ) {
-  for (const area of geography.areas) {
-    const components = areaComponents(area);
-    for (const component of components) {
-      if (component.length < 2) continue;
-      const hull = convexHull(component.flatMap((region) => region.polygon));
-      if (hull.length < 3) continue;
-      context.save();
-      context.beginPath();
-      applySmoothClosedPath(context, hull, transform);
-      context.strokeStyle = "rgba(55, 57, 49, 0.23)";
-      context.lineWidth = 0.8;
-      context.setLineDash([Math.max(3, 6 * transform.scale), Math.max(2, 4 * transform.scale)]);
-      context.stroke();
-      context.restore();
-    }
-
-    if (compactMap || area.regions.length < 2) continue;
-    const largest = [...components].sort((left, right) => right.length - left.length)[0] ?? area.regions;
-    const minimumX = Math.min(...largest.map((region) => region.center.x));
-    const maximumY = Math.max(...largest.map((region) => region.center.y));
-    const anchor = worldToScreen({ x: minimumX + 16, y: maximumY + 28 }, transform);
-    context.save();
-    context.fillStyle = "rgba(50, 52, 45, 0.5)";
-    context.font = '600 9px "Noto Serif SC", "Songti SC", serif';
-    context.textAlign = "left";
-    context.textBaseline = "middle";
-    context.shadowColor = "rgba(241, 234, 214, 0.95)";
-    context.shadowBlur = 4;
-    context.fillText(area.label, anchor.x, anchor.y);
-    context.restore();
+  context.save();
+  context.lineJoin = "round";
+  for (const shape of MAP_LAND_SHAPES) {
+    context.beginPath();
+    applyLinePath(context, shape.polygon, transform);
+    context.closePath();
+    context.strokeStyle = "rgba(249, 243, 224, 0.78)";
+    context.lineWidth = Math.max(2.2, 4.5 * transform.scale);
+    context.stroke();
+    context.strokeStyle = "rgba(36, 48, 45, 0.72)";
+    context.lineWidth = Math.max(0.85, 1.5 * transform.scale);
+    context.stroke();
   }
+
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  for (const label of MAP_MACRO_LABELS) {
+    if (compactMap && label.kind === "province" && label.priority < 3) continue;
+    const point = worldToScreen(label.center, transform);
+    const geographical = label.kind !== "province";
+    context.font = `${geographical ? 620 : 560} ${compactMap ? 7 : geographical ? 10 : 9}px "Noto Serif SC", "Songti SC", serif`;
+    context.lineWidth = compactMap ? 2.4 : 3.4;
+    context.strokeStyle = "rgba(231, 224, 201, 0.76)";
+    context.strokeText(label.label, point.x, point.y);
+    context.fillStyle = geographical ? "rgba(37, 49, 47, 0.58)" : "rgba(47, 49, 42, 0.42)";
+    context.fillText(label.label, point.x, point.y);
+  }
+  context.restore();
 }
 
 function regionFill(
@@ -849,30 +760,27 @@ function drawSeaZones(
     const radiusY = Math.max(11, (strait ? 23 : ocean ? 42 : 32) * transform.scale);
     const selected = selectedObject?.kind === "seaZone" && selectedObject.id === zone.id;
     const naval = overlay === "naval";
+    const contextual = naval || overlay === "trade" || selected;
     context.save();
-    context.beginPath();
-    context.ellipse(center.x, center.y, radiusX, radiusY, -0.08, 0, Math.PI * 2);
-    context.fillStyle = zone.contested ? "rgba(116, 89, 79, 0.18)" : ocean ? "rgba(74, 111, 120, 0.16)" : "rgba(94, 116, 122, 0.13)";
-    context.globalAlpha = naval ? 0.56 + clamp(zone.powerShare) * 0.32 : ocean ? 0.48 : 0.36;
-    context.fill();
-    context.globalAlpha = naval ? 0.66 : ocean ? 0.38 : 0.3;
-    context.strokeStyle = selected ? VERMILION : zone.contested ? "#86685f" : RIVER;
-    context.lineWidth = selected ? 2 : zone.contested ? 1.2 : 0.8;
-    context.setLineDash(zone.contested ? [3, 3] : ocean ? [7, 5] : strait ? [2, 3] : []);
-    context.stroke();
-    context.setLineDash([]);
+    if (contextual) {
+      context.beginPath();
+      context.ellipse(center.x, center.y, radiusX, radiusY, -0.08, 0, Math.PI * 2);
+      context.fillStyle = zone.contested ? "rgba(116, 89, 79, 0.18)" : ocean ? "rgba(74, 111, 120, 0.16)" : "rgba(94, 116, 122, 0.13)";
+      context.globalAlpha = naval ? 0.56 + clamp(zone.powerShare) * 0.32 : 0.32;
+      context.fill();
+      context.globalAlpha = naval ? 0.66 : 0.38;
+      context.strokeStyle = selected ? VERMILION : zone.contested ? "#86685f" : RIVER;
+      context.lineWidth = selected ? 2 : zone.contested ? 1.2 : 0.8;
+      context.setLineDash(zone.contested ? [3, 3] : ocean ? [7, 5] : strait ? [2, 3] : []);
+      context.stroke();
+      context.setLineDash([]);
+    }
 
-    context.globalAlpha = ocean ? 0.2 : 0.15;
-    context.beginPath();
-    context.ellipse(center.x, center.y, radiusX * 1.3, radiusY * 1.34, -0.08, 0, Math.PI * 2);
-    context.strokeStyle = RIVER;
-    context.lineWidth = 0.65;
-    context.stroke();
     context.globalAlpha = 1;
-    context.fillStyle = selected ? VERMILION : "rgba(76, 91, 95, 0.82)";
+    context.fillStyle = selected ? VERMILION : contextual ? "rgba(61, 82, 88, 0.86)" : "rgba(239, 241, 226, 0.62)";
     context.font = `${selected ? 650 : 560} ${transform.scale < 0.42 ? 8 : 9}px "Noto Serif SC", serif`;
     context.textAlign = "center";
-    context.fillText(zone.name, center.x, center.y + 3);
+    if (contextual || strait || ocean) context.fillText(zone.name, center.x, center.y + 3);
     context.restore();
   }
 }
@@ -1474,7 +1382,7 @@ function drawMap(
   drawSeaField(context, width, height, transform);
   drawSeaMarks(context, width, height, transform);
   drawSeaZones(context, seaZones, transform, overlay, selectedObject);
-  drawLandFoundation(context, geography, regions, transform);
+  drawLandFoundation(context, transform);
 
   context.save();
   context.lineCap = "round";
@@ -1493,10 +1401,11 @@ function drawMap(
     context.stroke(path);
   });
 
-  drawGeographicContours(context, geography, transform, compactMap);
+  drawGeographicContours(context, transform, compactMap);
   drawMountainRanges(context, geography, transform, compactMap);
 
   routes.forEach((route) => {
+    if (!shouldDrawRoute(route, overlay)) return;
     const from = regionById.get(route.from);
     const to = regionById.get(route.to);
     const points = route.points ?? (from && to ? [from.center, to.center] : []);
@@ -1541,7 +1450,7 @@ function drawMap(
 
   regions.forEach((region) => {
     const center = worldToScreen(region.center, transform);
-    if (!compactMap) {
+    if (!compactMap && overlay === "none") {
       drawRegionTerrain(context, region, center);
     }
     if (region.port) {
@@ -1680,6 +1589,10 @@ export function WorldMap({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<CanvasSize>({ width: 1, height: 1, dpr: 1 });
   const [hover, setHover] = useState<HoverState | null>(null);
+  const presentation = useMemo(
+    () => buildMapPresentation(regions, routes, armies, seaZones, fleets, flows, markers),
+    [armies, fleets, flows, markers, regions, routes, seaZones],
+  );
 
   useLayoutEffect(() => {
     const host = hostRef.current;
@@ -1716,20 +1629,20 @@ export function WorldMap({
     drawMap(
       context,
       size,
-      regions,
-      routes,
-      armies,
-      seaZones,
-      fleets,
-      flows,
-      markers,
+      presentation.regions,
+      presentation.routes,
+      presentation.armies,
+      presentation.seaZones,
+      presentation.fleets,
+      presentation.flows,
+      presentation.markers,
       overlay,
       highlightedRegionIds,
       selectedRegionId,
       selectedObject,
       hover?.region.id,
     );
-  }, [armies, fleets, flows, highlightedRegionIds, hover?.region.id, markers, overlay, regions, routes, seaZones, selectedObject, selectedRegionId, size]);
+  }, [highlightedRegionIds, hover?.region.id, overlay, presentation, selectedObject, selectedRegionId, size]);
 
   const localPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -1742,25 +1655,25 @@ export function WorldMap({
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
       const point = localPoint(event);
-      const region = regionAtScreenPoint(regions, point, size.width, size.height);
+      const region = regionAtScreenPoint(presentation.regions, point, size.width, size.height);
       event.currentTarget.style.cursor = region ? "crosshair" : "default";
       setHover(region ? { region, x: point.x, y: point.y } : null);
     },
-    [localPoint, regions, size.height, size.width],
+    [localPoint, presentation.regions, size.height, size.width],
   );
 
   const handleClick = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
       const point = localPoint(event);
       const worldPoint = screenToWorldPoint(point, size.width, size.height);
-      const nearestFleet = fleets
+      const nearestFleet = presentation.fleets
         .map((fleet) => ({ fleet, distance: Math.hypot(fleet.position.x - worldPoint.x, fleet.position.y - worldPoint.y) }))
         .sort((left, right) => left.distance - right.distance)[0];
       if (nearestFleet && nearestFleet.distance <= 18) {
         onSelectObject?.("fleet", nearestFleet.fleet.id);
         return;
       }
-      const nearestMarker = markers
+      const nearestMarker = presentation.markers
         .map((marker) => ({ marker, distance: Math.hypot(marker.position.x - worldPoint.x, marker.position.y - worldPoint.y) }))
         .sort((left, right) => left.distance - right.distance)[0];
       if (nearestMarker && nearestMarker.distance <= 16) {
@@ -1774,32 +1687,32 @@ export function WorldMap({
         const ratio = clamp(((worldPoint.x - flow.from.x) * dx + (worldPoint.y - flow.from.y) * dy) / denominator);
         return Math.hypot(worldPoint.x - (flow.from.x + ratio * dx), worldPoint.y - (flow.from.y + ratio * dy));
       };
-      const nearestFlow = flows.map((flow) => ({ flow, distance: pointToSegment(flow) })).sort((a, b) => a.distance - b.distance)[0];
+      const nearestFlow = presentation.flows.map((flow) => ({ flow, distance: pointToSegment(flow) })).sort((a, b) => a.distance - b.distance)[0];
       if (nearestFlow && nearestFlow.distance <= 12) {
         onSelectObject?.(nearestFlow.flow.selectedKind, nearestFlow.flow.selectedId);
         return;
       }
-      const region = regionAtScreenPoint(regions, point, size.width, size.height);
+      const region = regionAtScreenPoint(presentation.regions, point, size.width, size.height);
       if (region) {
         onSelectRegion(region.id);
         return;
       }
-      const nearestSea = seaZones
+      const nearestSea = presentation.seaZones
         .map((zone) => ({ zone, distance: Math.hypot(zone.center.x - worldPoint.x, zone.center.y - worldPoint.y) }))
         .sort((left, right) => left.distance - right.distance)[0];
       if (nearestSea && nearestSea.distance <= 52) onSelectObject?.("seaZone", nearestSea.zone.id);
     },
-    [fleets, flows, localPoint, markers, onSelectObject, onSelectRegion, regions, seaZones, size.height, size.width],
+    [localPoint, onSelectObject, onSelectRegion, presentation, size.height, size.width],
   );
 
   const handleKeyDown = useCallback(
     (event: ReactKeyboardEvent<HTMLCanvasElement>) => {
       const contextualObjects = overlay === "naval"
-        ? [...seaZones.map((item) => ({ kind: "seaZone" as const, id: item.id })), ...fleets.map((item) => ({ kind: "fleet" as const, id: item.id }))]
-        : [...markers.map((item) => ({ kind: item.kind, id: item.id })), ...flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId }))];
-      if (regions.length === 0 && contextualObjects.length === 0) return;
+        ? [...presentation.seaZones.map((item) => ({ kind: "seaZone" as const, id: item.id })), ...presentation.fleets.map((item) => ({ kind: "fleet" as const, id: item.id }))]
+        : [...presentation.markers.map((item) => ({ kind: item.kind, id: item.id })), ...presentation.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId }))];
+      if (presentation.regions.length === 0 && contextualObjects.length === 0) return;
       if (event.key === "Enter" || event.key === " ") {
-        const targetId = hover?.region.id ?? selectedRegionId ?? regions[0]?.id;
+        const targetId = hover?.region.id ?? selectedRegionId ?? presentation.regions[0]?.id;
         event.preventDefault();
         if (targetId) onSelectRegion(targetId);
         return;
@@ -1813,12 +1726,12 @@ export function WorldMap({
         if (next) onSelectObject?.(next.kind, next.id);
         return;
       }
-      const currentIndex = regions.findIndex((region) => region.id === selectedRegionId);
+      const currentIndex = presentation.regions.findIndex((region) => region.id === selectedRegionId);
       const direction = event.key === "ArrowRight" ? 1 : -1;
-      const nextIndex = (currentIndex + direction + regions.length) % regions.length;
-      onSelectRegion(regions[nextIndex].id);
+      const nextIndex = (currentIndex + direction + presentation.regions.length) % presentation.regions.length;
+      onSelectRegion(presentation.regions[nextIndex].id);
     },
-    [fleets, flows, hover?.region.id, markers, onSelectObject, onSelectRegion, overlay, regions, seaZones, selectedObject?.id, selectedRegionId],
+    [hover?.region.id, onSelectObject, onSelectRegion, overlay, presentation, selectedObject?.id, selectedRegionId],
   );
 
   const tooltipStyle = useMemo(() => {
@@ -1838,6 +1751,9 @@ export function WorldMap({
       ref={hostRef}
       className={`world-map${className ? ` ${className}` : ""}`}
       data-overlay={overlay}
+      data-map-layout="archipelago-v2"
+      data-landmass-count="3"
+      data-island-shape-count="5"
       data-highlighted-region-count={highlightedRegionIds.length}
     >
       <canvas
