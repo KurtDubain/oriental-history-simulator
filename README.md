@@ -124,3 +124,9 @@ npm run test:release
 - 当前版本可完全在浏览器中运行，不需要服务器。只有云存档、跨设备同步、共享世界或排行榜才需要后端。
 - 存档保存世界种子、schema、权威状态、事件摘要链和哈希；界面文案不是事实来源。
 - 详细设计与版本落地记录见 [《东方架空历史演化模拟器 System Design Proposal》](./东方架空历史演化模拟器_System_Design_Proposal.md)。
+
+## vNext 设计蓝图
+
+- [最终系统设计方案](./docs/NEXT_SYSTEM_DESIGN.md)：Situation、人物 Goal/Plan、家族、战争与历史叙事架构。
+- [模拟性能审计](./docs/SIMULATION_PERFORMANCE_AUDIT.md)：当前实测、热点、预算与 Worker 决策门。
+- [Roadmap 与任务清单](./docs/ROADMAP_VNEXT.md)：Phase A～F、任务编号、风险和验收标准。
