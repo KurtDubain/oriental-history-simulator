@@ -21,58 +21,52 @@ export interface MapLandShape extends TerritoryLandShape {
 export type MapLandShapeId =
   | 'land_northern'
   | 'land_lingnan'
-  | 'land_korea'
   | 'island_hainan'
   | 'island_taiwan'
   | 'island_kyushu'
   | 'island_shikoku'
-  | 'island_honshu';
+  | 'island_honshu'
+  | 'island_hokkaido';
 
-/** Three separated continental silhouettes and five intentionally detached islands. */
+/**
+ * Physical coast masks for the illustrated atlas.
+ *
+ * The northern continent deliberately includes the Korean peninsula: this is
+ * one continuous, deeply indented land body rather than the former collection
+ * of smooth capsules. Region cells are generated against convex bounds and
+ * clipped back to these masks by the canvas renderer.
+ */
 export const MAP_LAND_SHAPES = [
   {
     id: 'land_northern',
-    label: '中原北陆',
+    label: '北陆与海东半岛',
     role: 'mainland',
-    expectedRegionCount: 51,
+    expectedRegionCount: 57,
     polygon: [
-      { x: 20, y: 230 }, { x: 24, y: 154 }, { x: 38, y: 96 },
-      { x: 94, y: 48 }, { x: 178, y: 29 }, { x: 286, y: 22 },
-      { x: 406, y: 25 }, { x: 528, y: 27 }, { x: 614, y: 43 },
-      { x: 650, y: 82 }, { x: 653, y: 137 }, { x: 644, y: 190 },
-      { x: 625, y: 241 }, { x: 597, y: 292 }, { x: 560, y: 347 },
-      { x: 510, y: 390 }, { x: 435, y: 410 }, { x: 340, y: 416 },
-      { x: 252, y: 410 }, { x: 164, y: 399 }, { x: 90, y: 375 },
-      { x: 43, y: 334 }, { x: 25, y: 285 },
+      { x: 390, y: 205 }, { x: 346, y: 241 }, { x: 447, y: 272 },
+      { x: 358, y: 329 }, { x: 319, y: 318 }, { x: 296, y: 390 },
+      { x: 202, y: 354 }, { x: 172, y: 385 }, { x: 84, y: 364 },
+      { x: 151, y: 289 }, { x: 110, y: 269 }, { x: 115, y: 299 },
+      { x: 82, y: 299 }, { x: 60, y: 261 }, { x: 95, y: 222 },
+      { x: 149, y: 255 }, { x: 262, y: 192 }, { x: 277, y: 152 },
+      { x: 346, y: 141 }, { x: 377, y: 172 }, { x: 381, y: 146 },
+      { x: 456, y: 136 }, { x: 426, y: 61 }, { x: 462, y: 49 },
+      { x: 635, y: 121 }, { x: 553, y: 211 }, { x: 595, y: 268 },
+      { x: 578, y: 323 }, { x: 517, y: 323 }, { x: 534, y: 270 },
+      { x: 492, y: 247 }, { x: 505, y: 213 }, { x: 417, y: 232 },
+      { x: 422, y: 182 },
     ],
   },
   {
     id: 'land_lingnan',
-    label: '岭南陆',
+    label: '岭南海陆',
     role: 'mainland',
     expectedRegionCount: 12,
     polygon: [
-      { x: 196, y: 514 }, { x: 207, y: 480 }, { x: 236, y: 455 },
-      { x: 286, y: 440 }, { x: 359, y: 433 }, { x: 438, y: 435 },
-      { x: 510, y: 441 }, { x: 572, y: 453 }, { x: 607, y: 475 },
-      { x: 622, y: 507 }, { x: 617, y: 539 }, { x: 597, y: 569 },
-      { x: 550, y: 590 }, { x: 483, y: 601 }, { x: 405, y: 604 },
-      { x: 330, y: 601 }, { x: 267, y: 591 }, { x: 222, y: 573 },
-      { x: 201, y: 548 },
-    ],
-  },
-  {
-    id: 'land_korea',
-    label: '朝鲜半岛',
-    role: 'mainland',
-    expectedRegionCount: 6,
-    polygon: [
-      { x: 670, y: 190 }, { x: 680, y: 163 }, { x: 706, y: 149 },
-      { x: 736, y: 153 }, { x: 758, y: 174 }, { x: 771, y: 209 },
-      { x: 775, y: 251 }, { x: 789, y: 303 }, { x: 786, y: 347 },
-      { x: 770, y: 376 }, { x: 749, y: 391 }, { x: 726, y: 382 },
-      { x: 707, y: 350 }, { x: 696, y: 309 }, { x: 690, y: 268 },
-      { x: 678, y: 229 },
+      { x: 174, y: 584 }, { x: 197, y: 565 }, { x: 226, y: 516 },
+      { x: 303, y: 526 }, { x: 339, y: 462 }, { x: 366, y: 453 },
+      { x: 401, y: 475 }, { x: 389, y: 516 }, { x: 318, y: 560 },
+      { x: 241, y: 586 }, { x: 194, y: 592 },
     ],
   },
   {
@@ -81,10 +75,9 @@ export const MAP_LAND_SHAPES = [
     role: 'island',
     expectedRegionCount: 2,
     polygon: [
-      { x: 325, y: 646 }, { x: 338, y: 626 }, { x: 367, y: 619 },
-      { x: 405, y: 620 }, { x: 432, y: 631 }, { x: 440, y: 652 },
-      { x: 425, y: 674 }, { x: 392, y: 686 }, { x: 354, y: 680 },
-      { x: 332, y: 666 },
+      { x: 150, y: 631 }, { x: 162, y: 619 }, { x: 181, y: 617 },
+      { x: 202, y: 623 }, { x: 189, y: 645 }, { x: 174, y: 651 },
+      { x: 153, y: 646 },
     ],
   },
   {
@@ -93,10 +86,9 @@ export const MAP_LAND_SHAPES = [
     role: 'island',
     expectedRegionCount: 3,
     polygon: [
-      { x: 638, y: 491 }, { x: 648, y: 469 }, { x: 666, y: 477 },
-      { x: 681, y: 507 }, { x: 689, y: 547 }, { x: 687, y: 586 },
-      { x: 676, y: 623 }, { x: 659, y: 648 }, { x: 645, y: 632 },
-      { x: 638, y: 599 }, { x: 637, y: 556 },
+      { x: 394, y: 552 }, { x: 404, y: 534 }, { x: 412, y: 521 },
+      { x: 429, y: 514 }, { x: 435, y: 523 }, { x: 430, y: 543 },
+      { x: 420, y: 568 }, { x: 411, y: 581 }, { x: 401, y: 568 },
     ],
   },
   {
@@ -105,9 +97,9 @@ export const MAP_LAND_SHAPES = [
     role: 'island',
     expectedRegionCount: 1,
     polygon: [
-      { x: 771, y: 506 }, { x: 779, y: 486 }, { x: 800, y: 479 },
-      { x: 822, y: 489 }, { x: 830, y: 512 }, { x: 820, y: 536 },
-      { x: 796, y: 547 }, { x: 778, y: 533 },
+      { x: 593, y: 350 }, { x: 609, y: 341 }, { x: 628, y: 347 },
+      { x: 642, y: 365 }, { x: 635, y: 392 }, { x: 616, y: 399 },
+      { x: 604, y: 387 },
     ],
   },
   {
@@ -116,115 +108,167 @@ export const MAP_LAND_SHAPES = [
     role: 'island',
     expectedRegionCount: 1,
     polygon: [
-      { x: 841, y: 492 }, { x: 851, y: 480 }, { x: 874, y: 478 },
-      { x: 892, y: 489 }, { x: 886, y: 508 }, { x: 865, y: 519 },
-      { x: 846, y: 511 },
+      { x: 650, y: 351 }, { x: 666, y: 338 }, { x: 687, y: 345 },
+      { x: 707, y: 355 }, { x: 697, y: 371 }, { x: 676, y: 375 },
+      { x: 658, y: 365 },
     ],
   },
   {
     id: 'island_honshu',
     label: '本州岛',
     role: 'island',
-    expectedRegionCount: 6,
+    expectedRegionCount: 5,
     polygon: [
-      { x: 791, y: 422 }, { x: 800, y: 395 }, { x: 824, y: 366 },
-      { x: 853, y: 333 }, { x: 883, y: 292 }, { x: 910, y: 236 },
-      { x: 934, y: 194 }, { x: 950, y: 188 }, { x: 964, y: 207 },
-      { x: 968, y: 245 }, { x: 960, y: 283 }, { x: 945, y: 322 },
-      { x: 929, y: 355 }, { x: 908, y: 391 }, { x: 884, y: 428 },
-      { x: 862, y: 456 }, { x: 840, y: 469 }, { x: 815, y: 456 },
-      { x: 798, y: 440 },
+      { x: 650, y: 340 }, { x: 669, y: 322 }, { x: 692, y: 318 },
+      { x: 711, y: 301 }, { x: 733, y: 304 }, { x: 751, y: 261 },
+      { x: 770, y: 263 }, { x: 789, y: 247 }, { x: 813, y: 229 },
+      { x: 818, y: 186 }, { x: 838, y: 167 }, { x: 850, y: 172 },
+      { x: 864, y: 214 }, { x: 850, y: 245 }, { x: 836, y: 276 },
+      { x: 827, y: 312 }, { x: 804, y: 319 }, { x: 782, y: 311 },
+      { x: 758, y: 300 }, { x: 731, y: 323 }, { x: 707, y: 332 },
+      { x: 684, y: 339 },
+    ],
+  },
+  {
+    id: 'island_hokkaido',
+    label: '北海岛',
+    role: 'island',
+    expectedRegionCount: 1,
+    polygon: [
+      { x: 828, y: 144 }, { x: 843, y: 162 }, { x: 819, y: 169 },
+      { x: 812, y: 144 }, { x: 826, y: 123 }, { x: 848, y: 122 },
+      { x: 856, y: 68 }, { x: 900, y: 103 }, { x: 932, y: 99 },
+      { x: 937, y: 127 }, { x: 901, y: 136 }, { x: 887, y: 157 },
+      { x: 859, y: 143 },
     ],
   },
 ] as const satisfies readonly MapLandShape[];
+
+/** Convex generation bounds; the renderer clips their cells to MAP_LAND_SHAPES. */
+export const MAP_TERRITORY_SHAPES: readonly TerritoryLandShape[] = MAP_LAND_SHAPES.map((shape) => {
+  const xs = shape.polygon.map((point) => point.x);
+  const ys = shape.polygon.map((point) => point.y);
+  const minX = Math.min(...xs);
+  const maxX = Math.max(...xs);
+  const minY = Math.min(...ys);
+  const maxY = Math.max(...ys);
+  return Object.freeze({
+    id: shape.id,
+    polygon: Object.freeze([
+      Object.freeze({ x: minX, y: minY }),
+      Object.freeze({ x: maxX, y: minY }),
+      Object.freeze({ x: maxX, y: maxY }),
+      Object.freeze({ x: minX, y: maxY }),
+    ]),
+  });
+});
+
+export function getMapLandShape(shapeId: string): MapLandShape | undefined {
+  return MAP_LAND_SHAPES.find((shape) => shape.id === shapeId);
+}
+
+export interface MapDecorativeIslet extends TerritoryLandShape {
+  readonly label?: string;
+}
+
+/** Small unowned islets make the Japanese arc and straits legible at a glance. */
+export const MAP_DECORATIVE_ISLETS = [
+  { id: 'islet_jeju', polygon: [{ x: 524, y: 347 }, { x: 531, y: 344 }, { x: 538, y: 350 }, { x: 532, y: 355 }, { x: 525, y: 353 }] },
+  { id: 'islet_tsushima', polygon: [{ x: 577, y: 351 }, { x: 583, y: 347 }, { x: 588, y: 354 }, { x: 584, y: 361 }, { x: 578, y: 358 }] },
+  { id: 'islet_oki', polygon: [{ x: 779, y: 241 }, { x: 785, y: 238 }, { x: 790, y: 244 }, { x: 785, y: 249 }] },
+  { id: 'islet_ryukyu_1', polygon: [{ x: 610, y: 407 }, { x: 615, y: 403 }, { x: 620, y: 408 }, { x: 615, y: 413 }] },
+  { id: 'islet_ryukyu_2', polygon: [{ x: 587, y: 452 }, { x: 592, y: 448 }, { x: 597, y: 453 }, { x: 592, y: 459 }] },
+  { id: 'islet_ryukyu_3', polygon: [{ x: 556, y: 489 }, { x: 561, y: 486 }, { x: 566, y: 491 }, { x: 561, y: 496 }] },
+  { id: 'islet_ryukyu_4', polygon: [{ x: 478, y: 529 }, { x: 483, y: 526 }, { x: 488, y: 531 }, { x: 483, y: 536 }] },
+] as const satisfies readonly MapDecorativeIslet[];
 
 export interface MapRegionDisplaySite extends TerritorySite {
   readonly shapeId: MapLandShapeId;
 }
 
 const REGION_DISPLAY_SITE_ENTRIES = [
-  ['r_yanjing', 'land_northern', 319, 95],
-  ['r_jinmen', 'land_northern', 370, 121],
-  ['r_changshan', 'land_northern', 266, 159],
-  ['r_yecheng', 'land_northern', 315, 215],
-  ['r_jinyang', 'land_northern', 191, 161],
-  ['r_shangdang', 'land_northern', 242, 219],
-  ['r_qizhou', 'land_northern', 388, 222],
-  ['r_qingzhou', 'land_northern', 449, 205],
-  ['r_dengzhou', 'land_northern', 507, 166],
-  ['r_langya', 'land_northern', 436, 285],
-  ['r_kaifeng', 'land_northern', 334, 275],
-  ['r_runan', 'land_northern', 345, 339],
-  ['r_luoyang', 'land_northern', 265, 275],
-  ['r_nanyang', 'land_northern', 269, 344],
-  ['r_hedong', 'land_northern', 197, 245],
-  ['r_changan', 'land_northern', 136, 284],
-  ['r_yanan', 'land_northern', 107, 215],
-  ['r_lingzhou', 'land_northern', 40, 192],
-  ['r_liaoxi', 'land_northern', 422, 110],
-  ['r_liaodong', 'land_northern', 481, 95],
-  ['r_jilin', 'land_northern', 544, 74],
-  ['r_changbai', 'land_northern', 581, 120],
-  ['r_pyongyang', 'land_korea', 690, 180],
-  ['r_hanjing', 'land_korea', 709, 266],
-  ['r_quanzhou', 'land_lingnan', 545, 507],
-  ['r_guangzhou', 'land_lingnan', 365, 529],
-  ['r_hainan', 'island_hainan', 355, 650],
-  ['r_taiwan', 'island_taiwan', 660, 550],
-  ['r_tsukushi', 'island_kyushu', 797, 515],
-  ['r_naniwa', 'island_honshu', 865, 405],
-  ['r_datong', 'land_northern', 175, 104],
-  ['r_hejian', 'land_northern', 354, 177],
-  ['r_yuyang', 'land_northern', 381, 81],
-  ['r_donglai', 'land_northern', 487, 229],
-  ['r_pengcheng', 'land_northern', 402, 335],
-  ['r_huaiyang', 'land_northern', 363, 383],
-  ['r_beidi', 'land_northern', 71, 249],
-  ['r_tianshui', 'land_northern', 64, 313],
-  ['r_hanzhong', 'land_northern', 165, 364],
-  ['r_shangluo', 'land_northern', 208, 321],
-  ['r_shenyang', 'land_northern', 456, 133],
-  ['r_songhua', 'land_northern', 546, 42],
-  ['r_xianjing', 'land_korea', 737, 198],
-  ['r_jeonju', 'land_korea', 742, 300],
-  ['r_chaoshan', 'land_lingnan', 470, 525],
-  ['r_jiaozhi', 'land_lingnan', 240, 566],
-  ['r_yamato', 'island_honshu', 850, 455],
-  ['r_kanto', 'island_honshu', 930, 325],
-  ['r_zhending', 'land_northern', 289, 133],
-  ['r_bohai', 'land_northern', 401, 150],
-  ['r_daming', 'land_northern', 334, 198],
-  ['r_henei', 'land_northern', 280, 246],
-  ['r_xuchang', 'land_northern', 319, 311],
-  ['r_chenliu', 'land_northern', 361, 256],
-  ['r_fenyang', 'land_northern', 162, 198],
-  ['r_yuncheng', 'land_northern', 165, 268],
-  ['r_huazhou', 'land_northern', 175, 306],
-  ['r_suide', 'land_northern', 96, 177],
-  ['r_guyuan', 'land_northern', 40, 258],
-  ['r_hongnong', 'land_northern', 224, 282],
-  ['r_chengde', 'land_northern', 399, 64],
-  ['r_jinzhou', 'land_northern', 438, 85],
-  ['r_yingkou', 'land_northern', 498, 133],
-  ['r_fushun', 'land_northern', 501, 59],
-  ['r_mudan', 'land_northern', 607, 77],
-  ['r_leizhou', 'land_lingnan', 315, 553],
-  ['r_gaozhou', 'land_lingnan', 300, 522],
-  ['r_nanxiong', 'land_lingnan', 400, 499],
-  ['r_fuzhou', 'land_lingnan', 585, 483],
-  ['r_zhangzhou', 'land_lingnan', 520, 533],
-  ['r_tingzhou', 'land_lingnan', 485, 496],
-  ['r_jianning', 'land_lingnan', 530, 465],
-  ['r_putian', 'land_lingnan', 585, 512],
-  ['r_qiongshan', 'island_hainan', 400, 660],
-  ['r_tainan', 'island_taiwan', 655, 612],
-  ['r_beigang', 'island_taiwan', 670, 493],
-  ['r_kaesong', 'land_korea', 707, 224],
-  ['r_gyeongju', 'land_korea', 759, 346],
-  ['r_chugoku', 'island_honshu', 810, 425],
-  ['r_shikoku', 'island_shikoku', 865, 500],
-  ['r_tokai', 'island_honshu', 895, 365],
-  ['r_ou', 'island_honshu', 935, 240],
+  ['r_yanjing', 'land_northern', 367, 188],
+  ['r_jinmen', 'land_northern', 389, 200],
+  ['r_changshan', 'land_northern', 323, 184],
+  ['r_yecheng', 'land_northern', 333, 235],
+  ['r_jinyang', 'land_northern', 244, 217],
+  ['r_shangdang', 'land_northern', 278, 249],
+  ['r_qizhou', 'land_northern', 368, 250],
+  ['r_qingzhou', 'land_northern', 396, 258],
+  ['r_dengzhou', 'land_northern', 430, 270],
+  ['r_langya', 'land_northern', 385, 285],
+  ['r_kaifeng', 'land_northern', 325, 296],
+  ['r_runan', 'land_northern', 310, 345],
+  ['r_luoyang', 'land_northern', 282, 292],
+  ['r_nanyang', 'land_northern', 279, 344],
+  ['r_hedong', 'land_northern', 263, 270],
+  ['r_changan', 'land_northern', 196, 300],
+  ['r_yanan', 'land_northern', 164, 258],
+  ['r_lingzhou', 'land_northern', 93, 258],
+  ['r_liaoxi', 'land_northern', 404, 166],
+  ['r_liaodong', 'land_northern', 470, 194],
+  ['r_jilin', 'land_northern', 520, 92],
+  ['r_changbai', 'land_northern', 559, 160],
+  ['r_pyongyang', 'land_northern', 541, 252],
+  ['r_hanjing', 'land_northern', 560, 289],
+  ['r_quanzhou', 'land_lingnan', 374, 504],
+  ['r_guangzhou', 'land_lingnan', 280, 548],
+  ['r_hainan', 'island_hainan', 163, 637],
+  ['r_taiwan', 'island_taiwan', 416, 547],
+  ['r_tsukushi', 'island_kyushu', 618, 368],
+  ['r_naniwa', 'island_honshu', 701, 319],
+  ['r_datong', 'land_northern', 285, 165],
+  ['r_hejian', 'land_northern', 360, 210],
+  ['r_yuyang', 'land_northern', 407, 159],
+  ['r_donglai', 'land_northern', 423, 274],
+  ['r_pengcheng', 'land_northern', 350, 319],
+  ['r_huaiyang', 'land_northern', 302, 362],
+  ['r_beidi', 'land_northern', 138, 310],
+  ['r_tianshui', 'land_northern', 145, 345],
+  ['r_hanzhong', 'land_northern', 191, 351],
+  ['r_shangluo', 'land_northern', 238, 341],
+  ['r_shenyang', 'land_northern', 456, 158],
+  ['r_songhua', 'land_northern', 469, 68],
+  ['r_xianjing', 'land_northern', 525, 226],
+  ['r_jeonju', 'land_northern', 541, 303],
+  ['r_chaoshan', 'land_lingnan', 344, 522],
+  ['r_jiaozhi', 'land_lingnan', 200, 570],
+  ['r_yamato', 'island_honshu', 732, 310],
+  ['r_kanto', 'island_honshu', 815, 230],
+  ['r_zhending', 'land_northern', 340, 171],
+  ['r_bohai', 'land_northern', 390, 195],
+  ['r_daming', 'land_northern', 345, 222],
+  ['r_henei', 'land_northern', 298, 262],
+  ['r_xuchang', 'land_northern', 342, 310],
+  ['r_chenliu', 'land_northern', 357, 278],
+  ['r_fenyang', 'land_northern', 229, 244],
+  ['r_yuncheng', 'land_northern', 245, 295],
+  ['r_huazhou', 'land_northern', 222, 321],
+  ['r_suide', 'land_northern', 137, 255],
+  ['r_guyuan', 'land_northern', 115, 340],
+  ['r_hongnong', 'land_northern', 260, 314],
+  ['r_chengde', 'land_northern', 425, 150],
+  ['r_jinzhou', 'land_northern', 438, 175],
+  ['r_yingkou', 'land_northern', 447, 207],
+  ['r_fushun', 'land_northern', 493, 125],
+  ['r_mudan', 'land_northern', 591, 118],
+  ['r_leizhou', 'land_lingnan', 230, 568],
+  ['r_gaozhou', 'land_lingnan', 246, 548],
+  ['r_nanxiong', 'land_lingnan', 298, 530],
+  ['r_fuzhou', 'land_lingnan', 383, 482],
+  ['r_zhangzhou', 'land_lingnan', 355, 528],
+  ['r_tingzhou', 'land_lingnan', 329, 500],
+  ['r_jianning', 'land_lingnan', 358, 472],
+  ['r_putian', 'land_lingnan', 384, 496],
+  ['r_qiongshan', 'island_hainan', 185, 636],
+  ['r_tainan', 'island_taiwan', 408, 565],
+  ['r_beigang', 'island_taiwan', 424, 526],
+  ['r_kaesong', 'land_northern', 548, 273],
+  ['r_gyeongju', 'land_northern', 567, 307],
+  ['r_chugoku', 'island_honshu', 672, 329],
+  ['r_shikoku', 'island_shikoku', 677, 356],
+  ['r_tokai', 'island_honshu', 773, 273],
+  ['r_ou', 'island_hokkaido', 878, 123],
 ] as const satisfies readonly (readonly [string, MapLandShapeId, number, number])[];
 
 export const REGION_DISPLAY_SITES: Readonly<Record<string, MapRegionDisplaySite>> =
@@ -238,16 +282,16 @@ export function getRegionDisplaySite(regionId: string): MapRegionDisplaySite | u
 }
 
 const SEA_ZONE_DISPLAY_CENTERS: Readonly<Record<string, TerritoryPoint>> = Object.freeze({
-  sea_bohai: Object.freeze({ x: 661, y: 180 }),
-  sea_shandong: Object.freeze({ x: 617, y: 337 }),
-  sea_north_strait: Object.freeze({ x: 670, y: 119 }),
-  sea_fujian: Object.freeze({ x: 629, y: 513 }),
-  sea_taiwan: Object.freeze({ x: 718, y: 556 }),
-  sea_guangdong: Object.freeze({ x: 504, y: 632 }),
-  sea_qiongzhou: Object.freeze({ x: 377, y: 612 }),
-  sea_korea: Object.freeze({ x: 794, y: 390 }),
-  sea_japan_inland: Object.freeze({ x: 834, y: 483 }),
-  sea_east_ocean: Object.freeze({ x: 958, y: 530 }),
+  sea_bohai: Object.freeze({ x: 455, y: 240 }),
+  sea_shandong: Object.freeze({ x: 472, y: 300 }),
+  sea_north_strait: Object.freeze({ x: 650, y: 225 }),
+  sea_fujian: Object.freeze({ x: 430, y: 490 }),
+  sea_taiwan: Object.freeze({ x: 470, y: 550 }),
+  sea_guangdong: Object.freeze({ x: 290, y: 610 }),
+  sea_qiongzhou: Object.freeze({ x: 182, y: 605 }),
+  sea_korea: Object.freeze({ x: 585, y: 338 }),
+  sea_japan_inland: Object.freeze({ x: 675, y: 382 }),
+  sea_east_ocean: Object.freeze({ x: 900, y: 430 }),
 });
 
 export function getSeaZoneDisplayCenter(seaZoneId: string): TerritoryPoint | undefined {
@@ -266,20 +310,20 @@ export interface MapMacroLabel {
 
 /** Low-frequency geographic labels; city and polity labels remain data-driven. */
 export const MAP_MACRO_LABELS = [
-  { id: 'macro_ningxia', label: '宁夏', center: { x: 66, y: 218 }, kind: 'province', priority: 2 },
-  { id: 'macro_shaanxi', label: '陕西', center: { x: 150, y: 286 }, kind: 'province', priority: 2 },
-  { id: 'macro_shanxi', label: '山西', center: { x: 208, y: 200 }, kind: 'province', priority: 2 },
-  { id: 'macro_henan', label: '河南', center: { x: 303, y: 302 }, kind: 'province', priority: 2 },
-  { id: 'macro_hebei', label: '河北', center: { x: 320, y: 165 }, kind: 'province', priority: 2 },
-  { id: 'macro_beijing', label: '北京', center: { x: 316, y: 72 }, kind: 'province', priority: 3 },
-  { id: 'macro_tianjin', label: '天津', center: { x: 377, y: 112 }, kind: 'province', priority: 3 },
-  { id: 'macro_shandong', label: '山东', center: { x: 440, y: 245 }, kind: 'province', priority: 2 },
-  { id: 'macro_liaoning', label: '辽宁', center: { x: 470, y: 121 }, kind: 'province', priority: 2 },
-  { id: 'macro_jilin', label: '吉林', center: { x: 558, y: 66 }, kind: 'province', priority: 2 },
-  { id: 'macro_guangdong', label: '广东', center: { x: 360, y: 543 }, kind: 'province', priority: 2 },
-  { id: 'macro_fujian', label: '福建', center: { x: 540, y: 497 }, kind: 'province', priority: 2 },
-  { id: 'macro_hainan', label: '海南', center: { x: 383, y: 651 }, kind: 'island', priority: 2 },
-  { id: 'macro_taiwan', label: '台湾', center: { x: 660, y: 556 }, kind: 'island', priority: 2 },
-  { id: 'macro_korea', label: '朝鲜半岛', center: { x: 730, y: 278 }, kind: 'peninsula', priority: 2 },
-  { id: 'macro_japan', label: '日本列岛', center: { x: 881, y: 338 }, kind: 'archipelago', priority: 2 },
+  { id: 'macro_ningxia', label: '宁夏', center: { x: 105, y: 290 }, kind: 'province', priority: 2 },
+  { id: 'macro_shaanxi', label: '陕西', center: { x: 190, y: 306 }, kind: 'province', priority: 2 },
+  { id: 'macro_shanxi', label: '山西', center: { x: 266, y: 235 }, kind: 'province', priority: 2 },
+  { id: 'macro_henan', label: '河南', center: { x: 320, y: 323 }, kind: 'province', priority: 2 },
+  { id: 'macro_hebei', label: '河北', center: { x: 346, y: 210 }, kind: 'province', priority: 2 },
+  { id: 'macro_beijing', label: '北京', center: { x: 368, y: 176 }, kind: 'province', priority: 3 },
+  { id: 'macro_tianjin', label: '天津', center: { x: 394, y: 201 }, kind: 'province', priority: 3 },
+  { id: 'macro_shandong', label: '山东', center: { x: 401, y: 274 }, kind: 'province', priority: 2 },
+  { id: 'macro_liaoning', label: '辽宁', center: { x: 458, y: 176 }, kind: 'province', priority: 2 },
+  { id: 'macro_jilin', label: '吉林', center: { x: 533, y: 107 }, kind: 'province', priority: 2 },
+  { id: 'macro_guangdong', label: '广东', center: { x: 268, y: 552 }, kind: 'province', priority: 2 },
+  { id: 'macro_fujian', label: '福建', center: { x: 357, y: 497 }, kind: 'province', priority: 2 },
+  { id: 'macro_hainan', label: '海南', center: { x: 176, y: 637 }, kind: 'island', priority: 2 },
+  { id: 'macro_taiwan', label: '台湾', center: { x: 415, y: 550 }, kind: 'island', priority: 2 },
+  { id: 'macro_korea', label: '朝鲜半岛', center: { x: 554, y: 277 }, kind: 'peninsula', priority: 2 },
+  { id: 'macro_japan', label: '日本列岛', center: { x: 754, y: 284 }, kind: 'archipelago', priority: 2 },
 ] as const satisfies readonly MapMacroLabel[];

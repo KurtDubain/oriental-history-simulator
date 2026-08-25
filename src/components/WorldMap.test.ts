@@ -36,7 +36,7 @@ describe('WorldBox-style presentation atlas', () => {
     expect(presentation.regions.every((region) => region.polygon.length >= 3)).toBe(true);
     expect(source.find((region) => region.id === 'r_yanjing')?.center).toEqual(rawYanjing);
     expect(presentation.regions.find((region) => region.id === 'r_yanjing')?.center)
-      .toEqual({ x: 319, y: 95 });
+      .toEqual({ x: 367, y: 188 });
   });
 
   it('makes each display site hit its continuous territory on wide and compact maps', () => {
@@ -48,6 +48,7 @@ describe('WorldBox-style presentation atlas', () => {
 
     for (const viewport of viewports) {
       const transform = createMapViewportTransform(viewport.width, viewport.height);
+      expect(transform.yScale).toBe(1);
       for (const region of presentation.regions) {
         const site = getRegionDisplaySite(region.id);
         expect(site, region.id).toBeDefined();
@@ -63,6 +64,23 @@ describe('WorldBox-style presentation atlas', () => {
         )?.id, `${region.id}@${viewport.width}`).toBe(region.id);
       }
     }
+  });
+
+  it('keeps the deep Bohai bay unowned and unclickable', () => {
+    const presentation = buildMapPresentation(sourceRegions(), [], [], [], [], [], []);
+    const viewport = { width: 1210, height: 720 };
+    const transform = createMapViewportTransform(viewport.width, viewport.height);
+    const bayPoint = {
+      x: transform.offsetX + 455 * transform.scale,
+      y: transform.offsetY + 240 * transform.scale,
+    };
+
+    expect(regionAtScreenPoint(
+      presentation.regions,
+      bayPoint,
+      viewport.width,
+      viewport.height,
+    )).toBeNull();
   });
 
   it('projects region- and sea-anchored overlays onto the illustrated atlas', () => {
@@ -104,9 +122,9 @@ describe('WorldBox-style presentation atlas', () => {
       [],
     );
 
-    expect(presentation.seaZones[0].center).toEqual({ x: 661, y: 180 });
-    expect(presentation.fleets[0].position).toEqual({ x: 661, y: 180 });
-    expect(presentation.flows[0].from).toEqual({ x: 319, y: 95 });
-    expect(presentation.flows[0].to).toEqual({ x: 661, y: 180 });
+    expect(presentation.seaZones[0].center).toEqual({ x: 455, y: 240 });
+    expect(presentation.fleets[0].position).toEqual({ x: 455, y: 240 });
+    expect(presentation.flows[0].from).toEqual({ x: 367, y: 188 });
+    expect(presentation.flows[0].to).toEqual({ x: 455, y: 240 });
   });
 });

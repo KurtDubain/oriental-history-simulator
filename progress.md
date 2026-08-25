@@ -10,6 +10,8 @@ Current usability request: 将项目整理为 Git 仓库，并优先解决“难
 
 Current map-redesign request: 参考 WorldBox 的地图空间组织，严格让河北、北京、天津、山东、河南、山西、陕西、宁夏、辽宁、吉林、广东、福建、海南、台湾、日本、朝鲜半岛以外全部成为海洋；形成三块主要陆地区域与若干清晰岛屿，并适当放大地图。地形细节从简，优先修正海陆拓扑和整体构图。
 
+Current reference-correction request: 用户以图2明确纠偏：保留现有精美UI，但海陆结构必须从“平滑横向胶囊陆块”改成图2式复杂大陆；优先呈现渤海内湾、东北抬升、辽东—朝鲜半岛链、斜向岭南海岸、日本岛弧与细碎近海岛屿。
+
 ## Product thesis
 
 - Visual thesis: 墨色舆图 × 朱砂史册；暖纸底、炭墨信息、单一朱砂交互色，像一座可操作的历史观测台。
@@ -18,6 +20,9 @@ Current map-redesign request: 参考 WorldBox 的地图空间组织，严格让�
 - Map redesign visual thesis: 群岛箱庭 × 水墨政区；深浅海面占主导，三块陆地和岛链拥有自然、明确、可一眼辨识的岸线。
 - Map redesign content plan: 地块轮廓是主视觉；州域连续铺色与国号是信息层；城市、军团、港口和季度高亮是最上层，山河仅作低对比辅助。
 - Map redesign interaction thesis: 整块州域命中与提亮；叠层只改变陆地信息，不破坏海陆辨识；季度变化沿受影响州域岸内描边。
+- Reference-correction visual thesis: 锯齿海岸的东方群岛沙盘；轮廓辨识度、海湾和半岛优先于平滑装饰。
+- Reference-correction content plan: 北方大陆与朝鲜半岛构成带渤海/黄海凹湾的复杂主陆块；岭南为西南—东北斜长陆块；海南、台湾与日本四岛弧分离，辅以少量无主小岛。
+- Reference-correction interaction thesis: 保持整州点击、政权铺色和历史回溯不变；凹岸之外必须是海，沿岸州域高亮不得跨越海湾。
 
 ## V0.1 scope
 
@@ -105,3 +110,7 @@ Current map-redesign request: 参考 WorldBox 的地图空间组织，严格让�
 - 2026-08-25 map topology QA: Added explicit ocean seams, presentation sea anchors, 16 macro geographic labels, hidden three visually invalid cross-sea land routes, calmer political-mode routes/sea zones and wide desktop composition. Focused geography/territory/hit tests pass 12/12; every region display site is clickable in both 1210×560 and 390×644 viewports.
 - 2026-08-25 responsive map shell: The desktop navigation/inspector columns are narrower. At ≤760px the map uses the full viewport width and the navigation becomes a 58px bottom observation dock; layer selection opens above it. Browser inspection at 390×844 reports a 390×644 map stage, successful continuous-territory click selection and zero console errors.
 - 2026-08-25 map redesign release gate: Full Vitest is 79/79, production build and expanded Chromium create→guide→map→inspector→history→collection→mobile flow pass, and production dependency audit reports zero vulnerabilities. The deterministic E2E finishes at turn 4/hash `ecaff723046fe14b`; final desktop and 390×844 atlas captures were visually reviewed.
+- 2026-08-25 reference topology correction: Replaced the capsule-like coast system with the user-supplied reference proportions: one 57-region northern continent with a deep Bohai/Yellow-Sea indentation and connected Korean peninsula, a diagonal 12-region Lingnan coast, separate Hainan/Taiwan, a Kyushu–Shikoku–Honshu arc, and a new Hokkaido carrying `r_ou`. Seven unowned strait/Ryukyu islets complete the silhouette.
+- 2026-08-25 concave-coast architecture: Territory generation now uses per-shape convex bounds, while political fills, borders, hover and selection are clipped by the complex coast mask. Hit testing first requires a land-mask match and then chooses the deterministic nearest display site, so deep bays and straits cannot become accidental clickable land. Simulation coordinates, schema, saves and hashes remain untouched.
+- 2026-08-25 reference visual loop: Removed the desktop `0.714` vertical squash (`yScale=1`) and extended the sea field across the complete canvas so the wide margins are intentional ocean rather than paper. Focused geography/hit tests pass 9/9, production build passes, and the mandatory web-game client capture `output/reference-topology-loop-3/shot-0.png` was visually reviewed with 82 regions and no browser errors.
+- 2026-08-25 reference correction release gate: Full Vitest passes 80/80; production build and Chromium V1 E2E pass on desktop and 390×844; E2E finishes at turn 4/hash `ecaff723046fe14b`; production dependency audit reports zero vulnerabilities. Reviewed both `geographic-world-map.png` and `mobile-world-map-390x844.png` after the final sea-field adjustment.

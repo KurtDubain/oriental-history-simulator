@@ -471,10 +471,10 @@ try {
     islands: element.getAttribute('data-island-shape-count'),
   }));
   assert.deepEqual(mapTopology, {
-    layout: 'archipelago-v2',
-    landmasses: '3',
-    islands: '5',
-  }, '舆图必须使用固定三大陆与五岛形展示拓扑');
+    layout: 'reference-topology-v3',
+    landmasses: '2',
+    islands: '6',
+  }, '舆图必须使用北陆半岛体系、岭南陆与六岛形的参考拓扑');
 
   const afterPrimer = await exerciseMapPrimer(page);
   await page.screenshot({ path: `${ARTIFACT_DIR}/geographic-world-map.png`, fullPage: true });
@@ -714,7 +714,7 @@ try {
   });
   assert.ok(mobileMapLayout.stageWidth >= 389 && mobileMapLayout.mapWidth >= 389, '移动端舆图必须使用完整视口宽度');
   assert.ok(mobileMapLayout.dockWidth >= 370, '移动端观察导航应成为全宽底部观察坞');
-  assert.equal(mobileMapLayout.mapLayout, 'archipelago-v2');
+  assert.equal(mobileMapLayout.mapLayout, 'reference-topology-v3');
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-world-map-390x844.png`, fullPage: true });
 
   await mobilePage.locator('button[data-observer-desk-trigger="true"]').click();

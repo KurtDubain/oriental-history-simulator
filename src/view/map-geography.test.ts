@@ -5,6 +5,7 @@ import {
   MAP_MACRO_LABELS,
   MAP_PRESENTATION_HEIGHT,
   MAP_PRESENTATION_WIDTH,
+  MAP_TERRITORY_SHAPES,
   REGION_DISPLAY_SITES,
   getRegionDisplaySite,
   getSeaZoneDisplayCenter,
@@ -58,6 +59,13 @@ function bounds(shape: MapLandShape) {
   });
 }
 
+function polygonArea(polygon: readonly TerritoryPoint[]): number {
+  return Math.abs(polygon.reduce((area, point, index) => {
+    const next = polygon[(index + 1) % polygon.length];
+    return area + point.x * next.y - next.x * point.y;
+  }, 0)) / 2;
+}
+
 describe('presentation-only map geography', () => {
   it('covers the fixed 82-region contract exactly once', () => {
     const expectedIds = REGION_DEFINITIONS.map((region) => region.id).sort();
@@ -70,13 +78,14 @@ describe('presentation-only map geography', () => {
     expect(getRegionDisplaySite('unknown')).toBeUndefined();
   });
 
-  it('defines three mainlands plus five detached island shapes', () => {
+  it('defines a connected northern peninsula system, a southern land and six islands', () => {
     expect(MAP_LAND_SHAPES).toHaveLength(8);
     expect(MAP_LAND_SHAPES.filter((shape) => shape.role === 'mainland').map((shape) => shape.id))
-      .toEqual(['land_northern', 'land_lingnan', 'land_korea']);
+      .toEqual(['land_northern', 'land_lingnan']);
     expect(MAP_LAND_SHAPES.filter((shape) => shape.role === 'island').map((shape) => shape.id))
       .toEqual([
-        'island_hainan', 'island_taiwan', 'island_kyushu', 'island_shikoku', 'island_honshu',
+        'island_hainan', 'island_taiwan', 'island_kyushu', 'island_shikoku',
+        'island_honshu', 'island_hokkaido',
       ]);
 
     for (const shape of MAP_LAND_SHAPES) {
@@ -96,28 +105,35 @@ describe('presentation-only map geography', () => {
       expect(containsPoint(site, shape?.polygon ?? []), site.id).toBe(true);
     }
 
-    const cells = buildTerritoryCells(MAP_LAND_SHAPES, sites);
+    const cells = buildTerritoryCells(MAP_TERRITORY_SHAPES, sites);
     expect(cells).toHaveLength(82);
     expect(cells.every((cell) => cell.polygon.length >= 3)).toBe(true);
   });
 
-  it('preserves visible ocean seams and splits the Japanese islands', () => {
+  it('preserves the reference ocean ratio, deep bay, sea gaps and Japanese arc', () => {
     const shapeById = new Map(MAP_LAND_SHAPES.map((shape) => [shape.id, shape]));
     const northern = bounds(shapeById.get('land_northern') as MapLandShape);
     const lingnan = bounds(shapeById.get('land_lingnan') as MapLandShape);
-    const korea = bounds(shapeById.get('land_korea') as MapLandShape);
     const hainan = bounds(shapeById.get('island_hainan') as MapLandShape);
-    const taiwan = bounds(shapeById.get('island_taiwan') as MapLandShape);
 
-    expect(lingnan.minY - northern.maxY).toBeGreaterThanOrEqual(16);
-    expect(korea.minX - northern.maxX).toBeGreaterThanOrEqual(16);
+    expect(lingnan.minY - northern.maxY).toBeGreaterThanOrEqual(55);
     expect(hainan.minY - lingnan.maxY).toBeGreaterThanOrEqual(12);
-    expect(taiwan.minX - lingnan.maxX).toBeGreaterThanOrEqual(12);
+    expect(containsPoint({ x: 455, y: 240 }, shapeById.get('land_northern')?.polygon ?? []))
+      .toBe(false);
+
+    const landShare = MAP_LAND_SHAPES.reduce((sum, shape) => sum + polygonArea(shape.polygon), 0)
+      / (MAP_PRESENTATION_WIDTH * MAP_PRESENTATION_HEIGHT);
+    expect(landShare).toBeGreaterThan(0.15);
+    expect(landShare).toBeLessThan(0.19);
 
     expect(getRegionDisplaySite('r_tsukushi')?.shapeId).toBe('island_kyushu');
     expect(getRegionDisplaySite('r_shikoku')?.shapeId).toBe('island_shikoku');
-    for (const regionId of ['r_chugoku', 'r_naniwa', 'r_yamato', 'r_tokai', 'r_kanto', 'r_ou']) {
+    for (const regionId of ['r_chugoku', 'r_naniwa', 'r_yamato', 'r_tokai', 'r_kanto']) {
       expect(getRegionDisplaySite(regionId)?.shapeId).toBe('island_honshu');
+    }
+    expect(getRegionDisplaySite('r_ou')?.shapeId).toBe('island_hokkaido');
+    for (const regionId of ['r_xianjing', 'r_pyongyang', 'r_kaesong', 'r_hanjing', 'r_jeonju', 'r_gyeongju']) {
+      expect(getRegionDisplaySite(regionId)?.shapeId).toBe('land_northern');
     }
   });
 

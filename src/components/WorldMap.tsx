@@ -11,10 +11,13 @@ import {
 
 import "../styles/world-map.css";
 import {
+  MAP_DECORATIVE_ISLETS,
   MAP_LAND_SHAPES,
   MAP_MACRO_LABELS,
   MAP_PRESENTATION_HEIGHT,
   MAP_PRESENTATION_WIDTH,
+  MAP_TERRITORY_SHAPES,
+  getMapLandShape,
   getRegionDisplaySite,
   getSeaZoneDisplayCenter,
 } from "../view/map-geography";
@@ -160,8 +163,8 @@ export const MAP_WORLD_WIDTH = MAP_PRESENTATION_WIDTH;
 export const MAP_WORLD_HEIGHT = MAP_PRESENTATION_HEIGHT;
 
 const MAP_PADDING = 8;
-const MAP_DESKTOP_RENDER_HEIGHT = 500;
-const MAP_COMPACT_RENDER_HEIGHT = 620;
+const MAP_DESKTOP_RENDER_HEIGHT = MAP_PRESENTATION_HEIGHT;
+const MAP_COMPACT_RENDER_HEIGHT = MAP_PRESENTATION_HEIGHT;
 const PAPER = "#e7dfca";
 const PAPER_LIGHT = "#f4eedf";
 const INK = "#292b27";
@@ -286,9 +289,31 @@ export function regionAtScreenPoint(
   padding = MAP_PADDING,
 ): MapRegionView | null {
   const worldPoint = screenToWorldPoint(point, width, height, padding);
+
+  const containingShapeIds = new Set(
+    MAP_LAND_SHAPES
+      .filter((shape) => isPointInPolygon(worldPoint, shape.polygon))
+      .map((shape) => shape.id),
+  );
+  const geographicCandidates = regions
+    .filter((region) => {
+      const site = getRegionDisplaySite(region.id);
+      return site ? containingShapeIds.has(site.shapeId) : false;
+    })
+    .sort((left, right) => {
+      const leftDistance = (left.center.x - worldPoint.x) ** 2 + (left.center.y - worldPoint.y) ** 2;
+      const rightDistance = (right.center.x - worldPoint.x) ** 2 + (right.center.y - worldPoint.y) ** 2;
+      return leftDistance - rightDistance || left.id.localeCompare(right.id);
+    });
+  if (geographicCandidates[0]) return geographicCandidates[0];
+
+  // Preserve the generic component contract for callers supplying custom,
+  // non-atlas regions while keeping every illustrated bay and strait as sea.
   for (let index = regions.length - 1; index >= 0; index -= 1) {
     const region = regions[index];
-    if (region.polygon.length >= 3 && isPointInPolygon(worldPoint, region.polygon)) {
+    if (!getRegionDisplaySite(region.id)
+      && region.polygon.length >= 3
+      && isPointInPolygon(worldPoint, region.polygon)) {
       return region;
     }
   }
@@ -326,7 +351,7 @@ export function buildMapPresentation(
     return site ? [site] : [];
   });
   const cellByRegionId = new Map(
-    buildTerritoryCells(MAP_LAND_SHAPES, knownSites)
+    buildTerritoryCells(MAP_TERRITORY_SHAPES, knownSites)
       .map((cell) => [cell.siteId, cell] as const),
   );
   const projectedPointByRawPoint = new Map<string, MapPoint>();
@@ -378,15 +403,29 @@ const worldToScreen = (point: MapPoint, transform: MapViewportTransform): MapPoi
   y: transform.offsetY + point.y * transform.scale * transform.yScale,
 });
 
-function makeRegionPath(region: MapRegionView, transform: MapViewportTransform) {
+function makePolygonPath(points: readonly MapPoint[], transform: MapViewportTransform) {
   const path = new Path2D();
-  region.polygon.forEach((point, index) => {
+  points.forEach((point, index) => {
     const screenPoint = worldToScreen(point, transform);
     if (index === 0) path.moveTo(screenPoint.x, screenPoint.y);
     else path.lineTo(screenPoint.x, screenPoint.y);
   });
   path.closePath();
   return path;
+}
+
+function makeRegionPath(region: MapRegionView, transform: MapViewportTransform) {
+  return makePolygonPath(region.polygon, transform);
+}
+
+function clipToRegionCoast(
+  context: CanvasRenderingContext2D,
+  region: MapRegionView,
+  transform: MapViewportTransform,
+) {
+  const site = getRegionDisplaySite(region.id);
+  const coast = site ? getMapLandShape(site.shapeId) : undefined;
+  if (coast) context.clip(makePolygonPath(coast.polygon, transform));
 }
 
 function applyLinePath(
@@ -468,9 +507,17 @@ function pairKey(left: string, right: string) {
 }
 
 const VISUAL_CROSS_SEA_LAND_ROUTES = new Set([
-  pairKey("r_liaodong", "r_pyongyang"),
   pairKey("r_nanyang", "r_guangzhou"),
   pairKey("r_runan", "r_quanzhou"),
+]);
+
+const KOREAN_REGION_IDS = new Set([
+  "r_xianjing",
+  "r_pyongyang",
+  "r_kaesong",
+  "r_hanjing",
+  "r_jeonju",
+  "r_gyeongju",
 ]);
 
 function shouldDrawRoute(route: MapRouteView, overlay: MapOverlay) {
@@ -490,7 +537,7 @@ function deriveGeography(
     const site = getRegionDisplaySite(region.id);
     if (!site) return "heartland";
     if (site.shapeId.startsWith("island_") && !site.shapeId.includes("hainan") && !site.shapeId.includes("taiwan")) return "japan";
-    if (site.shapeId === "land_korea") return "korea";
+    if (KOREAN_REGION_IDS.has(region.id)) return "korea";
     if (site.shapeId === "land_lingnan" || site.shapeId === "island_hainan" || site.shapeId === "island_taiwan") return "lingnan";
     if (region.id === "r_chengde" || site.x >= 395 && site.y <= 150) return "northeast";
     return "heartland";
@@ -592,30 +639,28 @@ function drawSeaField(
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
-  transform: MapViewportTransform,
+  _transform: MapViewportTransform,
 ) {
-  const left = transform.offsetX;
-  const top = transform.offsetY;
-  const sea = context.createLinearGradient(left, top, left + MAP_WORLD_WIDTH * transform.scale, top + transform.renderHeight * transform.scale);
+  const sea = context.createLinearGradient(0, 0, width, height);
   sea.addColorStop(0, "rgba(126, 151, 151, 0.28)");
   sea.addColorStop(0.48, "rgba(105, 139, 143, 0.35)");
   sea.addColorStop(1, "rgba(76, 117, 128, 0.43)");
   context.save();
   context.fillStyle = sea;
-  context.fillRect(left, top, MAP_WORLD_WIDTH * transform.scale, transform.renderHeight * transform.scale);
+  context.fillRect(0, 0, width, height);
 
   const easternDepth = context.createRadialGradient(
-    left + MAP_WORLD_WIDTH * transform.scale,
-    top + transform.renderHeight * transform.scale * 0.62,
+    width,
+    height * 0.62,
     10,
-    left + MAP_WORLD_WIDTH * transform.scale,
-    top + transform.renderHeight * transform.scale * 0.62,
+    width,
+    height * 0.62,
     Math.max(width, height) * 0.58,
   );
   easternDepth.addColorStop(0, "rgba(55, 94, 107, 0.24)");
   easternDepth.addColorStop(1, "rgba(73, 111, 121, 0)");
   context.fillStyle = easternDepth;
-  context.fillRect(left, top, MAP_WORLD_WIDTH * transform.scale, transform.renderHeight * transform.scale);
+  context.fillRect(0, 0, width, height);
   context.restore();
 }
 
@@ -623,14 +668,14 @@ function drawSeaMarks(
   context: CanvasRenderingContext2D,
   width: number,
   height: number,
-  transform: MapViewportTransform,
+  _transform: MapViewportTransform,
 ) {
   context.save();
   context.strokeStyle = "rgba(235, 239, 224, 0.2)";
   context.lineWidth = 0.75;
   const spacing = Math.max(43, Math.min(width, height) * 0.095);
-  for (let y = transform.offsetY + spacing * 0.55; y < height - transform.offsetY; y += spacing) {
-    for (let x = transform.offsetX + spacing * 0.35; x < width - transform.offsetX; x += spacing) {
+  for (let y = spacing * 0.55; y < height; y += spacing) {
+    for (let x = spacing * 0.35; x < width; x += spacing) {
       const shift = ((Math.round(y) * 7 + Math.round(x)) % 19) - 9;
       context.beginPath();
       context.arc(x + shift, y, 7, Math.PI * 1.06, Math.PI * 1.93);
@@ -649,11 +694,11 @@ function drawLandFoundation(
   context.lineJoin = "round";
   context.shadowColor = "rgba(28, 47, 49, 0.2)";
   context.shadowBlur = Math.max(3, 8 * transform.scale);
-  for (const shape of MAP_LAND_SHAPES) {
+  for (const shape of [...MAP_LAND_SHAPES, ...MAP_DECORATIVE_ISLETS]) {
     context.beginPath();
     applyLinePath(context, shape.polygon, transform);
     context.closePath();
-    context.fillStyle = shape.role === "mainland" ? "#d8d0b4" : "#d4ccb0";
+    context.fillStyle = "role" in shape && shape.role === "mainland" ? "#d8d0b4" : "#d4ccb0";
     context.fill();
     context.strokeStyle = "rgba(242, 235, 214, 0.95)";
     context.lineWidth = Math.max(2.6, 9 * transform.scale);
@@ -669,7 +714,7 @@ function drawGeographicContours(
 ) {
   context.save();
   context.lineJoin = "round";
-  for (const shape of MAP_LAND_SHAPES) {
+  for (const shape of [...MAP_LAND_SHAPES, ...MAP_DECORATIVE_ISLETS]) {
     context.beginPath();
     applyLinePath(context, shape.polygon, transform);
     context.closePath();
@@ -1392,6 +1437,8 @@ function drawMap(
     if (region.polygon.length < 3) return;
     const path = makeRegionPath(region, transform);
     const fill = regionFill(region, overlay, maxPopulation);
+    context.save();
+    clipToRegionCoast(context, region, transform);
     context.globalAlpha = fill.alpha;
     context.fillStyle = fill.color;
     context.fill(path);
@@ -1399,6 +1446,7 @@ function drawMap(
     context.strokeStyle = "rgba(41, 43, 39, 0.34)";
     context.lineWidth = 0.65;
     context.stroke(path);
+    context.restore();
   });
 
   drawGeographicContours(context, transform, compactMap);
@@ -1474,6 +1522,7 @@ function drawMap(
     if (highlighted && !selected && !hovered) {
       const path = makeRegionPath(region, transform);
       context.save();
+      clipToRegionCoast(context, region, transform);
       context.strokeStyle = VERMILION;
       context.globalAlpha = 0.72;
       context.lineWidth = 1.45;
@@ -1486,6 +1535,7 @@ function drawMap(
     if (selected || hovered) {
       const path = makeRegionPath(region, transform);
       context.save();
+      clipToRegionCoast(context, region, transform);
       context.strokeStyle = VERMILION;
       context.lineWidth = selected ? 2.2 : 1.35;
       context.shadowColor = "rgba(163, 58, 46, 0.34)";
@@ -1751,9 +1801,10 @@ export function WorldMap({
       ref={hostRef}
       className={`world-map${className ? ` ${className}` : ""}`}
       data-overlay={overlay}
-      data-map-layout="archipelago-v2"
-      data-landmass-count="3"
-      data-island-shape-count="5"
+      data-map-layout="reference-topology-v3"
+      data-major-landform-count="3"
+      data-landmass-count="2"
+      data-island-shape-count="6"
       data-highlighted-region-count={highlightedRegionIds.length}
     >
       <canvas
