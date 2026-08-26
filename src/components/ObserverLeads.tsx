@@ -17,6 +17,11 @@ export function observerLeadTargetKey(lead: ObserverLead): string {
   return `${lead.target.kind}:${lead.target.id}`;
 }
 
+export function observerLeadWatchKey(lead: ObserverLead): string {
+  if (lead.situationId) return `situation:${lead.situationId}`;
+  return observerLeadTargetKey(lead);
+}
+
 export function ObserverLeads({
   leads,
   watchedKeys,
@@ -85,7 +90,8 @@ export function ObserverLeads({
       <ol className="observer-leads__list">
         {leads.map((lead) => {
           const targetKey = observerLeadTargetKey(lead);
-          const watched = watchedKeys.has(targetKey);
+          const watchKey = observerLeadWatchKey(lead);
+          const watched = watchedKeys.has(watchKey);
           const selected = selectedKey === targetKey;
           return (
             <li
@@ -125,18 +131,23 @@ export function ObserverLeads({
               <button
                 type="button"
                 className="observer-leads__watch"
+                data-testid="observer-lead-watch"
+                data-watch-key={watchKey}
+                data-watch-kind={lead.situationId ? 'situation' : lead.target.kind}
                 data-watched={watched || undefined}
                 aria-pressed={watched}
                 aria-label={watched
-                  ? `取消关注相关对象：${lead.question}`
+                  ? lead.situationId
+                    ? `取消关注局势：${lead.question}`
+                    : `取消关注这条线：${lead.question}`
                   : lead.situationId
-                    ? `关注相关对象：${lead.question}；局势级关注将在下一阶段开放`
+                    ? `关注局势：${lead.question}`
                     : `关注这条线：${lead.question}`}
-                title={lead.situationId ? '当前关注相关对象；局势级关注下一阶段开放' : watched ? '取消关注' : '关注此线'}
+                title={watched ? lead.situationId ? '取消关注局势' : '取消关注' : lead.situationId ? '关注此局势' : '关注此线'}
                 onClick={() => onToggleWatch(lead)}
               >
                 {watched ? <BookmarkCheck size={15} aria-hidden="true" /> : <Bookmark size={15} aria-hidden="true" />}
-                <span>{watched ? lead.situationId ? '对象已关注' : '已关注' : lead.situationId ? '关注对象' : '关注'}</span>
+                <span>{watched ? lead.situationId ? '局势已关注' : '已关注' : lead.situationId ? '关注局势' : '关注'}</span>
               </button>
             </li>
           );

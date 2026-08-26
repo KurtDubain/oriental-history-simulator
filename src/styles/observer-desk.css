@@ -148,6 +148,37 @@
   gap: 2px;
 }
 
+.observer-desk__pause-open {
+  display: grid;
+  min-width: 0;
+  min-height: 44px;
+  grid-template-columns: minmax(0, 1fr) 18px;
+  align-items: center;
+  gap: 7px;
+  margin: -6px -7px;
+  padding: 6px 7px;
+  border: 0;
+  color: inherit;
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.observer-desk__pause-open:hover,
+.observer-desk__pause-open:focus-visible {
+  background: rgb(156 53 43 / 8%);
+}
+
+.observer-desk__pause-open > span {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.observer-desk__pause-open > svg {
+  color: var(--observer-vermilion-dark);
+}
+
 .observer-desk__pause-note strong {
   font-family: var(--observer-serif);
   font-size: 11px;
@@ -220,7 +251,7 @@
 .observer-desk__watchlist li {
   position: relative;
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 31px;
+  grid-template-columns: minmax(0, 1fr) 36px;
   border-top: 1px dotted var(--observer-line-strong);
   transition: background 140ms ease;
 }
@@ -255,7 +286,7 @@
   display: grid;
   min-width: 0;
   min-height: 58px;
-  grid-template-columns: 38px minmax(0, 1fr) 17px;
+  grid-template-columns: 38px minmax(0, 1fr) auto;
   align-items: center;
   gap: 8px;
   padding: 7px 4px 7px 0;
@@ -299,14 +330,25 @@
 }
 
 .observer-desk__watch-main > i {
-  display: grid;
-  width: 18px;
-  height: 18px;
-  place-items: center;
-  border-radius: 50%;
+  display: inline-flex;
+  min-height: 22px;
+  padding: 0 5px;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  border: 1px solid rgb(156 53 43 / 14%);
+  border-radius: 10px;
   color: var(--observer-vermilion-dark);
   background: var(--observer-vermilion-wash);
   font-style: normal;
+}
+
+.observer-desk__watch-main > i > span {
+  color: inherit;
+  font-size: 7px;
+  font-weight: 760;
+  letter-spacing: 0;
+  white-space: nowrap;
 }
 
 .observer-desk__watch-remove {
@@ -621,7 +663,7 @@
   }
 
   .observer-desk__header {
-    grid-template-columns: 38px minmax(0, 1fr) 34px;
+    grid-template-columns: 38px minmax(0, 1fr) 44px;
     gap: 10px;
     padding: 13px 10px 12px 12px;
   }
@@ -633,6 +675,11 @@
 
   .observer-desk__header h2 {
     font-size: 20px;
+  }
+
+  .observer-desk__header > button {
+    width: 44px;
+    height: 44px;
   }
 
   .observer-desk__pause-note,
@@ -648,7 +695,17 @@
   }
 
   .observer-desk__watch-main {
-    grid-template-columns: 34px minmax(0, 1fr) 17px;
+    min-height: 60px;
+    grid-template-columns: 34px minmax(0, 1fr) auto;
+  }
+
+  .observer-desk__watchlist li {
+    grid-template-columns: minmax(0, 1fr) 44px;
+  }
+
+  .observer-desk__watch-remove {
+    width: 44px;
+    height: 44px;
   }
 }
 

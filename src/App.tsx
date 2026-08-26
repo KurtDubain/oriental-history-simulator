@@ -28,7 +28,10 @@ import {
   type MapPrimerStep,
 } from './components/MapPrimer';
 import { ObserverDesk } from './components/ObserverDesk';
-import { ObserverLeads, observerLeadTargetKey } from './components/ObserverLeads';
+import {
+  ObserverLeads,
+  observerLeadWatchKey,
+} from './components/ObserverLeads';
 import { SituationWorkbench } from './components/SituationWorkbench';
 import {
   QuarterPulse,
@@ -125,7 +128,10 @@ import {
   type ObserverLeadProjection,
 } from './view/observer-leads';
 import { projectSituationWorkbench } from './view/situation-detail';
-import { toSituationSnapshot } from './view/situation-snapshot';
+import {
+  projectSituationSnapshotItem,
+  toSituationSnapshot,
+} from './view/situation-snapshot';
 import {
   OBSERVER_DESK_STORAGE_KEY,
   applyObserverEventAlerts,
@@ -138,7 +144,9 @@ import {
   parseObserverDeskSettings,
   removeObserverWatch,
   serializeObserverDeskSettings,
+  setObserverWatchAlert,
   upsertObserverWatch,
+  worldToSituationPauseCandidates,
   type ObserverDeskSettings,
   type ObserverGuideStepId,
   type ObserverPauseMatch,
@@ -268,6 +276,19 @@ function watchItemForSelection(world: WorldState, selection: Exclude<Selection, 
   return { kind: selection.kind, id: selection.id, label, detail, alert: false };
 }
 
+function watchItemForSituation(world: WorldState, situationId: string): ObserverWatchItem | null {
+  const situation = world.situationSystem.situations.find((item) => item.id === situationId);
+  if (!situation) return null;
+  const snapshot = projectSituationSnapshotItem(situation, world);
+  return {
+    kind: 'situation',
+    id: situation.id,
+    label: snapshot.title,
+    detail: `${snapshot.statusLabel} · ${snapshot.phaseLabel} · 张力${Math.round(snapshot.tension)}`,
+    alert: false,
+  };
+}
+
 interface SnapshotOptions {
   startOpen: boolean;
   running: boolean;
@@ -285,8 +306,12 @@ interface SnapshotOptions {
   observerLeadProjection: ObserverLeadProjection | null;
   historicalTurn: number | null;
   watchedCount: number;
+  watchlist: ObserverWatchItem[];
   guideCompleted: number;
   pauseReason: string | null;
+  pauseRule: string | null;
+  pauseSituationId: string | null;
+  pauseSituationTrigger: string | null;
   collectionOpen: boolean;
   worldSaveCount: number;
   primerOpen: boolean;
@@ -539,8 +564,21 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
       } : null,
       historicalTurn: options.historicalTurn,
       watchedCount: options.watchedCount,
+      watchlist: options.watchlist.map((item) => ({
+        kind: item.kind,
+        id: item.id,
+        label: item.label,
+        detail: item.detail,
+        alert: item.alert,
+      })),
+      watchedSituationIds: options.watchlist
+        .filter((item) => item.kind === 'situation')
+        .map((item) => item.id),
       guideCompleted: options.guideCompleted,
       lastPauseReason: options.pauseReason,
+      lastPauseRule: options.pauseRule,
+      lastPauseSituationId: options.pauseSituationId,
+      lastPauseSituationTrigger: options.pauseSituationTrigger,
       collectionOpen: options.collectionOpen,
       worldSaveCount: options.worldSaveCount,
       primerOpen: options.primerOpen,
@@ -782,8 +820,12 @@ export function App() {
     observerLeadProjection,
     historicalTurn: historicalView?.turn ?? null,
     watchedCount: observerSettings.watchlist.length,
+    watchlist: observerSettings.watchlist.map((item) => ({ ...item })),
     guideCompleted: observerGuideProgress(observerSettings).completed,
     pauseReason: pauseMatch?.reason ?? null,
+    pauseRule: pauseMatch?.rule ?? null,
+    pauseSituationId: pauseMatch?.situationId ?? null,
+    pauseSituationTrigger: pauseMatch?.situationTrigger ?? null,
     collectionOpen,
     worldSaveCount: worldSaves.length,
     primerOpen,
@@ -796,6 +838,11 @@ export function App() {
     leadLineage: 'advance' | 'restore' | 'reset' = 'advance',
   ) => {
     const previousHash = leadLineage === 'advance' ? worldRef.current?.hash ?? null : null;
+    const refreshedWatchlist = observerSettingsRef.current.watchlist.map((item) => {
+      if (item.kind !== 'situation') return item;
+      const currentItem = watchItemForSituation(nextWorld, item.id);
+      return currentItem ? { ...currentItem, alert: item.alert } : item;
+    });
     const leadProjection = deriveObserverLeadProjection(
       nextWorld,
       leadLineage === 'reset' ? null : observerSettingsRef.current.leadContinuity,
@@ -803,6 +850,7 @@ export function App() {
     );
     const nextObserverSettings = {
       ...observerSettingsRef.current,
+      watchlist: refreshedWatchlist,
       leadContinuity: leadProjection.continuity,
     };
     observerSettingsRef.current = nextObserverSettings;
@@ -810,6 +858,8 @@ export function App() {
     snapshotOptionsRef.current = {
       ...snapshotOptionsRef.current,
       observerLeadProjection: leadProjection,
+      watchedCount: refreshedWatchlist.length,
+      watchlist: refreshedWatchlist.map((item) => ({ ...item })),
     };
     reactCommitStartedAtRef.current = { startedAt: runtimeNow(), turn: nextWorld.turn };
     worldRef.current = nextWorld;
@@ -1220,7 +1270,10 @@ export function App() {
       const next = assertValidRuntimeTurn(current, advanced);
       commitWorld(next);
       const newEvents = next.history.slice(oldHistoryLength);
-      const pauseCandidates = newEvents.map(historyEventToPauseCandidate);
+      const pauseCandidates = [
+        ...worldToSituationPauseCandidates(next),
+        ...newEvents.map(historyEventToPauseCandidate),
+      ];
       let nextObserverSettings = completeObserverGuideStep(observerSettingsRef.current, 'quarter-advanced');
       nextObserverSettings = applyObserverEventAlerts(nextObserverSettings, pauseCandidates);
       observerSettingsRef.current = nextObserverSettings;
@@ -1340,8 +1393,12 @@ export function App() {
     observerLeadProjection,
     historicalTurn: historicalView?.turn ?? null,
     watchedCount: observerSettings.watchlist.length,
+    watchlist: observerSettings.watchlist.map((item) => ({ ...item })),
     guideCompleted: observerGuideProgress(observerSettings).completed,
     pauseReason: pauseMatch?.reason ?? null,
+    pauseRule: pauseMatch?.rule ?? null,
+    pauseSituationId: pauseMatch?.situationId ?? null,
+    pauseSituationTrigger: pauseMatch?.situationTrigger ?? null,
     collectionOpen,
     worldSaveCount: worldSaves.length,
     primerOpen,
@@ -1381,6 +1438,12 @@ export function App() {
 
   const commitObserverSettings = useCallback((nextSettings: ObserverDeskSettings) => {
     observerSettingsRef.current = nextSettings;
+    snapshotOptionsRef.current = {
+      ...snapshotOptionsRef.current,
+      watchedCount: nextSettings.watchlist.length,
+      watchlist: nextSettings.watchlist.map((item) => ({ ...item })),
+      guideCompleted: observerGuideProgress(nextSettings).completed,
+    };
     setObserverSettings(nextSettings);
   }, []);
 
@@ -1657,10 +1720,14 @@ export function App() {
 
   const shouldRestoreSituationFocus = useCallback(() => situationFocusRestoreAllowedRef.current, []);
 
-  const handleOpenSituationWorkbench = useCallback((preferredSituationId: string | null = null) => {
+  const handleOpenSituationWorkbench = useCallback((
+    preferredSituationId: string | null = null,
+    returnFocusTo: HTMLElement | null = null,
+  ) => {
     const current = worldRef.current;
     if (!current || current.situationSystem.situations.length === 0) return;
-    situationReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    situationReturnFocusRef.current = returnFocusTo
+      ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     situationFocusRestoreAllowedRef.current = true;
     const projection = projectSituationWorkbench(current, preferredSituationId ?? selectedSituationId);
     setSelectedSituationId(projection.selectedId);
@@ -1760,11 +1827,24 @@ export function App() {
   }, []);
 
   const handleSelectWatchItem = useCallback((item: ObserverWatchItem) => {
+    if (item.kind === 'situation') {
+      const current = worldRef.current;
+      if (!current?.situationSystem.situations.some((situation) => situation.id === item.id)) {
+        setObserverDeskOpen(false);
+        setPauseMatch(null);
+        setToast('这条局势已折入冷档案，当前卷宗不再保留可展开正文。');
+        return;
+      }
+      setObserverDeskOpen(false);
+      setPauseMatch(null);
+      handleOpenSituationWorkbench(item.id, observerDeskTriggerRef.current);
+      return;
+    }
     setSelection({ kind: item.kind, id: item.id });
     setActiveView(item.kind === 'country' ? 'polities' : item.kind === 'family' ? 'families' : item.kind === 'person' ? 'people' : 'world');
     setObserverDeskOpen(false);
     setPauseMatch(null);
-  }, []);
+  }, [handleOpenSituationWorkbench]);
 
   const handleInspectObserverLead = useCallback((lead: ObserverLead) => {
     setPauseMatch(null);
@@ -1777,10 +1857,12 @@ export function App() {
   const handleToggleObserverLead = useCallback((lead: ObserverLead) => {
     const current = worldRef.current;
     if (!current) return;
-    const item = watchItemForSelection(current, lead.target);
+    const item = lead.situationId
+      ? watchItemForSituation(current, lead.situationId)
+      : watchItemForSelection(current, lead.target);
     if (!item) return;
     const watched = observerSettingsRef.current.watchlist.some((entry) => (
-      observerWatchKey(entry.kind, entry.id) === observerLeadTargetKey(lead)
+      observerWatchKey(entry.kind, entry.id) === observerLeadWatchKey(lead)
     ));
     const nextSettings = watched
       ? removeObserverWatch(observerSettingsRef.current, item.kind, item.id)
@@ -1788,8 +1870,22 @@ export function App() {
     commitObserverSettings(nextSettings);
     setToast(watched
       ? `已取消关注：${item.label}`
-      : `已关注：${item.label}。推进季度后，相关动向会提醒并自动暂停。`);
+      : item.kind === 'situation'
+        ? `已关注局势：${item.label}。形成、阶段变化、核心人物死亡或结案时会提醒并自动暂停。`
+        : `已关注：${item.label}。推进季度后，相关动向会提醒并自动暂停。`);
   }, [commitObserverSettings]);
+
+  const handleSelectPauseMatch = useCallback((match: ObserverPauseMatch) => {
+    if (!match.situationId) return;
+    commitObserverSettings(setObserverWatchAlert(
+      observerSettingsRef.current,
+      'situation',
+      match.situationId,
+      false,
+    ));
+    setObserverDeskOpen(false);
+    handleOpenSituationWorkbench(match.situationId, observerDeskTriggerRef.current);
+  }, [commitObserverSettings, handleOpenSituationWorkbench]);
 
   const handleGuideAction = useCallback((step: ObserverGuideStepId) => {
     const current = worldRef.current;
@@ -2192,6 +2288,7 @@ export function App() {
         onSelectWatchItem={handleSelectWatchItem}
         onGuideAction={handleGuideAction}
         pauseMatch={pauseMatch}
+        onSelectPauseMatch={handleSelectPauseMatch}
         returnFocusTo={observerDeskTriggerRef.current}
       />
 

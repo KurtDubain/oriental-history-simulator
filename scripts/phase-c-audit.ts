@@ -18,9 +18,12 @@ import {
   type ObserverLeadSlot,
 } from '../src/view/observer-leads';
 import {
+  MAX_OBSERVER_SITUATION_PAUSE_CANDIDATES,
   createObserverDeskSettings,
+  evaluateObserverPause,
   parseObserverDeskSettings,
   serializeObserverDeskSettings,
+  worldToSituationPauseCandidates,
 } from '../src/view/v1-observer';
 
 const DEFAULT_SEEDS = [
@@ -78,6 +81,14 @@ interface MutableMetrics {
   situationSourceChecks: number;
   fallbackChecks: number;
   continuityChecks: number;
+  situationPauseCheckpoints: number;
+  situationPauseCandidates: number;
+  situationPausePurityChecks: number;
+  situationPauseDeterminismChecks: number;
+  situationPauseAuthorityChecks: number;
+  situationPauseIdentityChecks: number;
+  situationPauseEvaluationChecks: number;
+  situationPauseWrongIdentityChecks: number;
   maximumContinuityBytes: number;
   projectionTimingsMs: number[];
   slots: Record<ObserverLeadSlot, SlotMetrics>;
@@ -165,10 +176,151 @@ function createMetrics(): MutableMetrics {
     situationSourceChecks: 0,
     fallbackChecks: 0,
     continuityChecks: 0,
+    situationPauseCheckpoints: 0,
+    situationPauseCandidates: 0,
+    situationPausePurityChecks: 0,
+    situationPauseDeterminismChecks: 0,
+    situationPauseAuthorityChecks: 0,
+    situationPauseIdentityChecks: 0,
+    situationPauseEvaluationChecks: 0,
+    situationPauseWrongIdentityChecks: 0,
     maximumContinuityBytes: 0,
     projectionTimingsMs: [],
     slots: { person: slot(), polity: slot(), tension: slot() },
   };
+}
+
+function situationOnlySettings(situationId: string) {
+  const defaults = createObserverDeskSettings();
+  return {
+    ...defaults,
+    watchlist: [{
+      kind: 'situation' as const,
+      id: situationId,
+      label: situationId,
+      detail: 'Phase C audit',
+      alert: false,
+    }],
+    pauseRules: {
+      ...defaults.pauseRules,
+      enabled: true,
+      majorHistory: false,
+      wars: false,
+      powerTransfers: false,
+      outbreaks: false,
+      watchlistHits: false,
+      situationChanges: true,
+    },
+  };
+}
+
+function auditSituationPauseCandidates(world: WorldState, metrics: MutableMetrics): void {
+  const beforeHash = world.hash;
+  const beforeSerialization = serializeWorld(world);
+  const first = worldToSituationPauseCandidates(world);
+  const second = worldToSituationPauseCandidates(world);
+  const afterSerialization = serializeWorld(world);
+  const report = world.lastTurn;
+
+  metrics.situationPauseCheckpoints += 1;
+  metrics.situationPausePurityChecks += 1;
+  metrics.situationPauseDeterminismChecks += 1;
+  if (world.hash !== beforeHash || afterSerialization !== beforeSerialization) {
+    fail(world.seed, world.turn, 'Situation pause projection mutated the world, hash, or serialized save');
+  }
+  if (!jsonEqual(first, second)) {
+    fail(world.seed, world.turn, 'Situation pause projection is not deterministic for the same checkpoint');
+  }
+  if (first.length > MAX_OBSERVER_SITUATION_PAUSE_CANDIDATES) {
+    fail(
+      world.seed,
+      world.turn,
+      `Situation pause candidates grew to ${first.length} (limit ${MAX_OBSERVER_SITUATION_PAUSE_CANDIDATES})`,
+    );
+  }
+  if (!report && first.length > 0) {
+    fail(world.seed, world.turn, 'Situation pause projection produced candidates without a lastTurn ledger');
+  }
+
+  const reportFactIds = new Set(report?.factIds ?? []);
+  for (const candidate of first) {
+    metrics.situationPauseCandidates += 1;
+    metrics.situationPauseAuthorityChecks += 1;
+    metrics.situationPauseIdentityChecks += 1;
+    metrics.situationPauseEvaluationChecks += 1;
+    metrics.situationPauseWrongIdentityChecks += 1;
+
+    const sourceFact = candidate.sourceFactId
+      ? world.facts.find((fact) => fact.id === candidate.sourceFactId)
+      : undefined;
+    if (
+      !report
+      || !candidate.sourceFactId
+      || !reportFactIds.has(candidate.sourceFactId)
+      || !sourceFact
+      || sourceFact.turn !== report.turn
+    ) {
+      fail(world.seed, world.turn, `${candidate.id} is not anchored to an authoritative current-quarter Fact`);
+    }
+
+    const situationId = candidate.situationId;
+    const situation = situationId
+      ? world.situationSystem.situations.find((item) => item.id === situationId)
+      : undefined;
+    const hasExactSituationRef = Boolean(
+      situationId
+      && situation
+      && candidate.refs.length === 1
+      && candidate.refs[0]?.kind === 'situation'
+      && candidate.refs[0].id === situationId,
+    );
+    if (!hasExactSituationRef) {
+      fail(world.seed, world.turn, `${candidate.id} does not reference exactly one retained Situation identity`);
+    }
+
+    if (sourceFact && situation) {
+      if (sourceFact.kind === 'situation_milestone') {
+        if (sourceFact.payload.situationId !== situation.id) {
+          fail(world.seed, world.turn, `${candidate.id} milestone Fact points at a different Situation`);
+        }
+        const expectedTrigger = sourceFact.payload.transition === 'formed'
+          ? 'formation'
+          : sourceFact.payload.transition === 'resolved'
+            ? 'resolution'
+            : 'phase-change';
+        if (candidate.situationTrigger !== expectedTrigger) {
+          fail(world.seed, world.turn, `${candidate.id} trigger disagrees with its milestone transition`);
+        }
+      } else if (sourceFact.kind === 'character_death') {
+        if (
+          candidate.situationTrigger !== 'core-character-death'
+          || !situation.participants.coreCharacterIds.includes(sourceFact.payload.characterId)
+        ) {
+          fail(world.seed, world.turn, `${candidate.id} death Fact is not for a core Situation participant`);
+        }
+      } else {
+        fail(world.seed, world.turn, `${candidate.id} uses unsupported Fact kind ${sourceFact.kind}`);
+      }
+    }
+
+    if (!situationId || !candidate.situationTrigger || !candidate.sourceFactId) continue;
+    const match = evaluateObserverPause(situationOnlySettings(situationId), [candidate]);
+    if (
+      !match
+      || match.rule !== 'situationChanges'
+      || match.eventId !== candidate.id
+      || match.situationId !== situationId
+      || match.situationTrigger !== candidate.situationTrigger
+      || match.sourceFactId !== candidate.sourceFactId
+    ) {
+      fail(world.seed, world.turn, `${candidate.id} did not preserve Situation/trigger/source Fact identity`);
+    }
+
+    const wrongSituationId = `${situationId}:wrong`;
+    if (evaluateObserverPause(situationOnlySettings(wrongSituationId), [candidate]) !== null) {
+      fail(world.seed, world.turn, `${candidate.id} matched a different watched Situation identity`);
+    }
+  }
 }
 
 function percentile(values: readonly number[], fraction: number): number {
@@ -424,6 +576,7 @@ function runAudited(seed: string): AuditRun {
       previousWorldHash = world.hash;
       world = advanceWorld(world);
     }
+    auditSituationPauseCandidates(world, metrics);
     const projection = auditProjection(world, continuity, previousWorldHash, priorLeadIds, metrics);
     continuity = persistedContinuity(world, projection.continuity);
     for (const lead of projection.leads) priorLeadIds[lead.slot] = lead.id;
@@ -474,6 +627,14 @@ function mergeMetrics(target: MutableMetrics, source: MutableMetrics): void {
   target.situationSourceChecks += source.situationSourceChecks;
   target.fallbackChecks += source.fallbackChecks;
   target.continuityChecks += source.continuityChecks;
+  target.situationPauseCheckpoints += source.situationPauseCheckpoints;
+  target.situationPauseCandidates += source.situationPauseCandidates;
+  target.situationPausePurityChecks += source.situationPausePurityChecks;
+  target.situationPauseDeterminismChecks += source.situationPauseDeterminismChecks;
+  target.situationPauseAuthorityChecks += source.situationPauseAuthorityChecks;
+  target.situationPauseIdentityChecks += source.situationPauseIdentityChecks;
+  target.situationPauseEvaluationChecks += source.situationPauseEvaluationChecks;
+  target.situationPauseWrongIdentityChecks += source.situationPauseWrongIdentityChecks;
   target.maximumContinuityBytes = Math.max(target.maximumContinuityBytes, source.maximumContinuityBytes);
   target.projectionTimingsMs.push(...source.projectionTimingsMs);
   for (const slot of LEAD_SLOTS) {
@@ -528,7 +689,7 @@ for (const seed of seeds) {
 
 const omittedFailures = Math.max(0, failureCount - failures.length);
 console.log(JSON.stringify({
-  phase: 'C01/C02',
+  phase: 'C01-C04',
   scope: {
     seeds: seeds.length,
     quartersPerSeed: turns,
@@ -543,6 +704,7 @@ console.log(JSON.stringify({
     visibilityThreshold: OBSERVER_LEAD_VISIBILITY_THRESHOLD,
     resolutionEchoQuarters: OBSERVER_LEAD_RESOLUTION_ECHO_TURNS,
     maximumContinuityBytes: MAX_CONTINUITY_BYTES,
+    maximumSituationPauseCandidates: MAX_OBSERVER_SITUATION_PAUSE_CANDIDATES,
   },
   metrics: {
     idempotenceChecks: aggregate.idempotenceChecks,
@@ -551,6 +713,16 @@ console.log(JSON.stringify({
     situationSourceChecks: aggregate.situationSourceChecks,
     fallbackChecks: aggregate.fallbackChecks,
     continuityChecks: aggregate.continuityChecks,
+    situationPause: {
+      checkpoints: aggregate.situationPauseCheckpoints,
+      candidates: aggregate.situationPauseCandidates,
+      purityChecks: aggregate.situationPausePurityChecks,
+      determinismChecks: aggregate.situationPauseDeterminismChecks,
+      authorityChecks: aggregate.situationPauseAuthorityChecks,
+      exactIdentityChecks: aggregate.situationPauseIdentityChecks,
+      evaluationChecks: aggregate.situationPauseEvaluationChecks,
+      wrongIdentityRejectionChecks: aggregate.situationPauseWrongIdentityChecks,
+    },
     maximumObservedContinuityBytes: aggregate.maximumContinuityBytes,
     projectionTiming: timingSummary(aggregate.projectionTimingsMs),
     sourcesBySlot: publicSlotMetrics(aggregate),

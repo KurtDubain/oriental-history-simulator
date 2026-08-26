@@ -27,6 +27,11 @@ const LEAD_STAGE_BY_SITUATION_PHASE = Object.freeze({
   active: '升温',
   critical: '临界',
 });
+const SITUATION_WATCH_SEED = '春战副将';
+const SITUATION_WATCH_TURN = 8;
+const SITUATION_WATCH_SLOT = 'tension';
+const SITUATION_WATCH_EXPECTED_ID = 'situation_000001';
+const SITUATION_WATCH_EXPECTED_PAUSE_TURN = 10;
 
 const server = await createServer({
   logLevel: 'error',
@@ -185,6 +190,46 @@ async function waitForVisualSettled(locator) {
   await locator.evaluate(async (element) => {
     await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
   });
+}
+
+async function readObserverDeskSettings(page, seed) {
+  return page.evaluate((worldSeed) => {
+    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(worldSeed)}`);
+    return raw ? JSON.parse(raw) : null;
+  }, seed);
+}
+
+function situationFromSnapshot(state, situationId) {
+  return [...state.observer.situations.open, ...state.observer.situations.recentResolved]
+    .find((item) => item.id === situationId) ?? null;
+}
+
+async function assertUnobstructedTapTarget(locator, message) {
+  const result = await locator.evaluate((element) => {
+    const bounds = element.getBoundingClientRect();
+    const centerX = bounds.left + bounds.width / 2;
+    const centerY = bounds.top + bounds.height / 2;
+    const hit = document.elementFromPoint(centerX, centerY);
+    return {
+      width: bounds.width,
+      height: bounds.height,
+      left: bounds.left,
+      right: bounds.right,
+      top: bounds.top,
+      bottom: bounds.bottom,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      unobstructed: Boolean(hit && (hit === element || element.contains(hit))),
+    };
+  });
+  assert.ok(result.width >= 44 && result.height >= 44, `${message}：触控目标不得小于44px`);
+  assert.ok(
+    result.left >= 0 && result.right <= result.viewportWidth + 1
+      && result.top >= 0 && result.bottom <= result.viewportHeight + 1,
+    `${message}：触控目标必须位于可见视口内`,
+  );
+  assert.equal(result.unobstructed, true, `${message}：触控中心不得被其他元素遮挡`);
+  return result;
 }
 
 async function selectLayer(page, layer) {
@@ -496,6 +541,191 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   assert.deepEqual(errors, []);
   await page.close();
   return { seed, turn, requiredTypes, projection, leadProjection: leadProjectionBeforeSave };
+}
+
+async function exerciseSituationWatchAndPause(browserInstance) {
+  const context = await browserInstance.newContext({ viewport: { width: 1_280, height: 720 } });
+  const page = await context.newPage();
+  const errors = [];
+  collectBrowserErrors(page, errors);
+  await page.goto(APP_URL, { waitUntil: 'networkidle' });
+  await page.evaluate(() => localStorage.setItem('canghai-map-primer-complete-v1', '1'));
+  await page.getByLabel('世界种子').fill(SITUATION_WATCH_SEED);
+  await page.click('#start-world');
+  await page.waitForSelector('.world-map__canvas');
+
+  const turn8 = await advanceTo(page, SITUATION_WATCH_TURN);
+  const lead = turn8.observer.focusLeads.find((item) => item.slot === SITUATION_WATCH_SLOT);
+  assert.ok(lead?.situationId, '冻结种子 T8 的天下矛盾必须由真实 Situation 承载');
+  assert.equal(lead.situationId, SITUATION_WATCH_EXPECTED_ID, '冻结种子应保持稳定的局势 ID');
+  const watchedSituationId = lead.situationId;
+  const turn8Situation = situationFromSnapshot(turn8, watchedSituationId);
+  assert.equal(turn8Situation?.status, 'open');
+  assert.equal(turn8Situation?.phase, 'critical', '关注前的战争局势应处于临界阶段');
+
+  const leadRow = page.locator(
+    `[data-testid="observer-lead"][data-situation-id="${watchedSituationId}"]`,
+  );
+  await leadRow.waitFor();
+  const watchButton = leadRow.locator('[data-testid="observer-lead-watch"]');
+  await watchButton.waitFor();
+  assert.equal(await watchButton.getAttribute('data-watch-kind'), 'situation');
+  assert.equal(await watchButton.getAttribute('data-watch-key'), `situation:${watchedSituationId}`);
+  const hashBeforeWatch = turn8.deterministicWorldHash;
+  await watchButton.click();
+  const watched = await waitForSnapshot(page, (current) => current.observer.watchedCount === 1);
+  assert.equal(watched.deterministicWorldHash, hashBeforeWatch, '关注 Situation 只能改变观察者设置');
+  assert.equal(await watchButton.getAttribute('aria-pressed'), 'true');
+
+  await page.waitForFunction(({ seed, situationId }) => {
+    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(seed)}`);
+    if (!raw) return false;
+    const parsed = JSON.parse(raw);
+    return parsed.version === 3
+      && parsed.watchlist?.some((item) => item.kind === 'situation' && item.id === situationId);
+  }, { seed: SITUATION_WATCH_SEED, situationId: watchedSituationId });
+  let stored = await readObserverDeskSettings(page, SITUATION_WATCH_SEED);
+  assert.equal(stored.version, 3, 'C03 观察台应迁移到 v3');
+  assert.equal(stored.watchlist.length, 1);
+  assert.deepEqual(
+    stored.watchlist.map((item) => ({ kind: item.kind, id: item.id })),
+    [{ kind: 'situation', id: watchedSituationId }],
+    '当世三问的关注项必须存 Situation ID，不得存代理人物或政权',
+  );
+
+  const deskTrigger = page.locator('button[data-observer-desk-trigger="true"]');
+  await deskTrigger.click();
+  const desk = page.locator('.observer-desk');
+  await desk.waitFor();
+  const watchedRow = desk.locator(
+    `[data-testid="observer-watch-item"][data-watch-kind="situation"][data-watch-id="${watchedSituationId}"]`,
+  );
+  assert.equal(await watchedRow.count(), 1, '观察台必须以同一 Situation ID 展示关注项');
+  const legacyRules = ['majorHistory', 'wars', 'powerTransfers', 'outbreaks', 'watchlistHits'];
+  for (const rule of legacyRules) {
+    const input = desk.locator(`[data-pause-rule="${rule}"] input[type="checkbox"]`);
+    assert.equal(await input.count(), 1, `自动暂停规则 ${rule} 应有稳定语义标识`);
+    if (await input.isChecked()) await input.uncheck();
+  }
+  const situationRule = desk.locator('[data-pause-rule="situationChanges"] input[type="checkbox"]');
+  assert.equal(await situationRule.count(), 1, '观察台必须提供独立的局势里程碑暂停规则');
+  if (!(await situationRule.isChecked())) await situationRule.check();
+  await page.keyboard.press('Escape');
+  await desk.waitFor({ state: 'detached' });
+
+  await page.waitForFunction((seed) => {
+    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(seed)}`);
+    if (!raw) return false;
+    const rules = JSON.parse(raw).pauseRules;
+    return rules?.enabled === true
+      && rules.situationChanges === true
+      && rules.majorHistory === false
+      && rules.wars === false
+      && rules.powerTransfers === false
+      && rules.outbreaks === false
+      && rules.watchlistHits === false;
+  }, SITUATION_WATCH_SEED);
+
+  await page.click('button[aria-label="保存当前世界"]');
+  await waitForLatestAutosave(page, watched);
+  await page.reload({ waitUntil: 'networkidle' });
+  await page.waitForSelector('#continue-world');
+  await page.click('#continue-world');
+  await page.waitForSelector('.world-map__canvas');
+  const restored = await waitForSnapshot(page, (current, expected) => (
+    current.time.turn === expected.turn && current.deterministicWorldHash === expected.hash
+  ), { turn: SITUATION_WATCH_TURN, hash: hashBeforeWatch });
+  assert.equal(restored.observer.watchedCount, 1, '浏览器重载续读后应保留 Situation 关注');
+  assert.deepEqual(restored.observer.watchedSituationIds, [watchedSituationId]);
+  assert.ok(
+    restored.observer.watchlist.some((item) => item.kind === 'situation' && item.id === watchedSituationId),
+    '文本快照应公开续读后的稳定 Situation 关注身份',
+  );
+  stored = await readObserverDeskSettings(page, SITUATION_WATCH_SEED);
+  assert.ok(
+    stored.watchlist.some((item) => item.kind === 'situation' && item.id === watchedSituationId),
+    '续读后 localStorage 仍应保留原 Situation ID',
+  );
+  const restoredInspectorClose = page.locator('.observer-inspector button[aria-label="关闭档案"]');
+  if (await restoredInspectorClose.isVisible().catch(() => false)) {
+    await restoredInspectorClose.click();
+    await page.waitForSelector('.observer-inspector', { state: 'detached' });
+  }
+  const restoredWatchButton = page.locator(
+    `[data-testid="observer-lead"][data-situation-id="${watchedSituationId}"] [data-testid="observer-lead-watch"]`,
+  );
+  await restoredWatchButton.waitFor();
+  assert.equal(await restoredWatchButton.getAttribute('aria-pressed'), 'true');
+
+  await page.getByRole('button', { name: '8 倍速推演' }).click();
+  await page.getByRole('button', { name: '开始自动推演' }).click();
+  await page.evaluate(() => window.advanceTime(225));
+  const turn9 = await waitForSnapshot(page, (current) => current.time.turn === 9 && current.playback.running === true);
+  assert.equal(turn9.observer.lastPauseReason, null, '被关注局势没有转折的 T9 不得误暂停');
+  assert.equal(situationFromSnapshot(turn9, watchedSituationId)?.phase, 'critical');
+
+  await page.evaluate(() => window.advanceTime(225));
+  const paused = await waitForSnapshot(page, (current, expected) => (
+    current.time.turn === expected.turn
+      && current.playback.running === false
+      && current.observer.lastPauseSituationId === expected.situationId
+  ), { turn: SITUATION_WATCH_EXPECTED_PAUSE_TURN, situationId: watchedSituationId });
+  assert.equal(paused.observer.lastPauseRule, 'situationChanges', '局势转折必须由 C04 规则暂停，不得冒充旧史事规则');
+  assert.equal(paused.observer.lastPauseSituationId, watchedSituationId);
+  assert.equal(paused.observer.lastPauseSituationTrigger, 'phase-change');
+  assert.match(paused.observer.lastPauseReason, /局势|阶段|转折/);
+  const pausedSituation = situationFromSnapshot(paused, watchedSituationId);
+  assert.equal(pausedSituation?.status, 'open');
+  assert.equal(pausedSituation?.phase, 'active', '冻结种子应在局势由 critical 回落为 active 的精确季度停下');
+  assert.equal(pausedSituation?.latestChange?.kind, 'phase_changed');
+  assert.equal(pausedSituation?.latestChange?.turn, SITUATION_WATCH_EXPECTED_PAUSE_TURN - 1);
+  const refreshedWatch = paused.observer.watchlist.find((item) => (
+    item.kind === 'situation' && item.id === watchedSituationId
+  ));
+  assert.match(refreshedWatch?.detail ?? '', /发展/, '关注簿应随权威局势刷新当前阶段');
+  assert.doesNotMatch(refreshedWatch?.detail ?? '', /临界/, '关注簿不得在转阶段后继续展示关注当季的旧阶段');
+  await waitForLatestAutosave(page, paused);
+
+  await deskTrigger.click();
+  await desk.waitFor();
+  const pauseNote = desk.locator('.observer-desk__pause-note[data-pause-rule="situationChanges"]');
+  await pauseNote.waitFor();
+  const pauseNoteText = await pauseNote.textContent();
+  assert.match(pauseNoteText, /局势里程碑|局势关键变化/);
+  assert.match(pauseNoteText, /时间已停/);
+  const pauseOpen = pauseNote.locator(
+    `[data-testid="observer-pause-open"][data-situation-id="${watchedSituationId}"][data-situation-trigger="phase-change"]`,
+  );
+  assert.equal(await pauseOpen.count(), 1, '暂停项必须保留触发局势 ID 和转折类型');
+  await waitForVisualSettled(desk);
+  await page.screenshot({ path: `${ARTIFACT_DIR}/situation-milestone-pause-desktop.png`, fullPage: true });
+  const pausedHash = paused.deterministicWorldHash;
+  await pauseOpen.click();
+  const opened = await waitForSnapshot(page, (current, situationId) => (
+    current.observer.situationWorkbenchOpen
+      && current.observer.selectedSituationId === situationId
+      && current.observer.selectedSituation?.id === situationId
+  ), watchedSituationId);
+  assert.equal(opened.deterministicWorldHash, pausedHash, '从暂停原因阅卷不得改变世界哈希');
+  assert.equal(opened.observer.selectedSituation.phase, 'active');
+  assert.equal(
+    opened.observer.watchlist.find((item) => item.kind === 'situation' && item.id === watchedSituationId)?.alert,
+    false,
+    '从暂停原因阅卷后应清除同一局势的未读里程碑',
+  );
+  await page.locator('.situation-workbench__close').click();
+  await page.waitForSelector('.situation-workbench', { state: 'detached' });
+  await page.waitForFunction(() => (
+    document.activeElement?.getAttribute('data-observer-desk-trigger') === 'true'
+  ));
+  assert.deepEqual(errors, []);
+  await context.close();
+  return {
+    seed: SITUATION_WATCH_SEED,
+    situationId: watchedSituationId,
+    pauseTurn: paused.time.turn,
+    trigger: paused.observer.lastPauseSituationTrigger,
+  };
 }
 
 async function exerciseObserverLeads(page, initialHash) {
@@ -984,6 +1214,13 @@ try {
     requiredTypes: Object.keys(SITUATION_TYPE_LABELS),
   });
   assert.ok(situationSample.projection.openCount > 0);
+  const situationPauseSample = await exerciseSituationWatchAndPause(browser);
+  assert.deepEqual(situationPauseSample, {
+    seed: SITUATION_WATCH_SEED,
+    situationId: SITUATION_WATCH_EXPECTED_ID,
+    pauseTurn: SITUATION_WATCH_EXPECTED_PAUSE_TURN,
+    trigger: 'phase-change',
+  });
   await exerciseMapViewportDesktop(page);
   await exerciseObserverLeads(page, afterPrimer.deterministicWorldHash);
   await page.screenshot({ path: `${ARTIFACT_DIR}/geographic-world-map.png`, fullPage: true });
@@ -1313,6 +1550,20 @@ try {
   await mobileLeadRow.waitFor();
   await waitForVisualSettled(mobileLeads);
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-situation-backed-lead-390x844.png`, fullPage: true });
+  const mobileWatchButton = mobileLeadRow.locator('[data-testid="observer-lead-watch"]');
+  await mobileWatchButton.waitFor();
+  await mobileWatchButton.scrollIntoViewIfNeeded();
+  assert.equal(await mobileWatchButton.getAttribute('data-watch-kind'), 'situation');
+  assert.equal(await mobileWatchButton.getAttribute('data-watch-key'), `situation:${mobileLead.situationId}`);
+  await assertUnobstructedTapTarget(mobileWatchButton, '移动端局势关注按钮');
+  await mobileWatchButton.click();
+  const mobileWatched = await waitForSnapshot(mobilePage, (current) => current.observer.watchedCount === 1);
+  assert.equal(mobileWatched.deterministicWorldHash, mobileSituationState.deterministicWorldHash, '移动端关注局势不得改写世界');
+  await mobilePage.waitForFunction(({ seed, situationId }) => {
+    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(seed)}`);
+    if (!raw) return false;
+    return JSON.parse(raw).watchlist?.some((item) => item.kind === 'situation' && item.id === situationId);
+  }, { seed: SITUATION_WATCH_SEED, situationId: mobileLead.situationId });
   await mobileLeadRow.locator('.observer-leads__inspect').click();
   const mobileSituation = mobilePage.locator('.situation-workbench');
   await mobileSituation.waitFor();
@@ -1352,10 +1603,32 @@ try {
   const mobileObserverDesk = mobilePage.locator('.observer-desk');
   await mobileObserverDesk.waitFor();
   await assertWithinViewport(mobilePage, '.observer-desk', '移动端观察台不可横向溢出');
+  const mobileWatchRow = mobileObserverDesk.locator(
+    `[data-testid="observer-watch-item"][data-watch-kind="situation"][data-watch-id="${mobileLead.situationId}"]`,
+  );
+  assert.equal(await mobileWatchRow.count(), 1, '移动端观察台应显示真实 Situation 关注项');
+  const mobileWatchOpen = mobileWatchRow.locator('[data-testid="observer-watch-open"]');
+  const mobileWatchRemove = mobileWatchRow.locator('[data-testid="observer-watch-remove"]');
+  const mobileSituationRule = mobileObserverDesk.locator('[data-pause-rule="situationChanges"]');
+  for (const [locator, label] of [
+    [mobileWatchOpen, '移动端局势关注项'],
+    [mobileWatchRemove, '移动端取消局势关注'],
+    [mobileSituationRule, '移动端局势里程碑规则'],
+  ]) {
+    await locator.scrollIntoViewIfNeeded();
+    await assertUnobstructedTapTarget(locator, label);
+  }
   await waitForVisualSettled(mobileObserverDesk);
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-observer-desk-390x844.png`, fullPage: true });
-  await mobilePage.keyboard.press('Escape');
+  await mobileWatchOpen.click();
   await mobileObserverDesk.waitFor({ state: 'detached' });
+  await mobilePage.waitForSelector('.situation-workbench');
+  const mobileWatchOpened = await snapshot(mobilePage);
+  assert.equal(mobileWatchOpened.observer.selectedSituationId, mobileLead.situationId, '移动端观察台关注项应直达同一局势');
+  assert.equal(mobileWatchOpened.observer.selectedSituation?.id, mobileLead.situationId);
+  assert.equal(mobileWatchOpened.deterministicWorldHash, mobileSituationState.deterministicWorldHash);
+  await mobilePage.locator('.situation-workbench__close').click();
+  await mobilePage.waitForSelector('.situation-workbench', { state: 'detached' });
 
   await mobilePage.locator('button[data-history-workbench-trigger="true"]').click();
   const mobileHistory = mobilePage.locator('.history-workbench');

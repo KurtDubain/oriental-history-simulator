@@ -27,6 +27,7 @@ import '../styles/observer-ui.css';
 import '../styles/observer-desk.css';
 
 const WATCH_KIND_LABELS: Record<ObserverWatchKind, string> = {
+  situation: '局势',
   country: '政权',
   family: '家族',
   person: '人物',
@@ -47,16 +48,18 @@ export interface ObserverDeskProps {
   onSelectWatchItem: (item: ObserverWatchItem) => void;
   onGuideAction?: (step: ObserverGuideStepId) => void;
   pauseMatch?: ObserverPauseMatch | null;
+  onSelectPauseMatch?: (match: ObserverPauseMatch) => void;
   returnFocusTo?: HTMLElement | null;
 }
 
 interface PauseRuleDefinition {
-  key: 'wars' | 'powerTransfers' | 'outbreaks' | 'watchlistHits';
+  key: 'wars' | 'powerTransfers' | 'outbreaks' | 'watchlistHits' | 'situationChanges';
   label: string;
   detail: string;
 }
 
 const PAUSE_RULES: PauseRuleDefinition[] = [
+  { key: 'situationChanges', label: '关注局势关键变化', detail: '形成、阶段变化、核心人物死亡与结案' },
   { key: 'wars', label: '战争', detail: '宣战、关键战役、都城陷落与媾和' },
   { key: 'powerTransfers', label: '政变与继承', detail: '宫变、篡立、摄政、继承与政权解体' },
   { key: 'outbreaks', label: '疾疫', detail: '疫病输入、暴发与重要人物染病' },
@@ -71,6 +74,7 @@ export function ObserverDesk({
   onSelectWatchItem,
   onGuideAction,
   pauseMatch,
+  onSelectPauseMatch,
   returnFocusTo,
 }: ObserverDeskProps) {
   const titleId = useId();
@@ -170,9 +174,30 @@ export function ObserverDesk({
         </header>
 
         {pauseMatch ? (
-          <div className="observer-desk__pause-note" role="status">
+          <div
+            className="observer-desk__pause-note"
+            role="status"
+            data-pause-rule={pauseMatch.rule}
+            data-situation-id={pauseMatch.situationId ?? undefined}
+            data-situation-trigger={pauseMatch.situationTrigger ?? undefined}
+          >
             <BellRing size={16} aria-hidden="true" />
-            <span><strong>时间已停</strong><small>{pauseMatch.reason} · {pauseMatch.eventTitle}</small></span>
+            {pauseMatch.situationId && onSelectPauseMatch ? (
+              <button
+                type="button"
+                className="observer-desk__pause-open"
+                data-testid="observer-pause-open"
+                data-situation-id={pauseMatch.situationId}
+                data-situation-trigger={pauseMatch.situationTrigger}
+                aria-label={`${pauseMatch.reason}：${pauseMatch.eventTitle}，打开对应局势卷宗`}
+                onClick={() => onSelectPauseMatch(pauseMatch)}
+              >
+                <span><strong>局势里程碑，时间已停</strong><small>{pauseMatch.reason} · {pauseMatch.eventTitle}</small></span>
+                <ChevronRight size={14} aria-hidden="true" />
+              </button>
+            ) : (
+              <span><strong>时间已停</strong><small>{pauseMatch.reason} · {pauseMatch.eventTitle}</small></span>
+            )}
           </div>
         ) : null}
 
@@ -181,28 +206,44 @@ export function ObserverDesk({
             <div className="observer-desk__section-heading">
               <div>
                 <span>01</span>
-                <h3 id="observer-watch-heading">关注对象</h3>
+                <h3 id="observer-watch-heading">关注簿</h3>
               </div>
-              <strong aria-label={`${safeSettings.watchlist.length}个关注对象`}>{safeSettings.watchlist.length}</strong>
+              <strong aria-label={`${safeSettings.watchlist.length}条关注记录`}>{safeSettings.watchlist.length}</strong>
             </div>
 
             {safeSettings.watchlist.length ? (
               <ul className="observer-desk__watchlist">
                 {safeSettings.watchlist.map((item) => (
-                  <li key={`${item.kind}-${item.id}`} data-alert={item.alert || undefined}>
+                  <li
+                    key={`${item.kind}-${item.id}`}
+                    data-testid="observer-watch-item"
+                    data-watch-kind={item.kind}
+                    data-watch-id={item.id}
+                    data-alert={item.alert || undefined}
+                  >
                     <button
                       type="button"
                       className="observer-desk__watch-main"
+                      data-testid="observer-watch-open"
                       onClick={() => selectWatchItem(item)}
                       aria-label={`前往${WATCH_KIND_LABELS[item.kind]}${item.label}${item.alert ? '，有新动向' : ''}`}
                     >
                       <span>{WATCH_KIND_LABELS[item.kind]}</span>
                       <span><strong>{item.label}</strong><small>{item.detail || '暂无补充记载'}</small></span>
-                      {item.alert ? <i aria-label="有新动向"><BellRing size={13} aria-hidden="true" /></i> : <ChevronRight size={14} aria-hidden="true" />}
+                      {item.alert ? (
+                        <i
+                          aria-label={item.kind === 'situation' ? '局势有新里程碑' : '有新动向'}
+                          data-alert-kind={item.kind === 'situation' ? 'situation-change' : 'new-history'}
+                        >
+                          <BellRing size={12} aria-hidden="true" />
+                          <span>{item.kind === 'situation' ? '里程碑' : '新动向'}</span>
+                        </i>
+                      ) : <ChevronRight size={14} aria-hidden="true" />}
                     </button>
                     <button
                       type="button"
                       className="observer-desk__watch-remove"
+                      data-testid="observer-watch-remove"
                       aria-label={`取消关注${item.label}`}
                       onClick={() => onSettingsChange(removeObserverWatch(safeSettings, item.kind, item.id))}
                     >
@@ -214,7 +255,7 @@ export function ObserverDesk({
             ) : (
               <div className="observer-desk__empty">
                 <Eye size={21} strokeWidth={1.3} aria-hidden="true" />
-                <p><strong>尚未留下目光</strong><span>在人物、家族、政权或地区档案中选择“关注”，其后续动向会汇集于此。</span></p>
+                <p><strong>尚未留下目光</strong><span>可在“当世三问”关注一条局势，也可从人物、家族、政权或地区档案留下关注。</span></p>
               </div>
             )}
           </section>
@@ -237,7 +278,7 @@ export function ObserverDesk({
             </div>
 
             <div className="observer-desk__rules" aria-disabled={!safeSettings.pauseRules.enabled}>
-              <label>
+              <label data-pause-rule="majorHistory">
                 <input
                   type="checkbox"
                   checked={safeSettings.pauseRules.majorHistory}
@@ -261,7 +302,7 @@ export function ObserverDesk({
                 </select>
               </label>
               {PAUSE_RULES.map((rule) => (
-                <label key={rule.key}>
+                <label key={rule.key} data-pause-rule={rule.key}>
                   <input
                     type="checkbox"
                     checked={safeSettings.pauseRules[rule.key]}
@@ -323,7 +364,7 @@ export function ObserverDesk({
           </section>
         </div>
 
-        <p className="observer-desk__footnote">关注与暂停仅属于观察者设置；读取、跳转或取消关注均不写入世界哈希。</p>
+        <p className="observer-desk__footnote">局势关注、关键变化提醒与暂停仅属于观察者设置；打开、取消或调整规则均不写入世界哈希。</p>
       </aside>
     </div>
   );

@@ -294,6 +294,10 @@
   background: rgb(156 53 43 / 6%);
 }
 
+.observer-leads__watch[data-watch-kind="situation"] {
+  border-left-color: rgb(126 42 34 / 20%);
+}
+
 .observer-leads__footer {
   padding: 9px 12px 9px 16px;
   border-top: 1px solid rgb(47 45 38 / 13%);

@@ -1,9 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import type { HistoryEvent } from '../sim/types';
+import { createWorld } from '../sim';
+import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
+import type { SituationState } from '../sim/situations/types';
 import type { ObserverLeadContinuityState } from './observer-leads';
 import {
   OBSERVER_DESK_SETTINGS_VERSION,
   MAX_OBSERVER_WATCH_ITEMS,
+  MAX_OBSERVER_SITUATION_PAUSE_CANDIDATES,
   applyObserverEventAlerts,
   completeObserverGuideStep,
   createObserverDeskSettings,
@@ -16,6 +19,7 @@ import {
   serializeObserverDeskSettings,
   setObserverWatchAlert,
   upsertObserverWatch,
+  worldToSituationPauseCandidates,
 } from './v1-observer';
 
 function historyEvent(patch: Partial<HistoryEvent> = {}): HistoryEvent {
@@ -52,6 +56,143 @@ function historyEvent(patch: Partial<HistoryEvent> = {}): HistoryEvent {
   };
 }
 
+const SETTLED_TURN = 7;
+
+function situationState(patch: Partial<SituationState> = {}): SituationState {
+  const id = patch.id ?? 'situation-alpha';
+  return {
+    id,
+    type: 'military_power_crisis',
+    scopeKey: 'character-core',
+    titleKey: 'military_power_crisis',
+    status: 'open',
+    phase: 'emerging',
+    startedTurn: SETTLED_TURN,
+    phaseSinceTurn: SETTLED_TURN,
+    lastUpdatedTurn: SETTLED_TURN,
+    resolvedTurn: null,
+    tension: 64,
+    momentum: 8,
+    consecutivePhaseRiseTurns: 0,
+    consecutivePhaseFallTurns: 0,
+    consecutiveBelowResolutionTurns: 0,
+    participants: {
+      coreCharacterIds: ['character-core'],
+      supportingCharacterIds: [],
+      opposingCharacterIds: [],
+      familyIds: [],
+      factionIds: [],
+      polityIds: ['polity-yan'],
+      regionIds: ['region-capital'],
+      armyIds: [],
+      fleetIds: [],
+    },
+    executableActorIds: ['character-core'],
+    signals: [],
+    causalFactIds: ['fact-cause'],
+    milestoneFactIds: [],
+    recentChanges: [{
+      turn: SETTLED_TURN,
+      kind: 'formed',
+      tension: 64,
+      fromPhase: null,
+      toPhase: 'emerging',
+      sourceFactIds: ['fact-cause'],
+    }],
+    possibleOutcomes: [],
+    nextWatch: { key: 'watch-command', refs: [{ kind: 'fact', factId: 'fact-cause' }] },
+    startSnapshot: {
+      turn: SETTLED_TURN,
+      pressure: 64,
+      participantDigest: 'participants',
+      evidenceDigest: 'evidence',
+    },
+    resolution: null,
+    importance: 4,
+    visibility: 80,
+    ...patch,
+  };
+}
+
+function milestoneFact(
+  id: string,
+  situation: SituationState,
+  transition: 'formed' | 'phase_changed' | 'resolved',
+): Extract<SimulationFact, { kind: 'situation_milestone' }> {
+  const change = situation.recentChanges.find((item) => (
+    item.turn === SETTLED_TURN
+    && item.kind === (transition === 'phase_changed' ? 'phase_changed' : transition)
+  ));
+  return {
+    id,
+    turn: SETTLED_TURN,
+    year: 2,
+    season: '冬',
+    kind: 'situation_milestone',
+    category: situation.type === 'war_progress' ? '军事' : '政治',
+    importance: transition === 'resolved' ? 4 : 3,
+    actorIds: [...situation.participants.coreCharacterIds],
+    polityIds: [...situation.participants.polityIds],
+    regionIds: [...situation.participants.regionIds],
+    causes: [],
+    stateDeltas: [],
+    sourceFactIds: ['fact-cause'],
+    payload: {
+      situationId: situation.id,
+      situationType: situation.type,
+      transition,
+      fromPhase: change?.fromPhase ?? null,
+      toPhase: change?.toPhase ?? null,
+      tension: situation.tension,
+      momentum: situation.momentum,
+      outcomeKey: transition === 'resolved' ? situation.resolution?.outcomeKey ?? 'dissipated' : null,
+    },
+  };
+}
+
+function deathFact(characterId: string, id = 'fact-death'): Extract<SimulationFact, { kind: 'character_death' }> {
+  return {
+    id,
+    turn: SETTLED_TURN,
+    year: 2,
+    season: '冬',
+    kind: 'character_death',
+    category: '政治',
+    importance: 4,
+    actorIds: [characterId],
+    polityIds: [],
+    regionIds: [],
+    causes: [],
+    stateDeltas: [{ entityType: 'character', entityId: characterId, field: 'alive', before: true, after: false }],
+    sourceFactIds: [],
+    payload: { characterId, age: 63, role: '君主', health: 0, diseaseId: null },
+  };
+}
+
+function worldWithSituationFacts(
+  situations: SituationState[],
+  facts: SimulationFact[],
+  factIds: string[] = facts.map((fact) => fact.id),
+): WorldState {
+  const world = createWorld('观察局势暂停测试');
+  world.turn = SETTLED_TURN + 1;
+  world.year = 3;
+  world.season = '春';
+  world.facts = facts;
+  world.situationSystem = {
+    ...world.situationSystem,
+    lastReducedTurn: SETTLED_TURN,
+    situations,
+  };
+  world.lastTurn = {
+    turn: SETTLED_TURN,
+    year: 2,
+    season: '冬',
+    factIds,
+  } as NonNullable<WorldState['lastTurn']>;
+  return world;
+}
+
 describe('V1 observer desk persistence', () => {
   it('returns independent defaults for malformed localStorage JSON', () => {
     const first = parseObserverDeskSettings('{not-json');
@@ -83,6 +224,31 @@ describe('V1 observer desk persistence', () => {
     expect(settings.watchlist[0]).toEqual({ kind: 'person', id: 'person-0', label: '人物0', detail: '', alert: true });
     expect(settings.pauseRules).toMatchObject({ enabled: true, wars: false, importanceThreshold: 5 });
     expect(settings.guide).toEqual({ completedSteps: ['world-opened'], dismissed: true });
+    expect(parseObserverDeskSettings(serializeObserverDeskSettings(settings))).toEqual(settings);
+  });
+
+  it('migrates v2 settings to v3 and preserves stable Situation watches', () => {
+    const settings = normalizeObserverDeskSettings({
+      version: 2,
+      watchlist: [
+        { kind: 'situation', id: ' situation-0007 ', label: '北军军权之争', detail: '临界', alert: true },
+        { kind: 'situation', id: 'situation-0007', label: '重复项', detail: '', alert: false },
+      ],
+      pauseRules: {
+        enabled: true,
+        watchlistHits: true,
+      },
+    });
+
+    expect(settings.version).toBe(3);
+    expect(settings.pauseRules.situationChanges).toBe(true);
+    expect(settings.watchlist).toEqual([{
+      kind: 'situation',
+      id: 'situation-0007',
+      label: '北军军权之争',
+      detail: '临界',
+      alert: true,
+    }]);
     expect(parseObserverDeskSettings(serializeObserverDeskSettings(settings))).toEqual(settings);
   });
 
@@ -172,6 +338,25 @@ describe('V1 observer desk persistence', () => {
     expect(removed.watchlist).toHaveLength(0);
   });
 
+  it('keeps Situation watch alerts isolated across local branch settings', () => {
+    const base = createObserverDeskSettings();
+    const branchA = upsertObserverWatch(base, {
+      kind: 'situation', id: 'situation-a', label: '甲线', detail: '发展', alert: false,
+    });
+    const branchB = upsertObserverWatch(base, {
+      kind: 'situation', id: 'situation-b', label: '乙线', detail: '萌芽', alert: false,
+    });
+    const situation = situationState({ id: 'situation-a', milestoneFactIds: ['fact-formed-a'] });
+    const fact = milestoneFact('fact-formed-a', situation, 'formed');
+    const [candidate] = worldToSituationPauseCandidates(worldWithSituationFacts([situation], [fact]));
+    const alertedA = applyObserverEventAlerts(branchA, [candidate]);
+    const alertedB = applyObserverEventAlerts(branchB, [candidate]);
+
+    expect(base.watchlist).toEqual([]);
+    expect(alertedA.watchlist[0].alert).toBe(true);
+    expect(alertedB.watchlist[0].alert).toBe(false);
+  });
+
   it('records the five real guide actions once and reports completion', () => {
     let settings = createObserverDeskSettings();
     for (const step of ['world-opened', 'quarter-advanced', 'overlay-switched', 'cause-traced', 'entity-watched'] as const) {
@@ -231,5 +416,273 @@ describe('V1 observer pause decisions', () => {
 
     expect(evaluateObserverPause(settings, [war])?.rule).toBe('wars');
     expect(evaluateObserverPause(settings, [disease])?.rule).toBe('outbreaks');
+  });
+});
+
+describe('C03/C04 authoritative Situation pause projection', () => {
+  it('uses lastTurn Fact ids instead of the next world cursor and rejects invalid Situation ids', () => {
+    const valid = situationState({ id: 'situation-valid', milestoneFactIds: ['fact-valid'] });
+    const validFact = milestoneFact('fact-valid', valid, 'formed');
+    const unlistedFact = milestoneFact('fact-not-in-report', valid, 'formed');
+    const missingSituationFact = {
+      ...milestoneFact('fact-missing-situation', valid, 'formed'),
+      payload: {
+        ...milestoneFact('fact-missing-situation', valid, 'formed').payload,
+        situationId: 'situation-does-not-exist',
+      },
+    };
+    const staleFact = { ...milestoneFact('fact-stale', valid, 'formed'), turn: SETTLED_TURN - 1 };
+    const world = worldWithSituationFacts(
+      [valid],
+      [validFact, unlistedFact, missingSituationFact, staleFact],
+      ['fact-valid', 'fact-missing-situation', 'fact-stale'],
+    );
+    const before = JSON.stringify(world);
+
+    const candidates = worldToSituationPauseCandidates(world);
+
+    expect(world.turn).toBe(SETTLED_TURN + 1);
+    expect(candidates).toEqual([
+      expect.objectContaining({
+        situationId: 'situation-valid',
+        situationTrigger: 'formation',
+        sourceFactId: 'fact-valid',
+        refs: [{ kind: 'situation', id: 'situation-valid' }],
+      }),
+    ]);
+    expect(JSON.stringify(world)).toBe(before);
+  });
+
+  it('derives and orders resolution, core death, phase change and formation deterministically', () => {
+    const world = createWorld('观察局势人物');
+    const deceased = world.characters[0];
+    deceased.alive = false;
+    deceased.deathTurn = SETTLED_TURN;
+
+    const resolved = situationState({
+      id: 'situation-resolved',
+      status: 'resolved',
+      phase: 'critical',
+      startedTurn: 1,
+      resolvedTurn: SETTLED_TURN,
+      milestoneFactIds: ['fact-resolved'],
+      recentChanges: [{
+        turn: SETTLED_TURN, kind: 'resolved', tension: 71,
+        fromPhase: 'critical', toPhase: null, sourceFactIds: ['fact-cause'],
+      }],
+      resolution: {
+        outcomeKey: 'dissipated', resolvedTurn: SETTLED_TURN,
+        resultFactIds: ['fact-cause'], belowThresholdTurns: 3, finalSnapshotDigest: 'resolved',
+      },
+    });
+    const death = situationState({
+      id: 'situation-death',
+      startedTurn: 1,
+      participants: {
+        ...situationState().participants,
+        coreCharacterIds: [deceased.id],
+      },
+      recentChanges: [],
+    });
+    const phase = situationState({
+      id: 'situation-phase',
+      phase: 'active',
+      startedTurn: 1,
+      phaseSinceTurn: SETTLED_TURN,
+      milestoneFactIds: ['fact-phase'],
+      recentChanges: [{
+        turn: SETTLED_TURN, kind: 'phase_changed', tension: 72,
+        fromPhase: 'emerging', toPhase: 'active', sourceFactIds: ['fact-cause'],
+      }],
+    });
+    const formed = situationState({ id: 'situation-formed', milestoneFactIds: ['fact-formed'] });
+    const facts: SimulationFact[] = [
+      milestoneFact('fact-formed', formed, 'formed'),
+      milestoneFact('fact-phase', phase, 'phase_changed'),
+      deathFact(deceased.id),
+      milestoneFact('fact-resolved', resolved, 'resolved'),
+    ];
+    const projectedWorld = worldWithSituationFacts([formed, phase, death, resolved], facts);
+    const projectedDeceased = projectedWorld.characters.find((item) => item.id === deceased.id);
+    if (!projectedDeceased) throw new Error('expected character fixture');
+    projectedDeceased.alive = false;
+    projectedDeceased.deathTurn = SETTLED_TURN;
+
+    const candidates = worldToSituationPauseCandidates(projectedWorld);
+
+    expect(candidates.map((candidate) => candidate.situationTrigger)).toEqual([
+      'resolution', 'core-character-death', 'phase-change', 'formation',
+    ]);
+    expect(candidates[1]).toMatchObject({
+      situationId: 'situation-death',
+      sourceFactId: 'fact-death',
+      refs: [{ kind: 'situation', id: 'situation-death' }],
+    });
+  });
+
+  it('ignores non-core, stale and invalid character deaths', () => {
+    const world = createWorld('观察无关人物死亡');
+    const deceased = world.characters[0];
+    const unrelated = world.characters[1];
+    deceased.alive = false;
+    deceased.deathTurn = SETTLED_TURN;
+    const active = situationState({
+      id: 'situation-active',
+      startedTurn: 1,
+      participants: {
+        ...situationState().participants,
+        coreCharacterIds: [unrelated.id],
+      },
+      recentChanges: [],
+    });
+    const staleResolved = situationState({
+      id: 'situation-stale',
+      status: 'resolved',
+      startedTurn: 1,
+      resolvedTurn: SETTLED_TURN - 1,
+      participants: {
+        ...situationState().participants,
+        coreCharacterIds: [deceased.id],
+      },
+      recentChanges: [],
+    });
+    const facts: SimulationFact[] = [deathFact(deceased.id), deathFact('character-invalid', 'fact-invalid-death')];
+    const projected = worldWithSituationFacts([active, staleResolved], facts);
+    const projectedDeceased = projected.characters.find((item) => item.id === deceased.id);
+    if (!projectedDeceased) throw new Error('expected character fixture');
+    projectedDeceased.alive = false;
+    projectedDeceased.deathTurn = SETTLED_TURN;
+
+    expect(worldToSituationPauseCandidates(projected)).toEqual([]);
+  });
+
+  it('pauses only an exactly watched Situation and never falls through generic rules', () => {
+    const situation = situationState({ id: 'situation-exact', milestoneFactIds: ['fact-exact'] });
+    const fact = milestoneFact('fact-exact', situation, 'formed');
+    const [candidate] = worldToSituationPauseCandidates(worldWithSituationFacts([situation], [fact]));
+    const proxyWatch = upsertObserverWatch(createObserverDeskSettings(), {
+      kind: 'person', id: 'character-core', label: '代理人物', detail: '', alert: false,
+    });
+    const otherSituation = upsertObserverWatch(createObserverDeskSettings(), {
+      kind: 'situation', id: 'situation-other-branch', label: '另一分支', detail: '', alert: false,
+    });
+    const exactWatch = upsertObserverWatch(createObserverDeskSettings(), {
+      kind: 'situation', id: 'situation-exact', label: '军权之争', detail: '', alert: false,
+    });
+
+    expect(evaluateObserverPause(proxyWatch, [candidate])).toBeNull();
+    expect(evaluateObserverPause(otherSituation, [candidate])).toBeNull();
+    expect(evaluateObserverPause(exactWatch, [candidate])).toMatchObject({
+      rule: 'situationChanges',
+      situationId: 'situation-exact',
+      situationTrigger: 'formation',
+      sourceFactId: 'fact-exact',
+      watchMatches: [expect.objectContaining({ kind: 'situation', id: 'situation-exact' })],
+    });
+
+    const disabled = normalizeObserverDeskSettings({
+      ...exactWatch,
+      pauseRules: {
+        ...exactWatch.pauseRules,
+        situationChanges: false,
+        watchlistHits: true,
+        majorHistory: true,
+        importanceThreshold: 2,
+      },
+    });
+    expect(evaluateObserverPause(disabled, [candidate])).toBeNull();
+    expect(applyObserverEventAlerts(disabled, [candidate]).watchlist[0].alert).toBe(true);
+  });
+
+  it('does not let a generic Chronicle event impersonate a Situation watch hit', () => {
+    const watched = upsertObserverWatch(createObserverDeskSettings(), {
+      kind: 'situation', id: 'situation-exact', label: '军权之争', detail: '', alert: false,
+    });
+    const generic = historyEventToPauseCandidate(historyEvent({
+      id: 'event-situation-copy',
+      kind: 'situation_milestone',
+      title: '史册中的局势文案',
+      importance: 4,
+      actorIds: [],
+      polityIds: [],
+      regionIds: [],
+      causes: [],
+      stateDeltas: [{
+        entityType: 'situation', entityId: 'situation-exact', field: 'phase', before: 'emerging', after: 'active',
+      }],
+    }));
+    const genericOnly = normalizeObserverDeskSettings({
+      ...watched,
+      pauseRules: {
+        ...watched.pauseRules,
+        wars: false,
+        powerTransfers: false,
+        outbreaks: false,
+        majorHistory: false,
+        situationChanges: true,
+        watchlistHits: true,
+      },
+    });
+
+    expect(generic.refs).not.toContainEqual({ kind: 'situation', id: 'situation-exact' });
+    expect(evaluateObserverPause(genericOnly, [generic])).toBeNull();
+    expect(applyObserverEventAlerts(genericOnly, [generic]).watchlist[0].alert).toBe(false);
+  });
+
+  it('chooses the highest-priority watched change independently of candidate order', () => {
+    const formed = situationState({ id: 'situation-priority', milestoneFactIds: ['fact-formed-priority'] });
+    const resolved = situationState({
+      ...formed,
+      status: 'resolved',
+      phase: 'critical',
+      resolvedTurn: SETTLED_TURN,
+      milestoneFactIds: ['fact-resolved-priority'],
+      recentChanges: [{
+        turn: SETTLED_TURN, kind: 'resolved', tension: 70,
+        fromPhase: 'critical', toPhase: null, sourceFactIds: ['fact-cause'],
+      }],
+      resolution: {
+        outcomeKey: 'dissipated', resolvedTurn: SETTLED_TURN,
+        resultFactIds: ['fact-cause'], belowThresholdTurns: 3, finalSnapshotDigest: 'resolved',
+      },
+    });
+    const formationCandidate = worldToSituationPauseCandidates(worldWithSituationFacts(
+      [formed], [milestoneFact('fact-formed-priority', formed, 'formed')],
+    ))[0];
+    const resolutionCandidate = worldToSituationPauseCandidates(worldWithSituationFacts(
+      [resolved], [milestoneFact('fact-resolved-priority', resolved, 'resolved')],
+    ))[0];
+    const watched = upsertObserverWatch(createObserverDeskSettings(), {
+      kind: 'situation', id: 'situation-priority', label: '优先级局势', detail: '', alert: false,
+    });
+
+    expect(evaluateObserverPause(watched, [formationCandidate, resolutionCandidate])).toMatchObject({
+      rule: 'situationChanges',
+      situationTrigger: 'resolution',
+      sourceFactId: 'fact-resolved-priority',
+    });
+  });
+
+  it('bounds a hostile current-quarter projection without mutating WorldState', () => {
+    const situations = Array.from({ length: MAX_OBSERVER_SITUATION_PAUSE_CANDIDATES + 9 }, (_, index) => (
+      situationState({
+        id: `situation-${String(index).padStart(3, '0')}`,
+        milestoneFactIds: [`fact-${String(index).padStart(3, '0')}`],
+      })
+    ));
+    const facts = situations.map((situation, index) => (
+      milestoneFact(`fact-${String(index).padStart(3, '0')}`, situation, 'formed')
+    ));
+    const world = worldWithSituationFacts(situations, facts);
+    const before = JSON.stringify(world);
+
+    const first = worldToSituationPauseCandidates(world);
+    const second = worldToSituationPauseCandidates(world);
+
+    expect(first).toHaveLength(MAX_OBSERVER_SITUATION_PAUSE_CANDIDATES);
+    expect(first).toEqual(second);
+    expect(first[0].situationId).toBe('situation-000');
+    expect(first.at(-1)?.situationId).toBe(`situation-${String(MAX_OBSERVER_SITUATION_PAUSE_CANDIDATES - 1).padStart(3, '0')}`);
+    expect(JSON.stringify(world)).toBe(before);
   });
 });

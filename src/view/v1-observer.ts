@@ -1,12 +1,14 @@
-import type { HistoryEvent } from '../sim/types';
+import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
+import type { SituationState } from '../sim/situations/types';
 import {
   normalizeObserverLeadContinuity,
   type ObserverLeadContinuityState,
 } from './observer-leads';
 
 export const OBSERVER_DESK_STORAGE_KEY = 'canghai-observer-desk-v1';
-export const OBSERVER_DESK_SETTINGS_VERSION = 2 as const;
+export const OBSERVER_DESK_SETTINGS_VERSION = 3 as const;
 export const MAX_OBSERVER_WATCH_ITEMS = 32;
+export const MAX_OBSERVER_SITUATION_PAUSE_CANDIDATES = 32;
 
 export type ObserverWatchKind =
   | 'country'
@@ -18,7 +20,8 @@ export type ObserverWatchKind =
   | 'tradeCorridor'
   | 'practice'
   | 'outbreak'
-  | 'migration';
+  | 'migration'
+  | 'situation';
 
 export interface ObserverWatchItem {
   kind: ObserverWatchKind;
@@ -43,6 +46,7 @@ export interface ObserverPauseRules {
   powerTransfers: boolean;
   outbreaks: boolean;
   watchlistHits: boolean;
+  situationChanges: boolean;
 }
 
 export interface ObserverGuideState {
@@ -58,7 +62,13 @@ export interface ObserverDeskSettings {
   leadContinuity: ObserverLeadContinuityState | null;
 }
 
-export type ObserverPauseSignal = 'war' | 'power-transfer' | 'outbreak';
+export type ObserverSituationPauseTrigger =
+  | 'formation'
+  | 'phase-change'
+  | 'core-character-death'
+  | 'resolution';
+
+export type ObserverPauseSignal = 'war' | 'power-transfer' | 'outbreak' | 'situation-change';
 
 export interface ObserverPauseCandidate {
   id: string;
@@ -66,6 +76,10 @@ export interface ObserverPauseCandidate {
   importance: number;
   signals: ObserverPauseSignal[];
   refs: Array<{ kind: ObserverWatchKind; id: string }>;
+  /** Present only for candidates projected from current-quarter authoritative Facts. */
+  situationId?: string;
+  situationTrigger?: ObserverSituationPauseTrigger;
+  sourceFactId?: string;
 }
 
 export type ObserverPauseRuleId =
@@ -73,6 +87,7 @@ export type ObserverPauseRuleId =
   | 'wars'
   | 'powerTransfers'
   | 'outbreaks'
+  | 'situationChanges'
   | 'majorHistory';
 
 export interface ObserverPauseMatch {
@@ -81,6 +96,9 @@ export interface ObserverPauseMatch {
   rule: ObserverPauseRuleId;
   reason: string;
   watchMatches: ObserverWatchItem[];
+  situationId?: string;
+  situationTrigger?: ObserverSituationPauseTrigger;
+  sourceFactId?: string;
 }
 
 export const OBSERVER_GUIDE_STEPS: ReadonlyArray<{
@@ -106,6 +124,7 @@ const WATCH_KINDS = new Set<ObserverWatchKind>([
   'practice',
   'outbreak',
   'migration',
+  'situation',
 ]);
 
 const GUIDE_STEPS = new Set<ObserverGuideStepId>(OBSERVER_GUIDE_STEPS.map((step) => step.id));
@@ -179,6 +198,7 @@ export function createObserverDeskSettings(): ObserverDeskSettings {
       powerTransfers: true,
       outbreaks: true,
       watchlistHits: true,
+      situationChanges: true,
     },
     guide: { completedSteps: [], dismissed: false },
     leadContinuity: null,
@@ -222,6 +242,7 @@ export function normalizeObserverDeskSettings(value: unknown): ObserverDeskSetti
       powerTransfers: safeBoolean(rawRules.powerTransfers, defaults.pauseRules.powerTransfers),
       outbreaks: safeBoolean(rawRules.outbreaks, defaults.pauseRules.outbreaks),
       watchlistHits: safeBoolean(rawRules.watchlistHits, defaults.pauseRules.watchlistHits),
+      situationChanges: safeBoolean(rawRules.situationChanges, defaults.pauseRules.situationChanges),
     },
     guide: {
       completedSteps: [...new Set(completedSteps)],
@@ -320,6 +341,184 @@ export function observerGuideProgress(settings: ObserverDeskSettings): {
   return { completed, total, percent: Math.round((completed / total) * 100) };
 }
 
+const SITUATION_TRIGGER_PRIORITY: Readonly<Record<ObserverSituationPauseTrigger, number>> = {
+  resolution: 0,
+  'core-character-death': 1,
+  'phase-change': 2,
+  formation: 3,
+};
+
+const SITUATION_TRIGGER_LABEL: Readonly<Record<ObserverSituationPauseTrigger, string>> = {
+  formation: '形成',
+  'phase-change': '阶段变化',
+  'core-character-death': '核心人物死亡',
+  resolution: '结案',
+};
+
+const SITUATION_PHASE_LABEL = {
+  emerging: '萌芽',
+  active: '发展',
+  critical: '临界',
+} as const;
+
+function stableCompare(left: string, right: string): number {
+  return left < right ? -1 : left > right ? 1 : 0;
+}
+
+function situationPauseTitle(world: WorldState, situation: SituationState): string {
+  const polityName = (id: string | undefined) => (
+    world.polities.find((item) => item.id === id)?.shortName
+    ?? world.polities.find((item) => item.id === id)?.name
+    ?? '未载政权'
+  );
+  const characterName = (id: string | undefined) => (
+    world.characters.find((item) => item.id === id)?.name ?? '未载人物'
+  );
+  if (situation.type === 'military_power_crisis') {
+    return `${characterName(situation.participants.coreCharacterIds[0])}与${polityName(situation.participants.polityIds[0])}的军权之争`;
+  }
+  if (situation.type === 'inheritance_crisis') {
+    return `${polityName(situation.participants.polityIds[0])}的继承之局`;
+  }
+  if (situation.type === 'war_progress') {
+    const war = world.wars.find((item) => item.id === situation.scopeKey);
+    return war
+      ? `${polityName(war.attackerId)}进攻${polityName(war.defenderId)}的战争进程`
+      : '这场战争的进程';
+  }
+  return '这场历史局势';
+}
+
+function milestoneMatchesSituation(
+  fact: Extract<SimulationFact, { kind: 'situation_milestone' }>,
+  situation: SituationState,
+  settledTurn: number,
+): boolean {
+  if (
+    fact.turn !== settledTurn
+    || fact.payload.situationType !== situation.type
+    || !situation.milestoneFactIds.includes(fact.id)
+  ) return false;
+
+  if (fact.payload.transition === 'formed') {
+    return situation.startedTurn === settledTurn
+      && situation.recentChanges.some((change) => change.turn === settledTurn && change.kind === 'formed');
+  }
+  if (fact.payload.transition === 'resolved') {
+    return situation.status === 'resolved'
+      && situation.resolvedTurn === settledTurn
+      && situation.recentChanges.some((change) => change.turn === settledTurn && change.kind === 'resolved');
+  }
+  return situation.recentChanges.some((change) => (
+    change.turn === settledTurn
+    && change.kind === 'phase_changed'
+    && change.fromPhase === fact.payload.fromPhase
+    && change.toPhase === fact.payload.toPhase
+  ));
+}
+
+function milestoneTrigger(
+  fact: Extract<SimulationFact, { kind: 'situation_milestone' }>,
+): ObserverSituationPauseTrigger {
+  if (fact.payload.transition === 'formed') return 'formation';
+  if (fact.payload.transition === 'resolved') return 'resolution';
+  return 'phase-change';
+}
+
+function milestoneCandidateTitle(
+  world: WorldState,
+  situation: SituationState,
+  fact: Extract<SimulationFact, { kind: 'situation_milestone' }>,
+): string {
+  const title = situationPauseTitle(world, situation);
+  if (fact.payload.transition === 'formed') return `${title}开始显形`;
+  if (fact.payload.transition === 'resolved') return `${title}告一段落`;
+  const phase = fact.payload.toPhase ? SITUATION_PHASE_LABEL[fact.payload.toPhase] : '未定';
+  return `${title}转入${phase}`;
+}
+
+function situationPauseCandidate(
+  situation: SituationState,
+  trigger: ObserverSituationPauseTrigger,
+  fact: SimulationFact,
+  title: string,
+): ObserverPauseCandidate {
+  return {
+    id: `situation-pause:${fact.id}:${situation.id}:${trigger}`,
+    title,
+    importance: fact.importance,
+    signals: ['situation-change'],
+    // Deliberately omit proxy people/polities. A Situation pause can only match
+    // the stable Situation id that the player explicitly followed.
+    refs: [{ kind: 'situation', id: situation.id }],
+    situationId: situation.id,
+    situationTrigger: trigger,
+    sourceFactId: fact.id,
+  };
+}
+
+/**
+ * Projects the just-settled quarter's authoritative Situation/death Facts into
+ * a bounded local pause contract. `world.turn` is the next simulation cursor;
+ * `lastTurn.turn` plus its exact Fact ids define the only eligible quarter.
+ */
+export function worldToSituationPauseCandidates(world: WorldState): ObserverPauseCandidate[] {
+  const report = world.lastTurn;
+  if (!report) return [];
+
+  const reportFactIds = new Set(report.factIds);
+  const facts = world.facts.filter((fact) => (
+    fact.turn === report.turn && reportFactIds.has(fact.id)
+  ));
+  const situationById = new Map(world.situationSystem.situations.map((item) => [item.id, item]));
+  const candidates = new Map<string, ObserverPauseCandidate>();
+
+  for (const fact of facts) {
+    if (fact.kind !== 'situation_milestone') continue;
+    const situation = situationById.get(fact.payload.situationId);
+    if (!situation || !milestoneMatchesSituation(fact, situation, report.turn)) continue;
+    const trigger = milestoneTrigger(fact);
+    const candidate = situationPauseCandidate(
+      situation,
+      trigger,
+      fact,
+      milestoneCandidateTitle(world, situation, fact),
+    );
+    candidates.set(candidate.id, candidate);
+  }
+
+  const eligibleSituations = world.situationSystem.situations
+    .filter((situation) => situation.status === 'open' || situation.resolvedTurn === report.turn)
+    .sort((left, right) => stableCompare(left.id, right.id));
+  for (const fact of facts) {
+    if (fact.kind !== 'character_death') continue;
+    const character = world.characters.find((item) => item.id === fact.payload.characterId);
+    if (!character || character.alive || character.deathTurn !== report.turn) continue;
+    for (const situation of eligibleSituations) {
+      if (!situation.participants.coreCharacterIds.includes(character.id)) continue;
+      const candidate = situationPauseCandidate(
+        situation,
+        'core-character-death',
+        fact,
+        `${situationPauseTitle(world, situation)}的核心人物${character.name}逝世`,
+      );
+      candidates.set(candidate.id, candidate);
+    }
+  }
+
+  return [...candidates.values()]
+    .sort((left, right) => {
+      const priority = SITUATION_TRIGGER_PRIORITY[left.situationTrigger as ObserverSituationPauseTrigger]
+        - SITUATION_TRIGGER_PRIORITY[right.situationTrigger as ObserverSituationPauseTrigger];
+      if (priority !== 0) return priority;
+      return stableCompare(
+        `${left.sourceFactId ?? ''}\u241f${left.situationId ?? ''}`,
+        `${right.sourceFactId ?? ''}\u241f${right.situationId ?? ''}`,
+      );
+    })
+    .slice(0, MAX_OBSERVER_SITUATION_PAUSE_CANDIDATES);
+}
+
 function watchKindFromEntityType(entityType: string): ObserverWatchKind | null {
   const mapped: Partial<Record<string, ObserverWatchKind>> = {
     polity: 'country',
@@ -371,10 +570,34 @@ function matchingWatchItems(
   candidate: ObserverPauseCandidate,
 ): ObserverWatchItem[] {
   const eventRefs = new Set(candidate.refs.map((ref) => observerWatchKey(ref.kind, ref.id)));
-  return watchlist.filter((item) => eventRefs.has(observerWatchKey(item.kind, item.id)));
+  const situationIdentity = validSituationCandidateIdentity(candidate);
+  return watchlist.filter((item) => {
+    if (item.kind === 'situation') {
+      return situationIdentity !== null
+        && item.id === situationIdentity.situationId
+        && eventRefs.has(observerWatchKey(item.kind, item.id));
+    }
+    return eventRefs.has(observerWatchKey(item.kind, item.id));
+  });
 }
 
-/** Returns the first deterministic pause reason; candidate order is preserved. */
+function validSituationCandidateIdentity(candidate: ObserverPauseCandidate): {
+  situationId: string;
+  trigger: ObserverSituationPauseTrigger;
+} | null {
+  const situationId = candidate.situationId;
+  const trigger = candidate.situationTrigger;
+  if (
+    !situationId
+    || !trigger
+    || !(trigger in SITUATION_TRIGGER_PRIORITY)
+    || !candidate.signals.includes('situation-change')
+    || !candidate.refs.some((ref) => ref.kind === 'situation' && ref.id === situationId)
+  ) return null;
+  return { situationId, trigger };
+}
+
+/** Returns one deterministic pause reason; watched Situation changes use explicit priority. */
 export function evaluateObserverPause(
   settings: ObserverDeskSettings,
   candidates: ObserverPauseCandidate[],
@@ -382,7 +605,41 @@ export function evaluateObserverPause(
   const normalized = normalizeObserverDeskSettings(settings);
   if (!normalized.pauseRules.enabled) return null;
 
+  if (normalized.pauseRules.situationChanges) {
+    const situationMatches = candidates.flatMap((candidate) => {
+      const identity = validSituationCandidateIdentity(candidate);
+      if (!identity) return [];
+      const watchMatches = matchingWatchItems(normalized.watchlist, candidate)
+        .filter((item) => item.kind === 'situation' && item.id === identity.situationId);
+      return watchMatches.length > 0 ? [{ candidate, identity, watchMatches }] : [];
+    }).sort((left, right) => {
+      const priority = SITUATION_TRIGGER_PRIORITY[left.identity.trigger]
+        - SITUATION_TRIGGER_PRIORITY[right.identity.trigger];
+      return priority !== 0 ? priority : stableCompare(left.candidate.id, right.candidate.id);
+    });
+    const first = situationMatches[0];
+    if (first) {
+      return {
+        eventId: first.candidate.id,
+        eventTitle: first.candidate.title,
+        rule: 'situationChanges',
+        reason: `关注局势“${first.watchMatches[0].label}”发生${SITUATION_TRIGGER_LABEL[first.identity.trigger]}`,
+        watchMatches: first.watchMatches,
+        situationId: first.identity.situationId,
+        situationTrigger: first.identity.trigger,
+        sourceFactId: first.candidate.sourceFactId,
+      };
+    }
+  }
+
   for (const candidate of candidates) {
+    // Authoritative Situation candidates have an isolated rule path. They must
+    // never fall through to generic watch-hit or major-history semantics.
+    if (
+      candidate.signals.includes('situation-change')
+      || candidate.situationId !== undefined
+      || candidate.situationTrigger !== undefined
+    ) continue;
     const watchMatches = matchingWatchItems(normalized.watchlist, candidate);
     if (normalized.pauseRules.watchlistHits && watchMatches.length > 0) {
       return {
