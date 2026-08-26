@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { advanceWorld, computeWorldHash, createWorld } from './engine';
 import { validateWorld } from './invariants';
 import { createSituationSystemState } from './situations';
+import { createAgencySystemState } from './agency';
 import {
   applyV03Intervention,
   availableMandate,
@@ -126,6 +127,7 @@ describe('V0.3 limited observer interventions', () => {
     world.year = 51;
     world.season = '春';
     world.situationSystem = createSituationSystemState(world.turn - 1);
+    world.agencySystem = createAgencySystemState(world.turn - 1);
     world.hash = computeWorldHash(world);
     expect(availableMandate(world)).toBe(12);
     const characterId = world.characters.find((character) => character.alive)?.id;

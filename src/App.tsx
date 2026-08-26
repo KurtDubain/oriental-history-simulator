@@ -21,7 +21,10 @@ import {
 } from 'react';
 import { CausalDrawer, type CausalFactor, type CausalReference } from './components/CausalDrawer';
 import { HistoryWorkbench } from './components/HistoryWorkbench';
-import { Inspector } from './components/Inspector';
+import {
+  Inspector,
+  type PersonAgencyQuarterChoiceView,
+} from './components/Inspector';
 import { MandatePanel, type MandateMessage, type MandateTarget } from './components/MandatePanel';
 import {
   MapPrimer,
@@ -92,9 +95,7 @@ import {
   isV03InterventionEvent,
   serializeWorld,
   measureRuntimeValidation,
-  projectCharacterAgency,
   SIMULATION_SYSTEM_PHASES,
-  toCharacterAgencyPlayerProjection,
   validateWorld,
   type V03InterventionAction,
   type WorldState,
@@ -121,6 +122,7 @@ import {
   toPersonArchive,
   toRegionInspector,
   toSystemInspector,
+  type PersonAgencyDossierOptions,
 } from './view/adapters';
 import {
   type HistoricalTerritoryView,
@@ -156,6 +158,24 @@ import {
   type ObserverPauseMatch,
   type ObserverWatchItem,
 } from './view/v1-observer';
+import {
+  AGENCY_SHADOW_STORAGE_KEY,
+  MAX_AGENCY_SHADOW_CHARACTERS,
+  advanceAgencyShadowBranch,
+  attachAgencyShadowBranch,
+  bindAgencyShadowRestorePoint,
+  copyAgencyShadowRestorePoint,
+  createAgencyShadowLedger,
+  ensureAgencyShadowCharacters,
+  forkAgencyShadowIntervention,
+  getAgencyShadowProjection,
+  parseAgencyShadowLedger,
+  removeAgencyShadowRestorePoint,
+  serializeAgencyShadowLedger,
+  toAgencyShadowPlayerEntries,
+  type AgencyShadowLedger,
+  type AgencyShadowPlayerEntry,
+} from './view/v1-agency-shadow';
 import './styles/app.css';
 
 type Selection =
@@ -249,6 +269,89 @@ function observerStorageKey(seed: string): string {
   return `${OBSERVER_DESK_STORAGE_KEY}:${encodeURIComponent(seed)}`;
 }
 
+function agencyShadowRestoreToken(slot: string): string {
+  return slot === 'autosave' ? 'autosave' : `collection:${slot}`;
+}
+
+function agencyPeriodLabel(turn: number): string {
+  const seasons = ['春', '夏', '秋', '冬'] as const;
+  const safeTurn = Math.max(0, Math.floor(turn));
+  return `第 ${Math.floor(safeTurn / 4) + 1} 年${seasons[safeTurn % 4]}`;
+}
+
+function agencyTrackedCharacterIds(
+  world: WorldState,
+  selection: Selection,
+  watchlist: readonly ObserverWatchItem[],
+): string[] {
+  const ids: string[] = [];
+  const seen = new Set<string>();
+  const add = (id: string | null | undefined) => {
+    if (!id || seen.has(id) || !world.characters.some((character) => character.id === id)) return;
+    seen.add(id);
+    ids.push(id);
+  };
+  if (selection?.kind === 'person') add(selection.id);
+  watchlist.filter((item) => item.kind === 'person').forEach((item) => add(item.id));
+  [...world.armies].sort((left, right) => left.id.localeCompare(right.id)).forEach((army) => add(army.deputyCommanderId));
+  [...world.fleets].sort((left, right) => left.id.localeCompare(right.id)).forEach((fleet) => add(fleet.deputyCommanderId));
+  [...world.situationSystem.situations]
+    .filter((situation) => situation.status === 'open')
+    .sort((left, right) => right.tension - left.tension || left.id.localeCompare(right.id))
+    .forEach((situation) => {
+      situation.executableActorIds.forEach(add);
+      situation.participants.coreCharacterIds.forEach(add);
+    });
+  [...world.polities]
+    .filter((polity) => polity.alive)
+    .sort((left, right) => left.id.localeCompare(right.id))
+    .forEach((polity) => add(polity.rulerId));
+  [...world.armies].sort((left, right) => left.id.localeCompare(right.id)).forEach((army) => add(army.commanderId));
+  [...world.characters]
+    .filter((character) => character.alive)
+    .sort((left, right) => right.influence - left.influence || right.renown - left.renown || left.id.localeCompare(right.id))
+    .forEach((character) => add(character.id));
+  return ids.slice(0, MAX_AGENCY_SHADOW_CHARACTERS);
+}
+
+function quarterChoiceFromAgencyEntry(entry: AgencyShadowPlayerEntry): PersonAgencyQuarterChoiceView {
+  const outcome = entry.conclusion === '相合'
+    ? 'aligned'
+    : entry.conclusion === '仅见盘算'
+      ? 'unobserved'
+      : entry.conclusion === '仅见旧制'
+        ? 'not_applicable'
+        : 'diverged';
+  return {
+    periodLabel: agencyPeriodLabel(entry.turn),
+    intended: entry.intended ?? '季初没有留下可与此事核对的明确打算',
+    actual: entry.actual ?? '本季没有出现与这项盘算相应的主帅任命',
+    outcome,
+    reason: entry.reason,
+    sourceEventId: entry.sourceEventId,
+  };
+}
+
+function agencyDossierOptions(
+  ledger: AgencyShadowLedger,
+  branchId: string | null,
+  characterId: string,
+): PersonAgencyDossierOptions {
+  if (!branchId) return {};
+  const projection = getAgencyShadowProjection(ledger, branchId, characterId);
+  const branch = ledger.branches.find((item) => item.id === branchId);
+  const comparison = branch
+    ? toAgencyShadowPlayerEntries(
+        branch.comparisons.filter((item) => item.actorId === characterId),
+        1,
+      )[0]
+    : undefined;
+  return {
+    projection,
+    quarterChoice: comparison ? quarterChoiceFromAgencyEntry(comparison) : null,
+  };
+}
+
 function availableCollectionSlot(prefix: string, saves: WorldSaveSummary[]): string {
   const occupied = new Set(saves.filter((save) => !save.isAutosave).map((save) => save.slot));
   for (let index = 1; index <= 99; index += 1) {
@@ -323,6 +426,8 @@ interface SnapshotOptions {
   primerOpen: boolean;
   primerStep: MapPrimerStep;
   mapCamera: MapCamera;
+  agencyShadowLedger: AgencyShadowLedger;
+  agencyShadowBranchId: string | null;
 }
 
 function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
@@ -437,7 +542,11 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
   } else if (options.selection?.kind === 'person') {
     const item = world.characters.find((character) => character.id === options.selection?.id);
     if (item) {
-      const agency = toCharacterAgencyPlayerProjection(projectCharacterAgency(world, item.id));
+      const personDossier = toPersonInspector(
+        world,
+        item,
+        agencyDossierOptions(options.agencyShadowLedger, options.agencyShadowBranchId, item.id),
+      );
       selectedDetail = {
         kind: 'person',
         id: item.id,
@@ -464,7 +573,7 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
         merit: item.merit,
         deputyExperience: item.deputyExperience,
         insubordination: item.insubordination,
-        agency,
+        agency: personDossier.agency,
         biography: Array.isArray(item.biography) ? item.biography.slice(-20) : [],
         relationships: relationships
           .filter((entry) => entry.sourceId === item.id || entry.targetId === item.id)
@@ -619,6 +728,19 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
         slots: focusLeadProjection.continuity.slots.map((entry) => ({ ...entry })),
       },
       situations: toSituationSnapshot(world),
+      agencyContinuity: (() => {
+        const branch = options.agencyShadowBranchId
+          ? options.agencyShadowLedger.branches.find((item) => item.id === options.agencyShadowBranchId)
+          : null;
+        return branch ? {
+          trackedCharacters: branch.projections.length,
+          recordedComparisons: branch.comparisons.length,
+          throughTurn: branch.head.turn,
+          matchesWorld: branch.head.seed === world.seed
+            && branch.head.turn === world.turn
+            && branch.head.hash === world.hash,
+        } : null;
+      })(),
     },
     interface: {
       view: options.view,
@@ -786,6 +908,8 @@ export function App() {
   const [collectionBusy, setCollectionBusy] = useState(false);
   const [worldSaves, setWorldSaves] = useState<WorldSaveSummary[]>([]);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const [agencyShadowLedger, setAgencyShadowLedger] = useState<AgencyShadowLedger>(() => createAgencyShadowLedger());
+  const [agencyShadowBranchId, setAgencyShadowBranchId] = useState<string | null>(null);
 
   const worldRef = useRef<WorldState | null>(null);
   const worldShellRef = useRef<HTMLElement>(null);
@@ -812,6 +936,8 @@ export function App() {
   const primerNewestEventIdRef = useRef<string | null>(null);
   const reactCommitStartedAtRef = useRef<{ startedAt: number; turn: number } | null>(null);
   const autosaveCoordinatorRef = useRef<AutosaveCoordinator | null>(null);
+  const agencyShadowLedgerRef = useRef(agencyShadowLedger);
+  const agencyShadowBranchIdRef = useRef<string | null>(agencyShadowBranchId);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
   useEffect(() => {
     if (!mobileToolsOpen) return undefined;
@@ -863,7 +989,38 @@ export function App() {
     primerOpen,
     primerStep,
     mapCamera,
+    agencyShadowLedger,
+    agencyShadowBranchId,
   });
+
+  const commitAgencyShadow = useCallback((nextLedger: AgencyShadowLedger, nextBranchId: string | null) => {
+    agencyShadowLedgerRef.current = nextLedger;
+    agencyShadowBranchIdRef.current = nextBranchId;
+    setAgencyShadowLedger(nextLedger);
+    setAgencyShadowBranchId(nextBranchId);
+  }, []);
+
+  const resetAgencyShadowAtWorld = useCallback((nextWorld: WorldState) => {
+    try {
+      const fresh = attachAgencyShadowBranch(createAgencyShadowLedger(), nextWorld, 'create');
+      let nextLedger = ensureAgencyShadowCharacters(
+        fresh.ledger,
+        fresh.branchId,
+        nextWorld,
+        agencyTrackedCharacterIds(nextWorld, selection, observerSettingsRef.current.watchlist),
+      );
+      nextLedger = bindAgencyShadowRestorePoint(
+        nextLedger,
+        fresh.branchId,
+        nextWorld,
+        agencyShadowRestoreToken('autosave'),
+      );
+      commitAgencyShadow(nextLedger, fresh.branchId);
+    } catch {
+      // Observer notes are expendable: even an unexpected projection error must not stop the world.
+      commitAgencyShadow(createAgencyShadowLedger(), null);
+    }
+  }, [commitAgencyShadow, selection]);
 
   const commitWorld = useCallback((
     nextWorld: WorldState,
@@ -913,6 +1070,47 @@ export function App() {
     reactCommitStartedAtRef.current = null;
   }, [world]);
 
+  useLayoutEffect(() => {
+    if (!world || selection?.kind !== 'person' || !agencyShadowBranchId) return;
+    const projection = getAgencyShadowProjection(
+      agencyShadowLedger,
+      agencyShadowBranchId,
+      selection.id,
+    );
+    if (
+      projection?.seed === world.seed
+      && projection.reviewedTurn === world.turn
+      && projection.sourceWorldHash === world.hash
+    ) return;
+    try {
+      const trackedIds = agencyTrackedCharacterIds(world, selection, observerSettings.watchlist);
+      let nextLedger = ensureAgencyShadowCharacters(
+        agencyShadowLedger,
+        agencyShadowBranchId,
+        world,
+        trackedIds,
+      );
+      nextLedger = bindAgencyShadowRestorePoint(
+        nextLedger,
+        agencyShadowBranchId,
+        world,
+        agencyShadowRestoreToken('autosave'),
+        trackedIds,
+      );
+      commitAgencyShadow(nextLedger, agencyShadowBranchId);
+    } catch {
+      resetAgencyShadowAtWorld(world);
+    }
+  }, [
+    agencyShadowBranchId,
+    agencyShadowLedger,
+    commitAgencyShadow,
+    observerSettings.watchlist,
+    resetAgencyShadowAtWorld,
+    selection,
+    world,
+  ]);
+
   const resetAutosaveCoordinator = useCallback((initialSavedTurn: number) => {
     autosaveCoordinatorRef.current?.dispose();
     const coordinator = createAutosaveCoordinator({
@@ -954,6 +1152,17 @@ export function App() {
   }, [observerSettings, world]);
 
   useEffect(() => {
+    const timeout = window.setTimeout(() => {
+      try {
+        localStorage.setItem(AGENCY_SHADOW_STORAGE_KEY, serializeAgencyShadowLedger(agencyShadowLedger));
+      } catch {
+        // The continuity ledger is an observer aid; storage pressure must never stop the world.
+      }
+    }, 500);
+    return () => window.clearTimeout(timeout);
+  }, [agencyShadowLedger]);
+
+  useEffect(() => {
     if (running) return;
     void autosaveCoordinatorRef.current?.flush('pause');
   }, [running]);
@@ -966,6 +1175,14 @@ export function App() {
     };
     const flushPage = () => {
       void autosaveCoordinatorRef.current?.flush('background');
+      try {
+        localStorage.setItem(
+          AGENCY_SHADOW_STORAGE_KEY,
+          serializeAgencyShadowLedger(agencyShadowLedgerRef.current),
+        );
+      } catch {
+        // Keep page shutdown best-effort when localStorage is unavailable.
+      }
     };
     document.addEventListener('visibilitychange', flushBackground);
     window.addEventListener('pagehide', flushPage);
@@ -987,7 +1204,11 @@ export function App() {
     worldShellRef.current.inert = startOpen || archiveOpen || mandateOpen || observerDeskOpen || situationWorkbenchOpen || collectionOpen || primerOpen || activeView === 'chronicle';
   }, [activeView, archiveOpen, collectionOpen, mandateOpen, observerDeskOpen, primerOpen, situationWorkbenchOpen, startOpen, world]);
 
-  const openWorld = useCallback((nextWorld: WorldState, source: OpenWorldSource) => {
+  const openWorld = useCallback((
+    nextWorld: WorldState,
+    source: OpenWorldSource,
+    restoreToken: string | null = null,
+  ) => {
     resetRuntimePerformanceMetrics();
     const validWorld = assertValidWorld(nextWorld);
     resetAutosaveCoordinator(source === 'continue' ? validWorld.turn : 0);
@@ -1003,6 +1224,37 @@ export function App() {
     restoredObserver = completeObserverGuideStep(restoredObserver, 'world-opened');
     observerSettingsRef.current = restoredObserver;
     setObserverSettings(restoredObserver);
+    try {
+      let restoredLedger = agencyShadowLedgerRef.current;
+      if (restoredLedger.branches.length === 0 && restoredLedger.restorePoints.length === 0) {
+        restoredLedger = parseAgencyShadowLedger(localStorage.getItem(AGENCY_SHADOW_STORAGE_KEY));
+      }
+      const mode = source === 'create' ? 'create' : source === 'import' ? 'import' : 'restore';
+      const attached = attachAgencyShadowBranch(restoredLedger, validWorld, mode, restoreToken);
+      let nextLedger = ensureAgencyShadowCharacters(
+        attached.ledger,
+        attached.branchId,
+        validWorld,
+        agencyTrackedCharacterIds(validWorld, null, restoredObserver.watchlist),
+      );
+      nextLedger = bindAgencyShadowRestorePoint(
+        nextLedger,
+        attached.branchId,
+        validWorld,
+        agencyShadowRestoreToken('autosave'),
+      );
+      if (restoreToken && restoreToken !== agencyShadowRestoreToken('autosave')) {
+        nextLedger = bindAgencyShadowRestorePoint(
+          nextLedger,
+          attached.branchId,
+          validWorld,
+          restoreToken,
+        );
+      }
+      commitAgencyShadow(nextLedger, attached.branchId);
+    } catch {
+      resetAgencyShadowAtWorld(validWorld);
+    }
     commitWorld(validWorld, source === 'continue' || source === 'collection' ? 'restore' : 'reset');
     setSeed(validWorld.seed);
     const compactViewport = window.matchMedia('(max-width: 760px)').matches;
@@ -1043,7 +1295,7 @@ export function App() {
     runningRef.current = false;
     setRunning(false);
     clockAccumulatorRef.current = 0;
-  }, [commitWorld, resetAutosaveCoordinator]);
+  }, [commitAgencyShadow, commitWorld, resetAgencyShadowAtWorld, resetAutosaveCoordinator]);
 
   const handleCreate = useCallback(() => {
     setStartBusy(true);
@@ -1063,7 +1315,7 @@ export function App() {
     try {
       const saved = await loadWorld();
       if (!saved) throw new Error('没有找到可续读的本地史册。');
-      openWorld(deserializeWorld(saved.payload), 'continue');
+      openWorld(deserializeWorld(saved.payload), 'continue', agencyShadowRestoreToken('autosave'));
     } catch (error) {
       setStartError(error instanceof Error ? error.message : '无法读取本地史册。');
     } finally {
@@ -1132,6 +1384,31 @@ export function App() {
       const historyLength = current.history.length;
       const next = assertValidWorld(applyV03Intervention(current, action));
       const intervention = next.history.slice(historyLength).find(isV03InterventionEvent);
+      try {
+        const currentBranchId = agencyShadowBranchIdRef.current;
+        if (!currentBranchId) throw new Error('人物取舍分支尚未建立');
+        const forked = forkAgencyShadowIntervention(
+          agencyShadowLedgerRef.current,
+          currentBranchId,
+          current,
+          next,
+        );
+        let nextLedger = ensureAgencyShadowCharacters(
+          forked.ledger,
+          forked.branchId,
+          next,
+          agencyTrackedCharacterIds(next, selection, observerSettingsRef.current.watchlist),
+        );
+        nextLedger = bindAgencyShadowRestorePoint(
+          nextLedger,
+          forked.branchId,
+          next,
+          agencyShadowRestoreToken('autosave'),
+        );
+        commitAgencyShadow(nextLedger, forked.branchId);
+      } catch {
+        resetAgencyShadowAtWorld(next);
+      }
       commitWorld(next);
       try {
         const flushResult = await autosaveCoordinatorRef.current?.flush('intervention');
@@ -1154,7 +1431,7 @@ export function App() {
     } finally {
       setMandateBusy(false);
     }
-  }, [commitWorld, mandateBusy]);
+  }, [commitAgencyShadow, commitWorld, mandateBusy, resetAgencyShadowAtWorld, selection]);
 
   const handleExport = useCallback(() => {
     const current = worldRef.current;
@@ -1205,12 +1482,27 @@ export function App() {
       const saves = await listWorldSaves();
       const slot = availableCollectionSlot(`world_${validCurrent.hash.slice(0, 8)}_t${validCurrent.turn}`, saves);
       await saveWorldToSlot(serializeWorld(validCurrent), slot, label);
+      try {
+        const currentBranchId = agencyShadowBranchIdRef.current;
+        if (currentBranchId) {
+          const nextLedger = bindAgencyShadowRestorePoint(
+            agencyShadowLedgerRef.current,
+            currentBranchId,
+            validCurrent,
+            agencyShadowRestoreToken(slot),
+            agencyTrackedCharacterIds(validCurrent, selection, observerSettingsRef.current.watchlist),
+          );
+          commitAgencyShadow(nextLedger, currentBranchId);
+        }
+      } catch {
+        // The world save is authoritative; optional observer notes must not make it fail.
+      }
       await refreshWorldSaves();
       setToast(`“${label}”已存入世界收藏。`);
     } finally {
       setCollectionBusy(false);
     }
-  }, [refreshWorldSaves]);
+  }, [commitAgencyShadow, refreshWorldSaves, selection]);
 
   const handleLoadCollectionSlot = useCallback(async (slot: string) => {
     setCollectionBusy(true);
@@ -1219,7 +1511,7 @@ export function App() {
       if (pendingSave?.status === 'failed') throw pendingSave.error;
       const saved = await loadWorldFromSlot(slot);
       if (!saved) throw new Error('该世界槽位已经不存在。');
-      openWorld(deserializeWorld(saved.payload), 'collection');
+      openWorld(deserializeWorld(saved.payload), 'collection', agencyShadowRestoreToken(slot));
       setToast(`已读取“${saved.label ?? '世界存档'}”。`);
       await refreshWorldSaves();
     } finally {
@@ -1248,23 +1540,46 @@ export function App() {
       const targetSlot = availableCollectionSlot(`branch_${baseHash}_t${source.turn ?? 0}`, saves);
       const label = `${source.label.slice(0, 72)} · 分支`;
       await duplicateWorldSlot(sourceSlot, targetSlot, label);
+      try {
+        commitAgencyShadow(
+          copyAgencyShadowRestorePoint(
+            agencyShadowLedgerRef.current,
+            agencyShadowRestoreToken(sourceSlot),
+            agencyShadowRestoreToken(targetSlot),
+          ),
+          agencyShadowBranchIdRef.current,
+        );
+      } catch {
+        // A copied world remains valid even if its optional observer note cannot be copied.
+      }
       await refreshWorldSaves();
       setToast(`已从“${source.label}”复制一个独立分支。`);
     } finally {
       setCollectionBusy(false);
     }
-  }, [refreshWorldSaves]);
+  }, [commitAgencyShadow, refreshWorldSaves]);
 
   const handleDeleteCollectionSlot = useCallback(async (slot: string) => {
     setCollectionBusy(true);
     try {
       await deleteWorldSlot(slot);
+      try {
+        commitAgencyShadow(
+          removeAgencyShadowRestorePoint(
+            agencyShadowLedgerRef.current,
+            agencyShadowRestoreToken(slot),
+          ),
+          agencyShadowBranchIdRef.current,
+        );
+      } catch {
+        // Save deletion is complete even when optional observer notes are unavailable.
+      }
       await refreshWorldSaves();
       setToast('世界槽位已从本机移除；当前正在观察的世界未改变。');
     } finally {
       setCollectionBusy(false);
     }
-  }, [refreshWorldSaves]);
+  }, [commitAgencyShadow, refreshWorldSaves]);
 
   const handleNewWorldMenu = useCallback(async () => {
     runningRef.current = false;
@@ -1300,6 +1615,33 @@ export function App() {
         recordRuntimeMetric(`simulation.system.${system}`, detailed.timings.systems[system], current.turn);
       }
       const next = assertValidRuntimeTurn(current, advanced);
+      try {
+        const currentBranchId = agencyShadowBranchIdRef.current;
+        if (!currentBranchId) throw new Error('人物取舍分支尚未建立');
+        const advancedShadow = advanceAgencyShadowBranch(
+          agencyShadowLedgerRef.current,
+          currentBranchId,
+          current,
+          next,
+          agencyTrackedCharacterIds(current, selection, observerSettingsRef.current.watchlist),
+        );
+        let nextLedger = ensureAgencyShadowCharacters(
+          advancedShadow.ledger,
+          advancedShadow.branchId,
+          next,
+          agencyTrackedCharacterIds(next, selection, observerSettingsRef.current.watchlist),
+        );
+        nextLedger = bindAgencyShadowRestorePoint(
+          nextLedger,
+          advancedShadow.branchId,
+          next,
+          agencyShadowRestoreToken('autosave'),
+          agencyTrackedCharacterIds(next, selection, observerSettingsRef.current.watchlist),
+        );
+        commitAgencyShadow(nextLedger, advancedShadow.branchId);
+      } catch {
+        resetAgencyShadowAtWorld(next);
+      }
       commitWorld(next);
       const newEvents = next.history.slice(oldHistoryLength);
       const pauseCandidates = [
@@ -1329,7 +1671,7 @@ export function App() {
     } finally {
       advancingRef.current = false;
     }
-  }, [commitWorld]);
+  }, [commitAgencyShadow, commitWorld, resetAgencyShadowAtWorld, selection]);
   advanceRef.current = advanceOne;
 
   const driveClock = useCallback((milliseconds: number) => {
@@ -1436,6 +1778,8 @@ export function App() {
     primerOpen,
     primerStep,
     mapCamera,
+    agencyShadowLedger,
+    agencyShadowBranchId,
   };
   useEffect(() => {
     window.render_game_to_text = () => makeTextSnapshot(worldRef.current, snapshotOptionsRef.current);
@@ -1695,10 +2039,14 @@ export function App() {
     }
     if (selection.kind === 'person') {
       const item = world.characters.find((candidate) => candidate.id === selection.id);
-      return item ? toPersonArchive(world, item) : null;
+      return item ? toPersonArchive(
+        world,
+        item,
+        agencyDossierOptions(agencyShadowLedger, agencyShadowBranchId, item.id),
+      ) : null;
     }
     return null;
-  }, [selection, world]);
+  }, [agencyShadowBranchId, agencyShadowLedger, selection, world]);
 
   const rosterConfig = useMemo(() => {
     if (activeView === 'polities') return {
@@ -1836,11 +2184,28 @@ export function App() {
     }
     if (selection.kind === 'person') {
       const item = world.characters.find((candidate) => candidate.id === selection.id);
-      return item ? <Inspector kind="person" data={toPersonInspector(world, item)} {...shared} /> : null;
+      return item ? <Inspector
+        kind="person"
+        data={toPersonInspector(
+          world,
+          item,
+          agencyDossierOptions(agencyShadowLedger, agencyShadowBranchId, item.id),
+        )}
+        {...shared}
+      /> : null;
     }
     const system = toSystemInspector(world, selection.kind, selection.id);
     return system ? <Inspector kind="system" data={system} {...shared} /> : null;
-  }, [commitObserverSettings, followed, handleSelectArchiveEntity, handleSelectScopedEvent, selection, world]);
+  }, [
+    agencyShadowBranchId,
+    agencyShadowLedger,
+    commitObserverSettings,
+    followed,
+    handleSelectArchiveEntity,
+    handleSelectScopedEvent,
+    selection,
+    world,
+  ]);
 
   const selectQuarterEvent = useCallback((eventId: string) => {
     setResumeArchiveAfterEvent(false);

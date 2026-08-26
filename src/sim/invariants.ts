@@ -1,6 +1,7 @@
 import { computeWorldHash, getDateForTurn } from './engine';
 import { stableCompare, stableHash } from './random';
 import { validateSituationSystemState } from './situations/reducer';
+import { reducePersonalMemorySystem, validateAgencySystemState } from './agency/memory';
 import type { SituationRecentChange } from './situations/types';
 import type { HistoryEvent, InvariantViolation, SimulationFact, WorldState } from './types';
 
@@ -444,6 +445,22 @@ export function validateTurnRuntime(
     previous.factDigest,
   );
   if (next.factDigest !== expectedFactDigest) push(violations, 'runtime.fact-digest', '本季增量事实与事实摘要不一致');
+  if (next.agencySystem.version !== 1 || next.agencySystem.memoryThroughTurn !== previous.turn) {
+    push(violations, 'runtime.personal-memory-turn', `人物记忆应结算至回合${previous.turn}`);
+  }
+  if (previous.agencySystem.memoryThroughTurn !== previous.turn - 1) {
+    push(violations, 'runtime.personal-memory-parent', '推进前人物记忆游标与世界回合不一致');
+  }
+  if (previous.agencySystem.memoryThroughTurn === previous.turn - 1) {
+    const expectedAgencySystem = reducePersonalMemorySystem(
+      { ...next, agencySystem: previous.agencySystem },
+      previous.turn,
+      appendedFacts,
+    );
+    if (stableHash(next.agencySystem) !== stableHash(expectedAgencySystem)) {
+      push(violations, 'runtime.personal-memory-reducer', '人物记忆与本季权威事实的归并结果不一致');
+    }
+  }
 
   const previousWars = new Map(previous.wars.map((war) => [war.id, war]));
   const nextWars = new Map(next.wars.map((war) => [war.id, war]));
@@ -839,6 +856,9 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       'situation.turn',
       `局势系统应停在回合${world.turn - 1}，实际${world.situationSystem.lastReducedTurn}`,
     );
+  }
+  for (const message of validateAgencySystemState(world)) {
+    push(violations, 'agency.memory-state', message);
   }
   const situationById = new Map(world.situationSystem.situations.map((situation) => [situation.id, situation]));
   const validateSituationFactId = (factId: string, ownerId: string, role: string): void => {

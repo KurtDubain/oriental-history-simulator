@@ -280,6 +280,8 @@ async function advanceOneQuarter(page) {
     nextTurn,
     { timeout: 15_000 },
   );
+  const fatal = page.locator('.observer-fatal');
+  if (await fatal.count()) throw new Error(`季度推进触发错误：${await fatal.textContent()}`);
   return snapshot(page);
 }
 
@@ -1433,6 +1435,9 @@ try {
   assert.ok(personAgency.primaryGoal?.label, '成年人物必须给出一项眼下所图');
   assert.ok(personAgency.secondaryGoals.length <= 2, '次要打算不得超过两项');
   assert.ok(personAgency.currentPlanSteps.length <= 5, '准备路径不得超过五步');
+  assert.ok(Array.isArray(personAgency.memories) && personAgency.memories.length <= 16, '人物心事必须来自有界记忆账');
+  assert.equal(selectedPerson.observer.agencyContinuity?.matchesWorld, true, '人物观察账必须与当前世界锚点相合');
+  assert.ok(selectedPerson.observer.agencyContinuity?.trackedCharacters <= 16, '人物观察账不得无界追踪人物');
   const agencyHash = selectedPerson.deterministicWorldHash;
   await page.getByRole('tab', { name: '所图' }).click();
   const agencyPanel = page.getByRole('tabpanel');
@@ -1440,6 +1445,7 @@ try {
   assert.equal(await agencyTab.getAttribute('aria-controls'), await agencyPanel.getAttribute('id'));
   assert.equal(await agencyPanel.getAttribute('aria-labelledby'), await agencyTab.getAttribute('id'));
   await agencyPanel.getByRole('heading', { name: '此人所重' }).waitFor();
+  await agencyPanel.getByRole('heading', { name: '放在心上的事' }).waitFor();
   assert.match(await agencyPanel.textContent(), /眼下所图/);
   assert.match(await agencyPanel.textContent(), /所行之路/);
   assert.doesNotMatch(await agencyPanel.textContent(), /Goal|Plan|Shadow|Simulation Audit/);
@@ -1462,6 +1468,9 @@ try {
     state.interface.selected?.kind === 'person' && state.interface.selected.id !== sourceId
   ), relationshipSourceId);
   assert.equal(relatedPerson.deterministicWorldHash, relationshipHash, '关系星图跳转不得改变世界哈希');
+  assert.equal(relatedPerson.observer.agencyContinuity?.matchesWorld, true, '跳转人物后观察账仍须锚定当前世界');
+  const continuityPersonId = relatedPerson.interface.selected.id;
+  const continuityGoalId = relatedPerson.interface.selectedDetail.agency.primaryGoal?.id ?? null;
 
   const observedText = await snapshotText(page);
   const observed = JSON.parse(observedText);
@@ -1498,6 +1507,21 @@ try {
   assert.equal(reloaded.worldSchemaVersion, 4);
   assert.equal(reloaded.observer.primerOpen, false, '续读不应重复弹出首次读图导览');
   assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 4存档续读应恢复完全相同的世界');
+  assert.equal(reloaded.observer.agencyContinuity?.matchesWorld, true, '续读必须恢复与存档精确相合的人物观察账');
+  await page.click('button[data-observer-view="people"]');
+  await page.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
+  await page.locator(`.roster-panel button[data-roster-id="${continuityPersonId}"]`).click();
+  const continuityReloaded = await waitForSnapshot(
+    page,
+    (state, id) => state.interface.selected?.kind === 'person' && state.interface.selected.id === id,
+    continuityPersonId,
+  );
+  assert.equal(
+    continuityReloaded.interface.selectedDetail.agency.primaryGoal?.id ?? null,
+    continuityGoalId,
+    '同一存档中的人物盘算身份应跨续读保持连续',
+  );
+  assert.equal(continuityReloaded.deterministicWorldHash, hashBeforeBrowsing, '核对人物续读不得改变世界哈希');
   assert.deepEqual(desktopErrors, []);
 
   const mobileContext = await browser.newContext({
@@ -1534,9 +1558,13 @@ try {
   assert.equal(mobilePerson.interface.selectedDetail.kind, 'person');
   assert.equal(mobilePerson.interface.selectedDetail.agency.desires.length, 2);
   assert.ok(mobilePerson.interface.selectedDetail.agency.primaryGoal?.label);
-  await mobilePage.getByRole('button', { name: '展开档案' }).click();
-  await mobilePage.getByRole('tab', { name: '所图' }).click();
+  const quickMind = mobilePage.getByRole('button', { name: /看所图/ });
+  const quickMindBounds = await quickMind.boundingBox();
+  assert.ok(quickMindBounds && quickMindBounds.height >= 44, '移动端“看所图”触控高度不得小于44px');
+  await quickMind.click();
+  await mobilePage.waitForFunction(() => document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true');
   const mobileAgency = mobilePage.getByRole('tabpanel');
+  await mobileAgency.getByRole('heading', { name: '放在心上的事' }).waitFor();
   await mobileAgency.getByRole('heading', { name: '眼下所图' }).waitFor();
   await assertWithinViewport(mobilePage, '.observer-inspector', '移动端人物所图不可横向溢出');
   const mobileAgencyTabs = mobilePage.locator('.observer-inspector-tabs button');

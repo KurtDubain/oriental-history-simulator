@@ -2,7 +2,7 @@
 
 > 对应设计：[NEXT_SYSTEM_DESIGN.md](./NEXT_SYSTEM_DESIGN.md)
 > 性能依据：[SIMULATION_PERFORMANCE_AUDIT.md](./SIMULATION_PERFORMANCE_AUDIT.md)
-> 任务状态：Phase A 已完成；Phase B 已交付三类权威 Situation、事实型结案层与 B10 局势全卷，B09 数值化起止快照因权威字段缺失继续保留；Phase C 的 C01～C07 已完成 Situation-first 观察循环与人物 Desire / Goal / Plan 只读契约，下一纵切进入 C08 PersonalMemory 与 C09 Agency shadow continuity
+> 任务状态：Phase A 已完成；Phase B 已交付三类权威 Situation、事实型结案层与 B10 局势全卷，B09 数值化起止快照因权威字段缺失继续保留；Phase C 的 C01～C09 已完成 Situation-first 观察循环、人物 Desire / Goal / Plan、权威 PersonalMemory 与本地跨季盘算对照；下一纵切进入 C10/C11 Intent Buffer / Resolver 契约与副将“获得独立统军权”计划模板
 
 ## 1. 路线总览
 
@@ -228,8 +228,8 @@ Phase F UX、地图 LOD 与发布打磨
 
 - [x] **C06 — Desire 初始化**：八根欲望，按出身、性格、家族、经历和 seed 确定生成。
 - [x] **C07 — Goal/Plan 数据模型**：主目标 1、次目标 2、计划最多 5 步、硬失效和最短惯性。
-- [ ] **C08 — PersonalMemory**：上限 16、永久 4、普通记忆聚合；保留现有有向关系记忆。
-- [ ] **C09 — Agency shadow mode**：记录旧行为与新 Intent 建议差异，不改变结果。
+- [x] **C08 — PersonalMemory**：schema 4 权威人生记忆只读已封存 typed Facts；每人上限 16、难忘记忆上限 4、普通记忆按类型与对象聚合，保留现有有向 RelationshipMemory，并进入存档、完整校验与 world hash。
+- [x] **C09 — Agency shadow mode**：本地 observer ledger 严格按 seed / turn / hash 恢复，最多 8 分支、25 恢复点、每分支 16 名人物、全簿 64 条对照；记录旧行为与新 Intent 建议的差异但不改变结果，不进入 WorldState、存档或 hash。当前唯一可严格比较的旧行为是陆军副将升任主帅。
 - [ ] **C10 — Intent Buffer 与 Resolver 契约**：人物提交意图，领域检查权限、资源、关系和风险。
 - [ ] **C11 — 首个计划模板**：副将“获得独立统军权”。
 - [ ] **C12 — 军中支持计划**：提携、培养副将集团、家族背书、请求军令、保留军权。
@@ -242,8 +242,17 @@ Phase F UX、地图 LOD 与发布打磨
 - `src/sim/agency` 提供确定性只读投影：八根欲望分别保留出身、性格、家族、近四年权威 Fact 与固定 seed 的贡献；玩家档案只显示两个长期所重及自然语言原因，不暴露 seed、world hash、内部目标对象或动作代码。
 - 成年人物拥有一个主目标、最多两个次目标；每个目标生成至多五步准备路径。主目标至少保留四季，惯性期后仍须同一挑战目标连续两季高出 15 分才会替换；人物死亡、对象消失、灭国、家族断绝或失去必要职位立即硬失效。
 - 未成年人只形成欲望而不启动目标，已故人物关闭目标。次目标提升为主目标时复用原 ID，活跃 Goal ID、signature 与 Plan step ID 均保持唯一；没有 continuity 时，只读身份由人物、目标签名和成年节点决定，避免季度或普通任免变化让同一盘算改名。
-- 该层不进入 `WorldState`、schema 4、存档、Fact、Chronicle 或世界 hash，也不接管旧 AI。`previous` 参数可以验证四季惯性，但页面重新载入后的真实跨季连续性仍由 C09 的有界 shadow ledger 负责，当前 UI 不把“盘算”写成“行动”。
+- C06/C07 的基础投影本身不进入 `WorldState`、schema 4、存档、Fact、Chronicle 或世界 hash，也不接管旧 AI。`previous` 参数可以验证四季惯性；后续交付的 C08 权威人生记忆与 C09 本地连续簿各自拥有独立 owner，没有把基础投影倒塞回世界事实。
 - 人物档案新增“所图”页，按“此人所重 → 眼下所图 → 所行之路 → 最近取舍”阅读；移动端保留两行速览、44px 页签和全高详览。独立 `test:audit:agency` 覆盖跨种子分布、数量上限、ID 连续性、硬失效、hash/序列化纯度及性能预算。
+
+### C08/C09 Completion Evidence（2026-08-27）
+
+- `AgencySystemState` 是 schema 4 内 PersonalMemory 的唯一权威 owner；它逐季只消费同季已封存 typed Facts，不读 Chronicle 文案。战役、任免、婚姻、战争、领土与 Situation 转折可形成个人/朝局/军旅/家门四类记忆；同类且指向同一对象的普通经历会累积次数与时间范围，而不重复增长。
+- 每人最多 16 条人生记忆、4 条 pinned 记忆，每条记忆的 Fact 来源和对象引用同样有上限。内容随 schema 4 存档导入导出，参与世界哈希和 full validation；老档迁移不伪造不存在的旧人生记忆。原有有向 RelationshipMemory 继续独立保留。
+- C09 ledger 是 `localStorage` 中的非权威观察元数据；创建、导入和恢复均要求完整 seed / turn / hash 锚点，普通推进只接受相邻季与精确 `lastTurn`。容量硬上限为 8 分支、25 恢复点、每分支 16 名人物、全簿 64 条对照；恢复点只携带 4 名代表人物，溢出项按稳定规则裁剪并留下 digest。
+- 与旧系统的对照只承认可由 `appointment_started` Fact 和对应 Chronicle 双重核验的“陆军副将升任同一军团主帅”。其他 Plan 步骤只保留“原先打算”，不把没有精确事实的沉默写成失败、违背或已执行。
+- 人物“所图”现按“此人所重 → 放在心上的事 → 眼下所图 → 所行之路 → 最近取舍”阅读，玩家只看到“难忘”“原先打算”“本季所行”与事实核对说明，不暴露 seed、hash、内部 action code 或迁移术语。移动端人物速览提供 44px “看所图”直达。
+- ledger 不进入 `WorldState`、Fact、Chronicle、JSON 世界存档或 world hash，也不提交给任何 Resolver。本地数据被清除、容量溢出或锚点不匹配只会丢失盘算连续性，不会阻断存档或改变世界结果。下一入口为 C10/C11，本轮没有提前接管旧任命逻辑。
 
 ### Tasks：成长与 LOD
 
@@ -272,6 +281,8 @@ Phase F UX、地图 LOD 与发布打磨
 - Agency 与旧系统双重任命/叛乱。
 - Goal 每季换心或所有高野心者走同一计划。
 - 玩家关注影响 LOD 后改变模拟。
+- 本地连续簿被浏览器清理或因分支上限被裁剪，玩家可能失去旧盘算的对照上下文。
+- 旧行为覆盖仍很窄；若把“没有可核对 Fact”误写为“人物没有照做”，会制造假因果。
 - 新家族生成破坏旧档或世界平衡。
 
 ### Controls
@@ -279,6 +290,8 @@ Phase F UX、地图 LOD 与发布打磨
 - 每个行为类型明确唯一 owner 和切换开关。
 - 最短 Goal 惯性、不同欲望组合、资源与记忆约束。
 - Authoritative tier 不读取 observer state。
+- 连续簿用 seed / turn / hash 严格锚定并保持硬上限；缺失或裁剪时宁可重建盘算，也不污染权威世界。
+- 对照层按行为类型建立严格证据适配器；在新适配器交付前，只承认陆军副将升任主帅。
 - 新生成器仅用于新世界，旧世界只分类。
 
 ### Acceptance Criteria
@@ -428,7 +441,7 @@ Phase F UX、地图 LOD 与发布打磨
 
 ## 9. 立即执行的下一 Sprint
 
-第一轮 Phase A 最小闭环已经按以下顺序完成；下一轮从第 10 项开始：
+已交付纵切按以下顺序累积；当前开发入口为第 19 项：
 
 1. [x] A01：端到端性能埋点与 0/20/50/100 年基线。
 2. [x] A02：schema 4 迁移夹具与 legacy boundary。
@@ -447,7 +460,8 @@ Phase F UX、地图 LOD 与发布打磨
 15. [x] C03/C04：观察台真正关注 Situation ID，并按形成、阶段变化、核心人物死亡和结案里程碑暂停；人物 Agency 未混入这一纵切。
 16. [x] C05：QuarterPulse 汇总局势升温、降温、新生与结案，并从普通史事流排除对应 `situation_*` Chronicle，避免重复。
 17. [x] C06/C07：冻结 Desire 与 Goal/Plan 的确定性只读契约，接入人物速览与档案，不接管旧行为。
-18. [ ] 下一纵切：C08/C09，建立有界 PersonalMemory 与 Agency shadow ledger，验证同一人物跨季盘算及旧行为差异，仍不改写结果。
+18. [x] C08/C09：建立 schema 4 权威人生记忆与有界本地盘算连续簿，验证同一人物跨季盘算及陆军副将升主帅的旧行为差异，未改写结果。
+19. [ ] 下一纵切：C10/C11，冻结 Intent Buffer / Resolver 的唯一 owner、权限、资源和失败契约，并交付副将“获得独立统军权”首个计划模板。
 
 这一 Sprint 的 B 阶段演示目标已经达成：
 
@@ -461,7 +475,9 @@ C05 的演示目标已经达成：玩家不用逐条翻史事，也能从 Quarte
 
 C06/C07 的演示目标已经达成：打开人物“所图”，可以读到此人长期看重什么、眼下在盘算什么、先做哪一步以及当前难处；这些内容保持可追溯且不冒充已经发生的行动。
 
-下一轮的演示目标是：同一个人物的关键记忆与盘算能够跨季有界延续，并可比较旧行为和新意图为何一致或分歧，但 shadow 阶段仍不改写既有世界结果。
+C08/C09 的演示目标已经达成：同一个人物的关键记忆与盘算可以跨季有界延续；玩家能在“放在心上的事”和“最近取舍”中读懂起因、打算与已发生之事，但这些盘算仍未改写既有世界结果。
+
+下一轮的演示目标是：一位有持续目标的副将可以提出“获得独立统军权”的具体行动，而任命结果仍由唯一领域裁决者根据职位、军团、政权和风险决定，不会被人物直接改写。
 
 ## 10. 每个任务的 Definition of Done
 
@@ -479,7 +495,7 @@ C06/C07 的演示目标已经达成：打开人物“所图”，可以读到此
 
 ## 11. 暂时不要开始的任务
 
-- 不立即铺开 B05/B07 等更多检测器；下一轮转入 C08/C09 的有界人物记忆与 shadow continuity，不提前接管旧行为。
+- 不立即铺开 B05/B07 等更多检测器；下一轮只进入 C10/C11 的 Intent Buffer / Resolver 契约与首个副将计划，不提前铺开抗命、清洗、叛乱或其他行为接管。
 - 不把普通张力波动、史册关键词或代理对象命中描述成 Situation 里程碑；C03/C04 只认同一稳定 Situation ID 的权威 Fact。
 - 不先做完整围城 UI。
 - 不先增加宗教、文化、资源、兵种或地图。

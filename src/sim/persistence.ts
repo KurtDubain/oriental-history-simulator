@@ -7,6 +7,7 @@ import { createV03LifeSystems } from './v03-life';
 import { createV03OceanSystems } from './v03-ocean';
 import type { LegacyArchiveBoundary, SimulationFact } from './facts';
 import { createSituationSystemState } from './situations';
+import { createAgencySystemState } from './agency/memory';
 
 function migrateV02Systems(world: WorldState): void {
   (world as unknown as { schemaVersion: number }).schemaVersion = 3;
@@ -202,6 +203,12 @@ export function deserializeWorld(serialized: string): WorldState {
     // original hash first, then start observation at the next live quarter; do
     // not fabricate retrospective candidates or milestones.
     world.situationSystem = createSituationSystemState(world.turn - 1);
+    migrated = true;
+  }
+  if (!world.agencySystem || typeof world.agencySystem !== 'object') {
+    // Early schema-4 saves predate PersonalMemory. Start at the live boundary;
+    // Chronicle and earlier Facts are not replayed into memories retroactively.
+    world.agencySystem = createAgencySystemState(world.turn - 1);
     migrated = true;
   }
   if (migrated) world.hash = computeWorldHash(world);

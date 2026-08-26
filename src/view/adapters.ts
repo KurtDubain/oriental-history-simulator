@@ -8,6 +8,7 @@ import type {
   CountryInspectorData,
   FamilyInspectorData,
   InspectorRecord,
+  PersonAgencyQuarterChoiceView,
   PersonInspectorData,
   RegionInspectorData,
   SystemInspectorData,
@@ -44,6 +45,8 @@ import type {
 import {
   projectCharacterAgency,
   toCharacterAgencyPlayerProjection,
+  toPersonalMemoryPlayerViews,
+  type CharacterAgencyShadowProjection,
 } from '../sim/agency';
 
 const compact = new Intl.NumberFormat('zh-CN', {
@@ -750,11 +753,24 @@ function relationSentiment(item: RelationshipState) {
   return '往来平淡';
 }
 
-export function toPersonInspector(world: WorldState, item: CharacterState): PersonInspectorData {
+export interface PersonAgencyDossierOptions {
+  projection?: CharacterAgencyShadowProjection | null;
+  quarterChoice?: PersonAgencyQuarterChoiceView | null;
+}
+
+export function toPersonInspector(
+  world: WorldState,
+  item: CharacterState,
+  options: PersonAgencyDossierOptions = {},
+): PersonInspectorData {
   const owner = polity(world, item.polityId);
   const home = region(world, item.locationRegionId);
   const personFamily = family(world, item.familyId);
-  const agency = toCharacterAgencyPlayerProjection(projectCharacterAgency(world, item.id));
+  const agency = {
+    ...toCharacterAgencyPlayerProjection(options.projection ?? projectCharacterAgency(world, item.id)),
+    memories: toPersonalMemoryPlayerViews(world, item.id),
+    quarterChoice: options.quarterChoice ?? null,
+  };
   const currentStep = agency.currentPlanSteps.find((step) => step.status === 'available');
   const coreDesires = agency.desires.map((desire) => desire.label);
   const relationships = worldRelationships(world)
@@ -977,8 +993,12 @@ export function toFamilyArchive(world: WorldState, item: FamilyState): ArchiveDo
   };
 }
 
-export function toPersonArchive(world: WorldState, item: CharacterState): ArchiveDossier {
-  const inspector = toPersonInspector(world, item);
+export function toPersonArchive(
+  world: WorldState,
+  item: CharacterState,
+  options: PersonAgencyDossierOptions = {},
+): ArchiveDossier {
+  const inspector = toPersonInspector(world, item, options);
   const owner = polity(world, item.polityId);
   const personFamily = family(world, item.familyId);
   const records: ArchiveRecord[] = toPersonExperienceRecords(world, item);

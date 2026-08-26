@@ -14,6 +14,19 @@ export {
   toCharacterAgencyPlayerProjection,
 } from './projection';
 
+export {
+  createAgencySystemState,
+  MAX_PERSONAL_MEMORIES,
+  MAX_PERSONAL_MEMORY_SOURCE_FACTS,
+  MAX_PERSONAL_MEMORY_SUBJECTS,
+  MAX_PINNED_PERSONAL_MEMORIES,
+  PERSONAL_MEMORY_KINDS,
+  PERSONAL_MEMORY_SCOPES,
+  reducePersonalMemorySystem,
+  toPersonalMemoryPlayerViews,
+  validateAgencySystemState,
+} from './memory';
+
 export type {
   AgencyEntityKind,
   AgencyEntityRef,
@@ -40,3 +53,14 @@ export type {
   DesireSourceKind,
   RootDesire,
 } from './projection';
+
+export type {
+  AgencySystemState,
+  CharacterPersonalMemoryState,
+  PersonalMemoryKind,
+  PersonalMemoryPlayerView,
+  PersonalMemoryState,
+  PersonalMemoryScope,
+  PersonalMemorySubjectKind,
+  PersonalMemorySubjectRef,
+} from './memory';

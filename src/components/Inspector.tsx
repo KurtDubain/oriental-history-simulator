@@ -161,6 +161,27 @@ export interface PersonAgencyDecisionView {
   reason: string;
 }
 
+export interface PersonAgencyMemoryView {
+  id: string;
+  dateLabel: string;
+  scopeLabel: string;
+  title: string;
+  interpretation: string;
+  pinned: boolean;
+  sourceEventId?: string | null;
+}
+
+export type PersonAgencyQuarterChoiceOutcome = 'aligned' | 'diverged' | 'unobserved' | 'not_applicable';
+
+export interface PersonAgencyQuarterChoiceView {
+  periodLabel: string;
+  intended: string;
+  actual: string;
+  outcome: PersonAgencyQuarterChoiceOutcome;
+  reason: string;
+  sourceEventId?: string | null;
+}
+
 export interface PersonAgencyView {
   availability: 'active' | 'dormant' | 'closed';
   reason: string;
@@ -171,6 +192,8 @@ export interface PersonAgencyView {
   secondaryGoals: readonly PersonAgencyGoalView[];
   currentPlanSteps: readonly PersonAgencyPlanStepView[];
   recentDecision?: PersonAgencyDecisionView | null;
+  memories?: readonly PersonAgencyMemoryView[];
+  quarterChoice?: PersonAgencyQuarterChoiceView | null;
 }
 
 export interface PersonInspectorData {
@@ -526,6 +549,13 @@ const PERSON_PLAN_STATUS_LABELS = {
   invalidated: '作罢',
 } satisfies Record<PersonAgencyPlanStepStatus, string>;
 
+const PERSON_QUARTER_CHOICE_LABELS = {
+  aligned: '照着盘算走',
+  diverged: '实际另有去向',
+  unobserved: '尚未见行动',
+  not_applicable: '尚无可比',
+} satisfies Record<PersonAgencyQuarterChoiceOutcome, string>;
+
 function AgencyScale({ label, value }: { label: string; value: number }) {
   const normalized = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
   return (
@@ -544,8 +574,25 @@ function agencyEmptyGoalCopy(agency: PersonAgencyView) {
   return { title: '仍在权衡', detail: '此人还没有把心中所重化为明确打算。' };
 }
 
-function PersonAgencySections({ agency }: { agency: PersonAgencyView }) {
+function PersonAgencySections({
+  agency,
+  onSelectEvent,
+}: {
+  agency: PersonAgencyView;
+  onSelectEvent?: (eventId: string) => void;
+}) {
+  const [memoriesExpanded, setMemoriesExpanded] = useState(false);
   const emptyGoal = agencyEmptyGoalCopy(agency);
+  const memories = (agency.memories ?? []).slice(0, 16);
+  const memoryListId = useId();
+  const visibleMemories = memoriesExpanded ? memories : memories.slice(0, 3);
+  const hiddenMemoryCount = Math.max(0, memories.length - visibleMemories.length);
+  const quarterChoice = agency.quarterChoice;
+  const choiceReasonLabel = quarterChoice?.outcome === 'aligned'
+    ? '为何相合'
+    : quarterChoice?.outcome === 'diverged'
+      ? '为何有别'
+      : '查考说明';
   return (
     <>
       <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-desire-heading">
@@ -560,6 +607,35 @@ function PersonAgencySections({ agency }: { agency: PersonAgencyView }) {
             ))}
           </ul>
         ) : <p className="observer-inspector__empty">此人的心中轻重尚未显明。</p>}
+      </section>
+
+      <section className="observer-inspector__section observer-agency observer-agency-memories" aria-labelledby="person-agency-memory-heading">
+        <div className="observer-agency-section-heading">
+          <h3 id="person-agency-memory-heading">放在心上的事</h3>
+          {memories.length > 3 ? (
+            <button type="button" aria-expanded={memoriesExpanded} aria-controls={memoryListId} onClick={() => setMemoriesExpanded((current) => !current)}>
+              {memoriesExpanded ? '收起旧事' : `再看 ${hiddenMemoryCount} 桩旧事`}
+            </button>
+          ) : null}
+        </div>
+        {visibleMemories.length ? (
+          <ol id={memoryListId} className="observer-agency-memory-list">
+            {visibleMemories.map((memory) => (
+              <li key={memory.id} data-pinned={memory.pinned || undefined}>
+                <div className="observer-agency-memory__meta">
+                  <span>{[memory.scopeLabel, memory.dateLabel].filter(Boolean).join(' · ')}</span>
+                  {memory.pinned ? <b>难忘</b> : null}
+                </div>
+                <strong>{memory.title}</strong>
+                <p>{memory.interpretation}</p>
+                {memory.sourceEventId && onSelectEvent ? (
+                  <button type="button" className="observer-agency-memory__source" onClick={() => onSelectEvent(memory.sourceEventId!)}>查原事</button>
+                ) : null}
+              </li>
+            ))}
+          </ol>
+        ) : <p className="observer-inspector__empty">眼下没有哪桩旧事格外牵动此人。</p>}
+        <p className="observer-agency-memory__note">这里只记此人仍放在心上的事，完整生平见“经历”。</p>
       </section>
 
       <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-goal-heading">
@@ -605,22 +681,39 @@ function PersonAgencySections({ agency }: { agency: PersonAgencyView }) {
 
       <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-decision-heading">
         <h3 id="person-agency-decision-heading">最近取舍</h3>
+        {quarterChoice ? (
+          <div className="observer-agency-choice" data-outcome={quarterChoice.outcome}>
+            <header><span>{quarterChoice.periodLabel}</span><strong>{PERSON_QUARTER_CHOICE_LABELS[quarterChoice.outcome]}</strong></header>
+            <dl>
+              <div><dt>原先打算</dt><dd>{quarterChoice.intended}</dd></div>
+              <div><dt>本季所行</dt><dd>{quarterChoice.actual}</dd></div>
+            </dl>
+            <p><b>{choiceReasonLabel}</b>{quarterChoice.reason}</p>
+            {quarterChoice.sourceEventId && onSelectEvent ? (
+              <button type="button" className="observer-agency-choice__source" onClick={() => onSelectEvent(quarterChoice.sourceEventId!)}>查本季原事</button>
+            ) : null}
+          </div>
+        ) : <p className="observer-inspector__empty">本季尚无可核对的盘算与行动。</p>}
         {agency.recentDecision ? (
-          <div className="observer-agency-decision" data-status={agency.recentDecision.status}>
-            <div><strong>{agency.recentDecision.label}</strong><span>{PERSON_GOAL_STATUS_LABELS[agency.recentDecision.status]}</span></div>
+          <div className="observer-agency-decision" data-status={agency.recentDecision.status} data-after-choice={quarterChoice ? true : undefined}>
+            <div><strong>{quarterChoice ? `主意变了：${agency.recentDecision.label}` : agency.recentDecision.label}</strong><span>{PERSON_GOAL_STATUS_LABELS[agency.recentDecision.status]}</span></div>
             <p>{agency.recentDecision.reason}</p>
           </div>
-        ) : <p className="observer-inspector__empty">近来没有改换主意的记载。</p>}
+        ) : null}
       </section>
       <p className="observer-agency__note">筹谋会随处境复核；是否成行，还要看职位、资源与关系。</p>
     </>
   );
 }
 
-function PersonInspector({ data, ...actions }: Extract<InspectorProps, { kind: 'person' }>) {
+function PersonInspector({ data, onOpenMind, ...actions }: Extract<InspectorProps, { kind: 'person' }> & { onOpenMind?: () => void }) {
   const [tab, setTab] = useState<'life' | 'mind' | 'relations' | 'history'>('life');
   const tabsId = useId();
   useEffect(() => setTab('life'), [data.id]);
+  const openMind = () => {
+    setTab('mind');
+    onOpenMind?.();
+  };
   const abilities: Array<[string, number]> = [['统率', data.abilities.command], ['武勇', data.abilities.martial], ['政略', data.abilities.governance], ['谋略', data.abilities.strategy], ['魅力', data.abilities.charisma], ['学识', data.abilities.scholarship]];
   return (
     <>
@@ -629,12 +722,16 @@ function PersonInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
         <InspectorActions label={data.name} {...actions} />
       </div>
       {data.summary ? <p className="observer-inspector__summary">{data.summary}</p> : null}
+      <button type="button" className="observer-person-quick-mind" aria-controls={`${tabsId}-panel-mind`} onClick={openMind}>
+        <span><strong>看所图</strong><small>旧事、盘算与本季所行</small></span>
+        <ChevronUp size={16} aria-hidden="true" />
+      </button>
       <InspectorTabs value={tab} onChange={setTab} idPrefix={tabsId} items={[{ id: 'life', label: '生平' }, { id: 'mind', label: '所图' }, { id: 'relations', label: '关系' }, { id: 'history', label: '经历' }]} />
       {tab === 'life' ? <div id={`${tabsId}-panel-life`} role="tabpanel" aria-labelledby={`${tabsId}-tab-life`}>
         <section className="observer-inspector__section" aria-labelledby="person-origin-heading"><h3 id="person-origin-heading">身世与处境</h3><dl className="observer-facts"><Fact label="性别" value={data.gender} /><Fact label="出身" value={data.origin} /><Fact label="阶层" value={data.politicalClass} /><Fact label="家族" value={data.family} /><Fact label="影响" value={data.influence} /><Fact label="私产" value={data.personalWealth} /></dl>{data.family ? <p className="observer-inspector__jump"><Network size={13} aria-hidden="true" /><LinkedName kind="family" id={data.familyId} onSelect={actions.onSelectEntity}>{data.family}</LinkedName></p> : null}{data.health !== undefined ? <div className="observer-health"><HeartPulse size={14} aria-hidden="true" /><Meter label="健康" value={data.health} /></div> : null}</section>
         <section className="observer-inspector__section" aria-labelledby="person-ability-heading"><h3 id="person-ability-heading">才能</h3><div className="observer-ability-grid">{abilities.map(([label, value]) => <div className="observer-ability" key={label}><span>{label}</span><strong>{Math.round(value)}</strong></div>)}</div><dl className="observer-facts observer-facts--after-grid"><Fact label="功绩" value={data.merit} /><Fact label="副将历练" value={data.deputyExperience} /></dl></section>
       </div> : null}
-      {tab === 'mind' ? <div id={`${tabsId}-panel-mind`} role="tabpanel" aria-labelledby={`${tabsId}-tab-mind`}>{data.agency ? <PersonAgencySections agency={data.agency} /> : <section className="observer-inspector__section" aria-labelledby="person-motive-heading"><h3 id="person-motive-heading">心志与打算</h3><p className="observer-inspector__empty">现有记载不足以判断此人的打算。</p></section>}</div> : null}
+      {tab === 'mind' ? <div id={`${tabsId}-panel-mind`} role="tabpanel" aria-labelledby={`${tabsId}-tab-mind`}>{data.agency ? <PersonAgencySections key={data.id} agency={data.agency} onSelectEvent={actions.onSelectEvent} /> : <section className="observer-inspector__section" aria-labelledby="person-motive-heading"><h3 id="person-motive-heading">心志与打算</h3><p className="observer-inspector__empty">现有记载不足以判断此人的打算。</p></section>}</div> : null}
       {tab === 'relations' ? <div id={`${tabsId}-panel-relations`} role="tabpanel" aria-labelledby={`${tabsId}-tab-relations`}><section className="observer-inspector__section" aria-labelledby="person-relation-heading"><h3 id="person-relation-heading"><Network size={14} aria-hidden="true" />关系与记忆</h3>{data.relationships?.length ? <><RelationshipConstellation name={data.name} relationships={data.relationships} onSelect={actions.onSelectEntity} /><ul className="observer-relation-list">{data.relationships.map((relation) => <li key={relation.id}><button type="button" onClick={() => actions.onSelectEntity?.('person', relation.targetId)}><span><strong>{relation.name}</strong><small>{relation.relation} · {relation.sentiment}</small></span>{relation.detail ? <b>{relation.detail}</b> : null}</button>{relation.memories?.length ? <p>{relation.memories.join('；')}</p> : null}</li>)}</ul></> : <p className="observer-inspector__empty">此人尚无足以入档的人际记忆。</p>}</section></div> : null}
       {tab === 'history' ? <div id={`${tabsId}-panel-history`} role="tabpanel" aria-labelledby={`${tabsId}-tab-history`}><section className="observer-inspector__section" aria-labelledby="person-history-heading"><h3 id="person-history-heading"><ScrollText size={14} aria-hidden="true" />人生经历</h3><RecordList records={data.experiences ?? []} onSelectEvent={actions.onSelectEvent} /></section></div> : null}
     </>
@@ -691,6 +788,7 @@ export function Inspector(props: InspectorProps) {
       id={inspectorId}
       className="observer-inspector"
       aria-label="对象档案"
+      data-kind={props.kind}
       data-mobile-expanded={mobileExpanded}
     >
       <div className="observer-inspector__mobile-toggle">
@@ -707,7 +805,7 @@ export function Inspector(props: InspectorProps) {
       {props.kind === 'region' ? <RegionInspector {...props} /> : null}
       {props.kind === 'country' ? <CountryInspector {...props} /> : null}
       {props.kind === 'family' ? <FamilyInspector {...props} /> : null}
-      {props.kind === 'person' ? <PersonInspector {...props} /> : null}
+      {props.kind === 'person' ? <PersonInspector {...props} onOpenMind={() => setMobileExpanded(true)} /> : null}
       {props.kind === 'system' ? <SystemInspector {...props} /> : null}
     </aside>
   );

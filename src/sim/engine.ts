@@ -50,6 +50,7 @@ import {
   syncOfficeAppointments,
 } from './v02';
 import { createSituationSystemState, processSituationSystem } from './situations';
+import { createAgencySystemState, reducePersonalMemorySystem } from './agency/memory';
 import {
   SEASONS,
   type ArmyState,
@@ -538,6 +539,7 @@ export function computeWorldHash(world: WorldState): string {
   void _legacyCounters;
   void _legacyLastTurn;
   const hasSituationSystem = Object.prototype.hasOwnProperty.call(world, 'situationSystem');
+  const hasAgencySystem = Object.prototype.hasOwnProperty.call(world, 'agencySystem');
   return stableHash({
     ...schema4Base,
     characters,
@@ -546,6 +548,7 @@ export function computeWorldHash(world: WorldState): string {
     factDigest: world.factDigest,
     legacyArchiveBoundary: world.legacyArchiveBoundary,
     ...(hasSituationSystem ? { situationSystem: world.situationSystem } : {}),
+    ...(hasAgencySystem ? { agencySystem: world.agencySystem } : {}),
   });
 }
 
@@ -604,6 +607,7 @@ export function createWorld(seed: string): WorldState {
     factDigest: stableHash([]),
     legacyArchiveBoundary: null,
     situationSystem: createSituationSystemState(-1),
+    agencySystem: createAgencySystemState(-1),
     lastTurn: null,
     counters: { character: characters.length, army: 0, polity: polities.length, war: 0, event: 1, family: 0, faction: 0, relationship: 0, office: 0, commitment: 0, fleet: 0, tradeCorridor: 0, navalOperation: 0, shipment: 0, shipProject: 0, fact: 0 },
     hash: '',
@@ -3016,6 +3020,7 @@ function cloneWorld(world: WorldState): WorldState {
     history: [...world.history],
     facts: [...world.facts],
     situationSystem: structuredClone(world.situationSystem),
+    agencySystem: structuredClone(world.agencySystem),
     counters: { ...world.counters },
   };
 }
@@ -3143,6 +3148,9 @@ export function advanceWorldDetailed(
   runSystem('military_careers', () => processV02MilitaryCareers(world, context, (input) => pushEvent(world, context, input)));
   runSystem('appointments', () => syncOfficeAppointments(world, context.turn, context));
   runSystem('situations', () => processSituationSystem(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('personal_memory', () => {
+    world.agencySystem = reducePersonalMemorySystem(world, context.turn, context.facts);
+  });
   runSystem('quarter_finalize', () => {
     finalizeTurn(world, context);
     world.turn += 1;
