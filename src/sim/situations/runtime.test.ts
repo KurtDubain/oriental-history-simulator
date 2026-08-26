@@ -13,7 +13,7 @@ import {
 } from '../index';
 
 describe('authoritative Situation engine integration', () => {
-  it('forms deterministic military and inheritance stories from real Facts and preserves identity across saves', () => {
+  it('forms all three deterministic Situation stories from real Facts and preserves identity across saves', () => {
     const first = advanceWorldBy(createWorld('春战副将'), 12);
     const replay = advanceWorldBy(createWorld('春战副将'), 12);
 
@@ -22,12 +22,14 @@ describe('authoritative Situation engine integration', () => {
     expect(first.situationSystem.situations.length).toBeGreaterThan(0);
     const open = first.situationSystem.situations.filter((situation) => situation.status === 'open');
     expect(open.length).toBeLessThanOrEqual(12);
-    expect(open.filter((situation) => situation.type === 'military_power_crisis').length).toBeLessThanOrEqual(8);
-    expect(open.filter((situation) => situation.type === 'inheritance_crisis').length).toBeLessThanOrEqual(4);
+    expect(open.filter((situation) => situation.type === 'military_power_crisis').length).toBeLessThanOrEqual(5);
+    expect(open.filter((situation) => situation.type === 'inheritance_crisis').length).toBeLessThanOrEqual(3);
+    expect(open.filter((situation) => situation.type === 'war_progress').length).toBeLessThanOrEqual(4);
     expect(first.situationSystem.candidates.length).toBeLessThanOrEqual(64);
     expect(new Set(first.situationSystem.candidates.map((candidate) => candidate.type))).toEqual(new Set([
       'inheritance_crisis',
       'military_power_crisis',
+      'war_progress',
     ]));
 
     const factById = new Map(first.facts.map((fact) => [fact.id, fact]));
@@ -36,6 +38,7 @@ describe('authoritative Situation engine integration', () => {
     expect(new Set(milestones.map((fact) => fact.payload.situationType))).toEqual(new Set([
       'inheritance_crisis',
       'military_power_crisis',
+      'war_progress',
     ]));
     for (const fact of milestones) {
       expect(fact.sourceFactIds.length).toBeGreaterThan(0);
@@ -49,6 +52,29 @@ describe('authoritative Situation engine integration', () => {
         event.sourceFactIds.includes(fact.id) && event.situationIds.includes(fact.payload.situationId)
       ));
       expect(historyEvent).toBeDefined();
+      if (fact.payload.situationType === 'war_progress') {
+        expect(fact.category).toBe('军事');
+        expect(historyEvent?.category).toBe('军事');
+        const war = first.wars.find((item) => item.id === state?.scopeKey);
+        const attacker = first.polities.find((item) => item.id === war?.attackerId)?.name;
+        const defender = first.polities.find((item) => item.id === war?.defenderId)?.name;
+        expect(war).toBeDefined();
+        expect(attacker).toBeTruthy();
+        expect(defender).toBeTruthy();
+        if (!attacker || !defender) throw new Error('expected named war participants');
+        expect(historyEvent?.title).toContain(attacker);
+        expect(historyEvent?.title).toContain(defender);
+        expect(historyEvent?.title.indexOf(attacker)).toBeLessThan(
+          historyEvent?.title.indexOf(defender) ?? -1,
+        );
+        if (fact.payload.transition === 'formed') {
+          expect(historyEvent?.summary).toContain('连续两个季度');
+          expect(historyEvent?.summary).toMatch(/开战|会战|领土控制/);
+        }
+      } else {
+        expect(fact.category).toBe('政治');
+        expect(historyEvent?.category).toBe('政治');
+      }
       if (fact.payload.transition === 'phase_changed') {
         const lifecycleEvidence = historyEvent?.causes.find(
           (cause) => cause.label === '生命周期规则',

@@ -89,12 +89,13 @@ export interface SituationSystemSnapshot {
 
 export type SituationSnapshotLabelWorld = Pick<
   WorldState,
-  'characters' | 'families' | 'factions' | 'polities' | 'regions' | 'armies' | 'fleets'
+  'characters' | 'families' | 'factions' | 'polities' | 'regions' | 'armies' | 'fleets' | 'wars'
 >;
 
 const TYPE_LABELS: Readonly<Record<string, string>> = {
   military_power_crisis: '军权危机',
   inheritance_crisis: '继承危机',
+  war_progress: '战争进程',
 };
 
 const STATUS_LABELS: Record<SituationStatus, string> = {
@@ -173,6 +174,27 @@ const SIGNAL_LABELS: Readonly<Record<string, string>> = {
   polity_extinguished: '政权已灭亡',
   polity_destroyed: '政权已被军事消灭',
   lineage_extinguished_and_absorbed: '王系断绝且故国被吸收',
+  ongoing_war: '战争仍在持续',
+  opposing_belligerents: '交战双方仍有国家载体',
+  war_goal_and_duration: '战争目标与持续时间',
+  recorded_war_score: '已记录的战果',
+  recent_war_declaration: '近期宣战',
+  recent_battles: '近期战役',
+  recent_territory_changes: '近期领土控制变化',
+  quiet_front: '近期战线平静',
+  war_weariness: '战争疲劳积累',
+  no_field_army: '缺少可持续作战军团',
+  frontline_supply_strain: '前线补给承压',
+  frontline_supply_ready: '前线补给尚可支撑',
+  field_army_capacity: '双方仍有野战能力',
+  critical_operational_evidence: '战事升级条件具备',
+  attacker_advantage: '攻方以优势结束战争',
+  defender_advantage: '守方以优势结束战争',
+  negotiated_peace: '双方议和停战',
+  attacker_destroyed: '攻方政权覆灭',
+  defender_destroyed: '守方政权覆灭',
+  attacker_dissolved: '攻方因继承断绝而解体',
+  defender_dissolved: '守方因继承断绝而解体',
 };
 
 const WATCH_SIGNAL_LABELS: Readonly<Record<string, string>> = {
@@ -187,6 +209,11 @@ const WATCH_SIGNAL_LABELS: Readonly<Record<string, string>> = {
   watch_claimant_support_balance: '观察候选人的家族、派系、官职与军方支持消长',
   watch_successor_states: '观察故国人物、家族、军队与领土的去向',
   watch_new_reign_consolidation: '观察新君能否重建合法性、中央权威与统治联盟',
+  watch_next_engagement: '观察双方是否发生下一场战役，或有州域控制权转移',
+  watch_frontline_supply: '观察低补给军团会撤退、溃散，还是仍能改变战线',
+  watch_war_score_and_control: '观察下一场战役是否扩大战果差距并改变州域控制权',
+  watch_postwar_absorption: '观察故国领土、军队、人物与家族如何进入新的政治秩序',
+  watch_postwar_settlement: '观察停战边界、赔款与双方战争疲劳是否稳定',
 };
 
 const PARTICIPANT_GROUP_LABELS: Record<SituationParticipantGroupKey, string> = {
@@ -306,6 +333,7 @@ function latestChangeSnapshot(changes: readonly SituationRecentChange[]): Situat
 function situationTitle(
   situation: SituationState,
   participants: readonly SituationSnapshotParticipantGroup[],
+  world: SituationSnapshotLabelWorld,
 ): string {
   const core = participants.find((group) => group.key === 'coreCharacterIds')?.entities[0]?.label;
   const polity = participants.find((group) => group.key === 'polityIds')?.entities[0]?.label;
@@ -315,12 +343,21 @@ function situationTitle(
   if (situation.type === 'inheritance_crisis' && polity) {
     return `${polity}的继承危机`;
   }
+  if (situation.type === 'war_progress') {
+    const war = world.wars.find((item) => item.id === situation.scopeKey);
+    if (!war) return '这场战争的进程';
+    const polityLabels = new Map(world.polities.map((item) => [item.id, item.shortName || item.name]));
+    const attacker = polityLabels.get(war.attackerId) ?? '未载攻方';
+    const defender = polityLabels.get(war.defenderId) ?? '未载守方';
+    return `${attacker}进攻${defender}的战争进程`;
+  }
   return TYPE_LABELS[situation.type] ?? '未命名历史局势';
 }
 
 function situationItem(
   situation: SituationState,
   labels: Record<SituationParticipantGroupKey, ReadonlyMap<string, string>>,
+  world: SituationSnapshotLabelWorld,
 ): SituationSnapshotItem {
   const participants = participantGroups(situation.participants, labels);
   const nextRefs = situation.nextWatch.refs.map(cloneRef);
@@ -328,7 +365,7 @@ function situationItem(
     id: situation.id,
     type: situation.type,
     typeLabel: TYPE_LABELS[situation.type] ?? '历史局势',
-    title: situationTitle(situation, participants),
+    title: situationTitle(situation, participants, world),
     status: situation.status,
     statusLabel: STATUS_LABELS[situation.status],
     phase: situation.phase,
@@ -385,10 +422,10 @@ export function projectSituationSystemSnapshot(
     openCount: open.length,
     resolvedCount: situationSystem.archive.resolvedCount + resolved.length,
     archivedResolvedCount: situationSystem.archive.resolvedCount,
-    open: open.slice(0, MAX_SNAPSHOT_OPEN_SITUATIONS).map((item) => situationItem(item, labels)),
+    open: open.slice(0, MAX_SNAPSHOT_OPEN_SITUATIONS).map((item) => situationItem(item, labels, world)),
     recentResolved: resolved
       .slice(0, MAX_SNAPSHOT_RECENT_RESOLVED_SITUATIONS)
-      .map((item) => situationItem(item, labels)),
+      .map((item) => situationItem(item, labels, world)),
   };
 }
 

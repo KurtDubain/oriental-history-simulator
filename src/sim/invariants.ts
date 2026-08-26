@@ -147,6 +147,19 @@ function sameOrderedStrings(left: readonly string[], right: readonly string[]): 
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function warEndRolesAreConsistent(
+  fact: Extract<SimulationFact, { kind: 'war_ended' }>,
+): boolean {
+  const { attackerId, defenderId, result, winnerId, loserId } = fact.payload;
+  if (result === 'attacker_advantage') return winnerId === attackerId && loserId === defenderId;
+  if (result === 'defender_advantage') return winnerId === defenderId && loserId === attackerId;
+  if (result === 'negotiated_peace') return winnerId === null && loserId === null;
+  if (result === 'attacker_destroyed' || result === 'attacker_dissolved') {
+    return loserId === attackerId && (winnerId === null || winnerId === defenderId);
+  }
+  return loserId === defenderId && (winnerId === null || winnerId === attackerId);
+}
+
 function milestoneMatchesSituationChange(
   fact: SimulationFact,
   situationId: string,
@@ -431,6 +444,56 @@ export function validateTurnRuntime(
     previous.factDigest,
   );
   if (next.factDigest !== expectedFactDigest) push(violations, 'runtime.fact-digest', '本季增量事实与事实摘要不一致');
+
+  const previousWars = new Map(previous.wars.map((war) => [war.id, war]));
+  const nextWars = new Map(next.wars.map((war) => [war.id, war]));
+  const warStartedFacts = appendedFacts.filter(
+    (fact): fact is Extract<SimulationFact, { kind: 'war_started' }> => fact.kind === 'war_started',
+  );
+  const warEndedFacts = appendedFacts.filter(
+    (fact): fact is Extract<SimulationFact, { kind: 'war_ended' }> => fact.kind === 'war_ended',
+  );
+  for (const war of next.wars) {
+    const prior = previousWars.get(war.id);
+    if (!prior) {
+      const matchingFacts = warStartedFacts.filter((candidate) => candidate.payload.warId === war.id);
+      const fact = matchingFacts[0];
+      if (matchingFacts.length !== 1
+        || !fact
+        || fact.payload.attackerId !== war.attackerId
+        || fact.payload.defenderId !== war.defenderId
+        || fact.payload.warKind !== war.kind
+        || fact.payload.goal !== war.goal
+        || !sameOrderedStrings(fact.payload.targetRegionIds, war.targetRegionIds)) {
+        push(violations, 'runtime.war-start-fact', `${war.id}新建战争缺少匹配的war_started事实`, war.id);
+      }
+    }
+    if ((prior?.active ?? !war.active) && !war.active) {
+      const matchingFacts = warEndedFacts.filter((candidate) => candidate.payload.warId === war.id);
+      const fact = matchingFacts[0];
+      if (matchingFacts.length !== 1
+        || !fact
+        || fact.payload.attackerId !== war.attackerId
+        || fact.payload.defenderId !== war.defenderId
+        || war.endedTurn !== fact.turn
+        || fact.payload.durationTurns !== fact.turn - war.startedTurn + 1
+        || !warEndRolesAreConsistent(fact)) {
+        push(violations, 'runtime.war-end-fact', `${war.id}结束战争缺少匹配的war_ended事实`, war.id);
+      }
+    }
+  }
+  for (const fact of warStartedFacts) {
+    if (previousWars.has(fact.payload.warId) || !nextWars.has(fact.payload.warId)) {
+      push(violations, 'runtime.war-start-orphan', `${fact.id}没有对应的当季新建战争`, fact.id);
+    }
+  }
+  for (const fact of warEndedFacts) {
+    const prior = previousWars.get(fact.payload.warId);
+    const current = nextWars.get(fact.payload.warId);
+    if ((!prior?.active && prior !== undefined) || !current || current.active) {
+      push(violations, 'runtime.war-end-orphan', `${fact.id}没有对应的当季战争结束转换`, fact.id);
+    }
+  }
 
   for (const message of validateSituationSystemState(next.situationSystem)) {
     push(violations, 'runtime.situation-state', message);
@@ -735,8 +798,37 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   const practiceById = new Map(world.practices.map((practice) => [practice.id, practice]));
   const familyById = new Map(world.families.map((family) => [family.id, family]));
   const factionById = new Map(world.factions.map((faction) => [faction.id, faction]));
+  const warById = new Map(world.wars.map((war) => [war.id, war]));
   const eventById = new Map(world.history.map((event) => [event.id, event]));
   const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
+
+  const warStartsById = new Map<string, Extract<SimulationFact, { kind: 'war_started' }>[]>();
+  const warEndsById = new Map<string, Extract<SimulationFact, { kind: 'war_ended' }>[]>();
+  for (const fact of world.facts) {
+    if (fact.kind === 'war_started') {
+      const facts = warStartsById.get(fact.payload.warId) ?? [];
+      facts.push(fact);
+      warStartsById.set(fact.payload.warId, facts);
+    } else if (fact.kind === 'war_ended') {
+      const facts = warEndsById.get(fact.payload.warId) ?? [];
+      facts.push(fact);
+      warEndsById.set(fact.payload.warId, facts);
+    }
+  }
+  const legacyFactBoundaryTurn = world.legacyArchiveBoundary?.turn ?? -1;
+  for (const war of world.wars) {
+    const starts = warStartsById.get(war.id) ?? [];
+    const ends = warEndsById.get(war.id) ?? [];
+    if (starts.length > 1 || (war.startedTurn > legacyFactBoundaryTurn && starts.length !== 1)) {
+      push(violations, 'fact.war-start-count', `${war.id}的war_started数量应为1，实际${starts.length}`, war.id);
+    }
+    const endFactRequired = !war.active
+      && war.endedTurn !== null
+      && war.endedTurn > legacyFactBoundaryTurn;
+    if (ends.length > 1 || (endFactRequired && ends.length !== 1) || (war.active && ends.length > 0)) {
+      push(violations, 'fact.war-end-count', `${war.id}的war_ended数量与生命周期不一致：${ends.length}`, war.id);
+    }
+  }
 
   for (const message of validateSituationSystemState(world.situationSystem)) {
     push(violations, 'situation.state', message);
@@ -1479,6 +1571,36 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       const source = factById.get(sourceFactId);
       if (!source || source.turn > fact.turn || numericIdSuffix(source.id) >= numericIdSuffix(fact.id)) {
         push(violations, 'fact.source', `${fact.id}引用未知或未来事实${sourceFactId}`, fact.id);
+      }
+    }
+    if (fact.kind === 'war_started') {
+      const war = warById.get(fact.payload.warId);
+      if (!war
+        || war.startedTurn !== fact.turn
+        || war.kind !== fact.payload.warKind
+        || war.attackerId !== fact.payload.attackerId
+        || war.defenderId !== fact.payload.defenderId
+        || war.goal !== fact.payload.goal
+        || !sameOrderedStrings(war.targetRegionIds, fact.payload.targetRegionIds)) {
+        push(violations, 'fact.war-start', `${fact.id}与权威战争起点不一致`, fact.id);
+      }
+    }
+    if (fact.kind === 'war_ended') {
+      const war = warById.get(fact.payload.warId);
+      const participantIds = new Set([fact.payload.attackerId, fact.payload.defenderId]);
+      if (!war
+        || war.active
+        || war.endedTurn !== fact.turn
+        || war.attackerId !== fact.payload.attackerId
+        || war.defenderId !== fact.payload.defenderId
+        || fact.payload.durationTurns !== fact.turn - war.startedTurn + 1
+        || !Number.isFinite(fact.payload.attackerScore)
+        || !Number.isFinite(fact.payload.defenderScore)
+        || !isWholeNonNegative(fact.payload.indemnity)
+        || (fact.payload.winnerId !== null && !participantIds.has(fact.payload.winnerId))
+        || (fact.payload.loserId !== null && !participantIds.has(fact.payload.loserId))
+        || !warEndRolesAreConsistent(fact)) {
+        push(violations, 'fact.war-end', `${fact.id}与权威战争结束状态不一致`, fact.id);
       }
     }
     if (fact.kind === 'situation_milestone') {

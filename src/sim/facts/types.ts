@@ -7,6 +7,8 @@ import type {
 } from '../types';
 
 export type SimulationFactKind =
+  | 'war_started'
+  | 'war_ended'
   | 'battle'
   | 'territory_control_changed'
   | 'appointment_started'
@@ -27,6 +29,39 @@ export interface BattleForceFact {
   trainingBefore: number;
   supplyBefore: number;
   losses: number;
+}
+
+export interface WarStartedFactPayload {
+  warId: string;
+  warKind: 'interstate' | 'rebellion';
+  attackerId: string;
+  defenderId: string;
+  goal: '征服' | '边境' | '独立' | '复仇' | '霸权';
+  targetRegionIds: string[];
+  reason: string;
+}
+
+export type WarEndResult =
+  | 'attacker_advantage'
+  | 'defender_advantage'
+  | 'negotiated_peace'
+  | 'attacker_destroyed'
+  | 'defender_destroyed'
+  | 'attacker_dissolved'
+  | 'defender_dissolved';
+
+export interface WarEndedFactPayload {
+  warId: string;
+  attackerId: string;
+  defenderId: string;
+  result: WarEndResult;
+  winnerId: string | null;
+  loserId: string | null;
+  reason: string;
+  durationTurns: number;
+  attackerScore: number;
+  defenderScore: number;
+  indemnity: number;
 }
 
 export interface BattleFactPayload {
@@ -106,6 +141,8 @@ interface SimulationFactBase<K extends SimulationFactKind, P> {
 }
 
 export type BattleFact = SimulationFactBase<'battle', BattleFactPayload>;
+export type WarStartedFact = SimulationFactBase<'war_started', WarStartedFactPayload>;
+export type WarEndedFact = SimulationFactBase<'war_ended', WarEndedFactPayload>;
 export type TerritoryControlFact = SimulationFactBase<'territory_control_changed', TerritoryControlFactPayload>;
 export type AppointmentStartedFact = SimulationFactBase<'appointment_started', AppointmentFactPayload>;
 export type AppointmentEndedFact = SimulationFactBase<'appointment_ended', AppointmentFactPayload>;
@@ -114,6 +151,8 @@ export type MarriageFact = SimulationFactBase<'marriage', MarriageFactPayload>;
 export type SituationMilestoneFact = SimulationFactBase<'situation_milestone', SituationMilestoneFactPayload>;
 
 export type SimulationFact =
+  | WarStartedFact
+  | WarEndedFact
   | BattleFact
   | TerritoryControlFact
   | AppointmentStartedFact

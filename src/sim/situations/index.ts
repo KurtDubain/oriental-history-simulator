@@ -29,6 +29,22 @@ export {
   INHERITANCE_CRISIS_TYPE,
   inheritanceCrisisDetector,
 } from './inheritance-crisis-detector';
+export {
+  buildWarProgressIndex,
+  detectWarProgressCandidates,
+  WAR_PROGRESS_TEMPLATE,
+  WAR_PROGRESS_TYPE,
+  warProgressDetector,
+} from './war-progress-detector';
+export type {
+  WarProgressCandidate,
+  WarProgressFactHistory,
+  WarProgressIndex,
+  WarProgressResolutionOutcomeKey,
+  WarProgressSignal,
+  WarProgressStartSnapshot,
+  WarProgressWatchSignal,
+} from './war-progress-detector';
 export type {
   SituationArchiveState,
   SituationCandidateObservation,

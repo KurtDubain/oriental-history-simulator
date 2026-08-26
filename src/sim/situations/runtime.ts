@@ -13,6 +13,12 @@ import {
   INHERITANCE_CRISIS_TYPE,
   inheritanceCrisisDetector,
 } from './inheritance-crisis-detector';
+import {
+  buildWarProgressIndex,
+  WAR_PROGRESS_TEMPLATE,
+  WAR_PROGRESS_TYPE,
+  warProgressDetector,
+} from './war-progress-detector';
 import { attachSituationMilestoneFacts, reduceSituationTurn } from './reducer';
 import type {
   SituationDetector,
@@ -24,6 +30,7 @@ import type {
 interface SituationRuntimeIndex {
   militaryPower: ReturnType<typeof buildMilitaryPowerCrisisIndex>;
   inheritance: ReturnType<typeof buildInheritanceCrisisIndex>;
+  warProgress: ReturnType<typeof buildWarProgressIndex>;
 }
 
 const militaryPowerRuntimeDetector: SituationDetector<SituationRuntimeIndex> = {
@@ -41,6 +48,15 @@ const inheritanceRuntimeDetector: SituationDetector<SituationRuntimeIndex> = {
     turn,
     facts,
     index: index.inheritance,
+  }),
+};
+
+const warProgressRuntimeDetector: SituationDetector<SituationRuntimeIndex> = {
+  id: warProgressDetector.id,
+  detect: ({ turn, facts, index }) => warProgressDetector.detect({
+    turn,
+    facts,
+    index: index.warProgress,
   }),
 };
 
@@ -84,6 +100,20 @@ const SIGNAL_LABELS: Record<string, string> = {
   claimant_military_support: '候选人掌握军方支持',
   ruler_death_without_lawful_settlement: '君主死亡后交接尚未落定',
   current_succession_evidence: '本季权力网络变化',
+  ongoing_war: '战争仍在持续',
+  opposing_belligerents: '交战双方仍有国家载体',
+  war_goal_and_duration: '战争目标与持续时间',
+  recorded_war_score: '已记录的战果',
+  recent_war_declaration: '近期宣战',
+  recent_battles: '近期战役',
+  recent_territory_changes: '近期领土控制变化',
+  quiet_front: '近期战线平静',
+  war_weariness: '战争疲劳积累',
+  no_field_army: '缺少可持续作战军团',
+  frontline_supply_strain: '前线补给承压',
+  frontline_supply_ready: '前线补给尚可支撑',
+  field_army_capacity: '双方仍有野战能力',
+  critical_operational_evidence: '战事升级条件具备',
 };
 
 const OUTCOME_LABELS: Readonly<Record<string, string>> = {
@@ -102,6 +132,13 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
   polity_extinguished: '政权灭亡',
   polity_destroyed: '政权被军事消灭',
   lineage_extinguished_and_absorbed: '王系断绝且故国被吸收',
+  attacker_advantage: '攻方以优势结束战争',
+  defender_advantage: '守方以优势结束战争',
+  negotiated_peace: '双方议和停战',
+  attacker_destroyed: '攻方政权覆灭',
+  defender_destroyed: '守方政权覆灭',
+  attacker_dissolved: '攻方因继承断绝而解体',
+  defender_dissolved: '守方因继承断绝而解体',
 };
 
 function outcomeLabel(outcomeKey: string | null): string {
@@ -126,7 +163,12 @@ function situationTitle(world: WorldState, situation: SituationState): string {
     const polity = polityName(world, situation.participants.polityIds[0] ?? '未知政权');
     return `${polity}的继承之局`;
   }
-  return situation.titleKey;
+  if (situation.type === WAR_PROGRESS_TYPE) {
+    const war = world.wars.find((item) => item.id === situation.scopeKey);
+    if (!war) return '这场战争的进程';
+    return `${polityName(world, war.attackerId)}进攻${polityName(world, war.defenderId)}的战争进程`;
+  }
+  return '这场历史局势';
 }
 
 function formationSummary(title: string, type: string): string {
@@ -136,7 +178,14 @@ function formationSummary(title: string, type: string): string {
   if (type === INHERITANCE_CRISIS_TYPE) {
     return `${title}已连续两个季度维持结构性压力，人物谱系与可追溯的任免、婚姻、参战或领土事实共同提供证据。`;
   }
+  if (type === WAR_PROGRESS_TYPE) {
+    return `${title}已连续两个季度维持结构性张力，并由开战、会战或领土控制变更事实提供可追溯的战争证据。`;
+  }
   return `${title}已连续两个季度维持结构性压力，并由可核验的当季事实提供起点证据。`;
+}
+
+function situationCategory(situation: SituationState): HistoryEvent['category'] {
+  return situation.type === WAR_PROGRESS_TYPE ? '军事' : '政治';
 }
 
 function transitionCopy(transition: SituationTransition): SituationTransition {
@@ -215,12 +264,13 @@ function emitSituationMilestone(
     throw new Error(`${transition.situationId} Situation milestone lacks causal Fact evidence`);
   }
   const text = transitionText(world, situation, transition);
+  const category = situationCategory(situation);
   const leadingSignals = situation.signals
     .filter((signal) => signal.role === 'structural' || signal.role === 'trigger')
     .slice(0, 3);
   const fact = emitSimulationFact(world, context, {
     kind: 'situation_milestone',
-    category: '政治',
+    category,
     importance: milestoneImportance(transition),
     actorIds: [...situation.participants.coreCharacterIds],
     polityIds: [...situation.participants.polityIds],
@@ -265,7 +315,7 @@ function emitSituationMilestone(
     },
   });
   const event = emit({
-    category: '政治',
+    category,
     kind: `situation_${transition.kind}`,
     title: text.title,
     summary: text.summary,
@@ -301,14 +351,24 @@ export function processSituationSystem(
       index: {
         militaryPower: buildMilitaryPowerCrisisIndex(world),
         inheritance: buildInheritanceCrisisIndex(world),
+        warProgress: buildWarProgressIndex(world),
       },
-      detectors: [militaryPowerRuntimeDetector, inheritanceRuntimeDetector],
+      detectors: [
+        militaryPowerRuntimeDetector,
+        inheritanceRuntimeDetector,
+        warProgressRuntimeDetector,
+      ],
     },
     {
-      templates: [MILITARY_POWER_CRISIS_TEMPLATE, INHERITANCE_CRISIS_TEMPLATE],
+      templates: [
+        MILITARY_POWER_CRISIS_TEMPLATE,
+        INHERITANCE_CRISIS_TEMPLATE,
+        WAR_PROGRESS_TEMPLATE,
+      ],
       maxOpenByType: {
-        [MILITARY_POWER_CRISIS_TYPE]: 8,
-        [INHERITANCE_CRISIS_TYPE]: 4,
+        [MILITARY_POWER_CRISIS_TYPE]: 5,
+        [INHERITANCE_CRISIS_TYPE]: 3,
+        [WAR_PROGRESS_TYPE]: 4,
       },
     },
   );

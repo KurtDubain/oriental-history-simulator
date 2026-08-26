@@ -9,10 +9,12 @@ const ARTIFACT_DIR = 'output/v1-release-visual';
 const SITUATION_TYPE_LABELS = Object.freeze({
   military_power_crisis: '军权危机',
   inheritance_crisis: '继承危机',
+  war_progress: '战争进程',
 });
 const SITUATION_OPEN_BUDGETS = Object.freeze({
-  military_power_crisis: 8,
-  inheritance_crisis: 4,
+  military_power_crisis: 5,
+  inheritance_crisis: 3,
+  war_progress: 4,
 });
 
 const server = await createServer({

@@ -19,4 +19,9 @@ export type {
   SimulationFactKind,
   TerritoryControlFact,
   TerritoryControlFactPayload,
+  WarEndedFact,
+  WarEndedFactPayload,
+  WarEndResult,
+  WarStartedFact,
+  WarStartedFactPayload,
 } from './types';

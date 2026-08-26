@@ -14,10 +14,11 @@ const seeds = process.env.PHASE_B_AUDIT_SEEDS?.split(',').map((seed) => seed.tri
   ?? ['军权春秋', '春战副将', '同源世界', '沧海一粟', '赤潮', '归档校验', '副将立功', '北境军令'];
 const turns = Math.max(8, Number.parseInt(process.env.PHASE_B_AUDIT_TURNS ?? '80', 10));
 
-const REQUIRED_SITUATION_TYPES = ['military_power_crisis', 'inheritance_crisis'] as const;
+const REQUIRED_SITUATION_TYPES = ['military_power_crisis', 'inheritance_crisis', 'war_progress'] as const;
 const OPEN_BUDGETS: Readonly<Record<(typeof REQUIRED_SITUATION_TYPES)[number], number>> = {
-  military_power_crisis: 8,
-  inheritance_crisis: 4,
+  military_power_crisis: 5,
+  inheritance_crisis: 3,
+  war_progress: 4,
 };
 
 interface SituationTypeTransitions {
@@ -58,6 +59,13 @@ function updatePeaks(peaks: Record<string, number>, counts: Readonly<Record<stri
   for (const [type, count] of Object.entries(counts)) peaks[type] = Math.max(peaks[type] ?? 0, count);
 }
 
+function factWarId(fact: SimulationFact): string | null {
+  if (fact.kind === 'war_started' || fact.kind === 'war_ended' || fact.kind === 'battle') {
+    return fact.payload.warId;
+  }
+  return fact.kind === 'territory_control_changed' ? fact.payload.warId : null;
+}
+
 function auditMilestoneFact(world: WorldState, fact: Extract<SimulationFact, { kind: 'situation_milestone' }>): string[] {
   const failures: string[] = [];
   const factById = new Map(world.facts.map((item) => [item.id, item]));
@@ -79,6 +87,31 @@ function auditMilestoneFact(world: WorldState, fact: Extract<SimulationFact, { k
   if (!situation.milestoneFactIds.includes(fact.id)) {
     failures.push(`${fact.id}未回挂到${situation.id}的里程碑事实链`);
   }
+  if (situation.type === 'war_progress') {
+    const war = world.wars.find((item) => item.id === situation.scopeKey);
+    if (!war) failures.push(`${fact.id}的战争局势指向不存在的${situation.scopeKey}`);
+    if (fact.category !== '军事') failures.push(`${fact.id}的战争局势里程碑没有归入军事类别`);
+    const exactWarSources = fact.sourceFactIds
+      .map((sourceFactId) => factById.get(sourceFactId))
+      .filter((source): source is SimulationFact => Boolean(source))
+      .filter((source) => factWarId(source) === situation.scopeKey);
+    if (exactWarSources.length === 0) {
+      failures.push(`${fact.id}没有引用同一战争${situation.scopeKey}的领域事实`);
+    }
+    if (war) {
+      const participantPolities = new Set(situation.participants.polityIds);
+      if (!participantPolities.has(war.attackerId) || !participantPolities.has(war.defenderId)) {
+        failures.push(`${fact.id}的战争参与政权与${war.id}攻守双方不一致`);
+      }
+    }
+    if (fact.payload.transition === 'resolved') {
+      const endFact = exactWarSources.find((source) => source.kind === 'war_ended');
+      if (!endFact) failures.push(`${fact.id}结案没有引用同战争的war_ended事实`);
+      else if (endFact.payload.result !== fact.payload.outcomeKey) {
+        failures.push(`${fact.id}结案结果${fact.payload.outcomeKey}与${endFact.id}的${endFact.payload.result}不一致`);
+      }
+    }
+  }
   const matchingChange = situation.recentChanges.find((change) => (
     change.turn === fact.turn && change.kind === fact.payload.transition
   ));
@@ -99,6 +132,42 @@ function auditMilestoneFact(world: WorldState, fact: Extract<SimulationFact, { k
     || situation.resolution?.outcomeKey !== fact.payload.outcomeKey
   ) {
     failures.push(`${fact.id}结案结果与${situation.id}权威状态不一致`);
+  }
+  return failures;
+}
+
+function auditWarLifecycleFacts(world: WorldState): string[] {
+  const failures: string[] = [];
+  const starts = world.facts.filter((fact) => fact.kind === 'war_started');
+  const ends = world.facts.filter((fact) => fact.kind === 'war_ended');
+  for (const war of world.wars) {
+    const matchingStarts = starts.filter((fact) => fact.payload.warId === war.id);
+    const matchingEnds = ends.filter((fact) => fact.payload.warId === war.id);
+    if (matchingStarts.length !== 1) failures.push(`${war.id}应有且仅有一个war_started，实际${matchingStarts.length}`);
+    const start = matchingStarts[0];
+    if (start && (
+      start.turn !== war.startedTurn
+      || start.payload.attackerId !== war.attackerId
+      || start.payload.defenderId !== war.defenderId
+      || start.payload.warKind !== war.kind
+    )) failures.push(`${war.id}的war_started与权威战争状态不一致`);
+    if (war.active) {
+      if (matchingEnds.length !== 0) failures.push(`${war.id}仍在进行却已有war_ended`);
+    } else {
+      if (matchingEnds.length !== 1) failures.push(`${war.id}已结束但war_ended数量为${matchingEnds.length}`);
+      const end = matchingEnds[0];
+      if (end && (
+        end.turn !== war.endedTurn
+        || end.payload.attackerId !== war.attackerId
+        || end.payload.defenderId !== war.defenderId
+        || end.payload.durationTurns !== Math.max(1, end.turn - war.startedTurn + 1)
+      )) failures.push(`${war.id}的war_ended与权威战争状态不一致`);
+    }
+  }
+  for (const fact of [...starts, ...ends]) {
+    if (!world.wars.some((war) => war.id === fact.payload.warId)) {
+      failures.push(`${fact.id}指向不存在的战争${fact.payload.warId}`);
+    }
   }
   return failures;
 }
@@ -168,6 +237,7 @@ function run(seed: string): AuditRun {
       }
     }
   }
+  failures.push(...auditWarLifecycleFacts(world));
   return {
     world,
     sequence,
@@ -240,7 +310,7 @@ for (const type of REQUIRED_SITUATION_TYPES) {
 }
 
 console.log(JSON.stringify({
-  phase: 'B01/B03/B04',
+  phase: 'B01/B03/B04/B06',
   seeds: seeds.length,
   turnsPerSeed: turns,
   samples,

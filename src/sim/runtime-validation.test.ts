@@ -143,6 +143,33 @@ describe('quarterly runtime validation', () => {
     expect(validateWorldFull(previous)).toEqual([]);
   });
 
+  it('rejects duplicate war lifecycle Facts and inconsistent ending roles at a full boundary', () => {
+    let world = createWorld('春战副将');
+    for (let index = 0; index < 40; index += 1) world = advanceWorld(world);
+    const start = world.facts.find(
+      (fact): fact is Extract<SimulationFact, { kind: 'war_started' }> => fact.kind === 'war_started',
+    );
+    const ending = world.facts.find(
+      (fact): fact is Extract<SimulationFact, { kind: 'war_ended' }> => fact.kind === 'war_ended',
+    );
+    if (!start || !ending) throw new Error('expected a completed war lifecycle');
+
+    const duplicated = structuredClone(world);
+    duplicated.counters.fact += 1;
+    duplicated.facts.push({
+      ...structuredClone(start),
+      id: `fact_${String(duplicated.counters.fact).padStart(7, '0')}`,
+    });
+    expect(validateWorldFull(duplicated).map((violation) => violation.code)).toContain('fact.war-start-count');
+
+    const inconsistent = structuredClone(world);
+    const inconsistentEnding = inconsistent.facts.find((fact) => fact.id === ending.id);
+    if (inconsistentEnding?.kind !== 'war_ended') throw new Error('expected cloned war ending');
+    inconsistentEnding.payload.winnerId = inconsistentEnding.payload.attackerId;
+    inconsistentEnding.payload.loserId = inconsistentEnding.payload.attackerId;
+    expect(validateWorldFull(inconsistent).map((violation) => violation.code)).toContain('fact.war-end');
+  }, 15_000);
+
   it('exposes separately measurable runtime and full validation modes', () => {
     const previous = createWorld('runtime-validator-measurement');
     const next = advanceWorld(previous);

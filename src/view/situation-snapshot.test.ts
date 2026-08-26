@@ -342,4 +342,81 @@ describe('Situation observer snapshot', () => {
     ]);
     expect(item.nextSignal.label).not.toContain('watch_');
   });
+
+  it('projects a war title from the exact WarState attack direction, not sorted participants', () => {
+    const world = createWorld('Situation战争进程-攻守方向');
+    const ordered = [...world.polities]
+      .sort((left, right) => left.id.localeCompare(right.id));
+    const defender = ordered[0];
+    const attacker = ordered[ordered.length - 1];
+    const war = {
+      id: 'war_projection_direction',
+      kind: 'interstate' as const,
+      attackerId: attacker.id,
+      defenderId: defender.id,
+      startedTurn: 1,
+      endedTurn: null,
+      active: true,
+      attackerScore: 8,
+      defenderScore: 3,
+      reason: '边境争端',
+      lastBattleTurn: 4,
+      goal: '边境' as const,
+      targetRegionIds: [],
+      exhaustion: 0,
+    };
+    world.wars.push(war);
+    const base = testSituation(world);
+    const situation = testSituation(world, {
+      id: 'situation_war_progress_01',
+      type: 'war_progress',
+      scopeKey: war.id,
+      titleKey: 'situation.war_progress',
+      participants: {
+        ...base.participants,
+        // Candidate normalization sorts IDs. This deliberately puts the
+        // defender first so a participant-based title would invert history.
+        polityIds: [defender.id, attacker.id],
+      },
+      signals: [
+        {
+          key: 'ongoing_war',
+          role: 'structural',
+          contribution: 18,
+          refs: [{ kind: 'index', entityType: 'war', entityId: war.id, field: 'active', value: true }],
+        },
+        {
+          key: 'recent_battles',
+          role: 'trigger',
+          contribution: 12,
+          refs: [{ kind: 'fact', factId: 'fact_war_battle_4' }],
+        },
+      ],
+      nextWatch: {
+        key: 'watch_war_score_and_control',
+        refs: [{ kind: 'index', entityType: 'war', entityId: war.id, field: 'attackerScore', value: 8 }],
+      },
+    });
+    world.situationSystem = situationSystem([situation]);
+
+    const item = toSituationSnapshot(world).open[0];
+    const attackerLabel = attacker.shortName || attacker.name;
+    const defenderLabel = defender.shortName || defender.name;
+
+    expect(item).toMatchObject({
+      type: 'war_progress',
+      typeLabel: '战争进程',
+      title: `${attackerLabel}进攻${defenderLabel}的战争进程`,
+      nextSignal: {
+        key: 'watch_war_score_and_control',
+        label: '观察下一场战役是否扩大战果差距并改变州域控制权',
+      },
+    });
+    expect(item.title.indexOf(attackerLabel)).toBeLessThan(item.title.indexOf(defenderLabel));
+    expect(item.evidence.map((entry) => entry.label)).toEqual([
+      '战争仍在持续',
+      '近期战役',
+    ]);
+    expect(item.evidence.every((entry) => !entry.label.includes(entry.key))).toBe(true);
+  });
 });

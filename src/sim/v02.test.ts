@@ -248,7 +248,9 @@ describe('V0.2 coupled social simulation', () => {
       relation.status = '中立';
       relation.allianceUntilTurn = null;
     }
-    world.wars = [];
+    // Keep retained WarState records paired with their authoritative start
+    // Facts. The next military tick closes any war whose other polity was
+    // removed by this synthetic last-realm setup.
     for (const candidate of world.backgroundPeople) {
       candidate.polityId = polity.id;
       candidate.birthTurn = world.turn;

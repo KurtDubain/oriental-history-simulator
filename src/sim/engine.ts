@@ -7,7 +7,15 @@ import {
   type PolityDefinition,
 } from './data';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
-import { emitSimulationFact, projectFactLinks, type BattleFact, type SimulationFact } from './facts';
+import {
+  emitSimulationFact,
+  projectFactLinks,
+  type BattleFact,
+  type SimulationFact,
+  type WarEndedFact,
+  type WarEndResult,
+  type WarStartedFact,
+} from './facts';
 import {
   SIMULATION_SYSTEM_PHASES,
   type SimulationAdvanceTimings,
@@ -891,9 +899,24 @@ function dissolveHeirlessPolity(
     relation.tributePerTurn = 0;
     relation.lastChangedTurn = context.turn;
   }
+  const warEndedFacts: WarEndedFact[] = [];
   for (const war of world.wars.filter((candidate) => candidate.active && (candidate.attackerId === polity.id || candidate.defenderId === polity.id))) {
-    war.active = false;
-    war.endedTurn = context.turn;
+    const opponentId = war.attackerId === polity.id ? war.defenderId : war.attackerId;
+    const opponent = world.polities.find((candidate) => candidate.id === opponentId);
+    const fact = closeWar(world, context, war, {
+      result: war.attackerId === polity.id ? 'attacker_dissolved' : 'defender_dissolved',
+      winnerId: null,
+      loserId: polity.id,
+      reason: `${polity.name}统治谱系断绝并行政解体`,
+      indemnity: 0,
+      category: '政治',
+      importance: 5,
+      actorIds: [...(deceasedRuler ? [deceasedRuler.id] : []), ...(opponent ? [opponent.rulerId] : [])],
+      regionIds: transferredRegionIds,
+      causes: [{ label: '参战政权解体', role: '结果', weight: 1, evidence: `${polity.name}因无可接续统治者并入${recipient.name}，${war.id}失去参战主体` }],
+      sourceFactIds: territoryFacts.map((item) => item.id),
+    });
+    if (fact) warEndedFacts.push(fact);
   }
   rebuildTerritories(world);
   pushEvent(world, context, {
@@ -924,7 +947,7 @@ function dissolveHeirlessPolity(
         after: recipient.id,
       })),
     ],
-    ...projectFactLinks(territoryFacts),
+    ...projectFactLinks([...territoryFacts, ...warEndedFacts]),
   });
   return true;
 }
@@ -1681,7 +1704,7 @@ function startWar(
   emitDeclaration = true,
   kind: WarState['kind'] = 'interstate',
   goal: WarState['goal'] = kind === 'rebellion' ? '独立' : '边境',
-): WarState {
+): { war: WarState; fact: WarStartedFact } {
   world.counters.war += 1;
   const war: WarState = {
     id: `war_${String(world.counters.war).padStart(4, '0')}`,
@@ -1709,6 +1732,26 @@ function startWar(
   markWarDiplomacy(world, attacker.id, defender.id, context.turn);
   attacker.lastWarTurn = context.turn;
   defender.lastWarTurn = context.turn;
+  const warStartedFact = emitSimulationFact(world, context, {
+    kind: 'war_started',
+    category: kind === 'rebellion' ? '政治' : '外交',
+    importance: kind === 'rebellion' ? 5 : 4,
+    actorIds: [attacker.rulerId, defender.rulerId],
+    polityIds: [attacker.id, defender.id],
+    regionIds: [...war.targetRegionIds],
+    causes,
+    stateDeltas: [{ entityType: 'war', entityId: war.id, field: 'active', before: false, after: true }],
+    sourceFactIds: [],
+    payload: {
+      warId: war.id,
+      warKind: war.kind,
+      attackerId: war.attackerId,
+      defenderId: war.defenderId,
+      goal: war.goal,
+      targetRegionIds: [...war.targetRegionIds],
+      reason: war.reason,
+    },
+  }) as WarStartedFact;
   if (emitDeclaration) {
     const brokenCommitments = world.commitments.filter((item) => (
       item.status === '生效'
@@ -1736,6 +1779,7 @@ function startWar(
           after: '背约',
         })),
       ],
+      ...projectFactLinks(warStartedFact),
     });
     recordDiplomaticCommitmentBreach(
       world,
@@ -1745,7 +1789,79 @@ function startWar(
       declarationEvent,
     );
   }
-  return war;
+  return { war, fact: warStartedFact };
+}
+
+interface WarClosureInput {
+  result: WarEndResult;
+  winnerId: string | null;
+  loserId: string | null;
+  reason: string;
+  indemnity: number;
+  category: HistoryEvent['category'];
+  importance: 3 | 4 | 5;
+  actorIds: string[];
+  regionIds?: string[];
+  causes: EventCause[];
+  stateDeltas?: StateDelta[];
+  sourceFactIds?: string[];
+}
+
+function factWarId(fact: SimulationFact): string | null {
+  if (fact.kind === 'war_started' || fact.kind === 'war_ended' || fact.kind === 'battle') {
+    return fact.payload.warId;
+  }
+  return fact.kind === 'territory_control_changed' ? fact.payload.warId : null;
+}
+
+/**
+ * The only authoritative path that closes a war in new schema-4 turns. Keeping
+ * the state mutation and `war_ended` Fact together prevents Situation detectors
+ * from having to infer peace or destruction from Chronicle text.
+ */
+function closeWar(
+  world: WorldState,
+  context: MutableTurnContext,
+  war: WarState,
+  input: WarClosureInput,
+): WarEndedFact | null {
+  if (!war.active) return null;
+  war.active = false;
+  war.endedTurn = context.turn;
+  const inferredSourceFactIds = context.facts
+    .filter((fact) => fact.turn === context.turn && fact.kind !== 'war_ended' && factWarId(fact) === war.id)
+    .map((fact) => fact.id);
+  const sourceFactIds = [...new Set([
+    ...inferredSourceFactIds,
+    ...(input.sourceFactIds ?? []),
+  ])].slice(-8);
+  return emitSimulationFact(world, context, {
+    kind: 'war_ended',
+    category: input.category,
+    importance: input.importance,
+    actorIds: input.actorIds,
+    polityIds: [war.attackerId, war.defenderId],
+    regionIds: input.regionIds ?? [],
+    causes: input.causes,
+    stateDeltas: [
+      { entityType: 'war', entityId: war.id, field: 'active', before: true, after: false },
+      ...(input.stateDeltas ?? []),
+    ],
+    sourceFactIds,
+    payload: {
+      warId: war.id,
+      attackerId: war.attackerId,
+      defenderId: war.defenderId,
+      result: input.result,
+      winnerId: input.winnerId,
+      loserId: input.loserId,
+      reason: input.reason,
+      durationTurns: Math.max(1, context.turn - war.startedTurn + 1),
+      attackerScore: war.attackerScore,
+      defenderScore: war.defenderScore,
+      indemnity: input.indemnity,
+    },
+  }) as WarEndedFact;
 }
 
 function processRebellions(world: WorldState, context: MutableTurnContext): void {
@@ -1939,7 +2055,7 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
   ensureRoster(world, newPolity);
   const mobilizedArmy = defectingArmy ?? createArmy(world, newPolity, region, context, character);
   if (!mobilizedArmy) throw new Error('Rebellion passed its resource gate but could not mobilize an army');
-  const rebellionWar = startWar(
+  const { war: rebellionWar, fact: rebellionWarStartedFact } = startWar(
     world,
     context,
     newPolity,
@@ -2022,7 +2138,7 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
         : [{ entityType: 'army' as const, entityId: mobilizedArmy.id, field: 'soldiers', before: 0, after: mobilizedArmy.soldiers, delta: mobilizedArmy.soldiers }]),
       ...crackdownDeltas,
     ],
-    ...projectFactLinks(territoryFact),
+    ...projectFactLinks([rebellionWarStartedFact, territoryFact]),
   });
   repairAppointments(world, context);
 }
@@ -2157,6 +2273,7 @@ function eliminatePolity(
   victor: PolityState,
   region: RegionState,
   context: MutableTurnContext,
+  territoryFact: SimulationFact,
 ): void {
   if (!loser.alive) return;
   const treasuryBefore = loser.treasury;
@@ -2199,9 +2316,26 @@ function eliminatePolity(
     relation.tributePerTurn = 0;
     relation.lastChangedTurn = context.turn;
   }
+  const warEndedFacts: WarEndedFact[] = [];
   for (const war of world.wars.filter((item) => item.active && (item.attackerId === loser.id || item.defenderId === loser.id))) {
-    war.active = false;
-    war.endedTurn = context.turn;
+    const opponentId = war.attackerId === loser.id ? war.defenderId : war.attackerId;
+    const opponent = world.polities.find((polity) => polity.id === opponentId);
+    const fact = closeWar(world, context, war, {
+      result: war.attackerId === loser.id ? 'attacker_destroyed' : 'defender_destroyed',
+      // Another war may have delivered the final blow. Record the extinct side
+      // without falsely crediting every concurrent opponent as the conqueror.
+      winnerId: null,
+      loserId: loser.id,
+      reason: `${loser.name}政权灭亡`,
+      indemnity: 0,
+      category: '军事',
+      importance: 5,
+      actorIds: [loser.rulerId, ...(opponent ? [opponent.rulerId] : [])],
+      regionIds: [region.id],
+      causes: [{ label: '参战政权灭亡', role: '结果', weight: 1, evidence: `${loser.name}已无任何受控州域，${war.id}随之终止` }],
+      sourceFactIds: [territoryFact.id],
+    });
+    if (fact) warEndedFacts.push(fact);
   }
   pushEvent(world, context, {
     category: '政治',
@@ -2222,6 +2356,7 @@ function eliminatePolity(
       { entityType: 'polity', entityId: loser.id, field: 'treasury', before: treasuryBefore, after: 0, delta: -treasuryBefore },
       { entityType: 'polity', entityId: victor.id, field: 'treasury', before: victor.treasury - treasuryBefore, after: victor.treasury, delta: treasuryBefore },
     ],
+    ...projectFactLinks([territoryFact, ...warEndedFacts]),
   });
 }
 
@@ -2333,7 +2468,7 @@ function captureRegion(
   }
 
   if (defender.controlledRegionIds.length === 0) {
-    eliminatePolity(world, defender, attacker, region, context);
+    eliminatePolity(world, defender, attacker, region, context, territoryFact);
   }
 
   pushEvent(world, context, {
@@ -2549,12 +2684,23 @@ function endWar(
   reason: string,
 ): void {
   if (!war.active) return;
-  war.active = false;
-  war.endedTurn = context.turn;
   const attacker = world.polities.find((polity) => polity.id === war.attackerId);
   const defender = world.polities.find((polity) => polity.id === war.defenderId);
   markPeaceDiplomacy(world, war.attackerId, war.defenderId, context.turn);
-  if (!attacker || !defender) return;
+  if (!attacker || !defender) {
+    closeWar(world, context, war, {
+      result: 'negotiated_peace',
+      winnerId: null,
+      loserId: null,
+      reason,
+      indemnity: 0,
+      category: '外交',
+      importance: 3,
+      actorIds: [],
+      causes: [{ label: '参战方记录中止', role: '结果', weight: 1, evidence: `${war.id}不再处于进行中` }],
+    });
+    return;
+  }
   const scoreGap = war.attackerScore - war.defenderScore;
   const winner = Math.abs(scoreGap) >= 6 ? (scoreGap > 0 ? attacker : defender) : null;
   const loser = winner ? (winner.id === attacker.id ? defender : attacker) : null;
@@ -2569,6 +2715,33 @@ function endWar(
   }
   attacker.warWeariness = Math.round(clamp(attacker.warWeariness - 8));
   defender.warWeariness = Math.round(clamp(defender.warWeariness - 8));
+  const peaceCauses: EventCause[] = [
+    { label: '战争时长', role: '结构', weight: 0.26, evidence: `战争持续${context.turn - war.startedTurn + 1}季` },
+    { label: '战争疲劳', role: '条件', weight: 0.26, evidence: `双方疲劳${attacker.warWeariness + 8}/${defender.warWeariness + 8}` },
+    { label: '战果差距', role: '条件', weight: 0.27, evidence: `战果${war.attackerScore}:${war.defenderScore}，差${scoreGap}`, refs: [{ kind: 'entity', entityType: 'war', entityId: war.id, label: '战争战果' }] },
+    { label: '和约结果', role: '结果', weight: 0.21, evidence: winner && loser ? `${loser.name}实际支付${indemnity}，不凭空创造财富` : '维持控制线且无赔款' },
+  ];
+  const treasuryDeltas: StateDelta[] = winner && loser && indemnity > 0 ? [
+    { entityType: 'polity', entityId: loser.id, field: 'treasury', before: loserTreasuryBefore, after: loser.treasury, delta: -indemnity },
+    { entityType: 'polity', entityId: winner.id, field: 'treasury', before: winnerTreasuryBefore, after: winner.treasury, delta: indemnity },
+  ] : [];
+  const warEndedFact = closeWar(world, context, war, {
+    result: winner?.id === attacker.id
+      ? 'attacker_advantage'
+      : winner?.id === defender.id
+        ? 'defender_advantage'
+        : 'negotiated_peace',
+    winnerId: winner?.id ?? null,
+    loserId: loser?.id ?? null,
+    reason,
+    indemnity,
+    category: '外交',
+    importance: winner ? 4 : 3,
+    actorIds: [attacker.rulerId, defender.rulerId],
+    causes: peaceCauses,
+    stateDeltas: treasuryDeltas,
+  });
+  if (!warEndedFact) throw new Error(`Active war ${war.id} could not emit its ending Fact`);
   const peaceEvent = pushEvent(world, context, {
     category: '外交',
     kind: 'peace',
@@ -2578,19 +2751,12 @@ function endWar(
     actorIds: [attacker.rulerId, defender.rulerId],
     polityIds: [attacker.id, defender.id],
     regionIds: [],
-    causes: [
-      { label: '战争时长', role: '结构', weight: 0.26, evidence: `战争持续${context.turn - war.startedTurn + 1}季` },
-      { label: '战争疲劳', role: '条件', weight: 0.26, evidence: `双方疲劳${attacker.warWeariness + 8}/${defender.warWeariness + 8}` },
-      { label: '战果差距', role: '条件', weight: 0.27, evidence: `战果${war.attackerScore}:${war.defenderScore}，差${scoreGap}`, refs: [{ kind: 'entity', entityType: 'war', entityId: war.id, label: '战争战果' }] },
-      { label: '和约结果', role: '结果', weight: 0.21, evidence: winner && loser ? `${loser.name}实际支付${indemnity}，不凭空创造财富` : '维持控制线且无赔款' },
-    ],
+    causes: peaceCauses,
     stateDeltas: [
       { entityType: 'war', entityId: war.id, field: 'active', before: true, after: false },
-      ...(winner && loser && indemnity > 0 ? [
-        { entityType: 'polity' as const, entityId: loser.id, field: 'treasury', before: loserTreasuryBefore, after: loser.treasury, delta: -indemnity },
-        { entityType: 'polity' as const, entityId: winner.id, field: 'treasury', before: winnerTreasuryBefore, after: winner.treasury, delta: indemnity },
-      ] : []),
+      ...treasuryDeltas,
     ],
+    ...projectFactLinks(warEndedFact),
   });
   const relation = getDiplomacy(world, attacker.id, defender.id);
   if (relation) {
@@ -2606,8 +2772,23 @@ function processMilitary(world: WorldState, context: MutableTurnContext): void {
     const attacker = world.polities.find((polity) => polity.id === war.attackerId);
     const defender = world.polities.find((polity) => polity.id === war.defenderId);
     if (!attacker?.alive || !defender?.alive) {
-      war.active = false;
-      war.endedTurn = context.turn;
+      const attackerMissing = !attacker?.alive;
+      const defenderMissing = !defender?.alive;
+      closeWar(world, context, war, {
+        result: attackerMissing && !defenderMissing
+          ? 'attacker_destroyed'
+          : defenderMissing && !attackerMissing
+            ? 'defender_destroyed'
+            : 'negotiated_peace',
+        winnerId: null,
+        loserId: attackerMissing === defenderMissing ? null : attackerMissing ? war.attackerId : war.defenderId,
+        reason: '参战政权已不复存续',
+        indemnity: 0,
+        category: '军事',
+        importance: 5,
+        actorIds: [attacker?.rulerId, defender?.rulerId].filter((id): id is string => Boolean(id)),
+        causes: [{ label: '参战主体消失', role: '结果', weight: 1, evidence: `${war.id}的一方或双方已失去政权载体` }],
+      });
       continue;
     }
     // A newly declared regional rebellion spends its first quarter organizing and
@@ -2649,8 +2830,23 @@ function processMilitary(world: WorldState, context: MutableTurnContext): void {
     const attackerNow = world.polities.find((polity) => polity.id === war.attackerId);
     const defenderNow = world.polities.find((polity) => polity.id === war.defenderId);
     if (!attackerNow?.alive || !defenderNow?.alive) {
-      war.active = false;
-      war.endedTurn = context.turn;
+      const attackerMissing = !attackerNow?.alive;
+      const defenderMissing = !defenderNow?.alive;
+      closeWar(world, context, war, {
+        result: attackerMissing && !defenderMissing
+          ? 'attacker_destroyed'
+          : defenderMissing && !attackerMissing
+            ? 'defender_destroyed'
+            : 'negotiated_peace',
+        winnerId: null,
+        loserId: attackerMissing === defenderMissing ? null : attackerMissing ? war.attackerId : war.defenderId,
+        reason: '参战政权已不复存续',
+        indemnity: 0,
+        category: '军事',
+        importance: 5,
+        actorIds: [attackerNow?.rulerId, defenderNow?.rulerId].filter((id): id is string => Boolean(id)),
+        causes: [{ label: '参战主体消失', role: '结果', weight: 1, evidence: `${war.id}的一方或双方已失去政权载体` }],
+      });
     } else if (
       duration >= 24
       || (duration >= 12 && attackerNow.warWeariness + defenderNow.warWeariness >= 95)

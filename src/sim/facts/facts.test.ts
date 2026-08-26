@@ -7,6 +7,7 @@ import {
   deserializeWorld,
   emitSimulationFact,
   serializeWorld,
+  validateWorld,
   type CharacterState,
   type HistoryEvent,
   type SimulationFact,
@@ -15,6 +16,48 @@ import type { V03EventInput } from '../v03-context';
 import { processV02Society } from '../v02';
 
 describe('schema 4 authoritative fact layer', () => {
+  it('records every new war start and ending as an authoritative lifecycle Fact', () => {
+    const world = advanceWorldBy(createWorld('春战副将'), 40);
+    const startedFacts = world.facts.filter(
+      (fact): fact is Extract<SimulationFact, { kind: 'war_started' }> => fact.kind === 'war_started',
+    );
+    const endedFacts = world.facts.filter(
+      (fact): fact is Extract<SimulationFact, { kind: 'war_ended' }> => fact.kind === 'war_ended',
+    );
+
+    expect(world.wars.length).toBeGreaterThan(0);
+    expect(startedFacts.length).toBe(world.wars.length);
+    expect(new Set(startedFacts.map((fact) => fact.payload.warId)).size).toBe(startedFacts.length);
+    expect(endedFacts.length).toBe(world.wars.filter((war) => !war.active).length);
+    expect(new Set(endedFacts.map((fact) => fact.payload.warId)).size).toBe(endedFacts.length);
+
+    for (const war of world.wars) {
+      const start = startedFacts.find((fact) => fact.payload.warId === war.id);
+      expect(start?.payload).toMatchObject({
+        warId: war.id,
+        warKind: war.kind,
+        attackerId: war.attackerId,
+        defenderId: war.defenderId,
+        goal: war.goal,
+      });
+      expect(start?.stateDeltas).toContainEqual({
+        entityType: 'war', entityId: war.id, field: 'active', before: false, after: true,
+      });
+      const ending = endedFacts.find((fact) => fact.payload.warId === war.id);
+      if (war.active) {
+        expect(ending).toBeUndefined();
+      } else {
+        expect(ending?.payload.durationTurns).toBe((war.endedTurn ?? war.startedTurn) - war.startedTurn + 1);
+        expect(ending?.payload.attackerScore).toBe(war.attackerScore);
+        expect(ending?.payload.defenderScore).toBe(war.defenderScore);
+        expect(ending?.stateDeltas).toContainEqual({
+          entityType: 'war', entityId: war.id, field: 'active', before: true, after: false,
+        });
+      }
+    }
+    expect(validateWorld(world)).toEqual([]);
+  }, 15_000);
+
   it('credits deputies from unpublished battles and retains pre-disband participant snapshots', () => {
     const world = advanceWorldBy(createWorld('春战副将'), 8);
     const battles = world.facts.filter((fact): fact is Extract<SimulationFact, { kind: 'battle' }> => fact.kind === 'battle');
