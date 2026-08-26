@@ -53,6 +53,40 @@ async function snapshot(page) {
   return JSON.parse(await snapshotText(page));
 }
 
+async function selectPersonWithCommandRequest(page, rows, maximum = 120) {
+  const current = await snapshot(page);
+  const candidates = current.observer.commandCandidates ?? [];
+  const search = page.getByLabel('检索时人群像');
+  for (const candidate of candidates) {
+    const id = candidate.characterId;
+    await search.fill(candidate.name);
+    const row = page.locator(`.roster-panel button[data-roster-id="${id}"]`);
+    if (!await row.count()) continue;
+    await row.click();
+    const state = await waitForSnapshot(page, (currentState, expectedId) => (
+      currentState.interface.selected?.kind === 'person'
+      && currentState.interface.selected.id === expectedId
+    ), id);
+    if (state.interface.selectedDetail.agency?.commandRequest) {
+      await search.fill('');
+      return state;
+    }
+  }
+  await search.fill('');
+  const count = Math.min(maximum, await rows.count());
+  for (let index = 0; index < count; index += 1) {
+    const id = await rows.nth(index).getAttribute('data-roster-id');
+    if (!id) continue;
+    await rows.nth(index).click();
+    const state = await waitForSnapshot(page, (current, expectedId) => (
+      current.interface.selected?.kind === 'person'
+      && current.interface.selected.id === expectedId
+    ), id);
+    if (state.interface.selectedDetail.agency?.commandRequest) return state;
+  }
+  return null;
+}
+
 function assertRuntimePhase(state, phase, message) {
   const metric = state.runtimePerformance?.phases?.[phase];
   assert.ok(metric, message ?? `缺少 ${phase} 性能样本`);
@@ -1368,7 +1402,7 @@ try {
   assert.equal((await snapshot(page)).interface.overlay, 'population');
   await page.locator('#observer-causal-drawer button[aria-label="关闭因果链"]').click();
   await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
-  const hashBeforeBrowsing = afterManual.deterministicWorldHash;
+  let hashBeforeBrowsing = afterManual.deterministicWorldHash;
 
   const afterHistoryBrowse = await exerciseHistoryWorkbench(page, afterManual);
   assert.equal(afterHistoryBrowse.deterministicWorldHash, hashBeforeBrowsing);
@@ -1417,6 +1451,9 @@ try {
   assert.ok(selectedFamily.interface.selectedDetail.members.length > 0);
   assert.ok(selectedFamily.visibleFamilies.length > 0);
 
+  await page.click('button[data-observer-view="world"]');
+  const commandWorld = await advanceTo(page, 8);
+  hashBeforeBrowsing = commandWorld.deterministicWorldHash;
   await page.click('button[data-observer-view="people"]');
   await page.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
   const personRows = page.locator('.roster-panel button[data-roster-id]');
@@ -1429,13 +1466,21 @@ try {
   assert.equal(selectedPerson.interface.selectedDetail.kind, 'person');
   assert.ok(selectedPerson.interface.selectedDetail.biography.length > 0);
   assert.ok(selectedPerson.interface.selectedDetail.relationships?.length > 0, '人物名录中应有可观察的关系网络');
-  const personAgency = selectedPerson.interface.selectedDetail.agency;
+  const relationshipPersonId = selectedPerson.interface.selected.id;
+  const commandPerson = selectedPerson.interface.selectedDetail.agency?.commandRequest
+    ? selectedPerson
+    : await selectPersonWithCommandRequest(page, personRows);
+  assert.ok(commandPerson, '人物名录中应有由 C10 接管的副将请令计划');
+  const personAgency = commandPerson.interface.selectedDetail.agency;
   assert.equal(personAgency.availability, 'active');
   assert.equal(personAgency.desires.length, 2, '人物速览只展示两项长期所重');
   assert.ok(personAgency.primaryGoal?.label, '成年人物必须给出一项眼下所图');
   assert.ok(personAgency.secondaryGoals.length <= 2, '次要打算不得超过两项');
   assert.ok(personAgency.currentPlanSteps.length <= 5, '准备路径不得超过五步');
   assert.ok(Array.isArray(personAgency.memories) && personAgency.memories.length <= 16, '人物心事必须来自有界记忆账');
+  assert.ok(['planned', 'preparing', 'submitted', 'approved', 'blocked'].includes(personAgency.commandRequest.stage));
+  assert.ok(personAgency.commandRequest.evidence.length <= 3, '请令进展最多显示三条有利或掣肘');
+  assert.equal(personAgency.quarterChoice, null, 'C10 接管请令链后不得再显示 C09 同链对照');
   assert.equal(selectedPerson.observer.agencyContinuity?.matchesWorld, true, '人物观察账必须与当前世界锚点相合');
   assert.ok(selectedPerson.observer.agencyContinuity?.trackedCharacters <= 16, '人物观察账不得无界追踪人物');
   const agencyHash = selectedPerson.deterministicWorldHash;
@@ -1448,12 +1493,31 @@ try {
   await agencyPanel.getByRole('heading', { name: '放在心上的事' }).waitFor();
   assert.match(await agencyPanel.textContent(), /眼下所图/);
   assert.match(await agencyPanel.textContent(), /所行之路/);
-  assert.doesNotMatch(await agencyPanel.textContent(), /Goal|Plan|Shadow|Simulation Audit/);
+  const commandRequest = agencyPanel.locator('[data-testid="person-command-request"]');
+  await commandRequest.waitFor();
+  assert.equal(await commandRequest.getAttribute('data-stage'), personAgency.commandRequest.stage);
+  assert.match(await commandRequest.textContent(), new RegExp(personAgency.commandRequest.statusLabel));
+  assert.ok(await commandRequest.locator('[data-tone]').count() <= 3);
+  assert.doesNotMatch(await agencyPanel.textContent(), /Goal|Plan|Shadow|Simulation Audit|Intent|Resolver|request_independent_command|decisionScore|decisionThreshold/);
   await waitForVisualSettled(page.locator('.observer-inspector'));
   await page.screenshot({ path: `${ARTIFACT_DIR}/person-agency.png`, fullPage: true });
+  if (personAgency.commandRequest.sourceEventId) {
+    const source = commandRequest.locator('.observer-agency-command__source');
+    await source.click();
+    await page.waitForSelector('#observer-causal-drawer');
+    assert.equal((await snapshot(page)).interface.selectedEventId, personAgency.commandRequest.sourceEventId);
+    await page.locator('#observer-causal-drawer button[aria-label="关闭因果链"]').click();
+    await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
+  }
   await agencyPanel.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${ARTIFACT_DIR}/person-agency-plan.png`, fullPage: true });
   assert.equal((await snapshot(page)).deterministicWorldHash, agencyHash, '查看人物所图不得改变世界哈希');
+  if (commandPerson.interface.selected.id !== relationshipPersonId) {
+    await page.locator(`.roster-panel button[data-roster-id="${relationshipPersonId}"]`).click();
+    await waitForSnapshot(page, (state, id) => (
+      state.interface.selected?.kind === 'person' && state.interface.selected.id === id
+    ), relationshipPersonId);
+  }
   await page.getByRole('tab', { name: '关系' }).click();
   const relationshipMap = page.locator('.observer-relationship-map');
   await relationshipMap.waitFor();
@@ -1551,35 +1615,6 @@ try {
     tension: 'fallback',
   }, '移动端 T0');
   assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
-  await mobilePage.click('button[data-observer-view="people"]');
-  await mobilePage.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
-  await mobilePage.locator('.roster-panel button[data-roster-id]').first().click();
-  const mobilePerson = await snapshot(mobilePage);
-  assert.equal(mobilePerson.interface.selectedDetail.kind, 'person');
-  assert.equal(mobilePerson.interface.selectedDetail.agency.desires.length, 2);
-  assert.ok(mobilePerson.interface.selectedDetail.agency.primaryGoal?.label);
-  const quickMind = mobilePage.getByRole('button', { name: /看所图/ });
-  const quickMindBounds = await quickMind.boundingBox();
-  assert.ok(quickMindBounds && quickMindBounds.height >= 44, '移动端“看所图”触控高度不得小于44px');
-  await quickMind.click();
-  await mobilePage.waitForFunction(() => document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true');
-  const mobileAgency = mobilePage.getByRole('tabpanel');
-  await mobileAgency.getByRole('heading', { name: '放在心上的事' }).waitFor();
-  await mobileAgency.getByRole('heading', { name: '眼下所图' }).waitFor();
-  await assertWithinViewport(mobilePage, '.observer-inspector', '移动端人物所图不可横向溢出');
-  const mobileAgencyTabs = mobilePage.locator('.observer-inspector-tabs button');
-  for (let index = 0; index < await mobileAgencyTabs.count(); index += 1) {
-    const bounds = await mobileAgencyTabs.nth(index).boundingBox();
-    assert.ok(bounds && bounds.height >= 44, '移动端人物档案页签触控高度不得小于44px');
-  }
-  await waitForVisualSettled(mobilePage.locator('.observer-inspector'));
-  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-390x844.png`, fullPage: true });
-  await mobileAgency.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();
-  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-plan-390x844.png`, fullPage: true });
-  assert.equal((await snapshot(mobilePage)).deterministicWorldHash, mobileTurn0.deterministicWorldHash, '移动端查看人物所图不得改变世界哈希');
-  await mobilePage.locator('.observer-inspector button[aria-label="关闭档案"]').click();
-  await mobilePage.waitForSelector('.observer-inspector', { state: 'detached' });
-  await mobilePage.click('button[data-observer-view="world"]');
   const mobileMapLayout = await mobilePage.evaluate(() => {
     const stage = document.querySelector('.observer-stage')?.getBoundingClientRect();
     const map = document.querySelector('.world-map')?.getBoundingClientRect();
@@ -1647,6 +1682,49 @@ try {
     mobileTurn8Layout.stageLeft >= 0 && mobileTurn8Layout.stageRight <= mobileTurn8Layout.viewportWidth + 1,
     '移动端 T8 世界舞台必须仍完整覆盖视口',
   );
+  await mobilePage.click('button[data-observer-view="people"]');
+  await mobilePage.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
+  const mobilePersonRows = mobilePage.locator('.roster-panel button[data-roster-id]');
+  const mobilePerson = await selectPersonWithCommandRequest(mobilePage, mobilePersonRows);
+  assert.ok(mobilePerson, '移动端人物名录中应能找到副将请令计划');
+  assert.equal(mobilePerson.interface.selectedDetail.kind, 'person');
+  assert.equal(mobilePerson.interface.selectedDetail.agency.desires.length, 2);
+  assert.ok(mobilePerson.interface.selectedDetail.agency.primaryGoal?.label);
+  assert.ok(mobilePerson.interface.selectedDetail.agency.commandRequest);
+  const quickMind = mobilePage.getByRole('button', { name: /看所图/ });
+  const quickMindBounds = await quickMind.boundingBox();
+  assert.ok(quickMindBounds && quickMindBounds.height >= 44, '移动端“看所图”触控高度不得小于44px');
+  await quickMind.click();
+  await mobilePage.waitForFunction(() => document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true');
+  const mobileAgency = mobilePage.getByRole('tabpanel');
+  await mobileAgency.getByRole('heading', { name: '放在心上的事' }).waitFor();
+  await mobileAgency.getByRole('heading', { name: '眼下所图' }).waitFor();
+  const mobileCommand = mobileAgency.locator('[data-testid="person-command-request"]');
+  await mobileCommand.waitFor();
+  assert.equal(
+    await mobileCommand.getAttribute('data-stage'),
+    mobilePerson.interface.selectedDetail.agency.commandRequest.stage,
+  );
+  assert.ok(await mobileCommand.locator('[data-tone]').count() <= 3);
+  await assertWithinViewport(mobilePage, '.observer-inspector', '移动端人物所图不可横向溢出');
+  const mobileAgencyTabs = mobilePage.locator('.observer-inspector-tabs button');
+  for (let index = 0; index < await mobileAgencyTabs.count(); index += 1) {
+    const bounds = await mobileAgencyTabs.nth(index).boundingBox();
+    assert.ok(bounds && bounds.height >= 44, '移动端人物档案页签触控高度不得小于44px');
+  }
+  const mobileCommandSource = mobileCommand.locator('.observer-agency-command__source');
+  if (await mobileCommandSource.count()) {
+    const bounds = await mobileCommandSource.boundingBox();
+    assert.ok(bounds && bounds.height >= 44, '移动端请令原事入口触控高度不得小于44px');
+  }
+  await waitForVisualSettled(mobilePage.locator('.observer-inspector'));
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-390x844.png`, fullPage: true });
+  await mobileAgency.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-plan-390x844.png`, fullPage: true });
+  assert.equal((await snapshot(mobilePage)).deterministicWorldHash, mobileSituationState.deterministicWorldHash, '移动端查看人物所图不得改变世界哈希');
+  await mobilePage.locator('.observer-inspector button[aria-label="关闭档案"]').click();
+  await mobilePage.waitForSelector('.observer-inspector', { state: 'detached' });
+  await mobilePage.click('button[data-observer-view="world"]');
   const mobileSituationTrigger = mobileLeads.locator('.observer-leads__situation-shortcut');
   await mobileSituationTrigger.waitFor();
   assert.equal(await mobileSituationTrigger.isVisible(), true, '移动端紧凑线索条必须直接提供局势卷宗入口');

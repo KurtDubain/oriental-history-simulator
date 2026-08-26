@@ -741,6 +741,11 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
             && branch.head.hash === world.hash,
         } : null;
       })(),
+      commandCandidates: world.agencyDecisionSystem.actors.map((actor) => ({
+        characterId: actor.characterId,
+        name: characterName(actor.characterId),
+        status: actor.goal.status,
+      })),
     },
     interface: {
       view: options.view,

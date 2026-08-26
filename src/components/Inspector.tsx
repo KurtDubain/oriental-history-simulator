@@ -182,6 +182,25 @@ export interface PersonAgencyQuarterChoiceView {
   sourceEventId?: string | null;
 }
 
+export type PersonAgencyCommandRequestStage = 'planned' | 'preparing' | 'submitted' | 'approved' | 'blocked';
+
+export interface PersonAgencyCommandRequestEvidenceView {
+  tone: 'support' | 'barrier';
+  label: string;
+  detail: string;
+}
+
+export interface PersonAgencyCommandRequestView {
+  id: string;
+  stage: PersonAgencyCommandRequestStage;
+  periodLabel?: string | null;
+  statusLabel: string;
+  title: string;
+  summary: string;
+  evidence: readonly PersonAgencyCommandRequestEvidenceView[];
+  sourceEventId?: string | null;
+}
+
 export interface PersonAgencyView {
   availability: 'active' | 'dormant' | 'closed';
   reason: string;
@@ -194,6 +213,7 @@ export interface PersonAgencyView {
   recentDecision?: PersonAgencyDecisionView | null;
   memories?: readonly PersonAgencyMemoryView[];
   quarterChoice?: PersonAgencyQuarterChoiceView | null;
+  commandRequest?: PersonAgencyCommandRequestView | null;
 }
 
 export interface PersonInspectorData {
@@ -543,10 +563,10 @@ const PERSON_GOAL_STATUS_LABELS = {
 } satisfies Record<PersonAgencyGoalStatus, string>;
 
 const PERSON_PLAN_STATUS_LABELS = {
-  completed: '已成',
-  available: '当下',
-  blocked: '待时',
-  invalidated: '作罢',
+  completed: '条件已具',
+  available: '正在准备',
+  blocked: '尚待前项',
+  invalidated: '此路已断',
 } satisfies Record<PersonAgencyPlanStepStatus, string>;
 
 const PERSON_QUARTER_CHOICE_LABELS = {
@@ -574,7 +594,7 @@ function agencyEmptyGoalCopy(agency: PersonAgencyView) {
   return { title: '仍在权衡', detail: '此人还没有把心中所重化为明确打算。' };
 }
 
-function PersonAgencySections({
+export function PersonAgencySections({
   agency,
   onSelectEvent,
 }: {
@@ -588,6 +608,11 @@ function PersonAgencySections({
   const visibleMemories = memoriesExpanded ? memories : memories.slice(0, 3);
   const hiddenMemoryCount = Math.max(0, memories.length - visibleMemories.length);
   const quarterChoice = agency.quarterChoice;
+  const commandRequest = agency.commandRequest;
+  const commandSourceEventId = commandRequest
+    && ['submitted', 'approved', 'blocked'].includes(commandRequest.stage)
+    ? commandRequest.sourceEventId
+    : null;
   const choiceReasonLabel = quarterChoice?.outcome === 'aligned'
     ? '为何相合'
     : quarterChoice?.outcome === 'diverged'
@@ -678,6 +703,55 @@ function PersonAgencySections({
           </ol>
         ) : <p className="observer-inspector__empty">眼下还没有形成可行的准备路径。</p>}
       </section>
+
+      {commandRequest ? (
+        <section
+          className="observer-inspector__section observer-agency observer-agency-command"
+          aria-labelledby="person-agency-command-heading"
+          data-testid="person-command-request"
+          data-request-id={commandRequest.id}
+          data-stage={commandRequest.stage}
+        >
+          <h3 id="person-agency-command-heading">请令进展</h3>
+          <div className="observer-agency-command__record" data-stage={commandRequest.stage}>
+            <header>
+              {commandRequest.periodLabel ? <span>{commandRequest.periodLabel}</span> : <span>眼下</span>}
+              <strong role="status" aria-live="polite">{commandRequest.statusLabel}</strong>
+            </header>
+            <h4>{commandRequest.title}</h4>
+            <p>{commandRequest.summary}</p>
+            {commandRequest.evidence.length ? (
+              <dl className="observer-agency-command__evidence">
+                {commandRequest.evidence.slice(0, 3).map((item, index) => (
+                  <div key={`${item.tone}-${item.label}-${index}`} data-tone={item.tone}>
+                    <dt>{item.label}</dt>
+                    <dd>{item.detail}</dd>
+                  </div>
+                ))}
+              </dl>
+            ) : null}
+            {commandSourceEventId && onSelectEvent ? (
+              <button
+                type="button"
+                className="observer-agency-command__source"
+                onClick={() => onSelectEvent(commandSourceEventId)}
+              >
+                {commandRequest.stage === 'submitted'
+                  ? '查请令原事'
+                  : commandRequest.stage === 'approved'
+                    ? '查授令原事'
+                    : commandRequest.stage === 'blocked'
+                      ? commandRequest.statusLabel === '请令作罢'
+                        ? '查作罢原事'
+                        : commandRequest.statusLabel === '暂缓授令'
+                          ? '查暂缓原事'
+                          : '查未准原事'
+                      : '查本季原事'}
+              </button>
+            ) : null}
+          </div>
+        </section>
+      ) : null}
 
       <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-decision-heading">
         <h3 id="person-agency-decision-heading">最近取舍</h3>

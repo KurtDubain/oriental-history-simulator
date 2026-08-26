@@ -3,6 +3,14 @@ export type { FactTurnBuffer } from './emitter';
 export { projectFactLinks } from './projector';
 export type { ChronicleFactLinks } from './projector';
 export type {
+  AgencyIntentResolvedFact,
+  AgencyIntentResolvedFactPayload,
+  AgencyIntentResolutionCheck,
+  AgencyIntentResolutionOutcome,
+  AgencyIntentResolutionReason,
+  AgencyIntentResolutionSupportComponent,
+  AgencyIntentSubmittedFact,
+  AgencyIntentSubmittedFactPayload,
   AppointmentEndedFact,
   AppointmentFactPayload,
   AppointmentStartedFact,

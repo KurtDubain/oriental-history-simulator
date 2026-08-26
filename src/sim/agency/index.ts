@@ -1,4 +1,19 @@
 export {
+  AGENCY_DECISION_CLOSED_RETENTION_TURNS,
+  ARMY_COMMAND_CHANGE_COOLDOWN_TURNS,
+  COMMAND_CHANGE_PARTICIPANT_COOLDOWN_TURNS,
+  createAgencyDecisionSystemState,
+  INDEPENDENT_COMMAND_PLAN_ACTIONS,
+  MAX_AGENCY_DECISION_ACTORS,
+  MAX_AGENCY_GOAL_SOURCE_FACTS,
+  MAX_AGENCY_INTENT_ATTEMPTS,
+  MAX_AGENCY_INTENTS_PER_TURN,
+  MIN_INDEPENDENT_COMMAND_DEPUTY_TENURE_TURNS,
+  processAgencyDecisionSystem,
+  validateAgencyDecisionSystemState,
+} from './decision';
+
+export {
   MAX_PLAN_STEPS,
   MAX_RECENTLY_CLOSED_GOALS,
   MAX_SECONDARY_GOALS,
@@ -26,6 +41,21 @@ export {
   toPersonalMemoryPlayerViews,
   validateAgencySystemState,
 } from './memory';
+
+export type {
+  AgencyDecisionEventInput,
+  AgencyDecisionGoalState,
+  AgencyDecisionGoalStatus,
+  AgencyDecisionPlanState,
+  AgencyDecisionPlanStepState,
+  AgencyDecisionPlanStepStatus,
+  AgencyDecisionSystemState,
+  AgencyDecisionTurnContext,
+  AgencyTurnIntent,
+  CharacterAgencyDecisionState,
+  EmitAgencyDecisionEvent,
+  IndependentCommandPlanAction,
+} from './decision';
 
 export type {
   AgencyEntityKind,

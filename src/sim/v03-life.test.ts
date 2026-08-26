@@ -14,6 +14,7 @@ import {
   processV03Migration,
 } from './v03-life';
 import { createAgencySystemState } from './agency/memory';
+import { createAgencyDecisionSystemState } from './agency/decision';
 import { createSituationSystemState } from './situations';
 
 const goods = () => ({ '木材': 2_000, '铁器': 1_500, '马匹': 800, '盐': 1_500, '纺织品': 1_000, '奢侈品': 500 });
@@ -104,6 +105,7 @@ function testWorld(): WorldState {
     history: [], historyDigest: '', facts: [], factDigest: '', legacyArchiveBoundary: null, lastTurn: null,
     situationSystem: createSituationSystemState(-1),
     agencySystem: createAgencySystemState(-1),
+    agencyDecisionSystem: createAgencyDecisionSystemState(-1),
     counters: { character: 3, army: 0, polity: 1, war: 0, event: 0, family: 0, faction: 0, relationship: 0, office: 0, commitment: 0, fleet: 0, tradeCorridor: 0, navalOperation: 0, shipment: 0, shipProject: 0, fact: 0 },
     hash: '',
   };

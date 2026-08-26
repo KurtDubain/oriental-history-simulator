@@ -16,6 +16,7 @@ export const SIMULATION_SYSTEM_PHASES = [
   'disease',
   'knowledge',
   'military_careers',
+  'agency_decisions',
   'appointments',
   'situations',
   'personal_memory',

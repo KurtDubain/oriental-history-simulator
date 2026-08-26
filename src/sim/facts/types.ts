@@ -15,6 +15,8 @@ export type SimulationFactKind =
   | 'appointment_ended'
   | 'character_death'
   | 'marriage'
+  | 'agency_intent_submitted'
+  | 'agency_intent_resolved'
   | 'situation_milestone';
 
 export interface BattleForceFact {
@@ -112,6 +114,66 @@ export interface MarriageFactPayload {
   diplomatic: boolean;
 }
 
+export interface AgencyIntentSubmittedFactPayload {
+  actorId: string;
+  goalId: string;
+  goalType: 'secure_independent_command';
+  goalCreatedTurn: number;
+  planId: string;
+  planStepId: string;
+  action: 'request_independent_command';
+  attemptOrdinal: number;
+  targetArmyId: string;
+  polityId: string;
+  currentCommanderId: string;
+  appointingAuthorityId: string;
+}
+
+export type AgencyIntentResolutionOutcome = 'executed' | 'rejected' | 'deferred' | 'invalidated';
+export type AgencyIntentResolutionReason =
+  | 'permission_lost'
+  | 'insufficient_record'
+  | 'insufficient_support'
+  | 'competing_request'
+  | 'court_risk'
+  | 'claim_weaker'
+  | 'command_granted';
+
+export interface AgencyIntentResolutionSupportComponent {
+  source: 'commander_patronage' | 'ruler_patronage' | 'family_backing';
+  value: number;
+  passed: boolean;
+}
+
+export interface AgencyIntentResolutionCheck {
+  kind: 'permission' | 'resource' | 'relationship' | 'risk';
+  passed: boolean;
+  value: number;
+  threshold: number;
+  comparison: 'at_least' | 'at_most';
+  components?: AgencyIntentResolutionSupportComponent[];
+}
+
+export interface AgencyIntentResolvedFactPayload {
+  submissionFactId: string;
+  actorId: string;
+  goalId: string;
+  planId: string;
+  planStepId: string;
+  action: 'request_independent_command';
+  attemptOrdinal: number;
+  targetArmyId: string;
+  polityId: string;
+  previousCommanderId: string;
+  appointingAuthorityId: string;
+  outcome: AgencyIntentResolutionOutcome;
+  reasonCode: AgencyIntentResolutionReason;
+  retryAfterTurn: number | null;
+  checks: AgencyIntentResolutionCheck[];
+  decisionScore: number;
+  decisionThreshold: number;
+}
+
 export interface SituationMilestoneFactPayload {
   situationId: string;
   situationType: string;
@@ -148,6 +210,8 @@ export type AppointmentStartedFact = SimulationFactBase<'appointment_started', A
 export type AppointmentEndedFact = SimulationFactBase<'appointment_ended', AppointmentFactPayload>;
 export type CharacterDeathFact = SimulationFactBase<'character_death', CharacterDeathFactPayload>;
 export type MarriageFact = SimulationFactBase<'marriage', MarriageFactPayload>;
+export type AgencyIntentSubmittedFact = SimulationFactBase<'agency_intent_submitted', AgencyIntentSubmittedFactPayload>;
+export type AgencyIntentResolvedFact = SimulationFactBase<'agency_intent_resolved', AgencyIntentResolvedFactPayload>;
 export type SituationMilestoneFact = SimulationFactBase<'situation_milestone', SituationMilestoneFactPayload>;
 
 export type SimulationFact =
@@ -159,6 +223,8 @@ export type SimulationFact =
   | AppointmentEndedFact
   | CharacterDeathFact
   | MarriageFact
+  | AgencyIntentSubmittedFact
+  | AgencyIntentResolvedFact
   | SituationMilestoneFact;
 
 export type SimulationFactInput = SimulationFact extends infer Fact

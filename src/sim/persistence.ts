@@ -8,6 +8,7 @@ import { createV03OceanSystems } from './v03-ocean';
 import type { LegacyArchiveBoundary, SimulationFact } from './facts';
 import { createSituationSystemState } from './situations';
 import { createAgencySystemState } from './agency/memory';
+import { createAgencyDecisionSystemState } from './agency/decision';
 
 function migrateV02Systems(world: WorldState): void {
   (world as unknown as { schemaVersion: number }).schemaVersion = 3;
@@ -209,6 +210,13 @@ export function deserializeWorld(serialized: string): WorldState {
     // Early schema-4 saves predate PersonalMemory. Start at the live boundary;
     // Chronicle and earlier Facts are not replayed into memories retroactively.
     world.agencySystem = createAgencySystemState(world.turn - 1);
+    migrated = true;
+  }
+  if (!world.agencyDecisionSystem || typeof world.agencyDecisionSystem !== 'object') {
+    // C08-era schema-4 saves had memories but no authoritative Goal/Plan owner.
+    // Authenticate first, then begin at the live boundary. Never import the
+    // observer-only shadow ledger or replay earlier Facts into invented intent.
+    world.agencyDecisionSystem = createAgencyDecisionSystemState(world.turn - 1);
     migrated = true;
   }
   if (migrated) world.hash = computeWorldHash(world);

@@ -76,6 +76,36 @@ describe('quarterly runtime validation', () => {
     expect(codes).toContain('runtime.fact-digest');
   });
 
+  it('accepts an army raised, committed to battle and removed within one quarter as transient', () => {
+    let previous = createWorld('关河旧梦');
+    for (let turn = 0; turn < 33; turn += 1) previous = advanceWorld(previous);
+    const next = advanceWorld(previous);
+    const appendedEvents = next.history.slice(previous.history.length);
+    const appendedFacts = next.facts.slice(previous.facts.length);
+    const raisedArmyIds = appendedEvents
+      .filter((event) => event.kind === 'army_raised')
+      .flatMap((event) => event.stateDeltas)
+      .filter((delta) => (
+        delta.entityType === 'army'
+        && delta.field === 'soldiers'
+        && delta.before === 0
+        && typeof delta.after === 'number'
+        && delta.after > 0
+      ))
+      .map((delta) => delta.entityId)
+      .filter((armyId) => (
+        !previous.armies.some((army) => army.id === armyId)
+        && !next.armies.some((army) => army.id === armyId)
+      ));
+
+    expect(raisedArmyIds.length).toBeGreaterThan(0);
+    expect(raisedArmyIds.every((armyId) => appendedFacts.some((fact) => (
+      fact.kind === 'battle'
+      && [fact.payload.attacker, ...fact.payload.defenders].some((force) => force.armyId === armyId)
+    )))).toBe(true);
+    expect(validateTurnRuntime(previous, next)).toEqual([]);
+  });
+
   it('normalizes regional practice-state deltas to their authoritative collection', () => {
     const previous = createWorld('runtime-validator-practice-state-artifact');
     const next = structuredClone(advanceWorld(previous));
@@ -104,19 +134,46 @@ describe('quarterly runtime validation', () => {
   });
 
   it('does not iterate either pre-existing archive during runtime validation', () => {
-    const first = advanceWorld(createWorld('runtime-validator-no-archive-scan'));
-    const previous = advanceWorld(first);
+    let previous = createWorld('北境军令');
+    for (let turn = 0; turn < 12; turn += 1) previous = advanceWorld(previous);
     const next = advanceWorld(previous);
-    const throwOnIteration = (): never => {
-      throw new Error('runtime validator traversed an archive');
-    };
-    Object.defineProperty(previous.history, Symbol.iterator, { configurable: true, value: throwOnIteration });
-    Object.defineProperty(previous.facts, Symbol.iterator, { configurable: true, value: throwOnIteration });
-    Object.defineProperty(next.history, Symbol.iterator, { configurable: true, value: throwOnIteration });
-    Object.defineProperty(next.facts, Symbol.iterator, { configurable: true, value: throwOnIteration });
+    expect(next.agencyDecisionSystem.actors.some((actor) => actor.goal.sourceFactIds.length > 0)).toBe(true);
 
-    expect(() => validateTurnRuntime(previous, next)).not.toThrow();
-    expect(validateTurnRuntime(previous, next)).toEqual([]);
+    const guardedArchive = <Item>(
+      items: Item[],
+      prefixLength: number,
+      allowedPrefixIndices: ReadonlySet<number>,
+      label: string,
+    ): Item[] => new Proxy(items, {
+      get(target, property, receiver) {
+        if (property === Symbol.iterator
+          || (typeof property === 'string' && ['map', 'filter', 'find', 'some', 'reduce', 'forEach', 'flatMap'].includes(property))) {
+          throw new Error(`runtime validator scanned ${label}`);
+        }
+        if (typeof property === 'string' && /^\d+$/.test(property)) {
+          const index = Number(property);
+          if (index < prefixLength && !allowedPrefixIndices.has(index)) {
+            throw new Error(`runtime validator read unreferenced ${label} prefix index ${index}`);
+          }
+        }
+        return Reflect.get(target, property, receiver) as unknown;
+      },
+    });
+    const previousFactTail = new Set([previous.facts.length - 1]);
+    const nextAllowedFactPrefix = new Set(previousFactTail);
+    for (const actor of next.agencyDecisionSystem.actors) {
+      for (const factId of actor.goal.sourceFactIds) nextAllowedFactPrefix.add(Number(factId.slice(5)) - 1);
+      if (actor.lastResolutionFactId) nextAllowedFactPrefix.add(Number(actor.lastResolutionFactId.slice(5)) - 1);
+    }
+    const previousEventTail = new Set([previous.history.length - 1]);
+    previous.facts = guardedArchive(previous.facts, previous.facts.length, previousFactTail, 'previous Fact archive');
+    previous.history = guardedArchive(previous.history, previous.history.length, previousEventTail, 'previous Chronicle archive');
+    next.facts = guardedArchive(next.facts, previous.facts.length, nextAllowedFactPrefix, 'next Fact prefix');
+    next.history = guardedArchive(next.history, previous.history.length, previousEventTail, 'next Chronicle prefix');
+
+    const validate = (): ReturnType<typeof validateTurnRuntime> => validateTurnRuntime(previous, next);
+    expect(validate).not.toThrow();
+    expect(validate()).toEqual([]);
   });
 
   it('accepts authoritative dynamic sea-capacity snapshots across a longer run', () => {

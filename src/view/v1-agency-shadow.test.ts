@@ -41,6 +41,7 @@ import {
 } from './v1-agency-shadow';
 
 type AppointmentStartedFact = Extract<SimulationFact, { kind: 'appointment_started' }>;
+type AgencyIntentResolvedFact = Extract<SimulationFact, { kind: 'agency_intent_resolved' }>;
 
 interface PromotionFixture {
   before: WorldState;
@@ -500,6 +501,67 @@ describe('C09 observer-side Agency shadow ledger', () => {
     duplicateFact.facts.push(duplicate);
     duplicateFact.lastTurn!.factIds.push(duplicate.id);
     expect(observeLegacyDeputyPromotions(fixture.before, duplicateFact)).toEqual([]);
+
+    const ownedByC10 = structuredClone(fixture.after);
+    const ownedArmy = ownedByC10.armies.find((army) => army.id === fixture.armyId);
+    const ownedPolity = ownedByC10.polities.find((polity) => polity.id === ownedArmy?.polityId);
+    if (!ownedArmy || !ownedPolity) throw new Error('Expected authoritative promotion references');
+    const resolution: AgencyIntentResolvedFact = {
+      id: `fact-agency-resolution:${fixture.eventId}`,
+      turn: fixture.before.turn,
+      year: fixture.before.year,
+      season: fixture.before.season,
+      kind: 'agency_intent_resolved',
+      category: '军事',
+      importance: 4,
+      actorIds: [fixture.actorId, fixture.formerCommanderId, ownedPolity.rulerId],
+      polityIds: [ownedPolity.id],
+      regionIds: [ownedArmy.regionId],
+      causes: [],
+      stateDeltas: [],
+      sourceFactIds: [],
+      payload: {
+        submissionFactId: `fact-agency-submission:${fixture.eventId}`,
+        actorId: fixture.actorId,
+        goalId: `goal-agency:${fixture.actorId}`,
+        planId: `plan-agency:${fixture.actorId}`,
+        planStepId: `plan-agency:${fixture.actorId}:request`,
+        action: 'request_independent_command',
+        attemptOrdinal: 1,
+        targetArmyId: fixture.armyId,
+        polityId: ownedPolity.id,
+        previousCommanderId: fixture.formerCommanderId,
+        appointingAuthorityId: ownedPolity.rulerId,
+        outcome: 'executed',
+        reasonCode: 'command_granted',
+        retryAfterTurn: null,
+        checks: [
+          { kind: 'permission', passed: true, value: 100, threshold: 100, comparison: 'at_least' },
+          { kind: 'resource', passed: true, value: 70, threshold: 34, comparison: 'at_least' },
+          { kind: 'relationship', passed: true, value: 60, threshold: 40, comparison: 'at_least' },
+          { kind: 'risk', passed: true, value: 30, threshold: 55, comparison: 'at_most' },
+        ],
+        decisionScore: 50,
+        decisionThreshold: 24,
+      },
+    };
+    ownedByC10.facts.push(resolution);
+    ownedByC10.lastTurn!.factIds.push(resolution.id);
+    ownedByC10.history.find((item) => item.id === fixture.eventId)!.sourceFactIds.push(resolution.id);
+    expect(observeLegacyDeputyPromotions(fixture.before, ownedByC10)).toEqual([]);
+
+    const actionable = forceActionableCommand(fixture.before);
+    expect(actionable.actorId).toBe(fixture.actorId);
+    const opened = openTrackedBranch(fixture.before, [fixture.actorId]);
+    const advanced = advanceAgencyShadowBranch(
+      opened.ledger,
+      opened.branchId,
+      fixture.before,
+      ownedByC10,
+      [fixture.actorId],
+    );
+    expect(advanced.comparisons).toEqual([]);
+    expect(getAgencyShadowPlayerQuarterComparisons(advanced.ledger, opened.branchId)).toEqual([]);
   });
 
   it('records exact and suggestion-only quarter comparisons while keeping player wording natural and non-authoritative', () => {

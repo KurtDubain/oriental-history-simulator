@@ -1,6 +1,7 @@
 import type { LegacyArchiveBoundary, SimulationFact } from './facts/types';
 import type { SituationSystemState } from './situations/types';
 import type { AgencySystemState } from './agency/memory';
+import type { AgencyDecisionSystemState } from './agency/decision';
 export type { LegacyArchiveBoundary, SimulationFact } from './facts/types';
 
 export const SEASONS = ['春', '夏', '秋', '冬'] as const;
@@ -808,6 +809,7 @@ export interface WorldState {
   legacyArchiveBoundary: LegacyArchiveBoundary | null;
   situationSystem: SituationSystemState;
   agencySystem: AgencySystemState;
+  agencyDecisionSystem: AgencyDecisionSystemState;
   lastTurn: TurnReport | null;
   counters: WorldCounters;
   hash: string;

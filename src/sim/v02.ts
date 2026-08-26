@@ -29,6 +29,7 @@ interface V02TurnContext {
   season: Season;
   events: HistoryEvent[];
   facts: SimulationFact[];
+  appointmentSourceFactIdsByArmyId?: Record<string, string>;
 }
 
 interface V02EventInput {
@@ -1743,49 +1744,6 @@ export function processV02MilitaryCareers(world: WorldState, context: V02TurnCon
       continue;
     }
 
-    const promotionScore = deputy.leadership + deputy.merit * 0.55 + deputy.deputyExperience * 0.35
-      - commander.leadership - commander.merit * 0.2 + deputy.loyalty * 0.12;
-    const commanderDiscredited = commander.loyalty <= 34
-      || army.morale <= 20
-      || commanderRelation.grievance >= 58
-      || actionRecentlyRecorded(commander, '遭到清洗', context.turn, 12);
-    if (
-      commanderDiscredited
-      && deputy.deputyExperience >= 45
-      && deputy.merit >= 38
-      && promotionScore >= 32
-      && !actionRecentlyRecorded(deputy, '升任主帅', context.turn, 48)
-      && !actionRecentlyRecorded(deputy, '退居副将', context.turn, 80)
-    ) {
-      const oldCommanderId = army.commanderId;
-      army.commanderId = deputy.id;
-      army.deputyCommanderId = commander.id;
-      commander.commandingArmyId = null;
-      deputy.commandingArmyId = army.id;
-      const event = emit({
-        category: '军事',
-        kind: 'deputy_promoted',
-        title: `${deputy.name}升任${army.name}主帅`,
-        summary: `${deputy.name}凭副将战功、经验与统率超过原主帅，获授独立军令；${commander.name}退居副将。`,
-        importance: 4,
-        actorIds: [deputy.id, commander.id],
-        polityIds: [army.polityId],
-        regionIds: [army.regionId],
-        causes: [
-          { label: '副将历练', role: '结构', weight: 0.26, evidence: `副将经验${deputy.deputyExperience}、战功${deputy.merit}` },
-          { label: '能力比较', role: '条件', weight: 0.28, evidence: `新帅统率${deputy.leadership}，原帅统率${commander.leadership}` },
-          { label: '任命判断', role: '选择', weight: 0.26, evidence: `晋升效用${promotionScore.toFixed(1)}达到32` },
-          { label: '军令转移', role: '结果', weight: 0.2, evidence: `${oldCommanderId}→${deputy.id}` },
-        ],
-        stateDeltas: [{ entityType: 'army', entityId: army.id, field: 'commanderId', before: oldCommanderId, after: deputy.id }],
-      });
-      addBiography(deputy, event, '升任主帅');
-      addBiography(commander, event, '退居副将');
-      remember(world, deputy.id, commander.id, '提携', 12, event.summary, event.id);
-      resolveCommitment(world, duty, '履约', event);
-      continue;
-    }
-
     if (duty.dueTurn !== null && duty.dueTurn <= context.turn) {
       const event = emit({
         category: '军事',
@@ -1877,7 +1835,9 @@ export function syncOfficeAppointments(world: WorldState, turn: number, context?
             { label: '任命终止', role: '结果', weight: 0.35, evidence: `${office.id}于第${turn}回合结束` },
           ],
           stateDeltas: [{ entityType: 'office', entityId: office.id, field: 'active', before: true, after: false }],
-          sourceFactIds: [],
+          sourceFactIds: office.armyId && context.appointmentSourceFactIdsByArmyId?.[office.armyId]
+            ? [context.appointmentSourceFactIdsByArmyId[office.armyId] as string]
+            : [],
           payload: {
             appointmentId: office.id,
             action: 'ended',
@@ -1918,7 +1878,9 @@ export function syncOfficeAppointments(world: WorldState, turn: number, context?
           { label: '任命生效', role: '结果', weight: 0.35, evidence: `${appointment.id}于第${turn}回合开始` },
         ],
         stateDeltas: [{ entityType: 'office', entityId: appointment.id, field: 'active', before: false, after: true }],
-        sourceFactIds: [],
+        sourceFactIds: appointment.armyId && context.appointmentSourceFactIdsByArmyId?.[appointment.armyId]
+          ? [context.appointmentSourceFactIdsByArmyId[appointment.armyId] as string]
+          : [],
         payload: {
           appointmentId: appointment.id,
           action: 'started',

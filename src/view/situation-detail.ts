@@ -201,6 +201,8 @@ const FACT_KIND_LABELS: Record<SimulationFact['kind'], string> = {
   appointment_ended: '去职事实',
   character_death: '人物事实',
   marriage: '婚姻事实',
+  agency_intent_submitted: '军令请求',
+  agency_intent_resolved: '军令裁决',
   situation_milestone: '局势里程碑',
 };
 
@@ -321,6 +323,10 @@ function regionLabel(world: WorldState, id: string): string {
   return world.regions.find((item) => item.id === id)?.name ?? '未载州域';
 }
 
+function armyLabel(world: WorldState, id: string): string {
+  return world.armies.find((item) => item.id === id)?.name ?? '该军团';
+}
+
 function factCopy(world: WorldState, fact: SimulationFact): { title: string; summary: string } {
   if (fact.kind === 'war_started') {
     return {
@@ -365,6 +371,43 @@ function factCopy(world: WorldState, fact: SimulationFact): { title: string; sum
     return {
       title: `${characterLabel(world, fact.payload.leftCharacterId)}与${characterLabel(world, fact.payload.rightCharacterId)}成婚`,
       summary: fact.payload.diplomatic ? '这桩婚姻同时承担了政权之间的外交联结。' : '这桩婚姻进入双方家族谱牒。',
+    };
+  }
+  if (fact.kind === 'agency_intent_submitted') {
+    return {
+      title: `${characterLabel(world, fact.payload.actorId)}请掌${armyLabel(world, fact.payload.targetArmyId)}`,
+      summary: `这是其第${fact.payload.attemptOrdinal}次正式请求独立统军，现任主帅为${characterLabel(world, fact.payload.currentCommanderId)}。`,
+    };
+  }
+  if (fact.kind === 'agency_intent_resolved') {
+    const outcome = fact.payload.outcome === 'executed'
+      ? '获准生效'
+      : fact.payload.outcome === 'rejected'
+        ? '未获准许'
+        : fact.payload.outcome === 'deferred'
+          ? '暂缓再议'
+          : '因资格变化而作罢';
+    const reason: Record<typeof fact.payload.reasonCode, string> = {
+      permission_lost: '请求资格已经失去',
+      insufficient_record: '军中履历仍显不足',
+      insufficient_support: '主帅、主君或家门支持不足',
+      competing_request: '本季已有另一项换帅军令先获处理',
+      court_risk: '朝廷认为授令风险过高',
+      claim_weaker: '资历尚不足以取代现任主帅',
+      command_granted: '履历、支持与风险审查均已通过',
+    };
+    const claimAssessment = fact.payload.outcome === 'executed'
+      ? fact.payload.decisionScore - fact.payload.decisionThreshold >= 16
+        ? '其军中资望已明显足以受任'
+        : '其军中资望已足以受任'
+      : fact.payload.reasonCode === 'claim_weaker'
+        ? '与现任主帅相比，朝廷认为其资望仍欠火候'
+        : fact.payload.outcome === 'invalidated'
+          ? '原有请求已不再具备裁决条件'
+          : '朝廷本季没有授予军令';
+    return {
+      title: `${characterLabel(world, fact.payload.actorId)}所请军令${outcome}`,
+      summary: `${reason[fact.payload.reasonCode]}；${claimAssessment}。`,
     };
   }
   const transitionLabel = fact.payload.transition === 'formed'

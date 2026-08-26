@@ -732,6 +732,11 @@ export function observeLegacyDeputyPromotions(
     .filter((event) => event.kind === 'deputy_promoted')
     .sort((left, right) => stableCompare(left.id, right.id));
   const facts = exactIds(after.facts, report.factIds, before.turn);
+  const agencyResolutions = new Map(facts
+    .filter((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_resolved' }> => (
+      fact.kind === 'agency_intent_resolved'
+    ))
+    .map((fact) => [fact.id, fact]));
   const candidates: AgencyShadowLegacyPromotion[] = [];
 
   for (const event of events) {
@@ -745,6 +750,13 @@ export function observeLegacyDeputyPromotions(
     const delta = commandDeltas[0];
     const actorId = delta.after as string;
     const formerCommanderId = delta.before as string;
+    const ownedByAgencyDecision = event.sourceFactIds.some((factId) => {
+      const resolution = agencyResolutions.get(factId);
+      return resolution?.payload.outcome === 'executed'
+        && resolution.payload.actorId === actorId
+        && resolution.payload.targetArmyId === delta.entityId;
+    });
+    if (ownedByAgencyDecision) continue;
     if (
       actorId === formerCommanderId
       || !event.actorIds.includes(actorId)
@@ -897,7 +909,14 @@ export function reconcileAgencyShadowTurn(
   };
 
   let ordinal = ledger.nextOrdinal;
-  const drafts = comparisonDrafts(completePrepared, actuals);
+  const report = after.lastTurn as NonNullable<WorldState['lastTurn']>;
+  const authoritativeActorIds = new Set(exactIds(after.facts, report.factIds, before.turn)
+    .filter((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_resolved' }> => (
+      fact.kind === 'agency_intent_resolved'
+    ))
+    .map((fact) => fact.payload.actorId));
+  const drafts = comparisonDrafts(completePrepared, actuals)
+    .filter((draft) => !authoritativeActorIds.has(draft.actorId));
   const comparisons = drafts.map((draft): AgencyShadowComparison => {
     const recordedOrdinal = ordinal;
     ordinal = nextOrdinal(ordinal);

@@ -2,6 +2,13 @@ import { computeWorldHash, getDateForTurn } from './engine';
 import { stableCompare, stableHash } from './random';
 import { validateSituationSystemState } from './situations/reducer';
 import { reducePersonalMemorySystem, validateAgencySystemState } from './agency/memory';
+import {
+  MAX_AGENCY_DECISION_ACTORS,
+  MAX_AGENCY_GOAL_SOURCE_FACTS,
+  MAX_AGENCY_INTENT_ATTEMPTS,
+  MAX_AGENCY_INTENTS_PER_TURN,
+  validateAgencyDecisionSystemState,
+} from './agency/decision';
 import type { SituationRecentChange } from './situations/types';
 import type { HistoryEvent, InvariantViolation, SimulationFact, WorldState } from './types';
 
@@ -148,6 +155,10 @@ function sameOrderedStrings(left: readonly string[], right: readonly string[]): 
   return left.length === right.length && left.every((value, index) => value === right[index]);
 }
 
+function normalizedFactEntityIds(values: readonly string[]): string[] {
+  return [...new Set(values)].sort(stableCompare);
+}
+
 function warEndRolesAreConsistent(
   fact: Extract<SimulationFact, { kind: 'war_ended' }>,
 ): boolean {
@@ -172,6 +183,483 @@ function milestoneMatchesSituationChange(
     && fact.payload.transition === change.kind
     && fact.payload.fromPhase === change.fromPhase
     && fact.payload.toPhase === change.toPhase;
+}
+
+type AgencyIntentSubmittedFact = Extract<SimulationFact, { kind: 'agency_intent_submitted' }>;
+type AgencyIntentResolvedFact = Extract<SimulationFact, { kind: 'agency_intent_resolved' }>;
+type AgencyAppointmentFact = Extract<
+  SimulationFact,
+  { kind: 'appointment_started' | 'appointment_ended' }
+>;
+
+const AGENCY_CHECK_CONTRACT = {
+  permission: { threshold: 100, comparison: 'at_least' },
+  resource: { threshold: 34, comparison: 'at_least' },
+  relationship: { threshold: 40, comparison: 'at_least' },
+  risk: { threshold: 55, comparison: 'at_most' },
+} as const;
+
+function sourceFactMentionsDeputy(
+  fact: SimulationFact | undefined,
+  actorId: string,
+  armyId: string,
+): boolean {
+  if (!fact) return false;
+  if (fact.kind === 'battle') {
+    return [fact.payload.attacker, ...fact.payload.defenders].some((force) => (
+      force.armyId === armyId && force.deputyCommanderId === actorId
+    ));
+  }
+  if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
+    return fact.payload.holderId === actorId && fact.payload.armyId === armyId;
+  }
+  return false;
+}
+
+function agencyResolutionDeltasAreExact(fact: AgencyIntentResolvedFact): boolean {
+  const payload = fact.payload;
+  if (payload.outcome !== 'executed') return fact.stateDeltas.length === 0;
+  return stableHash(fact.stateDeltas) === stableHash([
+    {
+      entityType: 'army',
+      entityId: payload.targetArmyId,
+      field: 'commanderId',
+      before: payload.previousCommanderId,
+      after: payload.actorId,
+    },
+    {
+      entityType: 'army',
+      entityId: payload.targetArmyId,
+      field: 'deputyCommanderId',
+      before: payload.actorId,
+      after: payload.previousCommanderId,
+    },
+    {
+      entityType: 'character',
+      entityId: payload.actorId,
+      field: 'commandingArmyId',
+      before: null,
+      after: payload.targetArmyId,
+    },
+    {
+      entityType: 'character',
+      entityId: payload.previousCommanderId,
+      field: 'commandingArmyId',
+      before: payload.targetArmyId,
+      after: null,
+    },
+  ]);
+}
+
+function agencyCommandChronicleDeltasAreValid(
+  event: HistoryEvent,
+  resolution: AgencyIntentResolvedFact,
+  commitmentById: ReadonlyMap<string, WorldState['commitments'][number]>,
+): boolean {
+  if (resolution.payload.outcome !== 'executed') {
+    return stableHash(event.stateDeltas) === stableHash(resolution.stateDeltas);
+  }
+  const unmatched = event.stateDeltas.map((delta) => ({ delta, matched: false }));
+  for (const expected of resolution.stateDeltas) {
+    const match = unmatched.find((candidate) => (
+      !candidate.matched && stableHash(candidate.delta) === stableHash(expected)
+    ));
+    if (!match) return false;
+    match.matched = true;
+  }
+  return unmatched.filter((candidate) => !candidate.matched).every(({ delta }) => {
+    if (delta.entityType !== 'commitment'
+      || delta.field !== 'status'
+      || delta.before !== '生效'
+      || delta.after !== '失效') return false;
+    const commitment = commitmentById.get(delta.entityId);
+    return commitment?.kind === '军令'
+      && commitment.promisorId === resolution.payload.actorId
+      && commitment.promiseeId === resolution.payload.previousCommanderId
+      && commitment.status === '失效'
+      && commitment.resolvedTurn === resolution.turn
+      && commitment.resolutionEventId === event.id;
+  });
+}
+
+function agencyResolutionReasonIsCoherent(fact: AgencyIntentResolvedFact): boolean {
+  const payload = fact.payload;
+  const checks = new Map(payload.checks.map((check) => [check.kind, check]));
+  const permission = checks.get('permission')?.passed === true;
+  const resource = checks.get('resource')?.passed === true;
+  const relationship = checks.get('relationship')?.passed === true;
+  const risk = checks.get('risk')?.passed === true;
+  if (payload.outcome === 'invalidated' && payload.reasonCode === 'permission_lost') return !permission;
+  if (payload.outcome === 'deferred' && payload.reasonCode === 'insufficient_record') {
+    return permission && !resource;
+  }
+  if (payload.outcome === 'deferred' && payload.reasonCode === 'insufficient_support') {
+    return permission && resource && !relationship;
+  }
+  if (payload.outcome === 'deferred' && payload.reasonCode === 'competing_request') {
+    return permission && resource && relationship;
+  }
+  if (payload.outcome === 'rejected' && payload.reasonCode === 'court_risk') {
+    return permission && resource && relationship && !risk;
+  }
+  if (payload.outcome === 'rejected' && payload.reasonCode === 'claim_weaker') {
+    return permission && resource && relationship && risk && payload.decisionScore < payload.decisionThreshold;
+  }
+  return payload.outcome === 'executed'
+    && payload.reasonCode === 'command_granted'
+    && permission
+    && resource
+    && relationship
+    && risk
+    && payload.decisionScore >= payload.decisionThreshold;
+}
+
+function validateAgencyDecisionStateFromReferences(
+  world: WorldState,
+  getFactById: (factId: string) => SimulationFact | undefined,
+): readonly string[] {
+  const boundedActors = world.agencyDecisionSystem.actors.slice(0, MAX_AGENCY_DECISION_ACTORS + 1);
+  const referenceFactIds = new Set<string>();
+  for (const actor of boundedActors) {
+    for (const factId of actor.goal.sourceFactIds.slice(0, MAX_AGENCY_GOAL_SOURCE_FACTS + 1)) {
+      referenceFactIds.add(factId);
+    }
+    if (actor.lastResolutionFactId) referenceFactIds.add(actor.lastResolutionFactId);
+  }
+  const referencedFacts: SimulationFact[] = [];
+  for (const factId of referenceFactIds) {
+    const fact = getFactById(factId);
+    if (fact) referencedFacts.push(fact);
+  }
+  return validateAgencyDecisionSystemState({
+    ...world,
+    facts: referencedFacts,
+    agencyDecisionSystem: {
+      ...world.agencyDecisionSystem,
+      actors: boundedActors,
+    },
+  });
+}
+
+interface AgencyIntentArchiveValidationOptions {
+  codePrefix: 'runtime' | 'fact';
+  facts: readonly SimulationFact[];
+  getFactById: (factId: string) => SimulationFact | undefined;
+  events: readonly HistoryEvent[];
+  world: WorldState;
+  requireEveryPromotionOwned: boolean;
+  enforceCurrentSnapshot: boolean;
+}
+
+/**
+ * Validates the authoritative C10/C11 intent transaction. The projection and
+ * Chronicle are deliberately absent from the decision inputs: submitted Fact,
+ * resolved Fact, exact state deltas and appointment Facts form the ownership
+ * chain.
+ */
+function validateAgencyIntentArchive(
+  options: AgencyIntentArchiveValidationOptions,
+  violations: InvariantViolation[],
+): void {
+  const {
+    codePrefix,
+    facts,
+    getFactById,
+    events,
+    world,
+    requireEveryPromotionOwned,
+    enforceCurrentSnapshot,
+  } = options;
+  const code = (suffix: string): string => `${codePrefix}.agency-intent-${suffix}`;
+  const submissions: AgencyIntentSubmittedFact[] = [];
+  const resolutions: AgencyIntentResolvedFact[] = [];
+  const appointmentsBySourceFactId = new Map<string, AgencyAppointmentFact[]>();
+  for (const fact of facts) {
+    if (fact.kind === 'agency_intent_submitted') submissions.push(fact);
+    else if (fact.kind === 'agency_intent_resolved') resolutions.push(fact);
+    if (fact.kind !== 'appointment_started' && fact.kind !== 'appointment_ended') continue;
+    for (const sourceFactId of fact.sourceFactIds) {
+      const linked = appointmentsBySourceFactId.get(sourceFactId) ?? [];
+      linked.push(fact);
+      appointmentsBySourceFactId.set(sourceFactId, linked);
+    }
+  }
+  const eventsBySourceFactId = new Map<string, HistoryEvent[]>();
+  const promotionEvents: HistoryEvent[] = [];
+  for (const event of events) {
+    if (event.kind === 'deputy_promoted') promotionEvents.push(event);
+    for (const sourceFactId of event.sourceFactIds) {
+      const linked = eventsBySourceFactId.get(sourceFactId) ?? [];
+      linked.push(event);
+      eventsBySourceFactId.set(sourceFactId, linked);
+    }
+  }
+  const officesByRoleKey = new Map<string, WorldState['offices']>();
+  for (const office of world.offices) {
+    const key = `${office.armyId ?? ''}\u0000${office.holderId}\u0000${office.kind}`;
+    const linked = officesByRoleKey.get(key) ?? [];
+    linked.push(office);
+    officesByRoleKey.set(key, linked);
+  }
+  const commitmentById = new Map(world.commitments.map((commitment) => [commitment.id, commitment]));
+  const resolutionsBySubmission = new Map<string, AgencyIntentResolvedFact[]>();
+  const executedByTurnAndPolity = new Map<string, AgencyIntentResolvedFact[]>();
+  const earliestExecutedFactNumberByTurnAndPolity = new Map<string, number>();
+  for (const resolution of resolutions) {
+    const linked = resolutionsBySubmission.get(resolution.payload.submissionFactId) ?? [];
+    linked.push(resolution);
+    resolutionsBySubmission.set(resolution.payload.submissionFactId, linked);
+    if (resolution.payload.outcome !== 'executed') continue;
+    const key = `${resolution.turn}:${resolution.payload.polityId}`;
+    const cohort = executedByTurnAndPolity.get(key) ?? [];
+    cohort.push(resolution);
+    executedByTurnAndPolity.set(key, cohort);
+    earliestExecutedFactNumberByTurnAndPolity.set(
+      key,
+      Math.min(
+        earliestExecutedFactNumberByTurnAndPolity.get(key) ?? Number.POSITIVE_INFINITY,
+        numericIdSuffix(resolution.id),
+      ),
+    );
+  }
+  const submissionsByTurn = new Map<number, AgencyIntentSubmittedFact[]>();
+  for (const submission of submissions) {
+    const turnSubmissions = submissionsByTurn.get(submission.turn) ?? [];
+    turnSubmissions.push(submission);
+    submissionsByTurn.set(submission.turn, turnSubmissions);
+  }
+  for (const [turn, turnSubmissions] of submissionsByTurn) {
+    if (turnSubmissions.length > MAX_AGENCY_INTENTS_PER_TURN) {
+      push(
+        violations,
+        code('limit'),
+        `第${turn}回合提交${turnSubmissions.length}项人物意图，超过上限${MAX_AGENCY_INTENTS_PER_TURN}`,
+      );
+    }
+    for (const actorId of duplicateIds(turnSubmissions.map((fact) => fact.payload.actorId))) {
+      push(violations, code('actor-duplicate'), `第${turn}回合人物${actorId}重复提交意图`, actorId);
+    }
+    for (const armyId of duplicateIds(turnSubmissions.map((fact) => fact.payload.targetArmyId))) {
+      push(violations, code('target-duplicate'), `第${turn}回合军团${armyId}收到重复独立军令请求`, armyId);
+    }
+  }
+
+  for (const submission of submissions) {
+    const payload = submission.payload;
+    const exactActors = normalizedFactEntityIds([
+      payload.actorId,
+      payload.currentCommanderId,
+      payload.appointingAuthorityId,
+    ]);
+    const shapeValid = payload.goalType === 'secure_independent_command'
+      && payload.action === 'request_independent_command'
+      && payload.actorId.length > 0
+      && payload.goalId.length > 0
+      && payload.planId.length > 0
+      && payload.planStepId.length > 0
+      && payload.targetArmyId.length > 0
+      && payload.polityId.length > 0
+      && payload.currentCommanderId.length > 0
+      && payload.appointingAuthorityId.length > 0
+      && Number.isSafeInteger(payload.goalCreatedTurn)
+      && payload.goalCreatedTurn >= 0
+      && payload.goalCreatedTurn <= submission.turn
+      && Number.isSafeInteger(payload.attemptOrdinal)
+      && payload.attemptOrdinal >= 1
+      && payload.attemptOrdinal <= MAX_AGENCY_INTENT_ATTEMPTS
+      && sameOrderedStrings(submission.actorIds, exactActors)
+      && sameOrderedStrings(submission.polityIds, normalizedFactEntityIds([payload.polityId]))
+      && submission.stateDeltas.length === 0
+      && submission.sourceFactIds.length > 0;
+    if (!shapeValid) {
+      push(violations, code('submission-shape'), `${submission.id}的提交载荷或参与者不符合契约`, submission.id);
+    }
+    if (submission.sourceFactIds.some((sourceId) => {
+      const source = getFactById(sourceId);
+      return !source
+        || source.turn < payload.goalCreatedTurn
+        || !sourceFactMentionsDeputy(source, payload.actorId, payload.targetArmyId);
+    })) {
+      push(violations, code('submission-evidence'), `${submission.id}含有不属于该副将目标的履历事实`, submission.id);
+    }
+    const linkedResolutions = resolutionsBySubmission.get(submission.id) ?? [];
+    if (linkedResolutions.length !== 1) {
+      push(
+        violations,
+        code('pair'),
+        `${submission.id}应恰有一个同季裁决，实际${linkedResolutions.length}`,
+        submission.id,
+      );
+    }
+  }
+
+  for (const resolution of resolutions) {
+    const payload = resolution.payload;
+    const submission = getFactById(payload.submissionFactId);
+    if (!submission || submission.kind !== 'agency_intent_submitted' || submission.turn !== resolution.turn) {
+      push(violations, code('orphan-resolution'), `${resolution.id}没有同季权威提交`, resolution.id);
+      continue;
+    }
+    const submitted = submission.payload;
+    const identityValid = payload.actorId === submitted.actorId
+      && payload.goalId === submitted.goalId
+      && payload.planId === submitted.planId
+      && payload.planStepId === submitted.planStepId
+      && payload.action === submitted.action
+      && payload.attemptOrdinal === submitted.attemptOrdinal
+      && payload.targetArmyId === submitted.targetArmyId
+      && payload.polityId === submitted.polityId
+      && payload.previousCommanderId === submitted.currentCommanderId
+      && payload.appointingAuthorityId === submitted.appointingAuthorityId
+      && sameOrderedStrings(resolution.actorIds, normalizedFactEntityIds([
+        payload.actorId,
+        payload.previousCommanderId,
+        payload.appointingAuthorityId,
+      ]))
+      && sameOrderedStrings(resolution.polityIds, normalizedFactEntityIds([payload.polityId]))
+      && sameOrderedStrings(resolution.sourceFactIds, [submission.id]);
+    if (!identityValid) {
+      push(violations, code('identity'), `${resolution.id}与提交${submission.id}的身份字段不一致`, resolution.id);
+    }
+    const checkKinds = payload.checks.map((check) => check.kind);
+    const checksValid = payload.checks.length === 4
+      && duplicateIds(checkKinds).length === 0
+      && (Object.keys(AGENCY_CHECK_CONTRACT) as Array<keyof typeof AGENCY_CHECK_CONTRACT>)
+        .every((kind) => {
+          const actual = payload.checks.find((check) => check.kind === kind);
+          const expected = AGENCY_CHECK_CONTRACT[kind];
+          if (!actual) return false;
+          return Number.isFinite(actual.value)
+            && actual.value >= 0
+            && actual.value <= 100
+            && actual.threshold === expected.threshold
+            && actual.comparison === expected.comparison
+            && actual.passed === (
+              actual.comparison === 'at_least'
+                ? actual.value >= actual.threshold
+                : actual.value <= actual.threshold
+            );
+        });
+    if (!checksValid) {
+      push(violations, code('checks'), `${resolution.id}的资格、资源、关系或风险检查无效`, resolution.id);
+    }
+    const retryValid = payload.outcome === 'executed' || payload.outcome === 'invalidated'
+      ? payload.retryAfterTurn === null
+      : payload.retryAfterTurn === resolution.turn + (payload.outcome === 'deferred' ? 4 : 8);
+    if (!Number.isSafeInteger(payload.decisionScore)
+      || !Number.isSafeInteger(payload.decisionThreshold)
+      || payload.decisionThreshold <= 0
+      || !retryValid
+      || !agencyResolutionReasonIsCoherent(resolution)) {
+      push(violations, code('outcome'), `${resolution.id}的裁决结果、理由或再议时间不一致`, resolution.id);
+    }
+    if (!agencyResolutionDeltasAreExact(resolution)) {
+      push(violations, code('deltas'), `${resolution.id}没有记录唯一且完整的统军权转换`, resolution.id);
+    }
+
+    const expectedEventKind = payload.outcome === 'executed'
+      ? 'deputy_promoted'
+      : payload.outcome === 'deferred'
+        ? 'command_request_deferred'
+        : payload.outcome === 'rejected'
+          ? 'command_request_rejected'
+          : 'command_request_invalidated';
+    const matchingEvents = (eventsBySourceFactId.get(resolution.id) ?? []).filter((event) => (
+      event.kind === expectedEventKind
+      && event.turn === resolution.turn
+      && sameOrderedStrings(event.sourceFactIds, [submission.id, resolution.id])
+      && agencyCommandChronicleDeltasAreValid(event, resolution, commitmentById)
+    ));
+    if (matchingEvents.length !== 1) {
+      push(violations, code('chronicle'), `${resolution.id}没有唯一且一致的史册投影`, resolution.id);
+    }
+
+    if (payload.outcome === 'executed') {
+      const requiredAppointments = [
+        ['appointment_ended', '军团副将', payload.actorId],
+        ['appointment_started', '军团主帅', payload.actorId],
+        ['appointment_started', '军团副将', payload.previousCommanderId],
+      ] as const;
+      const linkedAppointments = (appointmentsBySourceFactId.get(resolution.id) ?? [])
+        .filter((fact) => fact.payload.armyId === payload.targetArmyId);
+      // The appointment synchronizer may also close a stale commander office
+      // discovered in this pass. Require the three transitions implied by the
+      // authoritative role swap, while allowing those additional repairs to
+      // retain the same resolution source.
+      const appointmentsValid = linkedAppointments.length >= requiredAppointments.length
+        && linkedAppointments.every((fact) => (
+          fact.payload.polityId === payload.polityId
+          && sameOrderedStrings(fact.sourceFactIds, [resolution.id])
+        ))
+        && requiredAppointments.every(([kind, officeKind, holderId]) => linkedAppointments.filter((fact) => (
+          fact.kind === kind
+          && fact.payload.officeKind === officeKind
+          && fact.payload.holderId === holderId
+        )).length === 1);
+      if (!appointmentsValid) {
+        push(violations, code('appointments'), `${resolution.id}没有同步唯一的新主帅、新副将与旧副将卸任`, resolution.id);
+      }
+      const previousCommanderRoleKey = `${payload.targetArmyId}\u0000${payload.previousCommanderId}\u0000军团主帅`;
+      const previousCommanderMainOffices = (officesByRoleKey.get(previousCommanderRoleKey) ?? []).filter((office) => (
+        office.appointedTurn < resolution.turn
+        && (office.endedTurn === null || office.endedTurn >= resolution.turn)
+      ));
+      if (previousCommanderMainOffices.some((office) => (
+        office.endedTurn !== resolution.turn
+        || !linkedAppointments.some((fact) => (
+          fact.kind === 'appointment_ended'
+          && fact.payload.appointmentId === office.id
+          && fact.payload.officeKind === '军团主帅'
+          && fact.payload.holderId === payload.previousCommanderId
+        ))
+      ))) {
+        push(
+          violations,
+          code('previous-commander-office'),
+          `${resolution.id}没有关闭裁决前实际存在的前主帅职务`,
+          resolution.id,
+        );
+      }
+      if (enforceCurrentSnapshot) {
+        const army = world.armies.find((item) => item.id === payload.targetArmyId);
+        const actor = world.characters.find((item) => item.id === payload.actorId);
+        const previousCommander = world.characters.find((item) => item.id === payload.previousCommanderId);
+        if (!army
+          || army.commanderId !== payload.actorId
+          || army.deputyCommanderId !== payload.previousCommanderId
+          || actor?.commandingArmyId !== payload.targetArmyId
+          || previousCommander?.commandingArmyId !== null) {
+          push(violations, code('snapshot'), `${resolution.id}与本季结束时的统军权状态不一致`, resolution.id);
+        }
+      }
+    }
+  }
+
+  for (const [key, cohort] of executedByTurnAndPolity) {
+    if (cohort.length > 1) {
+      push(violations, code('conflict-owner'), `${key}同季出现${cohort.length}项获准独立军令`);
+    }
+  }
+  for (const resolution of resolutions) {
+    if (resolution.payload.reasonCode !== 'competing_request') continue;
+    const key = `${resolution.turn}:${resolution.payload.polityId}`;
+    const firstGrant = earliestExecutedFactNumberByTurnAndPolity.get(key);
+    const priorGrant = firstGrant !== undefined && firstGrant < numericIdSuffix(resolution.id);
+    if (!priorGrant) {
+      push(violations, code('conflict-order'), `${resolution.id}声称请求冲突但此前没有同政权获准军令`, resolution.id);
+    }
+  }
+
+  for (const event of promotionEvents) {
+    const owners = event.sourceFactIds
+      .map((id) => getFactById(id))
+      .filter((fact): fact is AgencyIntentResolvedFact => (
+        fact?.kind === 'agency_intent_resolved' && fact.payload.outcome === 'executed'
+      ));
+    if (requireEveryPromotionOwned && owners.length !== 1) {
+      push(violations, code('single-owner'), `${event.id}副将晋升不归属于唯一的军令裁决`, event.id);
+    }
+  }
 }
 
 /**
@@ -362,6 +850,44 @@ function validateRuntimeFact(
   }
 }
 
+function authoritativeTransientArmyIds(
+  appendedFacts: readonly SimulationFact[],
+  appendedEvents: readonly HistoryEvent[],
+): ReadonlySet<string> {
+  const raisedArmyIds = new Set<string>();
+  for (const event of appendedEvents) {
+    if (event.kind !== 'army_raised') continue;
+    for (const delta of event.stateDeltas) {
+      if (delta.entityType === 'army'
+        && delta.field === 'soldiers'
+        && delta.before === 0
+        && typeof delta.after === 'number'
+        && delta.after > 0) raisedArmyIds.add(delta.entityId);
+    }
+  }
+  const explainedArmyIds = new Set<string>();
+  for (const fact of appendedFacts) {
+    if (fact.kind !== 'battle') continue;
+    for (const force of [fact.payload.attacker, ...fact.payload.defenders]) {
+      if (fact.stateDeltas.some((delta) => delta.entityType === 'army' && delta.entityId === force.armyId)) {
+        explainedArmyIds.add(force.armyId);
+      }
+    }
+  }
+  const removalEventKinds = new Set(['army_disbanded', 'army_destroyed', 'army_demobilized', 'army_removed']);
+  for (const event of appendedEvents) {
+    for (const delta of event.stateDeltas) {
+      if (delta.entityType !== 'army') continue;
+      const explicitRemoval = delta.field === 'soldiers'
+        && typeof delta.before === 'number'
+        && delta.before > 0
+        && delta.after === 0;
+      if (explicitRemoval || removalEventKinds.has(event.kind)) explainedArmyIds.add(delta.entityId);
+    }
+  }
+  return new Set([...raisedArmyIds].filter((id) => explainedArmyIds.has(id)));
+}
+
 /**
  * Validate only the completed turn and current authoritative snapshot. This
  * function deliberately reads at most the previous history tail plus newly
@@ -445,6 +971,63 @@ export function validateTurnRuntime(
     previous.factDigest,
   );
   if (next.factDigest !== expectedFactDigest) push(violations, 'runtime.fact-digest', '本季增量事实与事实摘要不一致');
+  if (previous.agencyDecisionSystem.reviewedThroughTurn !== previous.turn - 1) {
+    push(violations, 'runtime.agency-decision-parent', '推进前人物决策游标与世界回合不一致');
+  }
+  const runtimeFactById = (factId: string): SimulationFact | undefined => {
+    if (!/^fact_\d+$/.test(factId)) return undefined;
+    const candidate = next.facts[numericIdSuffix(factId) - 1];
+    return candidate?.id === factId ? candidate : undefined;
+  };
+  // Resolve only the bounded Facts reachable from retained decision accounts;
+  // never rebuild a map for the append-only archive during a live quarter.
+  for (const message of validateAgencyDecisionStateFromReferences(next, runtimeFactById)) {
+    push(violations, 'runtime.agency-decision-state', message);
+  }
+  validateAgencyIntentArchive({
+    codePrefix: 'runtime',
+    facts: appendedFacts,
+    getFactById: runtimeFactById,
+    events: appendedEvents,
+    world: next,
+    requireEveryPromotionOwned: true,
+    enforceCurrentSnapshot: true,
+  }, violations);
+  const appendedAgencyResolutions = appendedFacts.filter(
+    (fact): fact is AgencyIntentResolvedFact => fact.kind === 'agency_intent_resolved',
+  );
+  for (const resolution of appendedAgencyResolutions) {
+    const actorState = next.agencyDecisionSystem.actors.find((actor) => actor.characterId === resolution.payload.actorId);
+    const requestExhausted = resolution.payload.attemptOrdinal >= MAX_AGENCY_INTENT_ATTEMPTS
+      && resolution.payload.outcome !== 'executed'
+      && resolution.payload.outcome !== 'invalidated';
+    const expectedGoalStatus = resolution.payload.outcome === 'executed'
+      ? 'achieved'
+      : resolution.payload.outcome === 'invalidated' || requestExhausted
+        ? 'invalidated'
+        : 'active';
+    const expectedClosureReason = resolution.payload.outcome === 'executed'
+      ? 'command_obtained'
+      : requestExhausted
+        ? 'request_exhausted'
+        : resolution.payload.outcome === 'invalidated'
+          ? 'position_lost'
+          : null;
+    if (!actorState
+      || actorState.lastResolutionFactId !== resolution.id
+      || actorState.attemptOrdinal !== resolution.payload.attemptOrdinal
+      || actorState.nextEligibleIntentTurn !== (resolution.payload.retryAfterTurn ?? previous.turn)
+      || actorState.goal.id !== resolution.payload.goalId
+      || actorState.goal.status !== expectedGoalStatus
+      || actorState.goal.closureReason !== expectedClosureReason) {
+      push(
+        violations,
+        'runtime.agency-intent-decision-state',
+        `${resolution.id}没有归并到唯一的人物目标与计划状态`,
+        resolution.id,
+      );
+    }
+  }
   if (next.agencySystem.version !== 1 || next.agencySystem.memoryThroughTurn !== previous.turn) {
     push(violations, 'runtime.personal-memory-turn', `人物记忆应结算至回合${previous.turn}`);
   }
@@ -677,6 +1260,7 @@ export function validateTurnRuntime(
   }
 
   if (artifacts.changedEntityIds) {
+    const transientArmyIds = authoritativeTransientArmyIds(appendedFacts, appendedEvents);
     for (const [kind, ids] of Object.entries(artifacts.changedEntityIds) as Array<[
       RuntimeEntityKind,
       readonly string[] | undefined,
@@ -690,7 +1274,9 @@ export function validateTurnRuntime(
         push(violations, 'runtime.changed-id-duplicate', `${kind}重复声明变更ID ${duplicate}`, duplicate);
       }
       for (const id of changedIds) {
-        if (!knownIds.has(id)) push(violations, 'runtime.changed-id', `${kind}声明未知变更ID ${id}`, id);
+        if (!knownIds.has(id) && (kind !== 'army' || !transientArmyIds.has(id))) {
+          push(violations, 'runtime.changed-id', `${kind}声明未知变更ID ${id}`, id);
+        }
       }
     }
   }
@@ -860,6 +1446,25 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   for (const message of validateAgencySystemState(world)) {
     push(violations, 'agency.memory-state', message);
   }
+  for (const message of validateAgencyDecisionStateFromReferences(world, (factId) => factById.get(factId))) {
+    push(violations, 'agency.decision-state', message);
+  }
+  const firstAgencyIntentTurn = world.facts.reduce((earliest, fact) => (
+    fact.kind === 'agency_intent_submitted' ? Math.min(earliest, fact.turn) : earliest
+  ), Number.POSITIVE_INFINITY);
+  const agencyDecisionEvents = world.history.filter((event) => (
+    event.kind !== 'deputy_promoted'
+    || (Number.isFinite(firstAgencyIntentTurn) && event.turn >= firstAgencyIntentTurn)
+  ));
+  validateAgencyIntentArchive({
+    codePrefix: 'fact',
+    facts: world.facts,
+    getFactById: (factId) => factById.get(factId),
+    events: agencyDecisionEvents,
+    world,
+    requireEveryPromotionOwned: true,
+    enforceCurrentSnapshot: false,
+  }, violations);
   const situationById = new Map(world.situationSystem.situations.map((situation) => [situation.id, situation]));
   const validateSituationFactId = (factId: string, ownerId: string, role: string): void => {
     if (!factById.has(factId)) push(violations, 'situation.fact', `${ownerId}的${role}引用未知事实${factId}`, ownerId);
@@ -1751,9 +2356,20 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       const promotedId = event.stateDeltas.find((delta) => delta.field === 'commanderId')?.after;
       const firstBattleTurn = typeof promotedId === 'string' ? firstDeputyBattleTurn.get(promotedId) : undefined;
       const hasBattleEvidence = firstBattleTurn !== undefined && firstBattleTurn <= event.turn;
+      const hasAgencyDecisionEvidence = event.sourceFactIds.some((factId) => {
+        const fact = factById.get(factId);
+        return fact?.kind === 'agency_intent_resolved'
+          && fact.payload.outcome === 'executed'
+          && fact.payload.actorId === promotedId;
+      });
       const isLegacyArchiveEvent = eventIndex < (world.legacyArchiveBoundary?.historyEventCount ?? 0);
-      if (!hasBattleEvidence && !isLegacyArchiveEvent) {
-        push(violations, 'event.deputy-promotion-evidence', `${event.id}副将晋升缺少BattleFact中的副将参战证据`, event.id);
+      if (!hasBattleEvidence && !hasAgencyDecisionEvidence && !isLegacyArchiveEvent) {
+        push(
+          violations,
+          'event.deputy-promotion-evidence',
+          `${event.id}副将晋升既无BattleFact参战履历，也无获准军令裁决`,
+          event.id,
+        );
       }
     }
   }

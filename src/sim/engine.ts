@@ -52,6 +52,11 @@ import {
 import { createSituationSystemState, processSituationSystem } from './situations';
 import { createAgencySystemState, reducePersonalMemorySystem } from './agency/memory';
 import {
+  createAgencyDecisionSystemState,
+  processAgencyDecisionSystem,
+  type AgencyDecisionTurnContext,
+} from './agency/decision';
+import {
   SEASONS,
   type ArmyState,
   type CharacterState,
@@ -66,7 +71,7 @@ import {
   type WorldState,
 } from './types';
 
-interface MutableTurnContext extends V03TurnContext {}
+interface MutableTurnContext extends V03TurnContext, AgencyDecisionTurnContext {}
 
 interface EventInput {
   category: HistoryEvent['category'];
@@ -540,6 +545,7 @@ export function computeWorldHash(world: WorldState): string {
   void _legacyLastTurn;
   const hasSituationSystem = Object.prototype.hasOwnProperty.call(world, 'situationSystem');
   const hasAgencySystem = Object.prototype.hasOwnProperty.call(world, 'agencySystem');
+  const hasAgencyDecisionSystem = Object.prototype.hasOwnProperty.call(world, 'agencyDecisionSystem');
   return stableHash({
     ...schema4Base,
     characters,
@@ -549,6 +555,7 @@ export function computeWorldHash(world: WorldState): string {
     legacyArchiveBoundary: world.legacyArchiveBoundary,
     ...(hasSituationSystem ? { situationSystem: world.situationSystem } : {}),
     ...(hasAgencySystem ? { agencySystem: world.agencySystem } : {}),
+    ...(hasAgencyDecisionSystem ? { agencyDecisionSystem: world.agencyDecisionSystem } : {}),
   });
 }
 
@@ -608,6 +615,7 @@ export function createWorld(seed: string): WorldState {
     legacyArchiveBoundary: null,
     situationSystem: createSituationSystemState(-1),
     agencySystem: createAgencySystemState(-1),
+    agencyDecisionSystem: createAgencyDecisionSystemState(-1),
     lastTurn: null,
     counters: { character: characters.length, army: 0, polity: polities.length, war: 0, event: 1, family: 0, faction: 0, relationship: 0, office: 0, commitment: 0, fleet: 0, tradeCorridor: 0, navalOperation: 0, shipment: 0, shipProject: 0, fact: 0 },
     hash: '',
@@ -2875,6 +2883,8 @@ function createTurnContext(world: WorldState): MutableTurnContext {
     // for that historical turn without replaying the mutation.
     events: [...boundaryInterventions],
     facts: [],
+    agencyIntents: [],
+    appointmentSourceFactIdsByArmyId: {},
     population: {
       start: totalPopulation(world),
       births: 0,
@@ -3021,6 +3031,7 @@ function cloneWorld(world: WorldState): WorldState {
     facts: [...world.facts],
     situationSystem: structuredClone(world.situationSystem),
     agencySystem: structuredClone(world.agencySystem),
+    agencyDecisionSystem: structuredClone(world.agencyDecisionSystem),
     counters: { ...world.counters },
   };
 }
@@ -3146,6 +3157,7 @@ export function advanceWorldDetailed(
   runSystem('disease', () => processV03Disease(world, context, (input) => pushEvent(world, context, input)));
   runSystem('knowledge', () => processV03Knowledge(world, context, (input) => pushEvent(world, context, input)));
   runSystem('military_careers', () => processV02MilitaryCareers(world, context, (input) => pushEvent(world, context, input)));
+  runSystem('agency_decisions', () => processAgencyDecisionSystem(world, context, (input) => pushEvent(world, context, input)));
   runSystem('appointments', () => syncOfficeAppointments(world, context.turn, context));
   runSystem('situations', () => processSituationSystem(world, context, (input) => pushEvent(world, context, input)));
   runSystem('personal_memory', () => {
