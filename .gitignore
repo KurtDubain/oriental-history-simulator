@@ -4,6 +4,7 @@ output/
 test-artifacts/
 coverage/
 .vite/
+.vercel/
 *.tsbuildinfo
 .DS_Store
 npm-debug.log*
