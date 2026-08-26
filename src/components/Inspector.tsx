@@ -129,6 +129,50 @@ export interface PersonRelationshipView {
   memories?: string[];
 }
 
+export interface PersonAgencyDesireView {
+  label: string;
+  core: boolean;
+  reason?: string;
+}
+
+export type PersonAgencyGoalStatus = 'active' | 'achieved' | 'invalidated' | 'abandoned';
+
+export interface PersonAgencyGoalView {
+  id: string;
+  label: string;
+  status: PersonAgencyGoalStatus;
+  progress: number;
+  commitment: number;
+  reason: string;
+  barrier: string;
+}
+
+export type PersonAgencyPlanStepStatus = 'completed' | 'available' | 'blocked' | 'invalidated';
+
+export interface PersonAgencyPlanStepView {
+  label: string;
+  status: PersonAgencyPlanStepStatus;
+  reason: string;
+}
+
+export interface PersonAgencyDecisionView {
+  label: string;
+  status: Exclude<PersonAgencyGoalStatus, 'active'>;
+  reason: string;
+}
+
+export interface PersonAgencyView {
+  availability: 'active' | 'dormant' | 'closed';
+  reason: string;
+  barrier: string | null;
+  longTermDirectionLabel: string;
+  desires: readonly PersonAgencyDesireView[];
+  primaryGoal: PersonAgencyGoalView | null;
+  secondaryGoals: readonly PersonAgencyGoalView[];
+  currentPlanSteps: readonly PersonAgencyPlanStepView[];
+  recentDecision?: PersonAgencyDecisionView | null;
+}
+
 export interface PersonInspectorData {
   id: string;
   name: string;
@@ -153,6 +197,7 @@ export interface PersonInspectorData {
   loyalty: number;
   caution: number;
   abilities: PersonAbilitySet;
+  agency?: PersonAgencyView;
   desires?: string[];
   traits?: string[];
   relationships?: PersonRelationshipView[];
@@ -275,8 +320,9 @@ function InspectorActions({ label, isFollowing, onToggleFollow, onOpenArchive, o
   );
 }
 
-function InspectorTabs<T extends string>({ value, items, onChange }: { value: T; items: Array<{ id: T; label: string }>; onChange: (value: T) => void }) {
-  const id = useId();
+function InspectorTabs<T extends string>({ value, items, onChange, idPrefix }: { value: T; items: Array<{ id: T; label: string }>; onChange: (value: T) => void; idPrefix?: string }) {
+  const generatedId = useId();
+  const id = idPrefix ?? generatedId;
   const tabsRef = useRef<HTMLDivElement>(null);
   const moveFocus = (event: KeyboardEvent<HTMLDivElement>) => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
@@ -293,7 +339,7 @@ function InspectorTabs<T extends string>({ value, items, onChange }: { value: T;
   return (
     <div ref={tabsRef} className="observer-inspector-tabs" role="tablist" aria-label="档案分页" onKeyDown={moveFocus}>
       {items.map((item) => (
-        <button key={item.id} id={`${id}-tab-${item.id}`} type="button" role="tab" aria-selected={value === item.id} tabIndex={value === item.id ? 0 : -1} onClick={() => onChange(item.id)}>
+        <button key={item.id} id={`${id}-tab-${item.id}`} type="button" role="tab" aria-selected={value === item.id} aria-controls={idPrefix ? `${id}-panel-${item.id}` : undefined} tabIndex={value === item.id ? 0 : -1} onClick={() => onChange(item.id)}>
           {item.label}
         </button>
       ))}
@@ -466,8 +512,114 @@ function FamilyInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
   );
 }
 
+const PERSON_GOAL_STATUS_LABELS = {
+  active: '正在谋求',
+  achieved: '已经达成',
+  invalidated: '已无从继续',
+  abandoned: '已经搁下',
+} satisfies Record<PersonAgencyGoalStatus, string>;
+
+const PERSON_PLAN_STATUS_LABELS = {
+  completed: '已成',
+  available: '当下',
+  blocked: '待时',
+  invalidated: '作罢',
+} satisfies Record<PersonAgencyPlanStepStatus, string>;
+
+function AgencyScale({ label, value }: { label: string; value: number }) {
+  const normalized = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+  return (
+    <div className="observer-agency-scale">
+      <div><span>{label}</span><strong>{Math.round(normalized)}</strong></div>
+      <span className="observer-agency-scale__track" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={normalized}>
+        <span style={{ width: `${normalized}%` }} />
+      </span>
+    </div>
+  );
+}
+
+function agencyEmptyGoalCopy(agency: PersonAgencyView) {
+  if (agency.availability === 'dormant') return { title: '尚未入局', detail: agency.reason || '年岁尚轻，眼下还没有真正进入世事。' };
+  if (agency.availability === 'closed') return { title: '生平已定', detail: agency.reason || '此人已不再形成新的打算。' };
+  return { title: '仍在权衡', detail: '此人还没有把心中所重化为明确打算。' };
+}
+
+function PersonAgencySections({ agency }: { agency: PersonAgencyView }) {
+  const emptyGoal = agencyEmptyGoalCopy(agency);
+  return (
+    <>
+      <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-desire-heading">
+        <h3 id="person-agency-desire-heading">此人所重</h3>
+        {agency.desires.length ? (
+          <ul className="observer-agency-desires">
+            {agency.desires.map((desire) => (
+              <li key={desire.label} data-core={desire.core || undefined}>
+                <div><strong>{desire.label}</strong><span>{desire.label === agency.longTermDirectionLabel ? '长远所向' : '同样看重'}</span></div>
+                {desire.reason ? <p>{desire.reason}</p> : null}
+              </li>
+            ))}
+          </ul>
+        ) : <p className="observer-inspector__empty">此人的心中轻重尚未显明。</p>}
+      </section>
+
+      <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-goal-heading">
+        <h3 id="person-agency-goal-heading">眼下所图</h3>
+        {agency.primaryGoal ? (
+          <div className="observer-agency-goal" data-status={agency.primaryGoal.status}>
+            <header><span>{PERSON_GOAL_STATUS_LABELS[agency.primaryGoal.status]}</span><strong>{agency.primaryGoal.label}</strong></header>
+            <p><b>因何起意</b>{agency.primaryGoal.reason}</p>
+            <div className="observer-agency-goal__scales">
+              <AgencyScale label="进展" value={agency.primaryGoal.progress} />
+              <AgencyScale label="决心" value={agency.primaryGoal.commitment} />
+            </div>
+            {agency.primaryGoal.barrier ? <p className="observer-agency__barrier"><b>眼下难处</b>{agency.primaryGoal.barrier}</p> : null}
+          </div>
+        ) : (
+          <div className="observer-agency-empty">
+            <strong>{emptyGoal.title}</strong>
+            <p>{emptyGoal.detail}</p>
+            {agency.barrier ? <p className="observer-agency__barrier"><b>眼下难处</b>{agency.barrier}</p> : null}
+          </div>
+        )}
+        {agency.secondaryGoals.length ? (
+          <div className="observer-agency-secondary">
+            <h4>还在留意</h4>
+            <ul>{agency.secondaryGoals.map((goal) => <li key={goal.id}><span>{goal.label}</span><small>{PERSON_GOAL_STATUS_LABELS[goal.status]}</small></li>)}</ul>
+          </div>
+        ) : null}
+      </section>
+
+      <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-plan-heading">
+        <h3 id="person-agency-plan-heading">所行之路</h3>
+        {agency.currentPlanSteps.length ? (
+          <ol className="observer-agency-plan">
+            {agency.currentPlanSteps.map((step, index) => (
+              <li key={`${index}-${step.label}`} data-status={step.status}>
+                <span className="observer-agency-plan__mark">{index + 1}</span>
+                <div><span>{PERSON_PLAN_STATUS_LABELS[step.status]}</span><strong>{step.label}</strong><p>{step.reason}</p></div>
+              </li>
+            ))}
+          </ol>
+        ) : <p className="observer-inspector__empty">眼下还没有形成可行的准备路径。</p>}
+      </section>
+
+      <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-decision-heading">
+        <h3 id="person-agency-decision-heading">最近取舍</h3>
+        {agency.recentDecision ? (
+          <div className="observer-agency-decision" data-status={agency.recentDecision.status}>
+            <div><strong>{agency.recentDecision.label}</strong><span>{PERSON_GOAL_STATUS_LABELS[agency.recentDecision.status]}</span></div>
+            <p>{agency.recentDecision.reason}</p>
+          </div>
+        ) : <p className="observer-inspector__empty">近来没有改换主意的记载。</p>}
+      </section>
+      <p className="observer-agency__note">筹谋会随处境复核；是否成行，还要看职位、资源与关系。</p>
+    </>
+  );
+}
+
 function PersonInspector({ data, ...actions }: Extract<InspectorProps, { kind: 'person' }>) {
   const [tab, setTab] = useState<'life' | 'mind' | 'relations' | 'history'>('life');
+  const tabsId = useId();
   useEffect(() => setTab('life'), [data.id]);
   const abilities: Array<[string, number]> = [['统率', data.abilities.command], ['武勇', data.abilities.martial], ['政略', data.abilities.governance], ['谋略', data.abilities.strategy], ['魅力', data.abilities.charisma], ['学识', data.abilities.scholarship]];
   return (
@@ -477,14 +629,14 @@ function PersonInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
         <InspectorActions label={data.name} {...actions} />
       </div>
       {data.summary ? <p className="observer-inspector__summary">{data.summary}</p> : null}
-      <InspectorTabs value={tab} onChange={setTab} items={[{ id: 'life', label: '生平' }, { id: 'mind', label: '心志' }, { id: 'relations', label: '关系' }, { id: 'history', label: '经历' }]} />
-      {tab === 'life' ? <div role="tabpanel">
+      <InspectorTabs value={tab} onChange={setTab} idPrefix={tabsId} items={[{ id: 'life', label: '生平' }, { id: 'mind', label: '所图' }, { id: 'relations', label: '关系' }, { id: 'history', label: '经历' }]} />
+      {tab === 'life' ? <div id={`${tabsId}-panel-life`} role="tabpanel" aria-labelledby={`${tabsId}-tab-life`}>
         <section className="observer-inspector__section" aria-labelledby="person-origin-heading"><h3 id="person-origin-heading">身世与处境</h3><dl className="observer-facts"><Fact label="性别" value={data.gender} /><Fact label="出身" value={data.origin} /><Fact label="阶层" value={data.politicalClass} /><Fact label="家族" value={data.family} /><Fact label="影响" value={data.influence} /><Fact label="私产" value={data.personalWealth} /></dl>{data.family ? <p className="observer-inspector__jump"><Network size={13} aria-hidden="true" /><LinkedName kind="family" id={data.familyId} onSelect={actions.onSelectEntity}>{data.family}</LinkedName></p> : null}{data.health !== undefined ? <div className="observer-health"><HeartPulse size={14} aria-hidden="true" /><Meter label="健康" value={data.health} /></div> : null}</section>
         <section className="observer-inspector__section" aria-labelledby="person-ability-heading"><h3 id="person-ability-heading">才能</h3><div className="observer-ability-grid">{abilities.map(([label, value]) => <div className="observer-ability" key={label}><span>{label}</span><strong>{Math.round(value)}</strong></div>)}</div><dl className="observer-facts observer-facts--after-grid"><Fact label="功绩" value={data.merit} /><Fact label="副将历练" value={data.deputyExperience} /></dl></section>
       </div> : null}
-      {tab === 'mind' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="person-motive-heading"><h3 id="person-motive-heading">心性与所求</h3><Meter label="野心" value={data.ambition} /><Meter label="忠诚" value={data.loyalty} /><Meter label="谨慎" value={data.caution} />{data.insubordination !== undefined ? <Meter label="抗命倾向" value={data.insubordination} /> : null}{[...(data.traits ?? []), ...(data.desires ?? []).map((item) => `所求·${item}`)].length ? <ul className="observer-tag-list">{[...(data.traits ?? []), ...(data.desires ?? []).map((item) => `所求·${item}`)].map((item) => <li key={item}>{item}</li>)}</ul> : null}</section></div> : null}
-      {tab === 'relations' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="person-relation-heading"><h3 id="person-relation-heading"><Network size={14} aria-hidden="true" />关系与记忆</h3>{data.relationships?.length ? <><RelationshipConstellation name={data.name} relationships={data.relationships} onSelect={actions.onSelectEntity} /><ul className="observer-relation-list">{data.relationships.map((relation) => <li key={relation.id}><button type="button" onClick={() => actions.onSelectEntity?.('person', relation.targetId)}><span><strong>{relation.name}</strong><small>{relation.relation} · {relation.sentiment}</small></span>{relation.detail ? <b>{relation.detail}</b> : null}</button>{relation.memories?.length ? <p>{relation.memories.join('；')}</p> : null}</li>)}</ul></> : <p className="observer-inspector__empty">此人尚无足以入档的人际记忆。</p>}</section></div> : null}
-      {tab === 'history' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="person-history-heading"><h3 id="person-history-heading"><ScrollText size={14} aria-hidden="true" />人生经历</h3><RecordList records={data.experiences ?? []} onSelectEvent={actions.onSelectEvent} /></section></div> : null}
+      {tab === 'mind' ? <div id={`${tabsId}-panel-mind`} role="tabpanel" aria-labelledby={`${tabsId}-tab-mind`}>{data.agency ? <PersonAgencySections agency={data.agency} /> : <section className="observer-inspector__section" aria-labelledby="person-motive-heading"><h3 id="person-motive-heading">心志与打算</h3><p className="observer-inspector__empty">现有记载不足以判断此人的打算。</p></section>}</div> : null}
+      {tab === 'relations' ? <div id={`${tabsId}-panel-relations`} role="tabpanel" aria-labelledby={`${tabsId}-tab-relations`}><section className="observer-inspector__section" aria-labelledby="person-relation-heading"><h3 id="person-relation-heading"><Network size={14} aria-hidden="true" />关系与记忆</h3>{data.relationships?.length ? <><RelationshipConstellation name={data.name} relationships={data.relationships} onSelect={actions.onSelectEntity} /><ul className="observer-relation-list">{data.relationships.map((relation) => <li key={relation.id}><button type="button" onClick={() => actions.onSelectEntity?.('person', relation.targetId)}><span><strong>{relation.name}</strong><small>{relation.relation} · {relation.sentiment}</small></span>{relation.detail ? <b>{relation.detail}</b> : null}</button>{relation.memories?.length ? <p>{relation.memories.join('；')}</p> : null}</li>)}</ul></> : <p className="observer-inspector__empty">此人尚无足以入档的人际记忆。</p>}</section></div> : null}
+      {tab === 'history' ? <div id={`${tabsId}-panel-history`} role="tabpanel" aria-labelledby={`${tabsId}-tab-history`}><section className="observer-inspector__section" aria-labelledby="person-history-heading"><h3 id="person-history-heading"><ScrollText size={14} aria-hidden="true" />人生经历</h3><RecordList records={data.experiences ?? []} onSelectEvent={actions.onSelectEvent} /></section></div> : null}
     </>
   );
 }
@@ -542,7 +694,7 @@ export function Inspector(props: InspectorProps) {
       data-mobile-expanded={mobileExpanded}
     >
       <div className="observer-inspector__mobile-toggle">
-        <span>地图速览</span>
+        <span>档案速览</span>
         <button
           type="button"
           aria-expanded={mobileExpanded}

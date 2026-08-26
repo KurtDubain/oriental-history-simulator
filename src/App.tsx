@@ -92,7 +92,9 @@ import {
   isV03InterventionEvent,
   serializeWorld,
   measureRuntimeValidation,
+  projectCharacterAgency,
   SIMULATION_SYSTEM_PHASES,
+  toCharacterAgencyPlayerProjection,
   validateWorld,
   type V03InterventionAction,
   type WorldState,
@@ -434,47 +436,51 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
     };
   } else if (options.selection?.kind === 'person') {
     const item = world.characters.find((character) => character.id === options.selection?.id);
-    if (item) selectedDetail = {
-      kind: 'person',
-      id: item.id,
-      name: item.name,
-      alive: item.alive,
-      age: item.age,
-      sex: item.sex,
-      polity: polityName(item.polityId),
-      role: item.role,
-      location: regionName(item.locationRegionId),
-      governedRegion: regionName(item.governedRegionId),
-      commandingArmyId: item.commandingArmyId,
-      abilities: { leadership: item.leadership, governance: item.governance, cunning: item.cunning },
-      personality: { ambition: item.ambition, loyalty: item.loyalty, caution: item.caution },
-      renown: item.renown,
-      lifeStage: item.lifeStage,
-      politicalClass: item.politicalClass,
-      tier: item.tier,
-      family: familyName(item.familyId),
-      parents: (item.parentIds ?? []).map(characterName),
-      spouses: (item.spouseIds ?? []).map(characterName),
-      influence: item.influence,
-      personalWealth: item.personalWealth,
-      merit: item.merit,
-      deputyExperience: item.deputyExperience,
-      insubordination: item.insubordination,
-      biography: Array.isArray(item.biography) ? item.biography.slice(-20) : [],
-      relationships: relationships
-        .filter((entry) => entry.sourceId === item.id || entry.targetId === item.id)
-        .slice(0, 10)
-        .map((entry) => ({
-          with: characterName(entry.sourceId === item.id ? entry.targetId : entry.sourceId),
-          kinship: entry.kinship,
-          affinity: entry.affinity,
-          trust: entry.trust,
-          fear: entry.fear,
-          grievance: entry.grievance,
-          gratitude: entry.gratitude,
-          memories: entry.memories,
-        })),
-    };
+    if (item) {
+      const agency = toCharacterAgencyPlayerProjection(projectCharacterAgency(world, item.id));
+      selectedDetail = {
+        kind: 'person',
+        id: item.id,
+        name: item.name,
+        alive: item.alive,
+        age: item.age,
+        sex: item.sex,
+        polity: polityName(item.polityId),
+        role: item.role,
+        location: regionName(item.locationRegionId),
+        governedRegion: regionName(item.governedRegionId),
+        commandingArmyId: item.commandingArmyId,
+        abilities: { leadership: item.leadership, governance: item.governance, cunning: item.cunning },
+        personality: { ambition: item.ambition, loyalty: item.loyalty, caution: item.caution },
+        renown: item.renown,
+        lifeStage: item.lifeStage,
+        politicalClass: item.politicalClass,
+        tier: item.tier,
+        family: familyName(item.familyId),
+        parents: (item.parentIds ?? []).map(characterName),
+        spouses: (item.spouseIds ?? []).map(characterName),
+        influence: item.influence,
+        personalWealth: item.personalWealth,
+        merit: item.merit,
+        deputyExperience: item.deputyExperience,
+        insubordination: item.insubordination,
+        agency,
+        biography: Array.isArray(item.biography) ? item.biography.slice(-20) : [],
+        relationships: relationships
+          .filter((entry) => entry.sourceId === item.id || entry.targetId === item.id)
+          .slice(0, 10)
+          .map((entry) => ({
+            with: characterName(entry.sourceId === item.id ? entry.targetId : entry.sourceId),
+            kinship: entry.kinship,
+            affinity: entry.affinity,
+            trust: entry.trust,
+            fear: entry.fear,
+            grievance: entry.grievance,
+            gratitude: entry.gratitude,
+            memories: entry.memories,
+          })),
+      };
+    }
   } else if (options.selection) {
     const system = toSystemInspector(world, options.selection.kind, options.selection.id);
     if (system) selectedDetail = system;
@@ -1702,7 +1708,7 @@ export function App() {
       title: '天下世家', eyebrow: '门第与传承', items: familyItems, emptyMessage: '尚无被谱牒记名的家族。',
     };
     if (activeView === 'people') return {
-      title: '时人群像', eyebrow: '声望与所求', items: peopleItems, emptyMessage: '暂无可记名人物。',
+      title: '时人群像', eyebrow: '声望与所图', items: peopleItems, emptyMessage: '暂无可记名人物。',
     };
     if (activeView === 'military') return {
       title: '天下军旅', eyebrow: '兵力与补给', items: militaryItems, emptyMessage: '天下暂无宏观军团。',

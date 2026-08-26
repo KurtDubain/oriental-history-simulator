@@ -1427,6 +1427,27 @@ try {
   assert.equal(selectedPerson.interface.selectedDetail.kind, 'person');
   assert.ok(selectedPerson.interface.selectedDetail.biography.length > 0);
   assert.ok(selectedPerson.interface.selectedDetail.relationships?.length > 0, '人物名录中应有可观察的关系网络');
+  const personAgency = selectedPerson.interface.selectedDetail.agency;
+  assert.equal(personAgency.availability, 'active');
+  assert.equal(personAgency.desires.length, 2, '人物速览只展示两项长期所重');
+  assert.ok(personAgency.primaryGoal?.label, '成年人物必须给出一项眼下所图');
+  assert.ok(personAgency.secondaryGoals.length <= 2, '次要打算不得超过两项');
+  assert.ok(personAgency.currentPlanSteps.length <= 5, '准备路径不得超过五步');
+  const agencyHash = selectedPerson.deterministicWorldHash;
+  await page.getByRole('tab', { name: '所图' }).click();
+  const agencyPanel = page.getByRole('tabpanel');
+  const agencyTab = page.getByRole('tab', { name: '所图' });
+  assert.equal(await agencyTab.getAttribute('aria-controls'), await agencyPanel.getAttribute('id'));
+  assert.equal(await agencyPanel.getAttribute('aria-labelledby'), await agencyTab.getAttribute('id'));
+  await agencyPanel.getByRole('heading', { name: '此人所重' }).waitFor();
+  assert.match(await agencyPanel.textContent(), /眼下所图/);
+  assert.match(await agencyPanel.textContent(), /所行之路/);
+  assert.doesNotMatch(await agencyPanel.textContent(), /Goal|Plan|Shadow|Simulation Audit/);
+  await waitForVisualSettled(page.locator('.observer-inspector'));
+  await page.screenshot({ path: `${ARTIFACT_DIR}/person-agency.png`, fullPage: true });
+  await agencyPanel.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();
+  await page.screenshot({ path: `${ARTIFACT_DIR}/person-agency-plan.png`, fullPage: true });
+  assert.equal((await snapshot(page)).deterministicWorldHash, agencyHash, '查看人物所图不得改变世界哈希');
   await page.getByRole('tab', { name: '关系' }).click();
   const relationshipMap = page.locator('.observer-relationship-map');
   await relationshipMap.waitFor();
@@ -1506,6 +1527,31 @@ try {
     tension: 'fallback',
   }, '移动端 T0');
   assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
+  await mobilePage.click('button[data-observer-view="people"]');
+  await mobilePage.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
+  await mobilePage.locator('.roster-panel button[data-roster-id]').first().click();
+  const mobilePerson = await snapshot(mobilePage);
+  assert.equal(mobilePerson.interface.selectedDetail.kind, 'person');
+  assert.equal(mobilePerson.interface.selectedDetail.agency.desires.length, 2);
+  assert.ok(mobilePerson.interface.selectedDetail.agency.primaryGoal?.label);
+  await mobilePage.getByRole('button', { name: '展开档案' }).click();
+  await mobilePage.getByRole('tab', { name: '所图' }).click();
+  const mobileAgency = mobilePage.getByRole('tabpanel');
+  await mobileAgency.getByRole('heading', { name: '眼下所图' }).waitFor();
+  await assertWithinViewport(mobilePage, '.observer-inspector', '移动端人物所图不可横向溢出');
+  const mobileAgencyTabs = mobilePage.locator('.observer-inspector-tabs button');
+  for (let index = 0; index < await mobileAgencyTabs.count(); index += 1) {
+    const bounds = await mobileAgencyTabs.nth(index).boundingBox();
+    assert.ok(bounds && bounds.height >= 44, '移动端人物档案页签触控高度不得小于44px');
+  }
+  await waitForVisualSettled(mobilePage.locator('.observer-inspector'));
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-390x844.png`, fullPage: true });
+  await mobileAgency.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-plan-390x844.png`, fullPage: true });
+  assert.equal((await snapshot(mobilePage)).deterministicWorldHash, mobileTurn0.deterministicWorldHash, '移动端查看人物所图不得改变世界哈希');
+  await mobilePage.locator('.observer-inspector button[aria-label="关闭档案"]').click();
+  await mobilePage.waitForSelector('.observer-inspector', { state: 'detached' });
+  await mobilePage.click('button[data-observer-view="world"]');
   const mobileMapLayout = await mobilePage.evaluate(() => {
     const stage = document.querySelector('.observer-stage')?.getBoundingClientRect();
     const map = document.querySelector('.world-map')?.getBoundingClientRect();

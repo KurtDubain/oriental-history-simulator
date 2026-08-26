@@ -118,7 +118,7 @@ npm run test:e2e
 npm run test:release
 ```
 
-`test:release` 会依次执行单元/系统测试、生产构建、Chromium 试玩、Phase A 事实/性能审计、Phase B Situation 审计和 V0.3 长程模拟审计。`npm run test:audit:phase-a` 单独检查 Fact 覆盖、runtime/full validation、序列化体积与耗时；`npm run test:audit:phase-b` 检查局势序列确定性、上限、Fact 证据和存档续推；历史审计可分别用 `npm run test:audit:v01` 与 `npm run test:audit:v02` 执行。
+`test:release` 会依次执行单元/系统测试、生产构建、Chromium 试玩、Phase A 事实/性能审计、Phase B Situation 审计、Phase C 观察循环审计、人物 Agency 契约审计和 V0.3 长程模拟审计。`npm run test:audit:agency` 单独检查八根欲望分布、Goal/Plan 上限与连续性、硬失效、观察纯度和性能；历史审计可分别用 `npm run test:audit:v01` 与 `npm run test:audit:v02` 执行。
 
 模拟内核不使用 `Math.random`。所有不确定性都由“世界种子 + 季度 + 系统 + 实体 + 用途”独立寻址；`window.render_game_to_text()` 与 `window.advanceTime(ms)` 提供确定性的文本观察与自动化测试接口。
 
@@ -129,7 +129,7 @@ npm run test:release
 - 世界收藏只存于当前浏览器；云存档、跨设备同步、共享世界、排行榜、在线多人和运行时生成式叙事均不在本次试玩范围。
 - 海岸线由州域坐标与通行关系推导，是服务于辨识与策略阅读的架空概括图，不是精密 GIS；稀疏旧档的轮廓会更抽象。
 - 桌面 Chromium 是本次发布流程的主要自动化目标；移动端可观察和操作，但复杂关系图与历史工作台仍以桌面体验为先。Firefox 与 Safari 尚未进入同等强度的发布回归。
-- Phase B 当前完成“军权危机”“继承危机”和“战争进程”三种 Situation 纵切、事实型结案摘要与可见局势全卷；Phase C 的 C01～C04 已让当世三问稳定追踪这些局势，并支持按 Situation ID 关注和关键变化停表。形成期尚未封存合法性、权威、人口、财富等类型化指标，因此这些数值的起止对照不会伪造；QuarterPulse 局势摘要、朝堂/地方局势、人物 Goal/Plan、家族年度 AI，以及真正让战争目标、耗竭、战役与围城生效的持续战役层仍按 Roadmap 分阶段进入。
+- Phase B 当前完成“军权危机”“继承危机”和“战争进程”三种 Situation 纵切、事实型结案摘要与可见局势全卷；Phase C 的 C01～C07 已让当世三问稳定追踪局势、按 Situation ID 关注和停表，并在人物档案提供只读 Desire / Goal / Plan。人物盘算尚未持久化到 C09 shadow ledger，也不会接管旧 AI；家族年度 AI，以及真正让战争目标、耗竭、战役与围城生效的持续战役层仍按 Roadmap 分阶段进入。
 - 局势暂停只认刚结算季度的权威 Situation milestone 与核心人物死亡 Fact，不会把普通张力波动或史册关键词冒充里程碑；未受关注的局势也不会因为这条专用规则停表。
 
 ## 技术边界

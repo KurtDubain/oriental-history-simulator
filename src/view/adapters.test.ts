@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { advanceWorldBy, createWorld, type BiographyFact, type CharacterState } from '../sim';
+import { advanceWorldBy, createWorld, serializeWorld, type BiographyFact, type CharacterState } from '../sim';
 import { toPersonArchive, toPersonExperienceRecords, toPersonInspector, toSystemInspector } from './adapters';
 
 describe('map object dossiers', () => {
@@ -16,6 +16,33 @@ describe('map object dossiers', () => {
     expect(dossier?.meters?.map((meter) => meter.label)).toEqual(['士气', '训练', '战阵经验', '补给']);
     expect(dossier?.links).toContainEqual(expect.objectContaining({ kind: 'person', id: army.commanderId }));
     expect(dossier?.links).toContainEqual(expect.objectContaining({ kind: 'region', id: army.regionId }));
+  });
+});
+
+describe('person Agency dossier', () => {
+  it('shows a bounded natural-language intention without changing the world', () => {
+    const world = advanceWorldBy(createWorld('人物所图档案'), 4);
+    const person = world.characters.find((character) => character.alive && character.age >= 16) as CharacterState;
+    const before = serializeWorld(world);
+    const inspector = toPersonInspector(world, person);
+    const archive = toPersonArchive(world, person);
+
+    expect(inspector.agency?.availability).toBe('active');
+    expect(inspector.agency?.desires).toHaveLength(2);
+    expect(inspector.agency?.primaryGoal).toBeTruthy();
+    expect(inspector.agency?.secondaryGoals.length).toBeLessThanOrEqual(2);
+    expect(inspector.agency?.currentPlanSteps.length).toBeLessThanOrEqual(5);
+    expect(inspector.summary).toContain(inspector.agency?.primaryGoal?.label);
+    expect(archive.chapters.find((chapter) => chapter.id === 'mind')?.paragraphs.join('')).toContain(
+      inspector.agency?.primaryGoal?.label,
+    );
+
+    const playerFacing = JSON.stringify(inspector.agency);
+    expect(playerFacing).not.toContain('sourceWorldHash');
+    expect(playerFacing).not.toContain('authority');
+    expect(playerFacing).not.toContain('identityAnchorTurn');
+    expect(playerFacing).not.toContain('action');
+    expect(serializeWorld(world)).toBe(before);
   });
 });
 

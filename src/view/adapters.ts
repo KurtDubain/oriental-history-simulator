@@ -41,6 +41,10 @@ import type {
   SimulationFact,
   WorldState,
 } from '../sim/types';
+import {
+  projectCharacterAgency,
+  toCharacterAgencyPlayerProjection,
+} from '../sim/agency';
 
 const compact = new Intl.NumberFormat('zh-CN', {
   notation: 'compact',
@@ -750,10 +754,9 @@ export function toPersonInspector(world: WorldState, item: CharacterState): Pers
   const owner = polity(world, item.polityId);
   const home = region(world, item.locationRegionId);
   const personFamily = family(world, item.familyId);
-  const desires = [
-    item.ambition >= 60 ? '功名与权势' : '安身立业',
-    item.loyalty >= 65 ? '守护所仕政权' : '保全自身道路',
-  ];
+  const agency = toCharacterAgencyPlayerProjection(projectCharacterAgency(world, item.id));
+  const currentStep = agency.currentPlanSteps.find((step) => step.status === 'available');
+  const coreDesires = agency.desires.map((desire) => desire.label);
   const relationships = worldRelationships(world)
     .filter((relation) => relation.sourceId === item.id || relation.targetId === item.id)
     .sort((a, b) => relationSalience(b) - relationSalience(a) || a.id.localeCompare(b.id))
@@ -804,15 +807,17 @@ export function toPersonInspector(world: WorldState, item: CharacterState): Pers
       charisma: Math.round((item.renown + item.loyalty) / 2),
       scholarship: Math.round((item.governance + item.cunning) / 2),
     },
-    desires,
+    agency,
     traits: characterTraits(item),
     relationships,
     experiences,
-    summary: item.commandingArmyId
-      ? '此人握有实际军令，其选择会直接改变兵力与地方秩序。'
-      : item.governedRegionId
-        ? '此人正负责一地税粮与秩序，政绩也在塑造其政治前途。'
-        : '此人尚在权力网络中寻找下一次机会。',
+    summary: agency.primaryGoal
+      ? `所图：${agency.primaryGoal.label}。${currentStep ? `眼下先${currentStep.label}` : agency.primaryGoal.reason}${agency.primaryGoal.barrier ? `；难处在于${agency.primaryGoal.barrier}` : ''}。`
+      : agency.availability === 'dormant'
+        ? `最看重${coreDesires.join('与') || agency.longTermDirectionLabel}，尚未成年，眼下还没有明确打算。`
+        : agency.availability === 'closed'
+          ? `此人生平已定；其长远所重以${agency.longTermDirectionLabel}为先。`
+          : `最看重${coreDesires.join('与') || agency.longTermDirectionLabel}，眼下仍在权衡。`,
   };
 }
 
@@ -978,6 +983,17 @@ export function toPersonArchive(world: WorldState, item: CharacterState): Archiv
   const personFamily = family(world, item.familyId);
   const records: ArchiveRecord[] = toPersonExperienceRecords(world, item);
   const relationships = inspector.relationships ?? [];
+  const agency = inspector.agency;
+  const desireSentence = agency?.desires.length
+    ? `${item.name}眼下最看重${agency.desires.map((desire) => desire.label).join('与')}`
+    : `${item.name}的心中轻重尚未显明`;
+  const goalSentence = agency?.primaryGoal
+    ? `目前正在盘算「${agency.primaryGoal.label}」；${agency.primaryGoal.reason}${agency.primaryGoal.barrier ? `，眼下难处在于${agency.primaryGoal.barrier}` : ''}。`
+    : agency?.availability === 'dormant'
+      ? '年岁尚轻，尚未形成可以付诸世事的打算。'
+      : agency?.availability === 'closed'
+        ? '生平已定，不再形成新的打算。'
+        : '眼下尚未形成明确打算。';
   return {
     id: item.id,
     kind: 'person',
@@ -994,7 +1010,7 @@ export function toPersonArchive(world: WorldState, item: CharacterState): Archiv
     chapters: [
       { id: 'origin', title: '身世与起点', paragraphs: [`${item.name}出自${personFamily?.name ?? `${item.familyName}氏`}，被归入${item.politicalClass ?? '未详'}阶层，早年活动于${region(world, item.locationRegionId)?.name ?? '乡里失考'}。`, item.adultTurn === null ? '尚未成年，未来身份仍将受家族与时代局势塑造。' : `于${turnLabel(item.adultTurn)}步入成年，此后才真正进入任职、婚姻与政治选择的网络。`] },
       { id: 'career', title: '仕途与功业', paragraphs: [`现任${item.role}，功绩${Math.round(item.merit ?? 0)}、个人影响${Math.round(item.influence ?? item.renown)}。${inspector.summary ?? ''}`, item.commandingArmyId ? `手握军令，且有${Math.round(item.deputyExperience ?? 0)}点副将历练；其抗命倾向为${Math.round(item.insubordination ?? 0)}。` : '此时未直接统率军团，政治与家族网络更能决定其下一步。'] },
-      { id: 'mind', title: '心性、所求与关系', paragraphs: [`野心${Math.round(item.ambition)}、忠诚${Math.round(item.loyalty)}、谨慎${Math.round(item.caution)}。史家据此只能判断倾向，真正选择仍取决于所处环境与人际关系。`, relationships.length ? `与其关系最深者包括${relationships.slice(0, 4).map((relation) => `${relation.name}（${relation.sentiment}）`).join('、')}。` : '现存史料未留下足以构成长期记忆的人际关系。'] },
+      { id: 'mind', title: '心志与关系', paragraphs: [`${desireSentence}。${goalSentence}这些只是当下盘算，不代表行动已经发生。`, relationships.length ? `与其关系最深者包括${relationships.slice(0, 4).map((relation) => `${relation.name}（${relation.sentiment}）`).join('、')}。` : '现存史料未留下足以构成长期记忆的人际关系。'] },
     ],
     records,
     links: uniqueArchiveLinks([
