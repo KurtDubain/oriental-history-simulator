@@ -221,7 +221,7 @@ export function SituationWorkbench({
             <section className="situation-workbench__reading" aria-labelledby={`${titleId}-reading`}>
               <div className="situation-workbench__section-heading">
                 <BookOpenText size={15} aria-hidden="true" />
-                <h3 id={`${titleId}-reading`}>史家判断</h3>
+                <h3 id={`${titleId}-reading`}>眼下局面</h3>
               </div>
               {detail.playerSummary.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
 
@@ -240,7 +240,7 @@ export function SituationWorkbench({
                   <dd>{detail.currentChange}</dd>
                 </div>
                 <div>
-                  <dt>接下来观察</dt>
+                  <dt>后续看点</dt>
                   <dd>{detail.nextWatch}</dd>
                 </div>
               </dl>
@@ -356,16 +356,16 @@ export function SituationWorkbench({
             </details>
 
             <details className="situation-workbench__audit">
-              <summary><ListTree size={15} aria-hidden="true" /><span>Simulation Audit</span><small>高级 · 默认折叠</small></summary>
+              <summary><ListTree size={15} aria-hidden="true" /><span>推演底账</span><small>详细数据 · 默认折叠</small></summary>
               <div>
                 <p>{detail.audit.randomness}</p>
                 <dl>
-                  <div><dt>Situation ID</dt><dd>{detail.audit.situationId}</dd></div>
-                  <div><dt>Type / Scope</dt><dd>{detail.audit.situationType} / {detail.audit.scopeKey}</dd></div>
-                  <div><dt>当前 tension / momentum</dt><dd>{detail.tension} / {detail.momentum}</dd></div>
-                  <div><dt>形成 pressure</dt><dd>{detail.audit.startSnapshot.pressure}</dd></div>
-                  <div><dt>形成参与者 digest</dt><dd>{detail.audit.startSnapshot.participantDigest}</dd></div>
-                  <div><dt>形成证据 digest</dt><dd>{detail.audit.startSnapshot.evidenceDigest}</dd></div>
+                  <div><dt>局势编号</dt><dd>{detail.audit.situationId}</dd></div>
+                  <div><dt>类型 / 范围</dt><dd>{detail.audit.situationType} / {detail.audit.scopeKey}</dd></div>
+                  <div><dt>当前张力 / 势头</dt><dd>{detail.tension} / {detail.momentum}</dd></div>
+                  <div><dt>形成时压力</dt><dd>{detail.audit.startSnapshot.pressure}</dd></div>
+                  <div><dt>形成时人物摘要</dt><dd>{detail.audit.startSnapshot.participantDigest}</dd></div>
+                  <div><dt>形成时证据摘要</dt><dd>{detail.audit.startSnapshot.evidenceDigest}</dd></div>
                 </dl>
                 {detail.audit.template ? (
                   <p className="situation-workbench__audit-rule">

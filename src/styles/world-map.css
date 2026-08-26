@@ -51,8 +51,8 @@
   animation: world-map-reveal 480ms cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
-.world-map[data-hover-region="true"] .world-map__canvas {
-  cursor: crosshair;
+.world-map[data-hover-object="true"] .world-map__canvas {
+  cursor: pointer;
 }
 
 .world-map[data-pannable="true"] .world-map__canvas {

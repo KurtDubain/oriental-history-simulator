@@ -3,6 +3,8 @@ import {
   Anchor,
   BookOpenText,
   Castle,
+  ChevronDown,
+  ChevronUp,
   Crown,
   Handshake,
   HeartPulse,
@@ -210,7 +212,7 @@ export interface SystemInspectorLink {
 
 export interface SystemInspectorData {
   id: string;
-  kind: 'seaZone' | 'fleet' | 'tradeCorridor' | 'practice' | 'outbreak' | 'migration';
+  kind: 'seaZone' | 'army' | 'fleet' | 'tradeCorridor' | 'practice' | 'outbreak' | 'migration';
   name: string;
   subtitle: string;
   summary: string;
@@ -489,6 +491,7 @@ function PersonInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
 
 const SYSTEM_META = {
   seaZone: { label: '海域档案', icon: Anchor },
+  army: { label: '军团档案', icon: Swords },
   fleet: { label: '舰队档案', icon: Anchor },
   tradeCorridor: { label: '商路档案', icon: Route },
   practice: { label: '知识档案', icon: Sparkles },
@@ -527,8 +530,28 @@ function SystemInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
 }
 
 export function Inspector(props: InspectorProps) {
+  const [mobileExpanded, setMobileExpanded] = useState(false);
+  const inspectorId = useId();
+  const selectionKey = `${props.kind}:${props.data.id}`;
+  useEffect(() => setMobileExpanded(false), [selectionKey]);
   return (
-    <aside className="observer-inspector" aria-label="对象档案">
+    <aside
+      id={inspectorId}
+      className="observer-inspector"
+      aria-label="对象档案"
+      data-mobile-expanded={mobileExpanded}
+    >
+      <div className="observer-inspector__mobile-toggle">
+        <span>地图速览</span>
+        <button
+          type="button"
+          aria-expanded={mobileExpanded}
+          onClick={() => setMobileExpanded((current) => !current)}
+        >
+          {mobileExpanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronUp size={16} aria-hidden="true" />}
+          {mobileExpanded ? '收起档案' : '展开档案'}
+        </button>
+      </div>
       {props.kind === 'region' ? <RegionInspector {...props} /> : null}
       {props.kind === 'country' ? <CountryInspector {...props} /> : null}
       {props.kind === 'family' ? <FamilyInspector {...props} /> : null}

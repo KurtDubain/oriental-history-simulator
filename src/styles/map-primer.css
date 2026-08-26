@@ -94,8 +94,8 @@
 
 .map-primer__header > button {
   display: grid;
-  width: 36px;
-  height: 36px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   place-items: center;
   border: 1px solid transparent;
@@ -141,6 +141,7 @@
 .map-primer__steps button {
   display: grid;
   min-width: 52px;
+  min-height: 44px;
   padding: 0 5px;
   justify-items: center;
   gap: 4px;
@@ -281,7 +282,8 @@
   stroke-width: 1.6;
 }
 
-.map-primer__nodes rect {
+.map-primer__nodes rect,
+.map-primer__nodes > g > circle {
   fill: #f3ead7;
   stroke: var(--observer-vermilion-dark, #79271f);
   stroke-width: 2;
@@ -376,7 +378,7 @@
 
 .map-primer__footer button {
   display: inline-flex;
-  min-height: 38px;
+  min-height: 44px;
   align-items: center;
   justify-content: center;
   gap: 7px;
@@ -472,7 +474,7 @@
     gap: 7px;
   }
 
-  .map-primer__footer button { min-height: 40px; padding: 0 10px; font-size: 11px; }
+  .map-primer__footer button { min-height: 44px; padding: 0 10px; font-size: 11px; }
 }
 
 @media (max-height: 650px) {

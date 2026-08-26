@@ -45,6 +45,7 @@ export interface MapRegionView {
   unrest?: number;
   warDamage?: number;
   port?: boolean;
+  portLevel?: number;
   capital?: boolean;
   cityLevel?: number;
   defense?: number;
@@ -103,6 +104,8 @@ export interface MapFleetView {
 
 export type MapFlowKind = "trade" | "migration" | "disease" | "knowledge" | "naval";
 
+export type MapObjectKind = MapFlowView["selectedKind"] | "seaZone" | "fleet" | "army";
+
 export interface MapFlowView {
   id: string;
   kind: MapFlowKind;
@@ -150,7 +153,7 @@ export interface WorldMapProps {
   selectedObject?: { kind: string; id: string } | null;
   overlay: MapOverlay;
   onSelectRegion: (regionId: string) => void;
-  onSelectObject?: (kind: MapFlowView["selectedKind"] | "seaZone" | "fleet", id: string) => void;
+  onSelectObject?: (kind: MapObjectKind, id: string) => void;
   cameraKey?: string | number;
   onCameraChange?: (camera: MapCamera) => void;
   className?: string;
@@ -193,11 +196,13 @@ interface CanvasSize {
   dpr: number;
 }
 
-interface HoverState {
-  region: MapRegionView;
-  x: number;
-  y: number;
-}
+type HoverState =
+  | { kind: "region"; region: MapRegionView; x: number; y: number }
+  | { kind: "regionNode"; nodeKind: "city" | "port"; region: MapRegionView; x: number; y: number }
+  | { kind: "army"; army: MapArmyView; x: number; y: number }
+  | { kind: "fleet"; fleet: MapFleetView; x: number; y: number }
+  | { kind: "marker"; marker: MapMarkerView; x: number; y: number }
+  | { kind: "flow"; flow: MapFlowView; x: number; y: number };
 
 interface PointerContact {
   pointerType: string;
@@ -564,6 +569,135 @@ const worldToScreen = (point: MapPoint, transform: MapViewportTransform): MapPoi
   x: transform.offsetX + point.x * transform.scale,
   y: transform.offsetY + point.y * transform.scale * transform.yScale,
 });
+
+export interface MapArmyIconLayout {
+  army: MapArmyView;
+  point: MapPoint;
+  radius: number;
+}
+
+/**
+ * Resolves the exact screen-space position used by both drawing and hit testing.
+ * Army badges are intentionally offset from their region label in CSS pixels,
+ * so inverse-transforming a tap to the region center is not sufficient.
+ */
+export function layoutMapArmyIcons(
+  armies: readonly MapArmyView[],
+  regions: readonly MapRegionView[],
+  transform: MapViewportTransform,
+): MapArmyIconLayout[] {
+  const compactMap = transform.scale < 0.42;
+  const regionById = new Map(regions.map((region) => [region.id, region]));
+  const armyOffsets = new Map<string, number>();
+  return armies.flatMap((army) => {
+    const region = army.regionId ? regionById.get(army.regionId) : undefined;
+    const anchor = army.position ?? region?.center;
+    if (!anchor) return [];
+    const slotKey = army.regionId ?? `${Math.round(anchor.x)}:${Math.round(anchor.y)}`;
+    const slot = armyOffsets.get(slotKey) ?? 0;
+    armyOffsets.set(slotKey, slot + 1);
+    const base = worldToScreen(anchor, transform);
+    return [{
+      army,
+      point: {
+        x: base.x + (compactMap ? 6 : 14) + (slot % 3) * (compactMap ? 7 : 17),
+        y: base.y - (compactMap ? 5 : 12) - Math.floor(slot / 3) * (compactMap ? 8 : 19),
+      },
+      radius: compactMap ? 3.8 : 9,
+    }];
+  });
+}
+
+/** Resolves the topmost army badge at a CSS-pixel point, including zoom/pan. */
+export function armyAtScreenPoint(
+  armies: readonly MapArmyView[],
+  regions: readonly MapRegionView[],
+  point: MapPoint,
+  width: number,
+  height: number,
+  padding = MAP_PADDING,
+  camera: MapCamera = DEFAULT_MAP_CAMERA,
+  coarsePointer = false,
+): MapArmyView | null {
+  const transform = createMapViewportTransform(width, height, padding, camera);
+  const layouts = layoutMapArmyIcons(armies, regions, transform);
+  const maximumDistance = coarsePointer ? 22 : 12;
+  const nearest = layouts
+    .map((layout, index) => ({
+      layout,
+      index,
+      distance: Math.hypot(layout.point.x - point.x, layout.point.y - point.y),
+    }))
+    .filter(({ layout, distance }) => distance <= Math.max(maximumDistance, layout.radius + 3))
+    // Later badges are painted on top, so they win an exact overlap.
+    .sort((left, right) => left.distance - right.distance || right.index - left.index)[0];
+  return nearest?.layout.army ?? null;
+}
+
+export interface MapRegionNodeLayout {
+  kind: "city" | "port";
+  region: MapRegionView;
+  point: MapPoint;
+  radius: number;
+}
+
+/** Shared city/port anchors ensure decorative symbols and their hit areas agree. */
+export function layoutMapRegionNodes(
+  regions: readonly MapRegionView[],
+  seaZones: readonly MapSeaZoneView[],
+  transform: MapViewportTransform,
+): MapRegionNodeLayout[] {
+  const compactMap = transform.scale < 0.42;
+  return regions.flatMap((region) => {
+    const center = worldToScreen(region.center, transform);
+    const layouts: MapRegionNodeLayout[] = [];
+    const showCity = Boolean(region.capital)
+      || (!compactMap && (region.cityLevel ?? 0) >= 3)
+      || (region.cityLevel ?? 0) >= 4;
+    if (showCity) {
+      layouts.push({
+        kind: "city",
+        region,
+        point: { x: center.x, y: center.y - (compactMap ? 7 : 10) },
+        radius: compactMap ? 4 : 7,
+      });
+    }
+    if (region.port) {
+      const nearestSea = seaZones
+        .map((zone) => ({ zone, distance: Math.hypot(zone.center.x - region.center.x, zone.center.y - region.center.y) }))
+        .sort((left, right) => left.distance - right.distance)[0]?.zone;
+      const seaPoint = nearestSea ? worldToScreen(nearestSea.center, transform) : { x: center.x + 1, y: center.y + 1 };
+      const dx = seaPoint.x - center.x;
+      const dy = seaPoint.y - center.y;
+      const distance = Math.max(1, Math.hypot(dx, dy));
+      const offset = compactMap ? 5 : 11;
+      layouts.push({
+        kind: "port",
+        region,
+        point: { x: center.x + dx / distance * offset, y: center.y + dy / distance * offset },
+        radius: compactMap ? 5 : 8,
+      });
+    }
+    return layouts;
+  });
+}
+
+export function regionNodeAtScreenPoint(
+  regions: readonly MapRegionView[],
+  seaZones: readonly MapSeaZoneView[],
+  point: MapPoint,
+  width: number,
+  height: number,
+  padding = MAP_PADDING,
+  camera: MapCamera = DEFAULT_MAP_CAMERA,
+  coarsePointer = false,
+): MapRegionNodeLayout | null {
+  const transform = createMapViewportTransform(width, height, padding, camera);
+  return layoutMapRegionNodes(regions, seaZones, transform)
+    .map((layout, index) => ({ layout, index, distance: Math.hypot(layout.point.x - point.x, layout.point.y - point.y) }))
+    .filter(({ layout, distance }) => distance <= Math.max(coarsePointer ? 22 : 11, layout.radius + 3))
+    .sort((left, right) => left.distance - right.distance || right.index - left.index)[0]?.layout ?? null;
+}
 
 function makePolygonPath(points: readonly MapPoint[], transform: MapViewportTransform) {
   const path = new Path2D();
@@ -1228,17 +1362,23 @@ function drawMajorRiverSystems(
   ].filter((course) => course.points.length >= 4);
   for (const course of courses) {
     context.save();
+    context.beginPath();
+    for (const shape of MAP_LAND_SHAPES) {
+      applyLinePath(context, shape.polygon, transform);
+      context.closePath();
+    }
+    context.clip();
     context.lineCap = "round";
     context.lineJoin = "round";
     context.beginPath();
     applySmoothOpenPath(context, course.points, transform);
-    context.strokeStyle = "rgba(242, 236, 218, 0.92)";
-    context.lineWidth = compactMap ? 3 : 5;
+    context.strokeStyle = "rgba(47, 87, 96, 0.17)";
+    context.lineWidth = compactMap ? 2.2 : 3.2;
     context.stroke();
     context.beginPath();
     applySmoothOpenPath(context, course.points, transform);
-    context.strokeStyle = "rgba(73, 105, 111, 0.82)";
-    context.lineWidth = compactMap ? 1.1 : 1.7;
+    context.strokeStyle = "rgba(66, 110, 119, 0.78)";
+    context.lineWidth = compactMap ? 0.8 : 1.25;
     context.stroke();
     context.restore();
 
@@ -1389,11 +1529,11 @@ function drawRegionTerrain(
   }
 }
 
-function drawPort(context: CanvasRenderingContext2D, point: MapPoint, compact = false) {
+function drawPort(context: CanvasRenderingContext2D, point: MapPoint, compact = false, selected = false) {
   context.save();
   context.translate(point.x, point.y);
-  context.strokeStyle = "rgba(36, 52, 53, 0.9)";
-  context.lineWidth = compact ? 0.9 : 1.15;
+  context.strokeStyle = selected ? VERMILION : "rgba(36, 52, 53, 0.9)";
+  context.lineWidth = selected ? (compact ? 1.5 : 1.8) : compact ? 0.9 : 1.15;
   context.beginPath();
   context.moveTo(0, compact ? -3 : -5);
   context.lineTo(0, compact ? 3 : 5);
@@ -1402,6 +1542,28 @@ function drawPort(context: CanvasRenderingContext2D, point: MapPoint, compact = 
   context.moveTo(compact ? -3 : -5, compact ? 1 : 2);
   context.quadraticCurveTo(0, compact ? 5 : 8, compact ? 3 : 5, compact ? 1 : 2);
   context.stroke();
+  context.restore();
+}
+
+function drawCity(
+  context: CanvasRenderingContext2D,
+  point: MapPoint,
+  compact: boolean,
+  capital: boolean,
+  selected: boolean,
+) {
+  const radius = compact ? 2.2 : 3.1;
+  context.save();
+  context.fillStyle = PAPER_LIGHT;
+  context.strokeStyle = selected ? VERMILION : INK;
+  context.lineWidth = selected ? 1.6 : 1;
+  context.fillRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
+  context.strokeRect(point.x - radius, point.y - radius, radius * 2, radius * 2);
+  if (capital) {
+    const outer = radius + (compact ? 1.8 : 2.4);
+    context.globalAlpha = selected ? 0.96 : 0.72;
+    context.strokeRect(point.x - outer, point.y - outer, outer * 2, outer * 2);
+  }
   context.restore();
 }
 
@@ -1582,6 +1744,12 @@ function drawMap(
   const compactMap = transform.scale < 0.42;
   const denseMap = regions.length > 64;
   const regionById = new Map(regions.map((region) => [region.id, region]));
+  const regionNodesByRegion = new Map<string, MapRegionNodeLayout[]>();
+  for (const node of layoutMapRegionNodes(regions, seaZones, transform)) {
+    const nodes = regionNodesByRegion.get(node.region.id) ?? [];
+    nodes.push(node);
+    regionNodesByRegion.set(node.region.id, nodes);
+  }
   const highlightedRegions = new Set(highlightedRegionIds);
   const maxPopulation = Math.max(1, ...regions.map((region) => region.population));
   const geography = deriveGeography(regions, routes);
@@ -1626,15 +1794,9 @@ function drawMap(
     context.beginPath();
     applyLinePath(context, points, transform);
     if (type === "river") {
-      context.strokeStyle = "rgba(244, 238, 223, 0.62)";
-      context.lineWidth = 2.6;
-      context.stroke();
-      context.beginPath();
-      applyLinePath(context, points, transform);
-      context.strokeStyle = RIVER;
-      context.globalAlpha = 0.56;
-      context.lineWidth = 0.9;
-      context.stroke();
+      // River routes are a transport graph, not literal cartography. The two
+      // smoothed, land-clipped river systems below carry the visible geography.
+      return;
     } else if (type === "sea") {
       context.strokeStyle = RIVER;
       context.globalAlpha = 0.54;
@@ -1664,20 +1826,9 @@ function drawMap(
     if (!compactMap && overlay === "none") {
       drawRegionTerrain(context, region, center);
     }
-    if (region.port) {
-      const nearestSea = seaZones
-        .map((zone) => ({ zone, distance: Math.hypot(zone.center.x - region.center.x, zone.center.y - region.center.y) }))
-        .sort((left, right) => left.distance - right.distance)[0]?.zone;
-      const seaPoint = nearestSea ? worldToScreen(nearestSea.center, transform) : { x: center.x + 1, y: center.y + 1 };
-      const dx = seaPoint.x - center.x;
-      const dy = seaPoint.y - center.y;
-      const distance = Math.max(1, Math.hypot(dx, dy));
-      const offset = compactMap ? 5 : 11;
-      drawPort(context, {
-        x: center.x + dx / distance * offset,
-        y: center.y + dy / distance * offset,
-      }, compactMap);
-    }
+    const regionNodes = regionNodesByRegion.get(region.id) ?? [];
+    const portNode = regionNodes.find((node) => node.kind === "port");
+    if (portNode) drawPort(context, portNode.point, compactMap, region.id === selectedRegionId);
 
     const selected = region.id === selectedRegionId;
     const hovered = region.id === hoveredRegionId;
@@ -1719,51 +1870,43 @@ function drawMap(
       context.shadowBlur = 3;
       context.fillText(region.name, center.x, center.y + 2);
     }
-    if (region.capital) {
-      context.beginPath();
-      context.fillStyle = selected ? VERMILION : INK;
-      context.arc(center.x, center.y - (compactMap ? 7 : 10), compactMap ? 1.7 : 2.3, 0, Math.PI * 2);
-      context.fill();
-    }
+    const cityNode = regionNodes.find((node) => node.kind === "city");
+    if (cityNode) drawCity(context, cityNode.point, compactMap, Boolean(region.capital), selected || hovered);
     context.restore();
   });
 
   drawPolityLabels(context, regions, transform, overlay, compactMap);
 
-  const armyOffsets = new Map<string, number>();
-  armies.forEach((army) => {
-    const region = army.regionId ? regionById.get(army.regionId) : undefined;
-    const anchor = army.position ?? region?.center;
-    if (!anchor) return;
-    const slotKey = army.regionId ?? `${Math.round(anchor.x)}:${Math.round(anchor.y)}`;
-    const slot = armyOffsets.get(slotKey) ?? 0;
-    armyOffsets.set(slotKey, slot + 1);
-    const base = worldToScreen(anchor, transform);
-    const x = base.x + (compactMap ? 6 : 14) + (slot % 3) * (compactMap ? 7 : 17);
-    const y = base.y - (compactMap ? 5 : 12) - Math.floor(slot / 3) * (compactMap ? 8 : 19);
+  layoutMapArmyIcons(armies, regions, transform).forEach(({ army, point, radius }) => {
+    const { x, y } = point;
     const color = army.polityColor ?? polityFallback(army.polityId ?? army.id);
+    const selected = selectedObject?.kind === "army" && selectedObject.id === army.id;
 
     context.save();
     if (compactMap) {
       context.fillStyle = PAPER_LIGHT;
       context.beginPath();
-      context.arc(x, y, 3.8, 0, Math.PI * 2);
+      context.arc(x, y, selected ? radius + 1.5 : radius, 0, Math.PI * 2);
       context.fill();
-      context.strokeStyle = color;
-      context.lineWidth = 1.4;
+      context.strokeStyle = selected ? VERMILION : color;
+      context.lineWidth = selected ? 2.2 : 1.4;
+      if (selected) {
+        context.shadowColor = "rgba(163, 58, 46, 0.34)";
+        context.shadowBlur = 5;
+      }
       context.stroke();
       context.restore();
       return;
     }
-    context.shadowColor = "rgba(41, 43, 39, 0.24)";
-    context.shadowBlur = 4;
+    context.shadowColor = selected ? "rgba(163, 58, 46, 0.34)" : "rgba(41, 43, 39, 0.24)";
+    context.shadowBlur = selected ? 7 : 4;
     context.fillStyle = PAPER_LIGHT;
     context.beginPath();
-    context.arc(x, y, 9, 0, Math.PI * 2);
+    context.arc(x, y, selected ? radius + 1.5 : radius, 0, Math.PI * 2);
     context.fill();
     context.shadowBlur = 0;
-    context.strokeStyle = color;
-    context.lineWidth = 2;
+    context.strokeStyle = selected ? VERMILION : color;
+    context.lineWidth = selected ? 2.6 : 2;
     context.stroke();
     context.fillStyle = INK;
     context.font = '700 7px Inter, "Noto Sans SC", sans-serif';
@@ -1819,6 +1962,9 @@ export function WorldMap({
     () => buildMapPresentation(regions, routes, armies, seaZones, fleets, flows, markers),
     [armies, fleets, flows, markers, regions, routes, seaZones],
   );
+  const hoveredRegionId = hover?.kind === "region" || hover?.kind === "regionNode"
+    ? hover.region.id
+    : undefined;
 
   const applyCamera = useCallback((candidate: MapCamera) => {
     const next = clampMapCamera(candidate, size.width, size.height);
@@ -1918,11 +2064,11 @@ export function WorldMap({
       highlightedRegionIds,
       selectedRegionId,
       selectedObject,
-      hover?.region.id,
+      hoveredRegionId,
       camera,
     );
     recordRuntimeMetric('canvas.draw', runtimeNow() - drawStartedAt);
-  }, [camera, highlightedRegionIds, hover?.region.id, overlay, presentation, selectedObject, selectedRegionId, size]);
+  }, [camera, highlightedRegionIds, hoveredRegionId, overlay, presentation, selectedObject, selectedRegionId, size]);
 
   const localPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -2001,11 +2147,42 @@ export function WorldMap({
       showTapFeedback(point);
       return;
     }
+    const army = armyAtScreenPoint(
+      presentation.armies,
+      presentation.regions,
+      point,
+      size.width,
+      size.height,
+      MAP_PADDING,
+      cameraRef.current,
+      coarse,
+    );
+    if (onSelectObject && army) {
+      onSelectObject("army", army.id);
+      showTapFeedback(point);
+      return;
+    }
     const nearestMarker = presentation.markers
       .map((marker) => ({ marker, distance: Math.hypot(marker.position.x - worldPoint.x, marker.position.y - worldPoint.y) }))
       .sort((left, right) => left.distance - right.distance)[0];
     if (onSelectObject && nearestMarker && nearestMarker.distance <= worldRadius(coarse ? 22 : 12)) {
       onSelectObject(nearestMarker.marker.kind, nearestMarker.marker.id);
+      showTapFeedback(point);
+      return;
+    }
+    const directRegion = regionNearScreenPoint(point, 0);
+    const regionNode = regionNodeAtScreenPoint(
+      presentation.regions,
+      presentation.seaZones,
+      point,
+      size.width,
+      size.height,
+      MAP_PADDING,
+      cameraRef.current,
+      coarse,
+    );
+    if (regionNode && (!directRegion || regionNode.region.id === directRegion.id)) {
+      onSelectRegion(regionNode.region.id);
       showTapFeedback(point);
       return;
     }
@@ -2024,7 +2201,7 @@ export function WorldMap({
       showTapFeedback(point);
       return;
     }
-    const region = regionNearScreenPoint(point, coarse ? 8 : 0);
+    const region = directRegion ?? regionNearScreenPoint(point, coarse ? 8 : 0);
     if (region) {
       onSelectRegion(region.id);
       showTapFeedback(point);
@@ -2079,10 +2256,10 @@ export function WorldMap({
           setHover(null);
           return;
         }
-        const threshold = gesture.pointerType === "touch" ? 8 : 5;
+        const canPan = cameraRef.current.zoom > MAP_MIN_ZOOM + 0.0001;
+        const threshold = gesture.pointerType === "touch" ? (canPan ? 10 : 14) : 5;
         const totalDistance = Math.hypot(point.x - gesture.startPoint.x, point.y - gesture.startPoint.y);
         if (gesture.moved || totalDistance >= threshold) {
-          gesture.moved = true;
           const before = cameraRef.current;
           const next = applyCamera(panMapCamera(
             cameraRef.current,
@@ -2093,20 +2270,82 @@ export function WorldMap({
           ));
           const cameraMoved = Math.abs(next.panX - before.panX) > 0.05
             || Math.abs(next.panY - before.panY) > 0.05;
+          const shouldCancelTap = gesture.moved
+            || cameraMoved
+            || canPan
+            || gesture.pointerType !== "touch"
+            || totalDistance >= 28;
+          gesture.moved = shouldCancelTap;
           if (cameraMoved) {
             setDragging(true);
             setHasInteracted(true);
           }
-          setHover(null);
+          if (shouldCancelTap) setHover(null);
         }
         gesture.lastPoint = point;
         return;
       }
       if (event.pointerType !== "mouse" || event.buttons !== 0) return;
-      const region = regionNearScreenPoint(point, 0);
-      setHover(region ? { region, x: point.x, y: point.y } : null);
+      const transform = createMapViewportTransform(size.width, size.height, MAP_PADDING, cameraRef.current);
+      const worldPoint = screenToWorldPoint(point, size.width, size.height, MAP_PADDING, cameraRef.current);
+      const worldRadius = (pixels: number) => pixels / Math.max(0.001, transform.scale * Math.min(1, transform.yScale));
+      const nearestFleet = presentation.fleets
+        .map((fleet) => ({ fleet, distance: Math.hypot(fleet.position.x - worldPoint.x, fleet.position.y - worldPoint.y) }))
+        .sort((left, right) => left.distance - right.distance)[0];
+      if (nearestFleet && nearestFleet.distance <= worldRadius(12)) {
+        setHover({ kind: "fleet", fleet: nearestFleet.fleet, x: point.x, y: point.y });
+        return;
+      }
+      const army = armyAtScreenPoint(
+        presentation.armies,
+        presentation.regions,
+        point,
+        size.width,
+        size.height,
+        MAP_PADDING,
+        cameraRef.current,
+      );
+      if (army) {
+        setHover({ kind: "army", army, x: point.x, y: point.y });
+        return;
+      }
+      const nearestMarker = presentation.markers
+        .map((marker) => ({ marker, distance: Math.hypot(marker.position.x - worldPoint.x, marker.position.y - worldPoint.y) }))
+        .sort((left, right) => left.distance - right.distance)[0];
+      if (nearestMarker && nearestMarker.distance <= worldRadius(12)) {
+        setHover({ kind: "marker", marker: nearestMarker.marker, x: point.x, y: point.y });
+        return;
+      }
+      const directRegion = regionNearScreenPoint(point, 0);
+      const regionNode = regionNodeAtScreenPoint(
+        presentation.regions,
+        presentation.seaZones,
+        point,
+        size.width,
+        size.height,
+        MAP_PADDING,
+        cameraRef.current,
+      );
+      if (regionNode && (!directRegion || regionNode.region.id === directRegion.id)) {
+        setHover({ kind: "regionNode", nodeKind: regionNode.kind, region: regionNode.region, x: point.x, y: point.y });
+        return;
+      }
+      const nearestFlow = presentation.flows
+        .map((flow) => {
+          const dx = flow.to.x - flow.from.x;
+          const dy = flow.to.y - flow.from.y;
+          const denominator = dx * dx + dy * dy || 1;
+          const ratio = clamp(((worldPoint.x - flow.from.x) * dx + (worldPoint.y - flow.from.y) * dy) / denominator);
+          return { flow, distance: Math.hypot(worldPoint.x - (flow.from.x + ratio * dx), worldPoint.y - (flow.from.y + ratio * dy)) };
+        })
+        .sort((left, right) => left.distance - right.distance)[0];
+      if (nearestFlow && nearestFlow.distance <= worldRadius(9)) {
+        setHover({ kind: "flow", flow: nearestFlow.flow, x: point.x, y: point.y });
+        return;
+      }
+      setHover(directRegion ? { kind: "region", region: directRegion, x: point.x, y: point.y } : null);
     },
-    [applyCamera, localPoint, regionNearScreenPoint, size.height, size.width],
+    [applyCamera, localPoint, presentation, regionNearScreenPoint, size.height, size.width],
   );
 
   const handlePointerDown = useCallback(
@@ -2115,14 +2354,11 @@ export function WorldMap({
       event.preventDefault();
       event.currentTarget.focus({ preventScroll: true });
       const point = localPoint(event);
-      let captured = false;
       try {
         event.currentTarget.setPointerCapture(event.pointerId);
-        captured = event.currentTarget.hasPointerCapture(event.pointerId);
       } catch {
         // Pointer capture can fail when a browser cancels a touch during handoff.
       }
-      if (!captured) return;
       pointersRef.current.set(event.pointerId, {
         pointerType: event.pointerType,
         current: point,
@@ -2170,6 +2406,7 @@ export function WorldMap({
       && pointersRef.current.size === 1
       && !gesture?.moved
       && !gesture?.hadMultiple;
+    const selectionPoint = shouldSelect && gesture ? gesture.startPoint : point;
     pointersRef.current.delete(event.pointerId);
     try {
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -2193,7 +2430,7 @@ export function WorldMap({
     }
     gestureRef.current = null;
     setDragging(false);
-    if (shouldSelect) selectAtPoint(point, contact.pointerType);
+    if (shouldSelect) selectAtPoint(selectionPoint, contact.pointerType);
     commitCamera();
   }, [commitCamera, localPoint, selectAtPoint]);
 
@@ -2276,17 +2513,44 @@ export function WorldMap({
       }
       const contextualObjects = overlay === "naval"
         ? [...presentation.seaZones.map((item) => ({ kind: "seaZone" as const, id: item.id })), ...presentation.fleets.map((item) => ({ kind: "fleet" as const, id: item.id }))]
+        : overlay === "war" || overlay === "conflict"
+          ? presentation.armies.map((item) => ({ kind: "army" as const, id: item.id }))
         : [...presentation.markers.map((item) => ({ kind: item.kind, id: item.id })), ...presentation.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId }))];
       if (presentation.regions.length === 0 && contextualObjects.length === 0) return;
       if (event.key === "Enter" || event.key === " ") {
-        const targetId = hover?.region.id ?? selectedRegionId ?? presentation.regions[0]?.id;
         event.preventDefault();
+        if (hover?.kind === "army") {
+          onSelectObject?.("army", hover.army.id);
+          return;
+        }
+        if (hover?.kind === "fleet") {
+          onSelectObject?.("fleet", hover.fleet.id);
+          return;
+        }
+        if (hover?.kind === "marker") {
+          onSelectObject?.(hover.marker.kind, hover.marker.id);
+          return;
+        }
+        if (hover?.kind === "flow") {
+          onSelectObject?.(hover.flow.selectedKind, hover.flow.selectedId);
+          return;
+        }
+        const selectedContext = contextualObjects.find((item) => (
+          item.id === selectedObject?.id && item.kind === selectedObject.kind
+        ));
+        if (selectedContext) {
+          onSelectObject?.(selectedContext.kind, selectedContext.id);
+          return;
+        }
+        const targetId = hover?.kind === "region" || hover?.kind === "regionNode"
+          ? hover.region.id
+          : selectedRegionId ?? presentation.regions[0]?.id;
         if (targetId) onSelectRegion(targetId);
         return;
       }
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
-      if (contextualObjects.length && overlay !== "political" && overlay !== "none" && overlay !== "food" && overlay !== "population" && overlay !== "war") {
+      if (contextualObjects.length && overlay !== "political" && overlay !== "none" && overlay !== "food" && overlay !== "population") {
         const currentIndex = contextualObjects.findIndex((item) => item.id === selectedObject?.id);
         const direction = event.key === "ArrowRight" ? 1 : -1;
         const next = contextualObjects[(currentIndex + direction + contextualObjects.length) % contextualObjects.length];
@@ -2298,7 +2562,7 @@ export function WorldMap({
       const nextIndex = (currentIndex + direction + presentation.regions.length) % presentation.regions.length;
       onSelectRegion(presentation.regions[nextIndex].id);
     },
-    [hover?.region.id, onSelectObject, onSelectRegion, overlay, presentation, resetCamera, selectedObject?.id, selectedRegionId, zoomAtCenter],
+    [hover, onSelectObject, onSelectRegion, overlay, presentation, resetCamera, selectedObject?.id, selectedRegionId, zoomAtCenter],
   );
 
   const tooltipStyle = useMemo(() => {
@@ -2311,7 +2575,51 @@ export function WorldMap({
 
   const selectedName = regions.find((region) => region.id === selectedRegionId)?.name
     ?? seaZones.find((item) => selectedObject?.kind === "seaZone" && item.id === selectedObject.id)?.name
-    ?? fleets.find((item) => selectedObject?.kind === "fleet" && item.id === selectedObject.id)?.name;
+    ?? fleets.find((item) => selectedObject?.kind === "fleet" && item.id === selectedObject.id)?.name
+    ?? armies.find((item) => selectedObject?.kind === "army" && item.id === selectedObject.id)?.name;
+
+  const hoverTooltip = useMemo(() => {
+    if (!hover) return null;
+    if (hover.kind === "region") return {
+      name: hover.region.name,
+      type: hover.region.port ? `${terrainLabel(hover.region.terrain)} · 港区` : terrainLabel(hover.region.terrain),
+      rows: [
+        ["辖属", hover.region.polityName ?? (hover.region.polityId ? "地方政权" : "无主之地")],
+        ["人口", formatPopulation(hover.region.population)],
+        ["粮况", foodDescription(hover.region.foodRatio)],
+      ],
+    };
+    if (hover.kind === "regionNode") return {
+      name: hover.region.name,
+      type: hover.nodeKind === "port" ? "港口 · 可点击" : hover.region.capital ? "都城 · 可点击" : "城邑 · 可点击",
+      rows: [
+        ["辖属", hover.region.polityName ?? (hover.region.polityId ? "地方政权" : "无主之地")],
+        [hover.nodeKind === "port" ? "港级" : "城级", `${hover.nodeKind === "port" ? hover.region.portLevel ?? 1 : hover.region.cityLevel ?? 0}`],
+        ["人口", formatPopulation(hover.region.population)],
+      ],
+    };
+    if (hover.kind === "army") return {
+      name: hover.army.name,
+      type: "军团 · 可点击",
+      rows: [["兵力", formatPopulation(hover.army.strength)], ["士气", `${Math.round(hover.army.morale ?? 0)}`], ["状态", hover.army.status ?? "驻军"]],
+    };
+    if (hover.kind === "fleet") return {
+      name: hover.fleet.name,
+      type: "水师 · 可点击",
+      rows: [["舰力", formatPopulation(hover.fleet.strength)], ["战备", `${Math.round(hover.fleet.readiness)}`], ["任务", hover.fleet.mission]],
+    };
+    if (hover.kind === "marker") return {
+      name: hover.marker.label,
+      type: hover.marker.kind === "outbreak" ? "疫病 · 可点击" : "技艺 · 可点击",
+      rows: [["强度", `${Math.round(hover.marker.magnitude)}`]],
+    };
+    const flowNames: Record<MapFlowKind, string> = { trade: "商路", migration: "迁徙", disease: "传播", knowledge: "知识", naval: "航路" };
+    return {
+      name: hover.flow.label,
+      type: `${flowNames[hover.flow.kind]} · 可点击`,
+      rows: [["规模", formatPopulation(hover.flow.magnitude)]],
+    };
+  }, [hover]);
 
   return (
     <div
@@ -2328,7 +2636,7 @@ export function WorldMap({
       data-map-pan-y={camera.panY.toFixed(1)}
       data-pannable={camera.zoom > MAP_MIN_ZOOM + 0.0001 || undefined}
       data-dragging={dragging || undefined}
-      data-hover-region={Boolean(hover) || undefined}
+      data-hover-object={Boolean(hover) || undefined}
     >
       <canvas
         ref={canvasRef}
@@ -2385,8 +2693,8 @@ export function WorldMap({
 
       {!hasInteracted && regions.length > 0 ? (
         <p className="world-map__gesture-hint" aria-hidden="true">
-          <span className="world-map__gesture-hint-desktop">滚轮缩放 · 放大后拖动</span>
-          <span className="world-map__gesture-hint-touch">双指缩放 · 放大后单指拖动</span>
+          <span className="world-map__gesture-hint-desktop">点州域、军团或水师查看 · 滚轮缩放</span>
+          <span className="world-map__gesture-hint-touch">轻点州域、军团或水师速览 · 双指缩放</span>
         </p>
       ) : null}
 
@@ -2399,26 +2707,15 @@ export function WorldMap({
         />
       ) : null}
 
-      {hover && tooltipStyle ? (
+      {hover && hoverTooltip && tooltipStyle ? (
         <div className="world-map__tooltip" style={tooltipStyle} aria-hidden="true">
           <div className="world-map__tooltip-heading">
-            <strong>{hover.region.name}</strong>
-            <span>{terrainLabel(hover.region.terrain)}</span>
+            <strong>{hoverTooltip.name}</strong>
+            <span>{hoverTooltip.type}</span>
           </div>
           <div className="world-map__tooltip-rule" />
           <dl>
-            <div>
-              <dt>辖属</dt>
-              <dd>{hover.region.polityName ?? (hover.region.polityId ? "地方政权" : "无主之地")}</dd>
-            </div>
-            <div>
-              <dt>人口</dt>
-              <dd>{formatPopulation(hover.region.population)}</dd>
-            </div>
-            <div>
-              <dt>粮况</dt>
-              <dd>{foodDescription(hover.region.foodRatio)}</dd>
-            </div>
+            {hoverTooltip.rows.map(([label, value]) => <div key={label}><dt>{label}</dt><dd>{value}</dd></div>)}
           </dl>
         </div>
       ) : null}

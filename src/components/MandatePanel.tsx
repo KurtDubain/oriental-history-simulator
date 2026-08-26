@@ -112,7 +112,7 @@ export function MandatePanel({
       <aside ref={panelRef} className="mandate-panel" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="mandate-panel__header">
           <div>
-            <span><Sparkles size={13} aria-hidden="true" />观察者的有限偏转</span>
+            <span><Sparkles size={13} aria-hidden="true" />轻拨天意</span>
             <h2 id={titleId}>天意</h2>
           </div>
           <button ref={closeRef} type="button" aria-label="关闭天意" onClick={onClose}><X size={18} aria-hidden="true" /></button>

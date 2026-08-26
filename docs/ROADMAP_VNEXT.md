@@ -2,7 +2,7 @@
 
 > 对应设计：[NEXT_SYSTEM_DESIGN.md](./NEXT_SYSTEM_DESIGN.md)
 > 性能依据：[SIMULATION_PERFORMANCE_AUDIT.md](./SIMULATION_PERFORMANCE_AUDIT.md)
-> 任务状态：Phase A 已完成；Phase B 已交付三类权威 Situation、事实型结案层与 B10 局势全卷，B09 数值化起止快照因权威字段缺失继续保留；Phase C 的 C01～C04 已完成 Situation-first 三问、连续性仲裁、局势关注与权威里程碑暂停，下一观察纵切是 C05 QuarterPulse 局势变化，人物 Agency 尚未开始
+> 任务状态：Phase A 已完成；Phase B 已交付三类权威 Situation、事实型结案层与 B10 局势全卷，B09 数值化起止快照因权威字段缺失继续保留；Phase C 的 C01～C05 已完成 Situation-first 三问、连续性仲裁、局势关注、权威里程碑暂停与季度局势摘要，下一纵切进入人物 Agency 的 Desire / Goal / Plan 只读契约
 
 ## 1. 路线总览
 
@@ -198,7 +198,7 @@ Phase F UX、地图 LOD 与发布打磨
 - [x] **C02 — 三问连续性仲裁**：新题最短保留 3 季；任期结束后，临界挑战者仍须高出 20 分并连续领先 2 季；加入有界多样性惩罚、失去可见性退场与结案后一季结果回响。
 - [x] **C03 — 关注 Situation**：观察台持久化 situation ID，而非只关注代理人物/政权；三问卡片、关注簿、未读提醒与卷宗跳转使用同一稳定身份。
 - [x] **C04 — 自动暂停**：只由刚结算季度的权威 milestone 与核心人物死亡 Fact 触发形成、phase change、核心人物死亡和结案停表；普通史事规则不能冒充 Situation 里程碑暂停。
-- [ ] **C05 — QuarterPulse 局势变化**：显示升温、降温、新生和结案，不重复列普通 Facts。
+- [x] **C05 — QuarterPulse 局势变化**：显示升温、降温、新生和结案，不重复列普通 Facts。
 
 ### C01/C02 Completion Evidence（2026-08-26）
 
@@ -215,6 +215,14 @@ Phase F UX、地图 LOD 与发布打磨
 - 暂停候选严格来自 `lastTurn.turn` 与 `lastTurn.factIds` 指向的 `situation_milestone` / `character_death` Fact，并反查同一 Situation 的生命周期记录；普通张力变化、史册文案或代理人物/政权命中不能伪造局势里程碑。
 - 同季多变化采用固定优先级：结案、核心人物死亡、阶段变化、形成；候选与关注簿均有 32 条硬上限，所有同分项按稳定 ID 决胜，不消费模拟 RNG。
 - 自动推演停表后，观察台显示触发种类和原因，并可直接打开同一 Situation 卷宗；固定种子 E2E 覆盖关注、保存续读、未到里程碑不停、精确季度暂停和移动端触控路径。
+
+### C05 Completion Evidence（2026-08-27）
+
+- 新生、结案和阶段升降只认 `lastTurn.factIds` 内的 `situation_milestone` Fact，并要求该 Fact 同时存在于对应 Situation 的 `milestoneFactIds`，且与同季 `recentChanges` 的 transition / phase 完整吻合；孤儿、漏列或错配证据一律不展示。
+- 非阶段性升温/降温只读 Situation reducer 已持久化的当季 `tension` 与 `momentum`，以前者减后者精确还原前季张力；绝对变化不足 8 点的普通抖动保持沉默。这类项目明确标为走势而非 milestone，不参与暂停，也不展开底层普通 Facts。
+- 局势摘要采用“权威转折优先、走势随后”的稳定排序，最多四条；同分按稳定 Situation ID 决胜，不消费 RNG，不写 `WorldState`、Fact、Chronicle、存档或 hash。
+- QuarterPulse 把局势与普通史事放在同一条可横向浏览的季报流中；对应 `situation_*` Chronicle 会从普通史事列表排除，避免同一里程碑出现两次。每条局势可直达同一 ID 的局势全卷，桌面与 390×844 均保留可读标签、标题和 44px 触控入口。
+- 纯投影与组件 focused tests 6/6、严格 TypeScript/生产构建通过；固定种子 T4 在桌面与移动端均显示三条真实“新生”局势，实点可打开 `situation_000001`，浏览器 console 为零。
 
 ### Tasks：人物 Agency
 
@@ -429,7 +437,8 @@ Phase F UX、地图 LOD 与发布打磨
 13. [x] B09 facts layer / B10：已有三类 Situation 可通过局势全卷阅读、查证、结案回看与展开审计；数值化起止指标因缺少权威形成快照继续保留为 B09 后续。
 14. [x] C01/C02：当世三问改为 Situation-first，并加入 3 季留任、临界挑战者连续两季高出 20 分、可见性退场、结案回响和多样性仲裁。
 15. [x] C03/C04：观察台真正关注 Situation ID，并按形成、阶段变化、核心人物死亡和结案里程碑暂停；人物 Agency 未混入这一纵切。
-16. [ ] 下一纵切：C05，让 QuarterPulse 汇总局势升温、降温、新生与结案，不重复罗列普通 Facts。
+16. [x] C05：QuarterPulse 汇总局势升温、降温、新生与结案，并从普通史事流排除对应 `situation_*` Chronicle，避免重复。
+17. [ ] 下一纵切：C06/C07，冻结 Desire 与 Goal/Plan 的确定性数据契约；先以只读投影和 shadow 记录验证，不接管旧行为。
 
 这一 Sprint 的 B 阶段演示目标已经达成：
 
@@ -439,7 +448,9 @@ C01/C02 的演示目标已经达成：当世三问连续数季追踪同一条关
 
 C03/C04 的演示目标已经达成：玩家关注一条 Situation 后，自动推演会在它形成、升级、核心人物死亡或结案时准确暂停，并可从暂停原因直达同一卷宗。
 
-下一轮的演示目标是：玩家不用逐条翻史事，也能从 QuarterPulse 一眼看出本季有哪些持续局势升温、降温、新生或结案。
+C05 的演示目标已经达成：玩家不用逐条翻史事，也能从 QuarterPulse 一眼看出本季有哪些持续局势升温、降温、新生或结案，并可直接打开同一局势卷宗。
+
+下一轮的演示目标是：同一个人物能稳定说明“想要什么、准备怎么做、为什么此刻选择或放弃”，但 shadow 阶段不改写既有世界结果。
 
 ## 10. 每个任务的 Definition of Done
 
@@ -457,7 +468,7 @@ C03/C04 的演示目标已经达成：玩家关注一条 Situation 后，自动�
 
 ## 11. 暂时不要开始的任务
 
-- 不立即铺开 B05/B07 等更多检测器；下一轮先完成 C05，让已经可追踪、可关注、可停表的 Situation 进入季度摘要闭环。
+- 不立即铺开 B05/B07 等更多检测器；下一轮转入 C06/C07 的人物欲望与计划契约，先做只读生成和 shadow 对照。
 - 不把普通张力波动、史册关键词或代理对象命中描述成 Situation 里程碑；C03/C04 只认同一稳定 Situation ID 的权威 Fact。
 - 不先做完整围城 UI。
 - 不先增加宗教、文化、资源、兵种或地图。

@@ -48,8 +48,8 @@ export const MAP_PRIMER_STEPS: readonly PrimerStepDefinition[] = [
     id: 'situation',
     eyebrow: '第二眼 · 人势',
     title: '再认谁控制这里',
-    description: '淡色疆域属于不同政权；方印是城邑，锚是港口，旗号是正在行动的军团。',
-    reading: '颜色只表示控制，不代表强弱。城、港与军团的位置才说明当季局势。',
+    description: '淡色疆域属于不同政权；方印是城邑，双框是都城，锚是港口，带兵数的圆章是军团。',
+    reading: '颜色只表示控制，不代表强弱。城邑、港口与军团的位置才说明当季局势。',
     action: '带我看疆界',
   },
   {
@@ -95,14 +95,19 @@ function PrimerMapDiagram({ step }: { step: MapPrimerStep }) {
         </g>
 
         <g className="map-primer__nodes">
-          <g transform="translate(276 79)"><rect x="-5" y="-5" width="10" height="10" /><text x="12" y="4">城邑</text></g>
+          <g transform="translate(276 79)">
+            <rect x="-7" y="-7" width="14" height="14" rx="1" />
+            <rect x="-4" y="-4" width="8" height="8" rx="0.5" />
+            <text x="12" y="4">都城</text>
+          </g>
           <g className="map-primer__port" transform="translate(443 175)">
             <path d="M0-9v16M-5-9h10M-10 1c2 8 18 8 20 0M0 7v7" />
             <text x="14" y="4">港口</text>
           </g>
           <g className="map-primer__army" transform="translate(353 132)">
-            <path d="M0 12V-12l18 5-18 6" />
-            <text x="23" y="4">军团</text>
+            <circle r="11" />
+            <text x="-7" y="3">8k</text>
+            <text x="18" y="4">军团</text>
           </g>
         </g>
 

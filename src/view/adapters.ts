@@ -30,6 +30,7 @@ import type {
 import type { RosterItem } from '../components/RosterPanel';
 import type {
   ArmyState,
+  BiographyFact,
   CharacterState,
   EventCategory,
   FamilyState,
@@ -37,6 +38,7 @@ import type {
   RelationshipState,
   PolityState,
   RegionState,
+  SimulationFact,
   WorldState,
 } from '../sim/types';
 
@@ -70,6 +72,181 @@ function worldOffices(world: WorldState) {
 function turnLabel(turn: number) {
   const safeTurn = Math.max(0, Number.isFinite(turn) ? Math.floor(turn) : 0);
   return `第 ${Math.floor(safeTurn / 4) + 1} 年 · ${SEASON_NAMES[safeTurn % 4]}`;
+}
+
+interface PersonExperienceEntry {
+  turn: number;
+  record: ArchiveRecord;
+}
+
+function factNamesCharacter(fact: SimulationFact, characterId: string): boolean {
+  if (!fact.actorIds.includes(characterId)) return false;
+  switch (fact.kind) {
+    case 'battle':
+      return [fact.payload.attacker, ...fact.payload.defenders].some((force) => (
+        force.commanderId === characterId || force.deputyCommanderId === characterId
+      ));
+    case 'appointment_started':
+    case 'appointment_ended':
+      return fact.payload.holderId === characterId;
+    case 'character_death':
+      return fact.payload.characterId === characterId;
+    case 'marriage':
+      return fact.payload.leftCharacterId === characterId || fact.payload.rightCharacterId === characterId;
+    default:
+      return true;
+  }
+}
+
+function biographySource(
+  item: CharacterState,
+  biography: BiographyFact,
+  eventById: ReadonlyMap<string, HistoryEvent>,
+  factById: ReadonlyMap<string, SimulationFact>,
+): { event: HistoryEvent | null; fact: SimulationFact | null } | null {
+  if (biography.factId !== null) {
+    if (biography.eventId !== null) return null;
+    const sourceFact = factById.get(biography.factId);
+    return sourceFact && sourceFact.turn === biography.turn && factNamesCharacter(sourceFact, item.id)
+      ? { event: null, fact: sourceFact }
+      : null;
+  }
+  if (biography.eventId !== null) {
+    const sourceEvent = eventById.get(biography.eventId);
+    return sourceEvent && sourceEvent.turn === biography.turn && sourceEvent.actorIds.includes(item.id)
+      ? { event: sourceEvent, fact: null }
+      : null;
+  }
+  return biography.kind === '旧档人物' && biography.turn === 0
+    ? { event: null, fact: null }
+    : null;
+}
+
+function coActorNames(world: WorldState, item: CharacterState, event: HistoryEvent): string | null {
+  const names = event.actorIds
+    .filter((actorId) => actorId !== item.id)
+    .map((actorId) => character(world, actorId)?.name)
+    .filter((name): name is string => Boolean(name));
+  if (!names.length) return null;
+  return `${names.slice(0, 3).join('、')}${names.length > 3 ? '等人' : ''}`;
+}
+
+function biographySummary(world: WorldState, item: CharacterState, fact: BiographyFact, event: HistoryEvent): string {
+  const others = coActorNames(world, item, event);
+  return `${item.name}卷中记为「${fact.kind}」，见于「${event.title}」${others ? `；同卷人物还有${others}` : ''}。`;
+}
+
+function relatedEventSummary(world: WorldState, item: CharacterState, event: HistoryEvent): string {
+  const others = coActorNames(world, item, event);
+  return `${item.name}直接卷入「${event.title}」${others ? `；同卷人物还有${others}` : ''}。`;
+}
+
+function appointmentSummary(world: WorldState, item: CharacterState, fact: Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }>): string {
+  const owner = polity(world, fact.payload.polityId)?.name ?? '所属政权';
+  const scope = fact.payload.armyId
+    ? world.armies.find((army) => army.id === fact.payload.armyId)?.name ?? '所部军团'
+    : fact.payload.fleetId
+      ? world.fleets.find((fleet) => fleet.id === fact.payload.fleetId)?.name ?? '所部水师'
+      : fact.payload.regionId
+        ? region(world, fact.payload.regionId)?.name ?? '地方官署'
+        : '中枢官署';
+  return fact.kind === 'appointment_started'
+    ? `${item.name}受${owner}任为${fact.payload.officeKind}，职掌系于${scope}。`
+    : `${item.name}卸下${owner}${fact.payload.officeKind}之职，原职掌系于${scope}。`;
+}
+
+/**
+ * Projects a person's dated record from sources that explicitly name that
+ * person. Biography prose is presentation data, so every linked entry is
+ * checked against its authoritative Fact or Chronicle actor list before it is
+ * shown. Appointment Facts are included even though they deliberately have no
+ * Chronicle projection.
+ */
+export function toPersonExperienceRecords(world: WorldState, item: CharacterState): ArchiveRecord[] {
+  const entries: PersonExperienceEntry[] = [];
+  const knownEventIds = new Set<string>();
+  const knownFactIds = new Set<string>();
+  const biography = Array.isArray(item.biography) ? item.biography : [];
+  const eventById = new Map(world.history.map((event) => [event.id, event]));
+  const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
+
+  for (const fact of biography) {
+    const source = biographySource(item, fact, eventById, factById);
+    if (!source) continue;
+    if (source.event) {
+      knownEventIds.add(source.event.id);
+      for (const sourceFactId of source.event.sourceFactIds) knownFactIds.add(sourceFactId);
+    }
+    if (source.fact) knownFactIds.add(source.fact.id);
+    entries.push({
+      turn: fact.turn,
+      record: {
+        id: fact.id,
+        date: turnLabel(fact.turn),
+        title: fact.kind,
+        summary: source.event
+          ? biographySummary(world, item, fact, source.event)
+          : fact.summary,
+        eventId: fact.eventId,
+        importance: fact.importance,
+      },
+    });
+  }
+
+  for (const event of world.history) {
+    if (!event.actorIds.includes(item.id) || knownEventIds.has(event.id)) continue;
+    entries.push({
+      turn: event.turn,
+      record: {
+        ...eventArchiveRecord(event),
+        summary: relatedEventSummary(world, item, event),
+      },
+    });
+    knownEventIds.add(event.id);
+    for (const sourceFactId of event.sourceFactIds) knownFactIds.add(sourceFactId);
+  }
+
+  const appointmentFacts = world.facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }> => (
+    (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended')
+    && factNamesCharacter(fact, item.id)
+  ));
+  const startedAppointmentIds = new Set(appointmentFacts
+    .filter((fact) => fact.kind === 'appointment_started')
+    .map((fact) => fact.payload.appointmentId));
+  for (const fact of appointmentFacts) {
+    if (knownFactIds.has(fact.id)) continue;
+    entries.push({
+      turn: fact.turn,
+      record: {
+        id: `${item.id}:experience:${fact.id}`,
+        date: turnLabel(fact.turn),
+        title: fact.kind === 'appointment_started' ? `就任${fact.payload.officeKind}` : `卸任${fact.payload.officeKind}`,
+        summary: appointmentSummary(world, item, fact),
+        eventId: null,
+        importance: fact.importance,
+      },
+    });
+  }
+
+  for (const office of world.offices) {
+    if (office.holderId !== item.id || startedAppointmentIds.has(office.id)) continue;
+    const owner = polity(world, office.polityId)?.name ?? '所属政权';
+    entries.push({
+      turn: office.appointedTurn,
+      record: {
+        id: `${item.id}:experience:${office.id}:initial`,
+        date: turnLabel(office.appointedTurn),
+        title: `任${office.kind}`,
+        summary: `${item.name}在初始官档中登记为${owner}${office.kind}。`,
+        eventId: null,
+        importance: office.rank >= 80 ? 2 : 1,
+      },
+    });
+  }
+
+  return entries
+    .sort((left, right) => left.turn - right.turn || left.record.id.localeCompare(right.record.id))
+    .map((entry) => entry.record);
 }
 
 function family(world: WorldState, id: string | null | undefined) {
@@ -138,6 +315,7 @@ export function toMapRegions(world: WorldState): MapRegionView[] {
       unrest: item.unrest,
       warDamage: item.devastation,
       port: item.port,
+      portLevel: item.portLevel,
       capital: owner?.capitalRegionId === item.id,
       cityLevel: item.cityLevel,
       defense: item.defense,
@@ -319,6 +497,49 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
     if (!item) return null;
     const controller = polity(world, item.controllerId);
     return { id, kind, name: item.name, subtitle: `${item.climate} · ${item.contested ? '列舰相争' : controller?.name ?? '无主海域'}`, summary: item.contested ? '多方投射在此交叠，护航、封锁与补给均承受额外风险。' : '海域控制尚有主次，商船流量与风浪共同塑造其价值。', facts: [{ label: '主导', value: controller?.name ?? '无' }, { label: '港口', value: `${item.portRegionIds.length}处` }, { label: '船流', value: compact.format(item.traffic) }, { label: '相邻海域', value: item.adjacentSeaZoneIds.length }], meters: [{ label: '风暴风险', value: item.stormRisk }, { label: '海盗压力', value: item.piracy }], links: item.portRegionIds.slice(0, 6).flatMap((regionId) => { const portRegion = region(world, regionId); return portRegion ? [{ id: portRegion.id, kind: 'region' as const, label: portRegion.name, detail: '通海港口', value: portRegion.portLevel }] : []; }), history: systemHistory(world, 'seaZone', id) };
+  }
+  if (kind === 'army') {
+    const item = world.armies.find((candidate) => candidate.id === id);
+    if (!item) return null;
+    const owner = polity(world, item.polityId);
+    const commander = character(world, item.commanderId);
+    const deputy = character(world, item.deputyCommanderId);
+    const stationed = region(world, item.regionId);
+    const summary = item.supply < 35
+      ? '粮道已很吃紧；继续行军或交战，减员会先于正面溃败到来。'
+      : item.morale < 40
+        ? '军心不稳；主帅威望、近期胜负和补给将决定这支军团能否维持建制。'
+        : item.training >= 70 && item.experience >= 60
+          ? '这是一支训练与战阵经验俱佳的常备军，真正的限制来自粮道、主帅和战场位置。'
+          : '军团的战力由兵力、训练、军心与补给共同决定，人数并不等同于胜算。';
+    return {
+      id,
+      kind,
+      name: item.name,
+      subtitle: `${owner?.name ?? '无属'} · ${stationed?.name ?? '驻地不详'}`,
+      summary,
+      facts: [
+        { label: '主帅', value: commander?.name ?? '无帅' },
+        { label: '副将', value: deputy?.name ?? '暂缺' },
+        { label: '兵力', value: compact.format(item.soldiers) },
+        { label: '军粮', value: compact.format(item.food) },
+        { label: '本营', value: region(world, item.originRegionId)?.name ?? '不详' },
+        { label: '最近移动', value: item.lastMovedTurn < 0 ? '尚未移营' : item.lastMovedTurn === world.turn ? '本季' : turnLabel(item.lastMovedTurn) },
+      ],
+      meters: [
+        { label: '士气', value: item.morale },
+        { label: '训练', value: item.training },
+        { label: '战阵经验', value: item.experience },
+        { label: '补给', value: item.supply },
+      ],
+      links: [
+        commander ? { id: commander.id, kind: 'person' as const, label: commander.name, detail: '军团主帅' } : null,
+        deputy ? { id: deputy.id, kind: 'person' as const, label: deputy.name, detail: '军团副将' } : null,
+        stationed ? { id: stationed.id, kind: 'region' as const, label: stationed.name, detail: '当前驻地' } : null,
+        owner ? { id: owner.id, kind: 'country' as const, label: owner.name, detail: '所属政权' } : null,
+      ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+      history: systemHistory(world, 'army', id),
+    };
   }
   if (kind === 'fleet') {
     const item = world.fleets.find((candidate) => candidate.id === id);
@@ -552,19 +773,7 @@ export function toPersonInspector(world: WorldState, item: CharacterState): Pers
           .map((memory) => memory.summary),
       };
     });
-  const biography = Array.isArray(item.biography) ? item.biography : [];
-  const experiences = biography
-    .slice()
-    .sort((a, b) => b.turn - a.turn || b.importance - a.importance)
-    .slice(0, 12)
-    .map((fact) => ({
-      id: fact.id,
-      date: turnLabel(fact.turn),
-      title: fact.kind,
-      summary: fact.summary,
-      eventId: fact.eventId,
-      importance: fact.importance,
-    }));
+  const experiences = toPersonExperienceRecords(world, item).slice(-12).reverse();
   return {
     id: item.id,
     name: item.name,
@@ -767,13 +976,7 @@ export function toPersonArchive(world: WorldState, item: CharacterState): Archiv
   const inspector = toPersonInspector(world, item);
   const owner = polity(world, item.polityId);
   const personFamily = family(world, item.familyId);
-  const biography = Array.isArray(item.biography) ? item.biography : [];
-  const recordEntries: Array<{ turn: number; record: ArchiveRecord }> = biography.map((fact) => ({ turn: fact.turn, record: { id: fact.id, date: turnLabel(fact.turn), title: fact.kind, summary: fact.summary, importance: fact.importance, eventId: fact.eventId } }));
-  const knownEventIds = new Set(recordEntries.map((entry) => entry.record.eventId).filter(Boolean));
-  for (const event of world.history.filter((candidate) => candidate.actorIds.includes(item.id))) {
-    if (!knownEventIds.has(event.id)) recordEntries.push({ turn: event.turn, record: eventArchiveRecord(event) });
-  }
-  const records = recordEntries.sort((a, b) => a.turn - b.turn || a.record.id.localeCompare(b.record.id)).map((entry) => entry.record);
+  const records: ArchiveRecord[] = toPersonExperienceRecords(world, item);
   const relationships = inspector.relationships ?? [];
   return {
     id: item.id,

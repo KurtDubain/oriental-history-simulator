@@ -1,5 +1,6 @@
 import { useId } from 'react';
 import type { TurnReport } from '../sim/types';
+import type { QuarterPulseSituationChange } from '../view/quarter-pulse-situations';
 import '../styles/quarter-pulse.css';
 
 export type QuarterPulseLedger = 'population' | 'food' | 'wealth';
@@ -15,7 +16,9 @@ export interface QuarterPulseEvent {
 export interface QuarterPulseProps {
   report: TurnReport | null;
   events: QuarterPulseEvent[];
+  situationChanges: QuarterPulseSituationChange[];
   onSelectEvent: (id: string) => void;
+  onSelectSituation: (id: string) => void;
   onSelectLedger: (ledger: QuarterPulseLedger) => void;
   compact?: boolean;
 }
@@ -42,7 +45,9 @@ function netTone(value: number): 'gain' | 'loss' | 'even' {
 export function QuarterPulse({
   report,
   events,
+  situationChanges,
   onSelectEvent,
+  onSelectSituation,
   onSelectLedger,
   compact = false,
 }: QuarterPulseProps) {
@@ -90,6 +95,7 @@ export function QuarterPulse({
   const visibleEvents = [...events]
     .sort((left, right) => right.importance - left.importance)
     .slice(0, 3);
+  const visibleSituations = situationChanges.slice(0, 4);
 
   return (
     <section
@@ -102,7 +108,7 @@ export function QuarterPulse({
       <header className="quarter-pulse__date" data-testid="quarter-pulse-date">
         <span className="quarter-pulse__kicker">本季变化</span>
         <strong id={`${tooltipId}-heading`}>第 {report.year} 年 · {report.season}季</strong>
-        <small>史页 T{String(report.turn).padStart(4, '0')}</small>
+        <small>第 {report.turn + 1} 季记</small>
       </header>
 
       <div className="quarter-pulse__ledgers" aria-label="本季总账净变化">
@@ -129,11 +135,32 @@ export function QuarterPulse({
         })}
       </div>
 
-      <div className="quarter-pulse__events" aria-label="本季重要史事">
-        {visibleEvents.length ? (
+      <div className="quarter-pulse__events" aria-label="本季局势与重要史事">
+        {visibleSituations.length || visibleEvents.length ? (
           <ol className="quarter-pulse__event-list">
+            {visibleSituations.map((situation) => (
+              <li key={`situation:${situation.id}`} data-story-kind="situation">
+                <button
+                  type="button"
+                  className="quarter-pulse__event quarter-pulse__situation"
+                  data-testid="quarter-pulse-situation"
+                  data-situation-id={situation.id}
+                  data-kind={situation.kind}
+                  data-basis={situation.basis}
+                  aria-label={`${situation.kindLabel}：${situation.title}。${situation.detail}。打开局势全卷`}
+                  onClick={() => onSelectSituation(situation.id)}
+                >
+                  <span className="quarter-pulse__event-meta">
+                    <span className="quarter-pulse__situation-kind">{situation.kindLabel}</span>
+                    <span>{situation.detail}</span>
+                  </span>
+                  <strong>{situation.title}</strong>
+                  <span className="quarter-pulse__event-cause" aria-hidden="true">看卷 ›</span>
+                </button>
+              </li>
+            ))}
             {visibleEvents.map((event) => (
-              <li key={event.id}>
+              <li key={event.id} data-story-kind="event">
                 <button
                   type="button"
                   className="quarter-pulse__event"

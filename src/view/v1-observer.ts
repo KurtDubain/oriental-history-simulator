@@ -16,6 +16,7 @@ export type ObserverWatchKind =
   | 'person'
   | 'region'
   | 'seaZone'
+  | 'army'
   | 'fleet'
   | 'tradeCorridor'
   | 'practice'
@@ -119,6 +120,7 @@ const WATCH_KINDS = new Set<ObserverWatchKind>([
   'person',
   'region',
   'seaZone',
+  'army',
   'fleet',
   'tradeCorridor',
   'practice',
@@ -526,6 +528,7 @@ function watchKindFromEntityType(entityType: string): ObserverWatchKind | null {
     family: 'family',
     region: 'region',
     seaZone: 'seaZone',
+    army: 'army',
     fleet: 'fleet',
     tradeCorridor: 'tradeCorridor',
     practice: 'practice',

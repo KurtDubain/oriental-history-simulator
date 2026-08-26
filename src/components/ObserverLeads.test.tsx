@@ -20,10 +20,10 @@ describe('ObserverLeads', () => {
     expect(markup).toContain('现在看什么');
     expect(markup).toContain('当世三问');
     expect(markup.match(/data-testid="observer-lead"/g)).toHaveLength(3);
-    expect(markup).toContain('下一观察');
+    expect(markup).toContain('接着看');
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('展开局势全卷');
-    expect(markup).toContain('卷 7');
+    expect(markup).toContain('7 条局势');
   });
 
   it('uses Situation identity for watching while fallback leads retain their target identity', () => {
@@ -48,7 +48,7 @@ describe('ObserverLeads', () => {
     expect(markup.match(/data-situation-id="situation_/g)).toHaveLength(3);
     expect(markup.match(/data-display-mode="tracking"/g)).toHaveLength(3);
     expect(markup.match(/data-testid="observer-lead-change"/g)).toHaveLength(3);
-    expect(markup).toContain('已追踪');
+    expect(markup).toContain('延续');
     expect(observerLeadWatchKey(watchedLead)).toBe(`situation:${watchedLead.situationId}`);
     expect(observerLeadTargetKey(watchedLead)).toBe(
       `${watchedLead.target.kind}:${watchedLead.target.id}`,

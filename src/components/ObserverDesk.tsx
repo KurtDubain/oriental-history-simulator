@@ -33,6 +33,7 @@ const WATCH_KIND_LABELS: Record<ObserverWatchKind, string> = {
   person: '人物',
   region: '地区',
   seaZone: '海域',
+  army: '军团',
   fleet: '舰队',
   tradeCorridor: '商路',
   practice: '实践',
@@ -356,7 +357,7 @@ export function ObserverDesk({
               })}
             </ol>
             <footer>
-              <span>{progress.completed === progress.total ? <BookOpenCheck size={14} aria-hidden="true" /> : <ListChecks size={14} aria-hidden="true" />}{progress.completed === progress.total ? '你已掌握观察世界的基本方法。' : '完成状态由真实操作自动记录。'}</span>
+              <span>{progress.completed === progress.total ? <BookOpenCheck size={14} aria-hidden="true" /> : <ListChecks size={14} aria-hidden="true" />}{progress.completed === progress.total ? '你已掌握观察世界的基本方法。' : '完成一次操作后自动勾选。'}</span>
               {progress.completed > 0 ? (
                 <button type="button" onClick={resetGuide}><RotateCcw size={12} aria-hidden="true" />重置</button>
               ) : null}

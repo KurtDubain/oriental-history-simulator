@@ -59,7 +59,7 @@ export function ObserverLeads({
             aria-label={`展开局势全卷，共${situationCount}条可阅局势`}
             onClick={() => onOpenSituations()}
           >
-            卷 {situationCount}
+            {situationCount} 条局势
           </button>
         ) : null}
         <button
@@ -109,20 +109,18 @@ export function ObserverLeads({
               <button
                 type="button"
                 className="observer-leads__inspect"
-                aria-label={`${lead.label}：${lead.question}。${lead.evidence.join('；')}。下一观察：${lead.nextSignal}。${lead.situationId ? '打开局势卷宗' : '查看对象'}`}
+                aria-label={`${lead.label}：${lead.question}。${lead.evidence.join('；')}。接着看：${lead.nextSignal}。${lead.situationId ? '打开局势卷宗' : '查看对象'}`}
                 onClick={() => onInspect(lead)}
               >
                 <span className="observer-leads__meta">
                   <span>{lead.label}</span>
-                  {lead.situationId ? <span data-source="situation">局势题</span> : null}
                   <span data-stage={lead.stage}>{lead.stage}</span>
-                  <span>张力 {lead.tension}</span>
                 </span>
                 <strong data-testid="observer-lead-question">{lead.question}</strong>
                 {lead.situationId ? (
                   <span className="observer-leads__continuity" data-testid="observer-lead-change">
                     <Clock3 size={10} aria-hidden="true" />
-                    始于{lead.startedLabel} · 已追踪{lead.trackingTurns ?? 1}季 · {lead.recentChange}
+                    始于{lead.startedLabel} · 延续{lead.trackingTurns ?? 1}季 · {lead.recentChange}
                   </span>
                 ) : null}
                 <span className="observer-leads__evidence">{lead.evidence.join(' · ')}</span>

@@ -830,11 +830,23 @@ async function exerciseMapViewportTouch(context, page) {
       && viewportControlsBounds.y + viewportControlsBounds.height <= navigationBounds.y,
     '舆图缩放控件必须位于底部观察坞上方',
   );
-  const worldTools = page.locator('.observer-world-tools button');
+  const worldTools = page.locator('.observer-world-tools > button:visible');
+  assert.equal(await worldTools.count(), 4, '移动端常驻工具只保留观察、史册、天意和更多');
   for (let index = 0; index < await worldTools.count(); index += 1) {
     const bounds = await worldTools.nth(index).boundingBox();
     assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, '移动端世界工具至少应为44px');
   }
+  await page.locator('.observer-world-tools__more').click();
+  const secondaryTools = page.locator('.observer-world-tools__secondary button:visible');
+  assert.equal(await secondaryTools.count(), 5, '更多工具应展开五项低频操作');
+  for (let index = 0; index < await secondaryTools.count(); index += 1) {
+    const bounds = await secondaryTools.nth(index).boundingBox();
+    assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, '展开后的移动端世界工具至少应为44px');
+  }
+  await page.screenshot({ path: `${ARTIFACT_DIR}/mobile-world-tools-more-390x844.png`, fullPage: true });
+  await page.keyboard.press('Escape');
+  assert.equal(await page.locator('.observer-world-tools').getAttribute('data-mobile-more-open'), null, 'Escape 应收起移动端更多工具');
+  assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('observer-world-tools__more')), true, '收起更多工具后应把焦点还给省略号按钮');
   for (const selector of ['.observer-speed-cycle', '.observer-time-controls__toggle', '.observer-advance-button']) {
     const bounds = await page.locator(selector).boundingBox();
     assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, `${selector} 应提供44px触控目标`);
@@ -899,11 +911,28 @@ async function exerciseMapViewportTouch(context, page) {
     x: box.x + (box.width - 1000 * fitScale) / 2 + 416 * fitScale,
     y: box.y + (box.height - 700 * fitScale) / 2 + 547 * fitScale,
   };
-  await page.touchscreen.tap(taiwan.x, taiwan.y);
-  await waitForSnapshot(page, (current) => current.interface.selected?.id === 'r_taiwan');
+  await page.locator('.observer-world-tools__more').click();
+  assert.equal(await page.locator('.observer-world-tools').getAttribute('data-mobile-more-open'), 'true');
+  await dispatch('touchStart', [taiwan]);
+  await dispatch('touchMove', [{ x: taiwan.x + 10, y: taiwan.y + 3 }]);
+  await dispatch('touchEnd', []);
+  await page.waitForTimeout(120);
+  const touchSelection = (await snapshot(page)).interface.selected;
+  assert.equal(touchSelection?.kind, 'army', `100%缩放下轻微手抖仍应点中台湾驻军，实际为 ${touchSelection?.kind ?? 'none'}:${touchSelection?.id ?? 'none'}`);
+  assert.equal(touchSelection?.id, 'a_006', `台湾驻军应打开自身档案，而非地域或主帅，实际为 ${touchSelection?.kind ?? 'none'}:${touchSelection?.id ?? 'none'}`);
+  assert.equal(await page.locator('.observer-world-tools').getAttribute('data-mobile-more-open'), null, '点选地图对象后应自动收起更多工具');
   const inspectorBounds = await page.locator('.observer-inspector').boundingBox();
   assert.ok(inspectorBounds && inspectorBounds.x >= 0 && inspectorBounds.x + inspectorBounds.width <= 391, '触摸点选后的档案不可横向溢出');
+  assert.ok(inspectorBounds && inspectorBounds.height <= 196, '移动端首次点选只应展开地图速览');
+  assert.equal(await page.locator('.observer-inspector').getAttribute('data-mobile-expanded'), 'false');
   assert.equal(await page.locator('.observer-navigation').isVisible(), false, '移动端档案打开时应隐藏被遮挡的底部导航');
+  const quickLookToggleBounds = await page.locator('.observer-inspector__mobile-toggle button').boundingBox();
+  assert.ok(quickLookToggleBounds && quickLookToggleBounds.width >= 44 && quickLookToggleBounds.height >= 44, '移动端档案展开按钮至少应为44px');
+  await page.screenshot({ path: `${ARTIFACT_DIR}/mobile-map-quick-look-390x844.png`, fullPage: true });
+  await page.locator('.observer-inspector__mobile-toggle button').click();
+  await page.waitForFunction(() => document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true');
+  const expandedInspectorBounds = await page.locator('.observer-inspector').boundingBox();
+  assert.ok(expandedInspectorBounds && inspectorBounds && expandedInspectorBounds.height > inspectorBounds.height, '点击展开档案后应显示完整移动端卷宗');
   await page.locator('.observer-inspector button[aria-label="关闭档案"]').click();
   await page.locator('.observer-inspector').waitFor({ state: 'detached' });
 }
@@ -920,6 +949,9 @@ async function selectFirstMapObject(page, expectedKind, expectedDossier) {
   assert.equal(selected.interface.selected.kind, expectedKind);
   assert.equal(selected.interface.selectedDetail.kind, expectedKind);
   assert.equal((await page.locator('.observer-inspector__kind').textContent())?.trim(), expectedDossier);
+  await page.keyboard.press('Enter');
+  const confirmed = await snapshot(page);
+  assert.deepEqual(confirmed.interface.selected, selected.interface.selected, '回车确认当前地图对象不得跳到无关地域');
   return selected;
 }
 
@@ -1357,6 +1389,7 @@ try {
   assert.equal(await page.locator('.world-map').getAttribute('data-overlay'), 'food');
   await selectLayer(page, 'population');
   await selectLayer(page, 'war');
+  await selectFirstMapObject(page, 'army', '军团档案');
 
   const references = await findThreeClickCausalPath(page);
   assert.ok(await references.locator('button').count());
@@ -1639,6 +1672,7 @@ try {
   await mobilePage.keyboard.press('Escape');
   await mobileHistory.waitFor({ state: 'detached' });
 
+  await mobilePage.locator('.observer-world-tools__more').click();
   const mobileCollectionTrigger = mobilePage.locator('button[data-world-collection-trigger="true"], button[aria-label^="打开世界收藏"]');
   if (await mobileCollectionTrigger.count()) {
     await mobileCollectionTrigger.first().click();

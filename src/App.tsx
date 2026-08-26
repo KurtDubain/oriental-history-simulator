@@ -5,6 +5,7 @@ import {
   Expand,
   Library,
   Map as MapIcon,
+  MoreHorizontal,
   RotateCcw,
   Save,
   Sparkles,
@@ -128,6 +129,7 @@ import {
   type ObserverLeadProjection,
 } from './view/observer-leads';
 import { projectSituationWorkbench } from './view/situation-detail';
+import { projectQuarterPulseSituations } from './view/quarter-pulse-situations';
 import {
   projectSituationSnapshotItem,
   toSituationSnapshot,
@@ -160,6 +162,7 @@ type Selection =
   | { kind: 'family'; id: string }
   | { kind: 'person'; id: string }
   | { kind: 'seaZone'; id: string }
+  | { kind: 'army'; id: string }
   | { kind: 'fleet'; id: string }
   | { kind: 'tradeCorridor'; id: string }
   | { kind: 'practice'; id: string }
@@ -233,6 +236,7 @@ function selectedEntityLabel(world: WorldState, selection: Selection): string | 
   if (selection.kind === 'family') return world.families?.find((item) => item.id === selection.id)?.name ?? null;
   if (selection.kind === 'person') return world.characters.find((item) => item.id === selection.id)?.name ?? null;
   if (selection.kind === 'seaZone') return world.seaZones.find((item) => item.id === selection.id)?.name ?? null;
+  if (selection.kind === 'army') return world.armies.find((item) => item.id === selection.id)?.name ?? null;
   if (selection.kind === 'fleet') return world.fleets.find((item) => item.id === selection.id)?.name ?? null;
   if (selection.kind === 'practice') return world.practices.find((item) => item.id === selection.id)?.name ?? null;
   const system = toSystemInspector(world, selection.kind, selection.id);
@@ -775,6 +779,7 @@ export function App() {
   const [collectionOpen, setCollectionOpen] = useState(false);
   const [collectionBusy, setCollectionBusy] = useState(false);
   const [worldSaves, setWorldSaves] = useState<WorldSaveSummary[]>([]);
+  const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
 
   const worldRef = useRef<WorldState | null>(null);
   const worldShellRef = useRef<HTMLElement>(null);
@@ -792,6 +797,8 @@ export function App() {
   const historyTriggerRef = useRef<HTMLButtonElement>(null);
   const collectionTriggerRef = useRef<HTMLButtonElement>(null);
   const primerTriggerRef = useRef<HTMLButtonElement>(null);
+  const mobileToolsRef = useRef<HTMLDivElement>(null);
+  const mobileToolsTriggerRef = useRef<HTMLButtonElement>(null);
   const collectionReturnFocusRef = useRef<HTMLElement | null>(null);
   const observerSettingsRef = useRef(observerSettings);
   const advanceRef = useRef<(source: AdvanceSource) => boolean>(() => false);
@@ -800,6 +807,25 @@ export function App() {
   const reactCommitStartedAtRef = useRef<{ startedAt: number; turn: number } | null>(null);
   const autosaveCoordinatorRef = useRef<AutosaveCoordinator | null>(null);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
+  useEffect(() => {
+    if (!mobileToolsOpen) return undefined;
+    const closeFromOutside = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !mobileToolsRef.current?.contains(target)) setMobileToolsOpen(false);
+    };
+    const closeFromKeyboard = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      setMobileToolsOpen(false);
+      window.setTimeout(() => mobileToolsTriggerRef.current?.focus(), 0);
+    };
+    document.addEventListener('pointerdown', closeFromOutside, true);
+    window.addEventListener('keydown', closeFromKeyboard);
+    return () => {
+      document.removeEventListener('pointerdown', closeFromOutside, true);
+      window.removeEventListener('keydown', closeFromKeyboard);
+    };
+  }, [mobileToolsOpen]);
   const observerLeadProjection = useMemo(() => (
     world ? deriveObserverLeadProjection(world, observerSettings.leadContinuity) : null
   ), [observerSettings.leadContinuity, world]);
@@ -1609,11 +1635,18 @@ export function App() {
   const familyItems = useMemo(() => world ? familyRoster(world) : [], [world]);
   const peopleItems = useMemo(() => world ? peopleRoster(world) : [], [world]);
   const militaryItems = useMemo(() => world ? militaryRoster(world) : [], [world]);
+  const quarterSituationChanges = useMemo(() => (
+    world ? projectQuarterPulseSituations(world) : []
+  ), [world]);
   const quarterEvents = useMemo<QuarterPulseEvent[]>(() => {
     if (!world?.lastTurn) return [];
     const eventIds = new Set(world.lastTurn.eventIds);
     return world.history
-      .filter((event) => eventIds.has(event.id) && event.kind !== 'quarter_summary')
+      .filter((event) => (
+        eventIds.has(event.id)
+        && event.kind !== 'quarter_summary'
+        && !event.kind.startsWith('situation_')
+      ))
       .map((event) => {
         const chronicle = toChronicleEvent(world, event);
         return {
@@ -1696,7 +1729,7 @@ export function App() {
       const army = current.armies.find((item) => item.id === id);
       const fleet = current.fleets.find((item) => item.id === id);
       setFocusedArmyId(id);
-      if (army) setSelection({ kind: 'person', id: army.commanderId });
+      if (army) setSelection({ kind: 'army', id: army.id });
       else if (fleet) setSelection({ kind: 'fleet', id: fleet.id });
       return;
     }
@@ -1840,7 +1873,16 @@ export function App() {
       handleOpenSituationWorkbench(item.id, observerDeskTriggerRef.current);
       return;
     }
-    setSelection({ kind: item.kind, id: item.id });
+    const current = worldRef.current;
+    const nextSelection = { kind: item.kind, id: item.id } as Selection;
+    if (!current || !selectedEntityLabel(current, nextSelection)) {
+      setObserverDeskOpen(false);
+      setPauseMatch(null);
+      setToast(`“${item.label}”已退出当下舆图；关注记录仍保留在观察台。`);
+      return;
+    }
+    if (item.kind === 'army' || item.kind === 'fleet') setFocusedArmyId(item.id);
+    setSelection(nextSelection);
     setActiveView(item.kind === 'country' ? 'polities' : item.kind === 'family' ? 'families' : item.kind === 'person' ? 'people' : 'world');
     setObserverDeskOpen(false);
     setPauseMatch(null);
@@ -2018,10 +2060,13 @@ export function App() {
               cameraKey={mapCameraKey}
               onCameraChange={setMapCamera}
               onSelectRegion={(id) => {
+                setMobileToolsOpen(false);
                 setSelection({ kind: 'region', id });
                 setActiveView('world');
               }}
               onSelectObject={(kind, id) => {
+                setMobileToolsOpen(false);
+                if (kind === 'army' || kind === 'fleet') setFocusedArmyId(id);
                 setSelection({ kind, id });
                 setActiveView('world');
               }}
@@ -2046,13 +2091,16 @@ export function App() {
               <span>读图</span>
             </button>
 
-            <div className="observer-world-tools" aria-label="世界与存档工具">
+            <div ref={mobileToolsRef} className="observer-world-tools" data-mobile-more-open={mobileToolsOpen || undefined} aria-label="世界与存档工具">
               <button
                 ref={observerDeskTriggerRef}
                 type="button"
                 data-observer-desk-trigger="true"
                 data-alert={observerSettings.watchlist.some((item) => item.alert) || undefined}
-                onClick={handleOpenObserverDesk}
+                onClick={() => {
+                  setMobileToolsOpen(false);
+                  handleOpenObserverDesk();
+                }}
                 aria-label={`打开观察台，关注${observerSettings.watchlist.length}项`}
                 title={`观察台 · ${observerSettings.watchlist.length}项关注`}
               >
@@ -2062,21 +2110,14 @@ export function App() {
                 ref={historyTriggerRef}
                 type="button"
                 data-history-workbench-trigger="true"
-                onClick={() => handleViewChange('chronicle')}
+                onClick={() => {
+                  setMobileToolsOpen(false);
+                  handleViewChange('chronicle');
+                }}
                 aria-label="打开历史工作台，快捷键 H"
                 title="历史工作台（H）"
               >
                 <Archive size={16} aria-hidden="true" />
-              </button>
-              <button
-                ref={collectionTriggerRef}
-                type="button"
-                data-world-collection-trigger="true"
-                onClick={handleOpenCollection}
-                aria-label={`打开世界收藏，现有${namedWorldSaveCount}个命名世界`}
-                title={`世界收藏 · ${namedWorldSaveCount}`}
-              >
-                <Library size={16} aria-hidden="true" />
               </button>
               <span className="observer-world-tools__rule" aria-hidden="true" />
               <button
@@ -2084,26 +2125,55 @@ export function App() {
                 type="button"
                 data-mandate-trigger="true"
                 data-mandate-available={mandateAvailable}
-                onClick={handleOpenMandate}
+                onClick={() => {
+                  setMobileToolsOpen(false);
+                  handleOpenMandate();
+                }}
                 aria-label={mandateUsedThisTurn ? '打开天意，本季已经干预' : `打开天意，本季可用${mandateAvailable}点`}
                 title={mandateUsedThisTurn ? '本季天意已用' : `天意 · ${mandateAvailable}点`}
               >
                 <Sparkles size={16} aria-hidden="true" />
               </button>
-              <span className="observer-world-tools__rule" aria-hidden="true" />
-              <button type="button" onClick={handleManualSave} aria-label="保存当前世界" title="保存当前世界">
-                <Save size={16} aria-hidden="true" />
+              <button
+                ref={mobileToolsTriggerRef}
+                type="button"
+                className="observer-world-tools__more"
+                aria-label={mobileToolsOpen ? '收起更多工具' : '打开更多工具'}
+                aria-expanded={mobileToolsOpen}
+                onClick={() => setMobileToolsOpen((current) => !current)}
+              >
+                <MoreHorizontal size={17} aria-hidden="true" />
               </button>
-              <button type="button" onClick={handleExport} aria-label="导出完整史册" title="导出完整史册">
-                <Download size={16} aria-hidden="true" />
-              </button>
-              <span className="observer-world-tools__rule" aria-hidden="true" />
-              <button type="button" onClick={handleFullscreen} aria-label="切换全屏，快捷键 F" title="全屏（F）">
-                <Expand size={16} aria-hidden="true" />
-              </button>
-              <button type="button" onClick={handleNewWorldMenu} aria-label="返回世界书页" title="新纪、续读或导入">
-                <RotateCcw size={16} aria-hidden="true" />
-              </button>
+              <div className="observer-world-tools__secondary">
+                <span className="observer-world-tools__rule" aria-hidden="true" />
+                <button
+                  ref={collectionTriggerRef}
+                  type="button"
+                  data-world-collection-trigger="true"
+                  onClick={() => {
+                    setMobileToolsOpen(false);
+                    handleOpenCollection();
+                  }}
+                  aria-label={`打开世界收藏，现有${namedWorldSaveCount}个命名世界`}
+                  title={`世界收藏 · ${namedWorldSaveCount}`}
+                >
+                  <Library size={16} aria-hidden="true" />
+                </button>
+                <span className="observer-world-tools__rule" aria-hidden="true" />
+                <button type="button" onClick={() => { setMobileToolsOpen(false); handleManualSave(); }} aria-label="保存当前世界" title="保存当前世界">
+                  <Save size={16} aria-hidden="true" />
+                </button>
+                <button type="button" onClick={() => { setMobileToolsOpen(false); handleExport(); }} aria-label="导出完整史册" title="导出完整史册">
+                  <Download size={16} aria-hidden="true" />
+                </button>
+                <span className="observer-world-tools__rule" aria-hidden="true" />
+                <button type="button" onClick={() => { setMobileToolsOpen(false); handleFullscreen(); }} aria-label="切换全屏，快捷键 F" title="全屏（F）">
+                  <Expand size={16} aria-hidden="true" />
+                </button>
+                <button type="button" onClick={() => { setMobileToolsOpen(false); handleNewWorldMenu(); }} aria-label="返回世界书页" title="新纪、续读或导入">
+                  <RotateCcw size={16} aria-hidden="true" />
+                </button>
+              </div>
             </div>
 
             <div className="observer-world-signature" aria-label="确定性世界签名">
@@ -2164,7 +2234,9 @@ export function App() {
           <QuarterPulse
             report={world.lastTurn}
             events={quarterEvents}
+            situationChanges={quarterSituationChanges}
             onSelectEvent={selectQuarterEvent}
+            onSelectSituation={handleOpenSituationWorkbench}
             onSelectLedger={selectQuarterLedger}
           />
 

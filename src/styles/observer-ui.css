@@ -400,6 +400,10 @@
   animation: observer-inspector-reveal 220ms ease-out both;
 }
 
+.observer-inspector__mobile-toggle {
+  display: none;
+}
+
 .observer-inspector__header {
   display: flex;
   align-items: flex-start;
@@ -1680,8 +1684,73 @@ button.observer-causal-chain__evidence:hover {
     width: auto;
     padding: 14px 14px calc(24px + var(--observer-safe-bottom));
     border-left: 0;
+    background: rgb(239 232 215);
     box-shadow: 0 -10px 38px rgb(42 40 34 / 14%);
+    backdrop-filter: blur(10px);
     animation-name: observer-inspector-mobile-reveal;
+  }
+
+  .observer-inspector__mobile-toggle {
+    display: flex;
+    min-height: 44px;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    margin: -6px -2px 5px;
+    color: var(--observer-ink-faint);
+    font-size: 9px;
+    font-weight: 750;
+    letter-spacing: 0.14em;
+  }
+
+  .observer-inspector__mobile-toggle button {
+    display: inline-flex;
+    min-height: 44px;
+    align-items: center;
+    gap: 5px;
+    padding: 0 8px;
+    border: 0;
+    color: var(--observer-vermilion-dark);
+    font: inherit;
+    letter-spacing: 0.08em;
+    background: transparent;
+  }
+
+  .observer-inspector[data-mobile-expanded="false"] {
+    top: auto;
+    max-height: 196px;
+    min-height: 0;
+    overflow: hidden;
+    border-top: 1px solid var(--observer-line-strong);
+  }
+
+  .observer-inspector[data-mobile-expanded="false"] > :not(.observer-inspector__mobile-toggle):not(.observer-inspector__header):not(.observer-inspector__summary) {
+    display: none;
+  }
+
+  .observer-inspector[data-mobile-expanded="false"] .observer-inspector__header {
+    position: static;
+    margin: 0;
+    padding: 1px 0 8px;
+    border-bottom: 0;
+    background: transparent;
+    backdrop-filter: none;
+  }
+
+  .observer-inspector[data-mobile-expanded="false"] .observer-inspector__identity h2 {
+    margin-top: 3px;
+    font-size: 22px;
+  }
+
+  .observer-inspector[data-mobile-expanded="false"] .observer-inspector__summary {
+    display: -webkit-box;
+    overflow: hidden;
+    margin: 0;
+    padding: 8px 0 0;
+    border-top: 1px solid var(--observer-line);
+    line-height: 1.6;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
   }
 
   .observer-inspector__actions .observer-icon-button,

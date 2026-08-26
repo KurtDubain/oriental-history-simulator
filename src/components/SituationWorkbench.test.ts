@@ -21,11 +21,11 @@ describe('SituationWorkbench', () => {
     }));
 
     expect(markup).toContain('role="dialog"');
-    expect(markup).toContain('史家判断');
-    expect(markup).toContain('接下来观察');
+    expect(markup).toContain('眼下局面');
+    expect(markup).toContain('后续看点');
     expect(markup).toContain('历史转折');
     expect(markup).toContain('历史凭证');
-    expect(markup).toContain('Simulation Audit');
+    expect(markup).toContain('推演底账');
     expect(markup).toContain(projection.selected?.title ?? '');
     expect(markup).toMatch(/<details class="situation-workbench__audit">/);
     expect(markup).not.toMatch(/<details class="situation-workbench__audit" open/);
