@@ -94,6 +94,7 @@ export type SituationSnapshotLabelWorld = Pick<
 
 const TYPE_LABELS: Readonly<Record<string, string>> = {
   military_power_crisis: '军权危机',
+  inheritance_crisis: '继承危机',
 };
 
 const STATUS_LABELS: Record<SituationStatus, string> = {
@@ -146,6 +147,32 @@ const SIGNAL_LABELS: Readonly<Record<string, string>> = {
   personal_caution: '谨慎抑制',
   actor_died: '军权主体死亡',
   command_removed: '军职已经解除',
+  ruler_mortality_exposure: '君主寿命风险',
+  ruler_health_stable: '君主健康稳定',
+  no_legal_successor: '合法继承人缺位',
+  competing_legal_claims: '合法主张相互竞争',
+  clear_legal_successor: '继承次序清晰',
+  weak_dynastic_legitimacy: '王朝合法性不足',
+  strong_dynastic_legitimacy: '王朝合法性稳固',
+  weak_succession_enforcement: '中央难以执行继承安排',
+  strong_succession_enforcement: '中央仍能维持次序',
+  weak_ruling_family_capacity: '统治家族组织力薄弱',
+  strong_ruling_family_capacity: '统治家族仍可协调',
+  factional_succession_split: '派系分押候选人',
+  consort_clan_pressure: '姻亲家族集团施压',
+  claimant_military_support: '候选人掌握军方支持',
+  ruler_death_without_lawful_settlement: '君主死亡后交接尚未落定',
+  current_succession_evidence: '本季权力网络变化',
+  lawful_succession: '合法继承已完成',
+  orderly_succession: '有序继承已完成',
+  regency_established: '监国秩序已建立',
+  dynasty_replaced: '王朝已被替代',
+  palace_transfer: '宫廷内部权力交接',
+  usurpation: '篡位已成',
+  dynastic_usurpation: '异姓权力交接已完成',
+  polity_extinguished: '政权已灭亡',
+  polity_destroyed: '政权已被军事消灭',
+  lineage_extinguished_and_absorbed: '王系断绝且故国被吸收',
 };
 
 const WATCH_SIGNAL_LABELS: Readonly<Record<string, string>> = {
@@ -155,6 +182,11 @@ const WATCH_SIGNAL_LABELS: Readonly<Record<string, string>> = {
   watch_command_and_army_support: '观察军职、战功、军中网络与家族支撑是否继续扩大',
   watch_command_succession: '观察军团由谁接掌，以及旧有军中与家族网络流向何处',
   watch_post_command_settlement: '观察解除军职后的安置、清洗、再任命或余部追随',
+  watch_ruler_health_and_succession: '观察君主健康与可执行的继承安排',
+  watch_heir_designation: '观察统治家族是否出现合法候选人',
+  watch_claimant_support_balance: '观察候选人的家族、派系、官职与军方支持消长',
+  watch_successor_states: '观察故国人物、家族、军队与领土的去向',
+  watch_new_reign_consolidation: '观察新君能否重建合法性、中央权威与统治联盟',
 };
 
 const PARTICIPANT_GROUP_LABELS: Record<SituationParticipantGroupKey, string> = {
@@ -280,6 +312,9 @@ function situationTitle(
   if (situation.type === 'military_power_crisis' && core && polity) {
     return `${core}与${polity}的军权危机`;
   }
+  if (situation.type === 'inheritance_crisis' && polity) {
+    return `${polity}的继承危机`;
+  }
   return TYPE_LABELS[situation.type] ?? '未命名历史局势';
 }
 
@@ -311,7 +346,7 @@ function situationItem(
     latestChange: latestChangeSnapshot(situation.recentChanges),
     nextSignal: {
       key: situation.nextWatch.key,
-      label: WATCH_SIGNAL_LABELS[situation.nextWatch.key] ?? `继续观察：${situation.nextWatch.key}`,
+      label: WATCH_SIGNAL_LABELS[situation.nextWatch.key] ?? '继续观察相关人物与局势变化',
       refs: nextRefs,
       factIds: factIdsFromRefs(nextRefs),
     },

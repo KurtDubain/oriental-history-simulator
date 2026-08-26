@@ -810,6 +810,16 @@ export function reduceSituationTurn<Index>(
     );
   }
   const templates = templateRegistry(options.templates);
+  const maxOpenByType = new Map<string, number>();
+  for (const [type, cap] of Object.entries(options.maxOpenByType ?? {}).sort(([left], [right]) => (
+    stableCompare(left, right)
+  ))) {
+    if (!templates.has(type)) throw new Error(`Situation admission budget references unknown type: ${type}`);
+    if (!Number.isSafeInteger(cap) || cap < 1 || cap > limits.maxOpenSituations) {
+      throw new Error(`Situation admission budget for ${type} must be between 1 and ${limits.maxOpenSituations}`);
+    }
+    maxOpenByType.set(type, cap);
+  }
   const observations = collectSituationCandidateObservations(input, limits);
   const currentObservations = observationsByCandidateKey(observations);
   let candidates = advanceCandidateRegistry(
@@ -857,7 +867,7 @@ export function reduceSituationTurn<Index>(
 
   const existingOpenCount = updated.filter((situation) => situation.status === 'open').length;
   const availableSlots = Math.max(0, limits.maxOpenSituations - existingOpenCount);
-  const eligible = candidates
+  const rankedEligible = candidates
     .filter((candidate) => {
       const template = templates.get(candidate.type);
       const observation = currentObservations.get(candidate.key);
@@ -876,8 +886,22 @@ export function reduceSituationTurn<Index>(
         right.latestPressure - left.latestPressure ||
         right.consecutiveQualifyingTurns - left.consecutiveQualifyingTurns ||
         stableCompare(left.key, right.key),
-    )
-    .slice(0, availableSlots);
+    );
+  const openByType = new Map<string, number>();
+  for (const situation of updated) {
+    if (situation.status !== 'open') continue;
+    openByType.set(situation.type, (openByType.get(situation.type) ?? 0) + 1);
+  }
+  const admittedByType = new Map<string, number>();
+  const eligible: SituationCandidateState[] = [];
+  for (const candidate of rankedEligible) {
+    if (eligible.length >= availableSlots) break;
+    const cap = maxOpenByType.get(candidate.type) ?? limits.maxOpenSituations;
+    const occupied = (openByType.get(candidate.type) ?? 0) + (admittedByType.get(candidate.type) ?? 0);
+    if (occupied >= cap) continue;
+    eligible.push(candidate);
+    admittedByType.set(candidate.type, (admittedByType.get(candidate.type) ?? 0) + 1);
+  }
 
   let nextSituationNumber = previous.nextSituationNumber;
   const formedIds = new Map<string, string>();

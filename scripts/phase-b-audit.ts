@@ -14,6 +14,19 @@ const seeds = process.env.PHASE_B_AUDIT_SEEDS?.split(',').map((seed) => seed.tri
   ?? ['军权春秋', '春战副将', '同源世界', '沧海一粟', '赤潮', '归档校验', '副将立功', '北境军令'];
 const turns = Math.max(8, Number.parseInt(process.env.PHASE_B_AUDIT_TURNS ?? '80', 10));
 
+const REQUIRED_SITUATION_TYPES = ['military_power_crisis', 'inheritance_crisis'] as const;
+const OPEN_BUDGETS: Readonly<Record<(typeof REQUIRED_SITUATION_TYPES)[number], number>> = {
+  military_power_crisis: 8,
+  inheritance_crisis: 4,
+};
+
+interface SituationTypeTransitions {
+  formed: number;
+  phaseChanged: number;
+  resolved: number;
+  outcomes: Record<string, number>;
+}
+
 interface SituationSequenceEntry {
   turn: number;
   ids: string[];
@@ -25,7 +38,24 @@ interface AuditRun {
   sequence: SituationSequenceEntry[];
   maxOpen: number;
   maxCandidates: number;
+  maxOpenByType: Record<string, number>;
+  maxCandidatesByType: Record<string, number>;
+  transitionsByType: Record<string, SituationTypeTransitions>;
   failures: string[];
+}
+
+function emptyTransitions(): SituationTypeTransitions {
+  return { formed: 0, phaseChanged: 0, resolved: 0, outcomes: {} };
+}
+
+function countByType(items: readonly { type: string }[]): Record<string, number> {
+  const counts: Record<string, number> = {};
+  for (const item of items) counts[item.type] = (counts[item.type] ?? 0) + 1;
+  return counts;
+}
+
+function updatePeaks(peaks: Record<string, number>, counts: Readonly<Record<string, number>>): void {
+  for (const [type, count] of Object.entries(counts)) peaks[type] = Math.max(peaks[type] ?? 0, count);
 }
 
 function auditMilestoneFact(world: WorldState, fact: Extract<SimulationFact, { kind: 'situation_milestone' }>): string[] {
@@ -38,6 +68,38 @@ function auditMilestoneFact(world: WorldState, fact: Extract<SimulationFact, { k
       failures.push(`${fact.id}引用无效来源${sourceFactId}`);
     }
   }
+  const situation = world.situationSystem.situations.find((item) => item.id === fact.payload.situationId);
+  if (!situation) {
+    failures.push(`${fact.id}指向不存在的局势${fact.payload.situationId}`);
+    return failures;
+  }
+  if (situation.type !== fact.payload.situationType) {
+    failures.push(`${fact.id}的类型${fact.payload.situationType}与权威状态${situation.type}不一致`);
+  }
+  if (!situation.milestoneFactIds.includes(fact.id)) {
+    failures.push(`${fact.id}未回挂到${situation.id}的里程碑事实链`);
+  }
+  const matchingChange = situation.recentChanges.find((change) => (
+    change.turn === fact.turn && change.kind === fact.payload.transition
+  ));
+  if (!matchingChange) failures.push(`${fact.id}在${situation.id}中没有同季状态转移`);
+  if (situation.tension !== fact.payload.tension || situation.momentum !== fact.payload.momentum) {
+    failures.push(`${fact.id}的张力或动量与${situation.id}权威状态不一致`);
+  }
+  if (fact.payload.transition === 'formed') {
+    if (situation.status !== 'open' || fact.payload.toPhase !== 'emerging') {
+      failures.push(`${fact.id}形成后未对应开放的萌芽局势`);
+    }
+  } else if (fact.payload.transition === 'phase_changed') {
+    if (situation.status !== 'open' || situation.phase !== fact.payload.toPhase) {
+      failures.push(`${fact.id}阶段转移与${situation.id}当前阶段不一致`);
+    }
+  } else if (
+    situation.status !== 'resolved'
+    || situation.resolution?.outcomeKey !== fact.payload.outcomeKey
+  ) {
+    failures.push(`${fact.id}结案结果与${situation.id}权威状态不一致`);
+  }
   return failures;
 }
 
@@ -45,6 +107,18 @@ function run(seed: string): AuditRun {
   let world = createWorld(seed);
   let maxOpen = 0;
   let maxCandidates = 0;
+  const maxOpenByType: Record<string, number> = Object.fromEntries(
+    REQUIRED_SITUATION_TYPES.map((type) => [type, 0]),
+  );
+  const maxCandidatesByType: Record<string, number> = Object.fromEntries(
+    REQUIRED_SITUATION_TYPES.map((type) => [type, 0]),
+  );
+  const transitionsByType: Record<string, SituationTypeTransitions> = Object.fromEntries(
+    REQUIRED_SITUATION_TYPES.map((type) => [type, emptyTransitions()]),
+  );
+  const seenMilestoneIds = new Set(
+    world.facts.filter((fact) => fact.kind === 'situation_milestone').map((fact) => fact.id),
+  );
   const sequence: SituationSequenceEntry[] = [];
   const failures: string[] = [];
   for (let index = 0; index < turns; index += 1) {
@@ -55,10 +129,33 @@ function run(seed: string): AuditRun {
       failures.push(`T${world.turn} ${runtime.violations[0]?.code}: ${runtime.violations[0]?.message}`);
     }
     const open = world.situationSystem.situations.filter((situation) => situation.status === 'open');
+    const openByType = countByType(open);
+    const candidatesByType = countByType(world.situationSystem.candidates);
     maxOpen = Math.max(maxOpen, open.length);
     maxCandidates = Math.max(maxCandidates, world.situationSystem.candidates.length);
+    updatePeaks(maxOpenByType, openByType);
+    updatePeaks(maxCandidatesByType, candidatesByType);
     if (open.length > 12) failures.push(`T${world.turn}开放局势超过12`);
+    for (const [type, budget] of Object.entries(OPEN_BUDGETS)) {
+      if ((openByType[type] ?? 0) > budget) {
+        failures.push(`T${world.turn}${type}开放局势超过类型预算${budget}`);
+      }
+    }
     if (world.situationSystem.candidates.length > 64) failures.push(`T${world.turn}候选局势超过64`);
+    for (const fact of world.facts) {
+      if (fact.kind !== 'situation_milestone' || seenMilestoneIds.has(fact.id)) continue;
+      seenMilestoneIds.add(fact.id);
+      failures.push(...auditMilestoneFact(world, fact));
+      const stats = transitionsByType[fact.payload.situationType]
+        ?? (transitionsByType[fact.payload.situationType] = emptyTransitions());
+      if (fact.payload.transition === 'formed') stats.formed += 1;
+      else if (fact.payload.transition === 'phase_changed') stats.phaseChanged += 1;
+      else {
+        stats.resolved += 1;
+        const outcome = fact.payload.outcomeKey ?? 'dissipated';
+        stats.outcomes[outcome] = (stats.outcomes[outcome] ?? 0) + 1;
+      }
+    }
     sequence.push({
       turn: world.turn,
       ids: open.map((situation) => situation.id),
@@ -71,10 +168,16 @@ function run(seed: string): AuditRun {
       }
     }
   }
-  for (const fact of world.facts) {
-    if (fact.kind === 'situation_milestone') failures.push(...auditMilestoneFact(world, fact));
-  }
-  return { world, sequence, maxOpen, maxCandidates, failures };
+  return {
+    world,
+    sequence,
+    maxOpen,
+    maxCandidates,
+    maxOpenByType,
+    maxCandidatesByType,
+    transitionsByType,
+    failures,
+  };
 }
 
 const failures: string[] = [];
@@ -97,21 +200,26 @@ const samples = seeds.map((seed) => {
     failures.push(`${seed}: 存档边界后局势演化分叉`);
   }
 
-  const milestoneFacts = first.world.facts.filter((fact) => fact.kind === 'situation_milestone');
-  const transitions = {
-    formed: milestoneFacts.filter((fact) => fact.payload.transition === 'formed').length,
-    phaseChanged: milestoneFacts.filter((fact) => fact.payload.transition === 'phase_changed').length,
-    resolved: milestoneFacts.filter((fact) => fact.payload.transition === 'resolved').length,
-  };
   const firstSituation = first.world.situationSystem.situations[0];
   return {
     seed,
     finalHash: first.world.hash,
     candidatesPeak: first.maxCandidates,
     openPeak: first.maxOpen,
+    types: Object.fromEntries(
+      [...new Set([
+        ...REQUIRED_SITUATION_TYPES,
+        ...Object.keys(first.maxCandidatesByType),
+        ...Object.keys(first.maxOpenByType),
+        ...Object.keys(first.transitionsByType),
+      ])].sort().map((type) => [type, {
+        candidatesPeak: first.maxCandidatesByType[type] ?? 0,
+        openPeak: first.maxOpenByType[type] ?? 0,
+        ...(first.transitionsByType[type] ?? emptyTransitions()),
+      }]),
+    ),
     retainedSituations: first.world.situationSystem.situations.length,
     archivedResolved: first.world.situationSystem.archive.resolvedCount,
-    transitions,
     firstSituation: firstSituation ? {
       id: firstSituation.id,
       phase: firstSituation.phase,
@@ -125,12 +233,14 @@ const samples = seeds.map((seed) => {
   };
 });
 
-if (!samples.some((sample) => sample.transitions.formed > 0)) {
-  failures.push('样本中没有自然形成任何军权危机');
+for (const type of REQUIRED_SITUATION_TYPES) {
+  if (!samples.some((sample) => (sample.types[type]?.formed ?? 0) > 0)) {
+    failures.push(`样本中没有自然形成任何${type}`);
+  }
 }
 
 console.log(JSON.stringify({
-  phase: 'B01/B03',
+  phase: 'B01/B03/B04',
   seeds: seeds.length,
   turnsPerSeed: turns,
   samples,

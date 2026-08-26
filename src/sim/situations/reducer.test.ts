@@ -97,11 +97,12 @@ function step(
   observations: readonly SituationCandidateObservation[],
   facts: readonly SimulationFact[] = [],
   overrides: Partial<SituationLimits> = {},
+  maxOpenByType?: Readonly<Record<string, number>>,
 ) {
   return reduceSituationTurn(
     state,
     { turn, facts, index: { observations }, detectors: [DETECTOR] },
-    { templates: [TEMPLATE], limits: overrides },
+    { templates: [TEMPLATE], limits: overrides, maxOpenByType },
   );
 }
 
@@ -398,6 +399,57 @@ describe('Situation reducer', () => {
     expect(formed?.participants.coreCharacterIds.length).toBeLessThanOrEqual(3);
     expect(formed?.recentChanges.length).toBeLessThanOrEqual(2);
     expect(validateSituationSystemState(result.state, limits)).toEqual([]);
+  });
+
+  it('uses per-type admission budgets without turning them into save-state invariants', () => {
+    const limits: Partial<SituationLimits> = { maxOpenSituations: 3, maxCandidates: 3 };
+    const evidence = fact(1, 'battle_type_budget');
+    const candidates = [
+      observation('budget-low', 60, evidence.id),
+      observation('budget-mid', 70, evidence.id),
+      observation('budget-high', 80, evidence.id),
+    ];
+    let result = step(
+      createSituationSystemState(0),
+      1,
+      candidates,
+      [evidence],
+      limits,
+      { 'test-crisis': 1 },
+    );
+    const continued = candidates.map((candidate) => observation(candidate.scopeKey, candidate.pressure));
+    result = step(result.state, 2, continued, [], limits, { 'test-crisis': 1 });
+
+    expect(result.state.situations).toHaveLength(1);
+    expect(result.state.situations[0]?.scopeKey).toBe('budget-high');
+    expect(validateSituationSystemState(result.state, limits)).toEqual([]);
+
+    let legacy = step(
+      createSituationSystemState(0),
+      1,
+      candidates.slice(0, 2),
+      [evidence],
+      limits,
+    );
+    legacy = step(legacy.state, 2, continued.slice(0, 2), [], limits);
+    expect(legacy.state.situations).toHaveLength(2);
+    expect(() => step(
+      legacy.state,
+      3,
+      continued.slice(0, 2),
+      [],
+      limits,
+      { 'test-crisis': 1 },
+    )).not.toThrow();
+
+    expect(() => step(
+      createSituationSystemState(0),
+      1,
+      candidates,
+      [evidence],
+      limits,
+      { 'test-crisis': 0 },
+    )).toThrow(/admission budget/);
   });
 
   it('bounds readable resolved history and folds overflow into a deterministic archive digest', () => {

@@ -22,6 +22,13 @@ export {
   MILITARY_POWER_CRISIS_TYPE,
   militaryPowerCrisisDetector,
 } from './military-power-crisis-detector';
+export {
+  buildInheritanceCrisisIndex,
+  detectInheritanceCrisisCandidates,
+  INHERITANCE_CRISIS_TEMPLATE,
+  INHERITANCE_CRISIS_TYPE,
+  inheritanceCrisisDetector,
+} from './inheritance-crisis-detector';
 export type {
   SituationArchiveState,
   SituationCandidateObservation,

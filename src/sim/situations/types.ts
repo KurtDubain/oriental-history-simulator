@@ -240,6 +240,12 @@ export interface SituationTurnInput<Index> {
 export interface SituationReducerOptions {
   templates: readonly SituationTemplate[];
   limits?: Partial<SituationLimits>;
+  /**
+   * Optional admission budgets for newly formed Situations. Existing open
+   * records remain valid so an older save is never rewritten merely because a
+   * later release adds another detector type.
+   */
+  maxOpenByType?: Readonly<Record<string, number>>;
 }
 
 export interface SituationTurnResult {

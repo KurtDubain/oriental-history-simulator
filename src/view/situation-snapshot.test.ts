@@ -277,4 +277,69 @@ describe('Situation observer snapshot', () => {
     expect(snapshot.resolvedCount).toBe(11);
     expect(toSituationSnapshot(world)).toEqual(snapshot);
   });
+
+  it('projects inheritance crises with Chinese evidence, watch copy, and a polity title', () => {
+    const world = createWorld('Situation继承危机-投影');
+    const polity = world.polities[0];
+    const situation = testSituation(world, {
+      id: 'situation_inheritance_01',
+      type: 'inheritance_crisis',
+      scopeKey: polity.id,
+      titleKey: 'situation.inheritance_crisis',
+      signals: [
+        {
+          key: 'no_legal_successor',
+          role: 'structural',
+          contribution: 24,
+          refs: [{
+            kind: 'index',
+            entityType: 'succession_pool',
+            entityId: polity.id,
+            field: 'legalCandidateCount',
+            value: 0,
+          }],
+        },
+        {
+          key: 'weak_succession_enforcement',
+          role: 'structural',
+          contribution: 12,
+          refs: [{
+            kind: 'index',
+            entityType: 'polity',
+            entityId: polity.id,
+            field: 'authority',
+            value: polity.authority,
+          }],
+        },
+      ],
+      nextWatch: {
+        key: 'watch_heir_designation',
+        refs: [{
+          kind: 'index',
+          entityType: 'polity',
+          entityId: polity.id,
+          field: 'rulingFamilyId',
+          value: polity.rulingFamilyId,
+        }],
+      },
+    });
+    world.situationSystem = situationSystem([situation]);
+
+    const item = toSituationSnapshot(world).open[0];
+
+    expect(item).toMatchObject({
+      type: 'inheritance_crisis',
+      typeLabel: '继承危机',
+      title: `${polity.shortName || polity.name}的继承危机`,
+      nextSignal: {
+        key: 'watch_heir_designation',
+        label: '观察统治家族是否出现合法候选人',
+      },
+    });
+    expect(item.evidence.map((entry) => entry.label)).toEqual([
+      '合法继承人缺位',
+      '中央难以执行继承安排',
+    ]);
+    expect(item.nextSignal.label).not.toContain('watch_');
+  });
 });

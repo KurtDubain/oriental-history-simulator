@@ -6,6 +6,14 @@ import { createServer } from 'vite';
 const APP_URL = 'http://127.0.0.1:4173';
 const SNAPSHOT_LIMIT = 128 * 1024;
 const ARTIFACT_DIR = 'output/v1-release-visual';
+const SITUATION_TYPE_LABELS = Object.freeze({
+  military_power_crisis: '军权危机',
+  inheritance_crisis: '继承危机',
+});
+const SITUATION_OPEN_BUDGETS = Object.freeze({
+  military_power_crisis: 8,
+  inheritance_crisis: 4,
+});
 
 const server = await createServer({
   logLevel: 'error',
@@ -222,12 +230,47 @@ async function advanceTo(page, turn) {
   return current;
 }
 
-async function exerciseSituationSnapshot(context) {
+function assertChineseSituationCopy(value, message) {
+  assert.equal(typeof value, 'string', message);
+  assert.match(value, /[\p{Script=Han}]/u, message);
+}
+
+function auditSituationProjection(projection, requiredTypes) {
+  assert.ok(projection.open.length <= 12 && projection.recentResolved.length <= 2, '局势文本投影必须有界');
+  assert.equal(projection.openCount, projection.open.length, '开放局势计数应与投影一致');
+  const openByType = Object.fromEntries(Object.keys(SITUATION_TYPE_LABELS).map((type) => [type, 0]));
+  for (const situation of projection.open) {
+    assert.ok(Object.hasOwn(SITUATION_TYPE_LABELS, situation.type), `未接纳的局势类型 ${situation.type}`);
+    openByType[situation.type] = (openByType[situation.type] ?? 0) + 1;
+    assert.equal(situation.typeLabel, SITUATION_TYPE_LABELS[situation.type], `${situation.type}应公开中文类型名`);
+    assertChineseSituationCopy(situation.title, `${situation.type}应公开中文标题`);
+    assert.match(situation.title, new RegExp(situation.typeLabel), `${situation.type}标题应明示局势类型`);
+    assert.ok(['emerging', 'active', 'critical'].includes(situation.phase));
+    assert.ok(situation.tension >= 0 && situation.tension <= 100);
+    assert.ok(situation.evidence.filter((item) => item.role === 'structural').length >= 2, '正式局势应公开至少两条结构证据');
+    assert.ok(situation.evidence.every((item) => {
+      assertChineseSituationCopy(item.label, `${situation.type}证据应使用中文标签`);
+      assertChineseSituationCopy(item.roleLabel, `${situation.type}证据角色应使用中文标签`);
+      return item.refs.length > 0;
+    }), '局势证据必须保留结构化引用');
+    assert.ok(situation.causalFactIds.length > 0 && situation.milestoneFactIds.length > 0);
+    assertChineseSituationCopy(situation.nextSignal.label, `${situation.type}应公开中文观察线索`);
+    assert.ok(situation.nextSignal.refs.length > 0, `${situation.type}观察线索应保留结构化引用`);
+  }
+  for (const [type, budget] of Object.entries(SITUATION_OPEN_BUDGETS)) {
+    assert.ok((openByType[type] ?? 0) <= budget, `${type}开放局势不得超过类型预算${budget}`);
+  }
+  for (const requiredType of requiredTypes) {
+    assert.ok(projection.open.some((situation) => situation.type === requiredType), `固定世界应自然形成${requiredType}`);
+  }
+}
+
+async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes }) {
   const page = await context.newPage();
   const errors = [];
   collectBrowserErrors(page, errors);
   await page.goto(APP_URL, { waitUntil: 'networkidle' });
-  await page.getByLabel('世界种子').fill('春战副将');
+  await page.getByLabel('世界种子').fill(seed);
   await page.click('#start-world');
   await page.waitForSelector('.world-map__canvas');
   const initial = await snapshot(page);
@@ -242,19 +285,11 @@ async function exerciseSituationSnapshot(context) {
     recentResolved: [],
   });
 
-  const observed = await advanceTo(page, 12);
+  const observed = await advanceTo(page, turn);
   const projection = observed.observer.situations;
   assert.equal(projection.lastReducedTurn, observed.time.turn - 1);
-  assert.ok(projection.openCount > 0, '固定种子应从真实季度事实自然形成军权危机');
-  assert.ok(projection.open.length <= 12 && projection.recentResolved.length <= 2, '局势文本投影必须有界');
-  for (const situation of projection.open) {
-    assert.ok(situation.id && situation.type === 'military_power_crisis');
-    assert.ok(['emerging', 'active', 'critical'].includes(situation.phase));
-    assert.ok(situation.tension >= 0 && situation.tension <= 100);
-    assert.ok(situation.evidence.filter((item) => item.role === 'structural').length >= 2, '正式局势应公开至少两条结构证据');
-    assert.ok(situation.causalFactIds.length > 0 && situation.milestoneFactIds.length > 0);
-    assert.ok(situation.nextSignal.label.length > 0);
-  }
+  assert.ok(projection.openCount > 0, '固定种子应从真实季度事实自然形成局势');
+  auditSituationProjection(projection, requiredTypes);
   assert.deepEqual((await snapshot(page)).observer.situations, projection, '重复读取必须得到完全相同的局势投影');
   assert.deepEqual(observed.observer.focusLeads.map((item) => item.slot), ['person', 'polity', 'tension'], '本阶段不得偷换当世三问来源');
   assert.equal(observed.observer.watchedCount, 0, '本阶段不得自动创建关注项');
@@ -269,9 +304,10 @@ async function exerciseSituationSnapshot(context) {
   const restored = await snapshot(page);
   assert.equal(restored.deterministicWorldHash, situationHash, '形成局势后的 schema-4 存档应精确恢复哈希');
   assert.deepEqual(restored.observer.situations, projection, '形成局势后的存档应精确恢复局势投影');
+  auditSituationProjection(restored.observer.situations, requiredTypes);
   assert.deepEqual(errors, []);
   await page.close();
-  return projection;
+  return { seed, turn, requiredTypes, projection };
 }
 
 async function exerciseObserverLeads(page, initialHash) {
@@ -519,10 +555,11 @@ async function exerciseObserverDesk(page, initialHash) {
   await desk.waitFor({ state: 'detached' });
   await page.waitForFunction(() => document.activeElement?.getAttribute('data-observer-desk-trigger') === 'true');
 
-  const stored = await page.evaluate(() => {
-    const key = Object.keys(localStorage).find((candidate) => candidate.startsWith('canghai-observer-desk-v1:'));
-    return key ? JSON.parse(localStorage.getItem(key)) : null;
-  });
+  const stored = await page.evaluate((label) => Object.keys(localStorage)
+    .filter((candidate) => candidate.startsWith('canghai-observer-desk-v1:'))
+    .map((key) => JSON.parse(localStorage.getItem(key)))
+    .find((settings) => settings.watchlist.some((item) => item.label === label)) ?? null, followedLabel);
+  assert.ok(stored, '应按当前世界的关注对象找到观察台存储');
   assert.equal(stored.watchlist.length, 1);
   assert.equal(stored.pauseRules.importanceThreshold, 2);
   return { followedLabel, trigger };
@@ -733,6 +770,12 @@ try {
   }, '舆图必须使用北陆半岛体系、岭南陆与六岛形的参考拓扑');
 
   const afterPrimer = await exerciseMapPrimer(page);
+  const situationSample = await exerciseSituationSnapshot(desktopContext, {
+    seed: '春战副将',
+    turn: 8,
+    requiredTypes: Object.keys(SITUATION_TYPE_LABELS),
+  });
+  assert.ok(situationSample.projection.openCount > 0);
   await exerciseMapViewportDesktop(page);
   await exerciseObserverLeads(page, afterPrimer.deterministicWorldHash);
   await page.screenshot({ path: `${ARTIFACT_DIR}/geographic-world-map.png`, fullPage: true });
@@ -957,9 +1000,6 @@ try {
   assert.equal(reloaded.observer.primerOpen, false, '续读不应重复弹出首次读图导览');
   assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 4存档续读应恢复完全相同的世界');
   assert.deepEqual(desktopErrors, []);
-
-  const situationProjection = await exerciseSituationSnapshot(desktopContext);
-  assert.ok(situationProjection.openCount > 0);
 
   const mobileContext = await browser.newContext({
     viewport: { width: 390, height: 844 },

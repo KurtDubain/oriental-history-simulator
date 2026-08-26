@@ -4,10 +4,45 @@ import type { V03Emit, V03TurnContext } from '../v03-context';
 import {
   buildMilitaryPowerCrisisIndex,
   MILITARY_POWER_CRISIS_TEMPLATE,
+  MILITARY_POWER_CRISIS_TYPE,
   militaryPowerCrisisDetector,
 } from './military-power-crisis-detector';
+import {
+  buildInheritanceCrisisIndex,
+  INHERITANCE_CRISIS_TEMPLATE,
+  INHERITANCE_CRISIS_TYPE,
+  inheritanceCrisisDetector,
+} from './inheritance-crisis-detector';
 import { attachSituationMilestoneFacts, reduceSituationTurn } from './reducer';
-import type { SituationPhase, SituationState, SituationTransition } from './types';
+import type {
+  SituationDetector,
+  SituationPhase,
+  SituationState,
+  SituationTransition,
+} from './types';
+
+interface SituationRuntimeIndex {
+  militaryPower: ReturnType<typeof buildMilitaryPowerCrisisIndex>;
+  inheritance: ReturnType<typeof buildInheritanceCrisisIndex>;
+}
+
+const militaryPowerRuntimeDetector: SituationDetector<SituationRuntimeIndex> = {
+  id: militaryPowerCrisisDetector.id,
+  detect: ({ turn, facts, index }) => militaryPowerCrisisDetector.detect({
+    turn,
+    facts,
+    index: index.militaryPower,
+  }),
+};
+
+const inheritanceRuntimeDetector: SituationDetector<SituationRuntimeIndex> = {
+  id: inheritanceCrisisDetector.id,
+  detect: ({ turn, facts, index }) => inheritanceCrisisDetector.detect({
+    turn,
+    facts,
+    index: index.inheritance,
+  }),
+};
 
 const PHASE_LABEL: Record<SituationPhase, string> = {
   emerging: '萌芽',
@@ -33,7 +68,45 @@ const SIGNAL_LABELS: Record<string, string> = {
   recent_command_removed: '削去军职',
   military_network_support: '军中网络',
   family_mobilization_capacity: '家族支撑',
+  ruler_mortality_exposure: '君主寿命风险',
+  ruler_health_stable: '君主健康稳定',
+  no_legal_successor: '合法继承人缺位',
+  competing_legal_claims: '合法主张相互竞争',
+  clear_legal_successor: '继承次序清晰',
+  weak_dynastic_legitimacy: '王朝合法性不足',
+  strong_dynastic_legitimacy: '王朝合法性稳固',
+  weak_succession_enforcement: '中央难以执行继承安排',
+  strong_succession_enforcement: '中央仍能维持次序',
+  weak_ruling_family_capacity: '统治家族组织力薄弱',
+  strong_ruling_family_capacity: '统治家族仍可协调',
+  factional_succession_split: '派系分押候选人',
+  consort_clan_pressure: '姻亲家族集团施压',
+  claimant_military_support: '候选人掌握军方支持',
+  ruler_death_without_lawful_settlement: '君主死亡后交接尚未落定',
+  current_succession_evidence: '本季权力网络变化',
 };
+
+const OUTCOME_LABELS: Readonly<Record<string, string>> = {
+  dissipated: '结构压力消退',
+  actor_died: '军权主体死亡',
+  command_removed: '军职已被解除',
+  lawful_succession: '合法继承完成',
+  orderly_succession: '有序继承完成',
+  regency: '监国秩序建立',
+  regency_established: '监国秩序建立',
+  factional_compromise: '派系协调完成',
+  dynastic_usurpation: '异姓权力交接完成',
+  dynasty_replaced: '王朝已被替代',
+  palace_transfer: '宫廷内部权力交接',
+  usurpation: '篡位成功',
+  polity_extinguished: '政权灭亡',
+  polity_destroyed: '政权被军事消灭',
+  lineage_extinguished_and_absorbed: '王系断绝且故国被吸收',
+};
+
+function outcomeLabel(outcomeKey: string | null): string {
+  return outcomeKey ? OUTCOME_LABELS[outcomeKey] ?? '局势已依事实结案' : '矛盾消散';
+}
 
 function characterName(world: WorldState, id: string): string {
   return world.characters.find((character) => character.id === id)?.name ?? id;
@@ -49,7 +122,21 @@ function situationTitle(world: WorldState, situation: SituationState): string {
     const polity = polityName(world, situation.participants.polityIds[0] ?? '未知政权');
     return `${actor}与${polity}的军权之争`;
   }
+  if (situation.type === INHERITANCE_CRISIS_TYPE) {
+    const polity = polityName(world, situation.participants.polityIds[0] ?? '未知政权');
+    return `${polity}的继承之局`;
+  }
   return situation.titleKey;
+}
+
+function formationSummary(title: string, type: string): string {
+  if (type === MILITARY_POWER_CRISIS_TYPE) {
+    return `${title}已连续两个季度维持结构性压力，并由真实军职或会战事实提供起点证据。`;
+  }
+  if (type === INHERITANCE_CRISIS_TYPE) {
+    return `${title}已连续两个季度维持结构性压力，人物谱系与可追溯的任免、婚姻、参战或领土事实共同提供证据。`;
+  }
+  return `${title}已连续两个季度维持结构性压力，并由可核验的当季事实提供起点证据。`;
 }
 
 function transitionCopy(transition: SituationTransition): SituationTransition {
@@ -93,13 +180,13 @@ function transitionText(
   if (transition.kind === 'formed') {
     return {
       title: `${title}开始显形`,
-      summary: `${title}已连续两个季度维持结构性压力，并由真实军职或会战事实提供起点证据。`,
+      summary: formationSummary(title, situation.type),
     };
   }
   if (transition.kind === 'resolved') {
     return {
       title: `${title}告一段落`,
-      summary: `${title}以“${transition.outcomeKey ?? '矛盾消散'}”结案；此后不再参与季度更新。`,
+      summary: `${title}以“${outcomeLabel(transition.outcomeKey)}”结案；此后不再参与季度更新。`,
     };
   }
   const from = transition.fromPhase ? PHASE_LABEL[transition.fromPhase] : '未定';
@@ -150,7 +237,7 @@ function emitSituationMilestone(
         role: '结构',
         weight: 0.35,
         evidence: leadingSignals.length > 0
-          ? leadingSignals.map((signal) => `${SIGNAL_LABELS[signal.key] ?? signal.key}${signal.contribution >= 0 ? '+' : ''}${signal.contribution.toFixed(1)}`).join('；')
+          ? leadingSignals.map((signal) => `${SIGNAL_LABELS[signal.key] ?? '其他结构信号'}${signal.contribution >= 0 ? '+' : ''}${signal.contribution.toFixed(1)}`).join('；')
           : `当前张力${Math.round(situation.tension)}`,
       },
       {
@@ -160,8 +247,8 @@ function emitSituationMilestone(
         evidence: transition.kind === 'formed'
           ? '连续两季越过形成门槛'
           : transition.kind === 'resolved'
-            ? `结案结果${transition.outcomeKey ?? 'dissipated'}`
-            : `${transition.fromPhase ?? 'none'}→${transition.toPhase ?? 'none'}`,
+            ? `结案结果：${outcomeLabel(transition.outcomeKey)}`
+            : `${transition.fromPhase ? PHASE_LABEL[transition.fromPhase] : '未定'}→${transition.toPhase ? PHASE_LABEL[transition.toPhase] : '未定'}`,
       },
     ],
     stateDeltas: [transitionDelta(transition)],
@@ -211,10 +298,19 @@ export function processSituationSystem(
     {
       turn: context.turn,
       facts: domainFacts,
-      index: buildMilitaryPowerCrisisIndex(world),
-      detectors: [militaryPowerCrisisDetector],
+      index: {
+        militaryPower: buildMilitaryPowerCrisisIndex(world),
+        inheritance: buildInheritanceCrisisIndex(world),
+      },
+      detectors: [militaryPowerRuntimeDetector, inheritanceRuntimeDetector],
     },
-    { templates: [MILITARY_POWER_CRISIS_TEMPLATE] },
+    {
+      templates: [MILITARY_POWER_CRISIS_TEMPLATE, INHERITANCE_CRISIS_TEMPLATE],
+      maxOpenByType: {
+        [MILITARY_POWER_CRISIS_TYPE]: 8,
+        [INHERITANCE_CRISIS_TYPE]: 4,
+      },
+    },
   );
   world.situationSystem = result.state;
   for (const rawTransition of result.transitions) {
