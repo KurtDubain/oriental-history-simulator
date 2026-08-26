@@ -12,7 +12,8 @@ export type SimulationFactKind =
   | 'appointment_started'
   | 'appointment_ended'
   | 'character_death'
-  | 'marriage';
+  | 'marriage'
+  | 'situation_milestone';
 
 export interface BattleForceFact {
   armyId: string;
@@ -76,6 +77,17 @@ export interface MarriageFactPayload {
   diplomatic: boolean;
 }
 
+export interface SituationMilestoneFactPayload {
+  situationId: string;
+  situationType: string;
+  transition: 'formed' | 'phase_changed' | 'resolved';
+  fromPhase: 'emerging' | 'active' | 'critical' | null;
+  toPhase: 'emerging' | 'active' | 'critical' | null;
+  tension: number;
+  momentum: number;
+  outcomeKey: string | null;
+}
+
 interface SimulationFactBase<K extends SimulationFactKind, P> {
   id: string;
   turn: number;
@@ -99,6 +111,7 @@ export type AppointmentStartedFact = SimulationFactBase<'appointment_started', A
 export type AppointmentEndedFact = SimulationFactBase<'appointment_ended', AppointmentFactPayload>;
 export type CharacterDeathFact = SimulationFactBase<'character_death', CharacterDeathFactPayload>;
 export type MarriageFact = SimulationFactBase<'marriage', MarriageFactPayload>;
+export type SituationMilestoneFact = SimulationFactBase<'situation_milestone', SituationMilestoneFactPayload>;
 
 export type SimulationFact =
   | BattleFact
@@ -106,7 +119,8 @@ export type SimulationFact =
   | AppointmentStartedFact
   | AppointmentEndedFact
   | CharacterDeathFact
-  | MarriageFact;
+  | MarriageFact
+  | SituationMilestoneFact;
 
 export type SimulationFactInput = SimulationFact extends infer Fact
   ? Fact extends SimulationFact

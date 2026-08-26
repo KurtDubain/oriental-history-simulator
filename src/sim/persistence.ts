@@ -6,6 +6,7 @@ import { migrateV01SocialState } from './v02';
 import { createV03LifeSystems } from './v03-life';
 import { createV03OceanSystems } from './v03-ocean';
 import type { LegacyArchiveBoundary, SimulationFact } from './facts';
+import { createSituationSystemState } from './situations';
 
 function migrateV02Systems(world: WorldState): void {
   (world as unknown as { schemaVersion: number }).schemaVersion = 3;
@@ -194,6 +195,13 @@ export function deserializeWorld(serialized: string): WorldState {
   }
   if (legacyBoundary) {
     migrateLegacyFacts(world, legacyBoundary);
+    migrated = true;
+  }
+  if (!world.situationSystem || typeof world.situationSystem !== 'object') {
+    // Phase-A schema-4 saves predate authoritative Situations. Authenticate the
+    // original hash first, then start observation at the next live quarter; do
+    // not fabricate retrospective candidates or milestones.
+    world.situationSystem = createSituationSystemState(world.turn - 1);
     migrated = true;
   }
   if (migrated) world.hash = computeWorldHash(world);

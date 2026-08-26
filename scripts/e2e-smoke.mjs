@@ -222,6 +222,58 @@ async function advanceTo(page, turn) {
   return current;
 }
 
+async function exerciseSituationSnapshot(context) {
+  const page = await context.newPage();
+  const errors = [];
+  collectBrowserErrors(page, errors);
+  await page.goto(APP_URL, { waitUntil: 'networkidle' });
+  await page.getByLabel('世界种子').fill('春战副将');
+  await page.click('#start-world');
+  await page.waitForSelector('.world-map__canvas');
+  const initial = await snapshot(page);
+  assert.equal(initial.observer.primerOpen, false, '已完成导览的浏览器不应为审计世界重复弹出导览');
+  assert.deepEqual(initial.observer.situations, {
+    version: 1,
+    lastReducedTurn: -1,
+    openCount: 0,
+    resolvedCount: 0,
+    archivedResolvedCount: 0,
+    open: [],
+    recentResolved: [],
+  });
+
+  const observed = await advanceTo(page, 12);
+  const projection = observed.observer.situations;
+  assert.equal(projection.lastReducedTurn, observed.time.turn - 1);
+  assert.ok(projection.openCount > 0, '固定种子应从真实季度事实自然形成军权危机');
+  assert.ok(projection.open.length <= 12 && projection.recentResolved.length <= 2, '局势文本投影必须有界');
+  for (const situation of projection.open) {
+    assert.ok(situation.id && situation.type === 'military_power_crisis');
+    assert.ok(['emerging', 'active', 'critical'].includes(situation.phase));
+    assert.ok(situation.tension >= 0 && situation.tension <= 100);
+    assert.ok(situation.evidence.filter((item) => item.role === 'structural').length >= 2, '正式局势应公开至少两条结构证据');
+    assert.ok(situation.causalFactIds.length > 0 && situation.milestoneFactIds.length > 0);
+    assert.ok(situation.nextSignal.label.length > 0);
+  }
+  assert.deepEqual((await snapshot(page)).observer.situations, projection, '重复读取必须得到完全相同的局势投影');
+  assert.deepEqual(observed.observer.focusLeads.map((item) => item.slot), ['person', 'polity', 'tension'], '本阶段不得偷换当世三问来源');
+  assert.equal(observed.observer.watchedCount, 0, '本阶段不得自动创建关注项');
+  assert.ok(Buffer.byteLength(await snapshotText(page), 'utf8') < SNAPSHOT_LIMIT);
+  const situationHash = observed.deterministicWorldHash;
+  await page.click('button[aria-label="保存当前世界"]');
+  await page.waitForTimeout(500);
+  await page.click('button[aria-label="返回世界书页"]');
+  await page.waitForSelector('#continue-world');
+  await page.click('#continue-world');
+  await page.waitForSelector('.world-map__canvas');
+  const restored = await snapshot(page);
+  assert.equal(restored.deterministicWorldHash, situationHash, '形成局势后的 schema-4 存档应精确恢复哈希');
+  assert.deepEqual(restored.observer.situations, projection, '形成局势后的存档应精确恢复局势投影');
+  assert.deepEqual(errors, []);
+  await page.close();
+  return projection;
+}
+
 async function exerciseObserverLeads(page, initialHash) {
   const initial = await snapshot(page);
   assert.equal(initial.observer.focusLeads.length, 3, '史家应始终给出一人、一国、一条矛盾');
@@ -905,6 +957,9 @@ try {
   assert.equal(reloaded.observer.primerOpen, false, '续读不应重复弹出首次读图导览');
   assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 4存档续读应恢复完全相同的世界');
   assert.deepEqual(desktopErrors, []);
+
+  const situationProjection = await exerciseSituationSnapshot(desktopContext);
+  assert.ok(situationProjection.openCount > 0);
 
   const mobileContext = await browser.newContext({
     viewport: { width: 390, height: 844 },

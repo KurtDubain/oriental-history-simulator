@@ -119,6 +119,7 @@ import {
   type HistoricalTerritoryView,
 } from './view/v1-history';
 import { deriveObserverLeads, type ObserverLead } from './view/observer-leads';
+import { toSituationSnapshot } from './view/situation-snapshot';
 import {
   OBSERVER_DESK_STORAGE_KEY,
   applyObserverEventAlerts,
@@ -518,6 +519,7 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
         target: lead.target,
         overlay: lead.overlay,
       })),
+      situations: toSituationSnapshot(world),
     },
     interface: {
       view: options.view,

@@ -17,6 +17,7 @@ export const SIMULATION_SYSTEM_PHASES = [
   'knowledge',
   'military_careers',
   'appointments',
+  'situations',
   'quarter_finalize',
 ] as const;
 

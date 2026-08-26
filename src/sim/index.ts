@@ -39,3 +39,4 @@ export {
 export type { V03InterventionAction } from './v03-intervention';
 export * from './types';
 export * from './facts';
+export * from './situations';

@@ -2,7 +2,7 @@
 
 > 对应设计：[NEXT_SYSTEM_DESIGN.md](./NEXT_SYSTEM_DESIGN.md)
 > 性能依据：[SIMULATION_PERFORMANCE_AUDIT.md](./SIMULATION_PERFORMANCE_AUDIT.md)
-> 任务状态：Phase A 已完成；下一实现入口为 Phase B 的 Situation 纵向切片
+> 任务状态：Phase A 已完成；Phase B 的 B01/B02/B03/B08 军权危机纵切已落地，下一入口仍在 Phase B，先扩展第二类局势，不提前进入人物 Agency
 
 ## 1. 路线总览
 
@@ -124,14 +124,14 @@ Phase F UX、地图 LOD 与发布打磨
 
 ### Tasks
 
-- [ ] **B01 — SituationState 与 reducer**：实现 `open/resolved`、`emerging/active/critical`、tension、momentum 和有界历史。
-- [ ] **B02 — Candidate Registry**：按 type + scopeKey 合并候选，连续两季形成，设置活跃上限和滞回。
-- [ ] **B03 — 军权危机检测器**：军令、主帅、野心、忠诚、中央权威、君臣关系、军中与家族支持。
+- [x] **B01 — SituationState 与 reducer**：实现 `open/resolved`、`emerging/active/critical`、tension、momentum 和有界历史。
+- [x] **B02 — Candidate Registry**：按 type + scopeKey 合并候选，连续两季形成，设置活跃上限和滞回。
+- [x] **B03 — 军权危机检测器**：军令、主帅、野心、忠诚、中央权威、君臣关系、军中与家族支持。
 - [ ] **B04 — 继承危机检测器**：君主健康、继承候选、合法性、派系、外戚和军方支持。
 - [ ] **B05 — 朝堂权斗检测器**：权臣、派系结盟、清洗与中央控制。
 - [ ] **B06 — 战争进程检测器**：现阶段先聚合 War/Battle Fact，不等待 Campaign。
 - [ ] **B07 — 地方危机检测器**：粮食支撑季数、人口迁出、民怨与疫情，设置叙事多样性限制。
-- [ ] **B08 — Situation Milestone Fact**：形成、升级、降温、参与者变化和结案。
+- [x] **B08 — Situation Milestone Fact**：形成、升级、降温和结案；参与者变化先保留在权威局势历史中，待需要公开时再投影。
 - [ ] **B09 — 结案摘要**：起止快照、里程碑、核心人物/家族、制度与领土后果。
 - [ ] **B10 — Situation 详情页**：玩家语言、历史证据、Simulation Audit 三层。
 - [ ] **B11 — 历史工作台接入**：按 Situation 聚合和展开源 Facts。
@@ -157,6 +157,15 @@ Phase F UX、地图 LOD 与发布打磨
 - 所有 milestone 引用真实 Fact。
 - 活跃 Situation 不超过设定上限，resolved 不再参与模拟更新。
 - 完整跑通“副将立功 → 军权增长 → 朝廷反应 → 危机 → 结案”的只读故事线。
+
+### B01/B03 Completion Evidence（2026-08-26）
+
+- Situation 已成为 schema 4 权威状态；每季在 `appointments` 后、季度封账前消费当季 Facts 与显式索引，不读取 Chronicle。
+- 军权危机要求连续两季达标、至少两条结构证据和下一观察信号；形成门槛经自然世界样本由 52 校准到 62，避免普通军职压力过早占满正式局势。
+- 形成、阶段变化与结案均生成 `situation_milestone` Fact，并反向挂接到稳定 Situation ID；里程碑 Fact 必须引用更早的真实领域 Fact。
+- resolved 状态冻结，开放/结案/候选/证据/参与者/变化记录均有硬上限；Phase-A schema 4 存档只从下一季开始观察，不倒推旧局势。
+- `render_game_to_text` 暴露最多 12 条开放局势与 2 条近期结案，供自动化与下一轮 UI 使用；本轮没有改变当世三问、关注、自动暂停或历史工作台。
+- 聚焦测试、完整 Vitest、TypeScript、生产构建、固定种子确定性/存档续推审计和桌面/移动端浏览器回归构成验收门。
 
 ## 5. Phase C — 当世三问、人物与家族真正行动
 
@@ -384,7 +393,8 @@ Phase F UX、地图 LOD 与发布打磨
 7. [x] A09/A10：Runtime/Full Validation 分离。
 8. [x] A11：AutosaveCoordinator。
 9. [x] A12：完整 release regression。
-10. [ ] B01/B03：只建立 Situation reducer 与“军权危机”检测器，暂不扩类型。
+10. [x] B01/B02/B03/B08：建立 Situation reducer、候选滞回、军权危机检测器和里程碑 Fact，暂不扩类型。
+11. [ ] 下一纵切：从 B04 继承危机或 B06 战争进程中只选一类，复用同一 reducer、证据与审计门。
 
 这一 Sprint 的演示目标只有一句话：
 

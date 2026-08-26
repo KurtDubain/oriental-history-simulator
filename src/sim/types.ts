@@ -1,4 +1,5 @@
 import type { LegacyArchiveBoundary, SimulationFact } from './facts/types';
+import type { SituationSystemState } from './situations/types';
 export type { LegacyArchiveBoundary, SimulationFact } from './facts/types';
 
 export const SEASONS = ['春', '夏', '秋', '冬'] as const;
@@ -607,7 +608,7 @@ export interface EventCause {
 export type DeltaValue = number | string | boolean | null;
 
 export interface StateDelta {
-  entityType: 'world' | 'region' | 'seaZone' | 'port' | 'polity' | 'character' | 'army' | 'fleet' | 'war' | 'family' | 'relationship' | 'faction' | 'diplomacy' | 'office' | 'commitment' | 'tradeCorridor' | 'infection' | 'practice' | 'navalOperation';
+  entityType: 'world' | 'region' | 'seaZone' | 'port' | 'polity' | 'character' | 'army' | 'fleet' | 'war' | 'family' | 'relationship' | 'faction' | 'diplomacy' | 'office' | 'commitment' | 'tradeCorridor' | 'infection' | 'practice' | 'navalOperation' | 'situation';
   entityId: string;
   field: string;
   before: DeltaValue;
@@ -804,6 +805,7 @@ export interface WorldState {
   facts: SimulationFact[];
   factDigest: string;
   legacyArchiveBoundary: LegacyArchiveBoundary | null;
+  situationSystem: SituationSystemState;
   lastTurn: TurnReport | null;
   counters: WorldCounters;
   hash: string;

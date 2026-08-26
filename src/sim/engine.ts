@@ -41,6 +41,7 @@ import {
   recordDiplomaticCommitmentBreach,
   syncOfficeAppointments,
 } from './v02';
+import { createSituationSystemState, processSituationSystem } from './situations';
 import {
   SEASONS,
   type ArmyState,
@@ -528,6 +529,7 @@ export function computeWorldHash(world: WorldState): string {
   void _legacyCharacterSnapshot;
   void _legacyCounters;
   void _legacyLastTurn;
+  const hasSituationSystem = Object.prototype.hasOwnProperty.call(world, 'situationSystem');
   return stableHash({
     ...schema4Base,
     characters,
@@ -535,6 +537,7 @@ export function computeWorldHash(world: WorldState): string {
     lastTurn,
     factDigest: world.factDigest,
     legacyArchiveBoundary: world.legacyArchiveBoundary,
+    ...(hasSituationSystem ? { situationSystem: world.situationSystem } : {}),
   });
 }
 
@@ -592,6 +595,7 @@ export function createWorld(seed: string): WorldState {
     facts: [],
     factDigest: stableHash([]),
     legacyArchiveBoundary: null,
+    situationSystem: createSituationSystemState(-1),
     lastTurn: null,
     counters: { character: characters.length, army: 0, polity: polities.length, war: 0, event: 1, family: 0, faction: 0, relationship: 0, office: 0, commitment: 0, fleet: 0, tradeCorridor: 0, navalOperation: 0, shipment: 0, shipProject: 0, fact: 0 },
     hash: '',
@@ -2815,6 +2819,7 @@ function cloneWorld(world: WorldState): WorldState {
     })),
     history: [...world.history],
     facts: [...world.facts],
+    situationSystem: structuredClone(world.situationSystem),
     counters: { ...world.counters },
   };
 }
@@ -2941,6 +2946,7 @@ export function advanceWorldDetailed(
   runSystem('knowledge', () => processV03Knowledge(world, context, (input) => pushEvent(world, context, input)));
   runSystem('military_careers', () => processV02MilitaryCareers(world, context, (input) => pushEvent(world, context, input)));
   runSystem('appointments', () => syncOfficeAppointments(world, context.turn, context));
+  runSystem('situations', () => processSituationSystem(world, context, (input) => pushEvent(world, context, input)));
   runSystem('quarter_finalize', () => {
     finalizeTurn(world, context);
     world.turn += 1;

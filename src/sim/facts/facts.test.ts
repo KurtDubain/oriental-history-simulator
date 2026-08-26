@@ -44,14 +44,15 @@ describe('schema 4 authoritative fact layer', () => {
       entry.kind === '首次参战' && entry.factId !== null && unpublishedIds.has(entry.factId)
     )));
     expect(creditedDeputy?.deputyExperience).toBeGreaterThanOrEqual(4);
-    expect(new Set(world.facts.map((fact) => fact.kind))).toEqual(new Set([
+    const factKinds = new Set(world.facts.map((fact) => fact.kind));
+    for (const requiredKind of [
       'battle',
       'territory_control_changed',
       'appointment_started',
       'appointment_ended',
       'character_death',
       'marriage',
-    ]));
+    ] as const) expect(factKinds.has(requiredKind)).toBe(true);
     const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
     expect(world.history.filter((event) => event.kind === 'battle').every((event) => (
       event.sourceFactIds.length === 1 && factById.get(event.sourceFactIds[0])?.kind === 'battle'

@@ -2,7 +2,7 @@
 
 一个纯前端、确定性的东方架空历史观察沙盒。你不直接统治国家，而是按季推进时间，观察人物欲望、家族传承、政治制度、资源流通、迁徙、疾病、知识、外交与战争共同写出的历史，并在少数节点用有限“天命”轻推世界。
 
-当前产品版本为 **1.0.0**，权威存档已升级为 **schema 4**，新世界仍使用 **82 个陆地区域 + 10 个海域**。schema 4 把“真实发生的 Simulation Fact”与面向玩家展示的 Chronicle 分开：战斗、领土、任免、死亡和婚姻先成为事实，史册再按重要度投影，因此没有公开入史的小战也会真实影响人物经历。
+当前产品版本为 **1.0.0**，权威存档已升级为 **schema 4**，新世界仍使用 **82 个陆地区域 + 10 个海域**。schema 4 把“真实发生的 Simulation Fact”与面向玩家展示的 Chronicle 分开：战斗、领土、任免、死亡和婚姻先成为事实，史册再按重要度投影，因此没有公开入史的小战也会真实影响人物经历。当前开发版还加入了第一条权威 Historical Situation：军职、战功、野心、忠诚、中央权威、君臣关系、军中网络和家族支撑可以连续累积为“军权危机”，并以真实 Fact 解释形成、升温与结案。
 
 ## 明天怎么试玩
 
@@ -106,7 +106,7 @@ npm run test:e2e
 npm run test:release
 ```
 
-`test:release` 会依次执行单元/系统测试、生产构建、Chromium 试玩、Phase A 事实/性能审计和 V0.3 长程模拟审计。`npm run test:audit:phase-a` 单独检查 Fact 覆盖、runtime/full validation、序列化体积与耗时；历史审计可分别用 `npm run test:audit:v01` 与 `npm run test:audit:v02` 执行。
+`test:release` 会依次执行单元/系统测试、生产构建、Chromium 试玩、Phase A 事实/性能审计、Phase B Situation 审计和 V0.3 长程模拟审计。`npm run test:audit:phase-a` 单独检查 Fact 覆盖、runtime/full validation、序列化体积与耗时；`npm run test:audit:phase-b` 检查局势序列确定性、上限、Fact 证据和存档续推；历史审计可分别用 `npm run test:audit:v01` 与 `npm run test:audit:v02` 执行。
 
 模拟内核不使用 `Math.random`。所有不确定性都由“世界种子 + 季度 + 系统 + 实体 + 用途”独立寻址；`window.render_game_to_text()` 与 `window.advanceTime(ms)` 提供确定性的文本观察与自动化测试接口。
 
@@ -117,7 +117,7 @@ npm run test:release
 - 世界收藏只存于当前浏览器；云存档、跨设备同步、共享世界、排行榜、在线多人和运行时生成式叙事均不在本次试玩范围。
 - 海岸线由州域坐标与通行关系推导，是服务于辨识与策略阅读的架空概括图，不是精密 GIS；稀疏旧档的轮廓会更抽象。
 - 桌面 Chromium 是本次发布流程的主要自动化目标；移动端可观察和操作，但复杂关系图与历史工作台仍以桌面体验为先。Firefox 与 Safari 尚未进入同等强度的发布回归。
-- Phase A 没有重做人物目标、家族年度 AI、Situation 或持续战役；这些仍按 Roadmap 从 Phase B 开始。当前版本先保证后续系统消费真实 Fact，并控制每季校验与自动存档成本。
+- Phase B 当前只完成“军权危机”这一种 Situation 纵切，并先通过有界文本快照提供证据；当世三问接管、局势关注/自动暂停、可见详情页、继承/朝堂/战争/地方局势、人物 Goal/Plan、家族年度 AI 和持续战役仍按 Roadmap 分阶段进入。
 
 ## 技术边界
 

@@ -1,5 +1,7 @@
 import { computeWorldHash, getDateForTurn } from './engine';
 import { stableCompare, stableHash } from './random';
+import { validateSituationSystemState } from './situations/reducer';
+import type { SituationRecentChange } from './situations/types';
 import type { HistoryEvent, InvariantViolation, SimulationFact, WorldState } from './types';
 
 export type RuntimeEntityKind =
@@ -27,7 +29,8 @@ export type RuntimeEntityKind =
   | 'pathogen'
   | 'infection'
   | 'practice'
-  | 'practiceState';
+  | 'practiceState'
+  | 'situation';
 
 /**
  * Describes an append-only digest without exposing or scanning its archive.
@@ -75,6 +78,7 @@ const RUNTIME_ENTITY_KIND_SET = new Set<RuntimeEntityKind>([
   'infection',
   'practice',
   'practiceState',
+  'situation',
 ]);
 
 export interface ValidationMeasurement {
@@ -141,6 +145,19 @@ function extendAppendOnlyDigest(digest: string, item: unknown): string {
 
 function sameOrderedStrings(left: readonly string[], right: readonly string[]): boolean {
   return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function milestoneMatchesSituationChange(
+  fact: SimulationFact,
+  situationId: string,
+  change: SituationRecentChange,
+): boolean {
+  if (fact.kind !== 'situation_milestone' || change.kind === 'participants_changed') return false;
+  return fact.turn === change.turn
+    && fact.payload.situationId === situationId
+    && fact.payload.transition === change.kind
+    && fact.payload.fromPhase === change.fromPhase
+    && fact.payload.toPhase === change.toPhase;
 }
 
 /**
@@ -213,6 +230,7 @@ function runtimeCollection(world: WorldState, kind: RuntimeEntityKind): readonly
     case 'infection': return world.infections;
     case 'practice': return world.practices;
     case 'practiceState': return world.practiceStates;
+    case 'situation': return world.situationSystem.situations;
     default: return [];
   }
 }
@@ -413,6 +431,42 @@ export function validateTurnRuntime(
     previous.factDigest,
   );
   if (next.factDigest !== expectedFactDigest) push(violations, 'runtime.fact-digest', '本季增量事实与事实摘要不一致');
+
+  for (const message of validateSituationSystemState(next.situationSystem)) {
+    push(violations, 'runtime.situation-state', message);
+  }
+  if (next.situationSystem.lastReducedTurn !== previous.turn) {
+    push(
+      violations,
+      'runtime.situation-turn',
+      `局势系统应结算回合${previous.turn}，实际${next.situationSystem.lastReducedTurn}`,
+    );
+  }
+  const retainedSituations = new Map(next.situationSystem.situations.map((situation) => [situation.id, situation]));
+  for (const fact of appendedFacts) {
+    if (fact.kind !== 'situation_milestone') continue;
+    const situation = retainedSituations.get(fact.payload.situationId);
+    if (fact.sourceFactIds.length === 0) {
+      push(violations, 'runtime.situation-cause', `${fact.id}没有来源事实`, fact.id);
+    }
+    if (!situation || !situation.milestoneFactIds.includes(fact.id)) {
+      push(violations, 'runtime.situation-milestone', `${fact.id}未挂接到权威局势`, fact.id);
+    }
+  }
+  for (const situation of next.situationSystem.situations) {
+    for (const change of situation.recentChanges) {
+      if (change.turn !== previous.turn || change.kind === 'participants_changed') continue;
+      const milestone = appendedFacts.find((fact) => milestoneMatchesSituationChange(fact, situation.id, change));
+      if (!milestone || !situation.milestoneFactIds.includes(milestone.id)) {
+        push(
+          violations,
+          'runtime.situation-transition-milestone',
+          `${situation.id}的${change.kind}变化没有同季里程碑事实`,
+          situation.id,
+        );
+      }
+    }
+  }
 
   const report = next.lastTurn;
   if (!report) {
@@ -639,6 +693,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     ['infection', world.infections.map((item) => item.id)],
     ['practice', world.practices.map((item) => item.id)],
     ['practice-state', world.practiceStates.map((item) => item.id)],
+    ['situation', world.situationSystem.situations.map((item) => item.id)],
   ];
   for (const [kind, ids] of collections) {
     for (const id of duplicateIds(ids)) push(violations, 'id.duplicate', `${kind}出现重复ID ${id}`, id);
@@ -682,6 +737,83 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   const factionById = new Map(world.factions.map((faction) => [faction.id, faction]));
   const eventById = new Map(world.history.map((event) => [event.id, event]));
   const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
+
+  for (const message of validateSituationSystemState(world.situationSystem)) {
+    push(violations, 'situation.state', message);
+  }
+  if (world.situationSystem.lastReducedTurn !== world.turn - 1) {
+    push(
+      violations,
+      'situation.turn',
+      `局势系统应停在回合${world.turn - 1}，实际${world.situationSystem.lastReducedTurn}`,
+    );
+  }
+  const situationById = new Map(world.situationSystem.situations.map((situation) => [situation.id, situation]));
+  const validateSituationFactId = (factId: string, ownerId: string, role: string): void => {
+    if (!factById.has(factId)) push(violations, 'situation.fact', `${ownerId}的${role}引用未知事实${factId}`, ownerId);
+  };
+  for (const candidate of world.situationSystem.candidates) {
+    for (const factId of candidate.evidenceFactIds) validateSituationFactId(factId, candidate.key, '候选证据');
+  }
+  for (const situation of world.situationSystem.situations) {
+    const participants = situation.participants;
+    for (const characterId of [
+      ...participants.coreCharacterIds,
+      ...participants.supportingCharacterIds,
+      ...participants.opposingCharacterIds,
+      ...situation.executableActorIds,
+    ]) {
+      if (!characterById.has(characterId)) push(violations, 'situation.character', `${situation.id}引用未知人物${characterId}`, situation.id);
+    }
+    for (const familyId of participants.familyIds) {
+      if (!familyById.has(familyId)) push(violations, 'situation.family', `${situation.id}引用未知家族${familyId}`, situation.id);
+    }
+    for (const factionId of participants.factionIds) {
+      if (!factionById.has(factionId)) push(violations, 'situation.faction', `${situation.id}引用未知派系${factionId}`, situation.id);
+    }
+    for (const polityId of participants.polityIds) {
+      if (!polityById.has(polityId)) push(violations, 'situation.polity', `${situation.id}引用未知政权${polityId}`, situation.id);
+    }
+    for (const regionId of participants.regionIds) {
+      if (!regionById.has(regionId)) push(violations, 'situation.region', `${situation.id}引用未知区域${regionId}`, situation.id);
+    }
+    // Characters, families, factions, polities and regions are durable records.
+    // Army/fleet snapshots are intentionally historical: those operational
+    // entities may be disbanded after the Fact that made them participants.
+    for (const factId of situation.causalFactIds) validateSituationFactId(factId, situation.id, '因果链');
+    for (const factId of situation.milestoneFactIds) {
+      const fact = factById.get(factId);
+      if (fact?.kind !== 'situation_milestone' || fact.payload.situationId !== situation.id) {
+        push(violations, 'situation.milestone', `${situation.id}引用无效里程碑事实${factId}`, situation.id);
+      }
+    }
+    for (const change of situation.recentChanges) {
+      for (const factId of change.sourceFactIds) validateSituationFactId(factId, situation.id, '变更证据');
+      if (change.kind !== 'participants_changed') {
+        const milestone = situation.milestoneFactIds
+          .map((factId) => factById.get(factId))
+          .find((fact): fact is SimulationFact => Boolean(
+            fact && milestoneMatchesSituationChange(fact, situation.id, change),
+          ));
+        if (!milestone) {
+          push(
+            violations,
+            'situation.transition-milestone',
+            `${situation.id}的${change.kind}变化没有匹配的里程碑事实`,
+            situation.id,
+          );
+        }
+      }
+    }
+    for (const signal of [...situation.signals, situation.nextWatch]) {
+      for (const reference of signal.refs) {
+        if (reference.kind === 'fact') validateSituationFactId(reference.factId, situation.id, '信号证据');
+      }
+    }
+    for (const factId of situation.resolution?.resultFactIds ?? []) {
+      validateSituationFactId(factId, situation.id, '结案证据');
+    }
+  }
 
   if (world.mapContentVersion === 'v03-82' && (world.regions.length !== 82 || world.seaZones.length !== 10)) {
     push(violations, 'map.v03-size', `V0.3新世界应有82陆区与10海域，实际${world.regions.length}/${world.seaZones.length}`);
@@ -1347,6 +1479,15 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       const source = factById.get(sourceFactId);
       if (!source || source.turn > fact.turn || numericIdSuffix(source.id) >= numericIdSuffix(fact.id)) {
         push(violations, 'fact.source', `${fact.id}引用未知或未来事实${sourceFactId}`, fact.id);
+      }
+    }
+    if (fact.kind === 'situation_milestone') {
+      if (fact.sourceFactIds.length === 0) {
+        push(violations, 'fact.situation-source', `${fact.id}没有来源事实`, fact.id);
+      }
+      const retainedSituation = situationById.get(fact.payload.situationId);
+      if (retainedSituation && !retainedSituation.milestoneFactIds.includes(fact.id)) {
+        push(violations, 'fact.situation-link', `${fact.id}未被${retainedSituation.id}反向引用`, fact.id);
       }
     }
     const factCauseWeight = fact.causes.reduce((sum, cause) => sum + cause.weight, 0);

@@ -13,6 +13,7 @@ import {
   processV03Knowledge,
   processV03Migration,
 } from './v03-life';
+import { createSituationSystemState } from './situations';
 
 const goods = () => ({ '木材': 2_000, '铁器': 1_500, '马匹': 800, '盐': 1_500, '纺织品': 1_000, '奢侈品': 500 });
 const prices = () => ({ '粮食': 1, '木材': 2, '铁器': 4, '马匹': 5, '盐': 2, '纺织品': 3, '奢侈品': 7 });
@@ -100,6 +101,7 @@ function testWorld(): WorldState {
     families: [], relationships: [], factions: [], diplomacy: [], offices: [], backgroundPeople: [], commitments: [],
     tradeCorridors: [], navalOperations: [], shipbuildingProjects: [], pathogens: [], infections: [], practices: [], practiceStates: [],
     history: [], historyDigest: '', facts: [], factDigest: '', legacyArchiveBoundary: null, lastTurn: null,
+    situationSystem: createSituationSystemState(-1),
     counters: { character: 3, army: 0, polity: 1, war: 0, event: 0, family: 0, faction: 0, relationship: 0, office: 0, commitment: 0, fleet: 0, tradeCorridor: 0, navalOperation: 0, shipment: 0, shipProject: 0, fact: 0 },
     hash: '',
   };
