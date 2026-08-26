@@ -29,6 +29,7 @@ import {
 } from './components/MapPrimer';
 import { ObserverDesk } from './components/ObserverDesk';
 import { ObserverLeads, observerLeadTargetKey } from './components/ObserverLeads';
+import { SituationWorkbench } from './components/SituationWorkbench';
 import {
   QuarterPulse,
   type QuarterPulseEvent,
@@ -119,6 +120,7 @@ import {
   type HistoricalTerritoryView,
 } from './view/v1-history';
 import { deriveObserverLeads, type ObserverLead } from './view/observer-leads';
+import { projectSituationWorkbench } from './view/situation-detail';
 import { toSituationSnapshot } from './view/situation-snapshot';
 import {
   OBSERVER_DESK_STORAGE_KEY,
@@ -274,6 +276,8 @@ interface SnapshotOptions {
   mandateOpen: boolean;
   observerDeskOpen: boolean;
   historyWorkbenchOpen: boolean;
+  situationWorkbenchOpen: boolean;
+  selectedSituationId: string | null;
   historicalTurn: number | null;
   watchedCount: number;
   guideCompleted: number;
@@ -487,6 +491,9 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
   const interventionHistory = world.history.filter(isV03InterventionEvent);
   const latestIntervention = interventionHistory.at(-1);
   const focusLeads = deriveObserverLeads(world);
+  const situationWorkbench = options.situationWorkbenchOpen
+    ? projectSituationWorkbench(world, options.selectedSituationId)
+    : null;
   return JSON.stringify({
     mode: options.startOpen ? 'world-menu' : 'observing',
     productVersion: '1.0.0',
@@ -501,6 +508,28 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
     observer: {
       deskOpen: options.observerDeskOpen,
       historyWorkbenchOpen: options.historyWorkbenchOpen,
+      situationWorkbenchOpen: options.situationWorkbenchOpen,
+      selectedSituationId: situationWorkbench?.selectedId ?? options.selectedSituationId,
+      selectedSituation: situationWorkbench?.selected ? {
+        id: situationWorkbench.selected.id,
+        type: situationWorkbench.selected.type,
+        title: situationWorkbench.selected.title,
+        status: situationWorkbench.selected.status,
+        phase: situationWorkbench.selected.phase,
+        playerSummary: situationWorkbench.selected.playerSummary,
+        currentChange: situationWorkbench.selected.currentChange,
+        nextWatch: situationWorkbench.selected.nextWatch,
+        outcome: situationWorkbench.selected.outcome,
+        timeline: situationWorkbench.selected.timeline.map((item) => ({
+          turn: item.turn,
+          kind: item.kind,
+          label: item.label,
+          milestoneFactId: item.milestoneFactId,
+          historyEventIds: item.historyEventIds,
+        })),
+        evidenceFactIds: situationWorkbench.selected.evidence.map((fact) => fact.id),
+        consequenceCount: situationWorkbench.selected.consequences.length,
+      } : null,
       historicalTurn: options.historicalTurn,
       watchedCount: options.watchedCount,
       guideCompleted: options.guideCompleted,
@@ -676,6 +705,9 @@ export function App() {
   const [mandateBusy, setMandateBusy] = useState(false);
   const [mandateMessage, setMandateMessage] = useState<MandateMessage | null>(null);
   const [observerDeskOpen, setObserverDeskOpen] = useState(false);
+  const [situationWorkbenchOpen, setSituationWorkbenchOpen] = useState(false);
+  const [selectedSituationId, setSelectedSituationId] = useState<string | null>(null);
+  const [resumeSituationAfterEvent, setResumeSituationAfterEvent] = useState(false);
   const [observerSettings, setObserverSettings] = useState<ObserverDeskSettings>(() => createObserverDeskSettings());
   const [pauseMatch, setPauseMatch] = useState<ObserverPauseMatch | null>(null);
   const [historicalView, setHistoricalView] = useState<HistoricalTerritoryView | null>(null);
@@ -695,6 +727,8 @@ export function App() {
   const archiveFocusRestoreAllowedRef = useRef(false);
   const mandateTriggerRef = useRef<HTMLButtonElement>(null);
   const observerDeskTriggerRef = useRef<HTMLButtonElement>(null);
+  const situationReturnFocusRef = useRef<HTMLElement | null>(null);
+  const situationFocusRestoreAllowedRef = useRef(false);
   const historyTriggerRef = useRef<HTMLButtonElement>(null);
   const collectionTriggerRef = useRef<HTMLButtonElement>(null);
   const primerTriggerRef = useRef<HTMLButtonElement>(null);
@@ -718,6 +752,8 @@ export function App() {
     mandateOpen,
     observerDeskOpen,
     historyWorkbenchOpen: activeView === 'chronicle',
+    situationWorkbenchOpen,
+    selectedSituationId,
     historicalTurn: historicalView?.turn ?? null,
     watchedCount: observerSettings.watchlist.length,
     guideCompleted: observerGuideProgress(observerSettings).completed,
@@ -821,8 +857,8 @@ export function App() {
 
   useEffect(() => {
     if (!worldShellRef.current) return;
-    worldShellRef.current.inert = startOpen || archiveOpen || mandateOpen || observerDeskOpen || collectionOpen || primerOpen || activeView === 'chronicle';
-  }, [activeView, archiveOpen, collectionOpen, mandateOpen, observerDeskOpen, primerOpen, startOpen, world]);
+    worldShellRef.current.inert = startOpen || archiveOpen || mandateOpen || observerDeskOpen || situationWorkbenchOpen || collectionOpen || primerOpen || activeView === 'chronicle';
+  }, [activeView, archiveOpen, collectionOpen, mandateOpen, observerDeskOpen, primerOpen, situationWorkbenchOpen, startOpen, world]);
 
   const openWorld = useCallback((nextWorld: WorldState, source: OpenWorldSource) => {
     resetRuntimePerformanceMetrics();
@@ -848,6 +884,9 @@ export function App() {
     setArchiveOpen(false);
     setMandateOpen(false);
     setObserverDeskOpen(false);
+    setSituationWorkbenchOpen(false);
+    setSelectedSituationId(null);
+    setResumeSituationAfterEvent(false);
     setCollectionOpen(false);
     setMandateMessage(null);
     setResumeArchiveAfterEvent(false);
@@ -1210,6 +1249,7 @@ export function App() {
         || options.archiveOpen
         || options.mandateOpen
         || options.observerDeskOpen
+        || options.situationWorkbenchOpen
         || options.collectionOpen
         || options.historyWorkbenchOpen
         || options.historicalTurn !== null
@@ -1250,6 +1290,8 @@ export function App() {
     mandateOpen,
     observerDeskOpen,
     historyWorkbenchOpen: activeView === 'chronicle',
+    situationWorkbenchOpen,
+    selectedSituationId,
     historicalTurn: historicalView?.turn ?? null,
     watchedCount: observerSettings.watchlist.length,
     guideCompleted: observerGuideProgress(observerSettings).completed,
@@ -1445,6 +1487,15 @@ export function App() {
   const mapFlows = useMemo(() => world && !historicalView ? toMapFlows(world, overlay) : [], [historicalView, overlay, world]);
   const mapMarkers = useMemo(() => world && !historicalView ? toMapMarkers(world, overlay) : [], [historicalView, overlay, world]);
   const observerLeads = useMemo(() => world ? deriveObserverLeads(world) : [], [world]);
+  const readableSituationCount = world ? (
+    world.situationSystem.situations.filter((item) => item.status === 'open').length
+    + Math.min(8, world.situationSystem.situations.filter((item) => item.status === 'resolved').length)
+  ) : 0;
+  const situationWorkbenchProjection = useMemo(() => (
+    world && situationWorkbenchOpen
+      ? projectSituationWorkbench(world, selectedSituationId)
+      : null
+  ), [selectedSituationId, situationWorkbenchOpen, world]);
   const polityItems = useMemo(() => world ? polityRoster(world) : [], [world]);
   const familyItems = useMemo(() => world ? familyRoster(world) : [], [world]);
   const peopleItems = useMemo(() => world ? peopleRoster(world) : [], [world]);
@@ -1551,11 +1602,51 @@ export function App() {
 
   const handleSelectScopedEvent = useCallback((eventId: string) => {
     archiveFocusRestoreAllowedRef.current = false;
+    setResumeSituationAfterEvent(false);
     setResumeArchiveAfterEvent(archiveOpen);
     setArchiveOpen(false);
     setSelectedEventId(eventId);
     completeGuideStep('cause-traced');
   }, [archiveOpen, completeGuideStep]);
+
+  const shouldRestoreSituationFocus = useCallback(() => situationFocusRestoreAllowedRef.current, []);
+
+  const handleOpenSituationWorkbench = useCallback(() => {
+    const current = worldRef.current;
+    if (!current || current.situationSystem.situations.length === 0) return;
+    situationReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    situationFocusRestoreAllowedRef.current = true;
+    const projection = projectSituationWorkbench(current, selectedSituationId);
+    setSelectedSituationId(projection.selectedId);
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    setSituationWorkbenchOpen(true);
+    setResumeSituationAfterEvent(false);
+  }, [selectedSituationId]);
+
+  const handleCloseSituationWorkbench = useCallback(() => {
+    situationFocusRestoreAllowedRef.current = true;
+    setSituationWorkbenchOpen(false);
+    setResumeSituationAfterEvent(false);
+  }, []);
+
+  const handleSelectSituationEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
+    situationFocusRestoreAllowedRef.current = false;
+    setSituationWorkbenchOpen(false);
+    setResumeSituationAfterEvent(false);
+    handleSelectArchiveEntity(kind, id);
+  }, [handleSelectArchiveEntity]);
+
+  const handleSelectSituationHistory = useCallback((eventId: string) => {
+    situationFocusRestoreAllowedRef.current = false;
+    setSituationWorkbenchOpen(false);
+    setResumeSituationAfterEvent(true);
+    setResumeArchiveAfterEvent(false);
+    setResumeHistoryAfterEvent(false);
+    setSelectedEventId(eventId);
+    completeGuideStep('cause-traced');
+  }, [completeGuideStep]);
 
   const inspector = useMemo<ReactNode>(() => {
     if (!world || !selection) return null;
@@ -1601,6 +1692,7 @@ export function App() {
 
   const selectQuarterEvent = useCallback((eventId: string) => {
     setResumeArchiveAfterEvent(false);
+    setResumeSituationAfterEvent(false);
     setSelectedEventId(eventId);
     completeGuideStep('cause-traced');
   }, [completeGuideStep]);
@@ -1673,6 +1765,7 @@ export function App() {
       const event = current.history.at(-1);
       if (event) {
         completeGuideStep(step);
+        setResumeSituationAfterEvent(false);
         setSelectedEventId(event.id);
         setObserverDeskOpen(false);
       }
@@ -1738,7 +1831,7 @@ export function App() {
           className="observer-app"
           data-inspector-open={Boolean(inspector)}
           data-focus-open={activeView === 'world' && !historicalView && !inspector || undefined}
-          aria-hidden={startOpen || archiveOpen || mandateOpen || observerDeskOpen || collectionOpen || primerOpen || activeView === 'chronicle' || undefined}
+          aria-hidden={startOpen || archiveOpen || mandateOpen || observerDeskOpen || situationWorkbenchOpen || collectionOpen || primerOpen || activeView === 'chronicle' || undefined}
         >
           <TopBar
             title="沧衡纪"
@@ -1916,8 +2009,10 @@ export function App() {
               leads={observerLeads}
               watchedKeys={followed}
               selectedKey={selection ? `${selection.kind}:${selection.id}` : null}
+              situationCount={readableSituationCount}
               onInspect={handleInspectObserverLead}
               onToggleWatch={handleToggleObserverLead}
+              onOpenSituations={handleOpenSituationWorkbench}
             />
           ) : null}
 
@@ -1942,6 +2037,10 @@ export function App() {
               } else if (resumeHistoryAfterEvent) {
                 setActiveView('chronicle');
                 setResumeHistoryAfterEvent(false);
+              } else if (resumeSituationAfterEvent) {
+                situationFocusRestoreAllowedRef.current = true;
+                setSituationWorkbenchOpen(true);
+                setResumeSituationAfterEvent(false);
               }
             }}
             onInspectEvidence={inspectEvidence}
@@ -1949,6 +2048,7 @@ export function App() {
               archiveFocusRestoreAllowedRef.current = false;
               setResumeArchiveAfterEvent(false);
               setResumeHistoryAfterEvent(false);
+              setResumeSituationAfterEvent(false);
               setSelectedEventId(null);
               handleSelectArchiveEntity(reference.kind, reference.id);
             }}
@@ -1956,6 +2056,7 @@ export function App() {
               archiveFocusRestoreAllowedRef.current = false;
               setResumeArchiveAfterEvent(false);
               setResumeHistoryAfterEvent(false);
+              setResumeSituationAfterEvent(false);
               setSelectedEventId(null);
               handleSelectArchiveEntity(kind, id);
             }}
@@ -2013,6 +2114,7 @@ export function App() {
           turn={historicalView?.turn ?? world.turn}
           onSelectEvent={(eventId) => {
             completeGuideStep('cause-traced');
+            setResumeSituationAfterEvent(false);
             setResumeHistoryAfterEvent(true);
             setActiveView('world');
             setSelectedEventId(eventId);
@@ -2023,6 +2125,17 @@ export function App() {
           returnFocusTo={historyTriggerRef.current}
         />
       ) : null}
+
+      <SituationWorkbench
+        open={situationWorkbenchOpen}
+        projection={situationWorkbenchProjection}
+        onClose={handleCloseSituationWorkbench}
+        onSelectSituation={setSelectedSituationId}
+        onSelectEntity={handleSelectSituationEntity}
+        onSelectHistoryEvent={handleSelectSituationHistory}
+        returnFocusTo={situationReturnFocusRef.current}
+        shouldRestoreFocus={shouldRestoreSituationFocus}
+      />
 
       <ObserverDesk
         open={observerDeskOpen && Boolean(world)}

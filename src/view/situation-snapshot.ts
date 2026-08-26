@@ -148,6 +148,12 @@ const SIGNAL_LABELS: Readonly<Record<string, string>> = {
   personal_caution: '谨慎抑制',
   actor_died: '军权主体死亡',
   command_removed: '军职已经解除',
+  submission: '军权重新归于朝廷',
+  appeased_or_promoted: '安抚或升任',
+  recalled_or_reassigned: '召还或调任',
+  order_refused: '拒绝军令',
+  court_purge: '朝廷清洗',
+  armed_breakaway: '拥兵自立',
   ruler_mortality_exposure: '君主寿命风险',
   ruler_health_stable: '君主健康稳定',
   no_legal_successor: '合法继承人缺位',
@@ -196,6 +202,26 @@ const SIGNAL_LABELS: Readonly<Record<string, string>> = {
   attacker_dissolved: '攻方因继承断绝而解体',
   defender_dissolved: '守方因继承断绝而解体',
 };
+
+export function situationTypeLabel(type: string): string {
+  return TYPE_LABELS[type] ?? '历史局势';
+}
+
+export function situationStatusLabel(status: SituationStatus): string {
+  return STATUS_LABELS[status];
+}
+
+export function situationPhaseLabel(phase: SituationPhase): string {
+  return PHASE_LABELS[phase];
+}
+
+export function situationSignalLabel(key: string, role: SituationSignalRole): string {
+  return SIGNAL_LABELS[key] ?? SIGNAL_ROLE_LABELS[role];
+}
+
+export function situationOutcomeLabel(key: string): string {
+  return SIGNAL_LABELS[key] ?? '结构压力已经消散';
+}
 
 const WATCH_SIGNAL_LABELS: Readonly<Record<string, string>> = {
   watch_military_order_resolution: '观察军令会被履行、拒绝，还是随升迁而解除',
@@ -298,7 +324,7 @@ function evidenceSnapshot(signal: SituationSignal): SituationSnapshotEvidence {
   const refs = signal.refs.map(cloneRef);
   return {
     key: signal.key,
-    label: SIGNAL_LABELS[signal.key] ?? SIGNAL_ROLE_LABELS[signal.role],
+    label: situationSignalLabel(signal.key, signal.role),
     role: signal.role,
     roleLabel: SIGNAL_ROLE_LABELS[signal.role],
     contribution: signal.contribution,
@@ -364,12 +390,12 @@ function situationItem(
   return {
     id: situation.id,
     type: situation.type,
-    typeLabel: TYPE_LABELS[situation.type] ?? '历史局势',
+    typeLabel: situationTypeLabel(situation.type),
     title: situationTitle(situation, participants, world),
     status: situation.status,
-    statusLabel: STATUS_LABELS[situation.status],
+    statusLabel: situationStatusLabel(situation.status),
     phase: situation.phase,
-    phaseLabel: PHASE_LABELS[situation.phase],
+    phaseLabel: situationPhaseLabel(situation.phase),
     tension: situation.tension,
     momentum: situation.momentum,
     startedTurn: situation.startedTurn,
@@ -388,6 +414,14 @@ function situationItem(
       factIds: factIdsFromRefs(nextRefs),
     },
   };
+}
+
+/** Projects one retained Situation without imposing the compact list caps. */
+export function projectSituationSnapshotItem(
+  situation: SituationState,
+  world: SituationSnapshotLabelWorld,
+): SituationSnapshotItem {
+  return situationItem(situation, entityLabelMaps(world), world);
 }
 
 /**

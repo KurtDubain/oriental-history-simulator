@@ -297,6 +297,52 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   assert.equal(observed.observer.watchedCount, 0, '本阶段不得自动创建关注项');
   assert.ok(Buffer.byteLength(await snapshotText(page), 'utf8') < SNAPSHOT_LIMIT);
   const situationHash = observed.deterministicWorldHash;
+
+  const workbenchTrigger = page.locator('.observer-leads__footer button');
+  await workbenchTrigger.waitFor();
+  await workbenchTrigger.click();
+  await page.waitForSelector('.situation-workbench[role="dialog"]');
+  let workbenchState = await snapshot(page);
+  assert.equal(workbenchState.observer.situationWorkbenchOpen, true, '局势全卷必须拥有独立只读打开态');
+  assert.ok(workbenchState.observer.selectedSituationId, '局势全卷必须选中一条稳定 Situation');
+  assert.ok(workbenchState.observer.selectedSituation?.playerSummary.length >= 2, '默认读势层必须提供玩家语言摘要');
+  assert.equal(workbenchState.deterministicWorldHash, situationHash, '打开局势全卷不得改变世界哈希');
+  const workbench = page.locator('.situation-workbench');
+  const auditDetails = workbench.locator('.situation-workbench__audit');
+  assert.equal(await auditDetails.getAttribute('open'), null, 'Simulation Audit 默认必须折叠');
+  assert.equal(await auditDetails.getByText('Situation ID', { exact: true }).isVisible(), false, '默认画面不得泄漏调试 ID');
+  assert.ok(await workbench.locator('.situation-workbench__directory li > button').count() >= requiredTypes.length, '全卷目录应列出真实开放局势');
+  await waitForVisualSettled(workbench);
+  await page.screenshot({ path: `${ARTIFACT_DIR}/situation-workbench-desktop.png`, fullPage: true });
+
+  const directoryButtons = workbench.locator('.situation-workbench__directory li > button');
+  if (await directoryButtons.count() > 1) {
+    const firstSelected = workbenchState.observer.selectedSituationId;
+    await directoryButtons.nth(1).click();
+    workbenchState = await snapshot(page);
+    assert.notEqual(workbenchState.observer.selectedSituationId, firstSelected, '目录切换必须保留 Situation 身份');
+    assert.equal(workbenchState.deterministicWorldHash, situationHash, '切换局势不得改变世界哈希');
+  }
+  await auditDetails.locator('summary').click();
+  assert.notEqual(await auditDetails.getAttribute('open'), null, '高级审计应可按需展开');
+  assert.equal((await snapshot(page)).deterministicWorldHash, situationHash, '展开审计不得改变世界哈希');
+  await auditDetails.locator('summary').click();
+
+  const causalButton = workbench.getByRole('button', { name: '查明因果' }).first();
+  if (await causalButton.count()) {
+    await causalButton.click();
+    await page.waitForSelector('.observer-causal-drawer');
+    const causalState = await snapshot(page);
+    assert.equal(causalState.observer.situationWorkbenchOpen, false, '查明因果时应暂收卷宗，避免双层焦点陷阱');
+    assert.ok(causalState.interface.selectedEventId, '里程碑因果入口必须精确指向史事');
+    await page.locator('.observer-causal-drawer button[aria-label="关闭因果链"]').click();
+    await page.waitForSelector('.situation-workbench[role="dialog"]');
+    assert.equal((await snapshot(page)).observer.situationWorkbenchOpen, true, '关闭因果链后应回到原局势卷宗');
+  }
+  await page.locator('.situation-workbench__close').click();
+  await page.waitForSelector('.situation-workbench', { state: 'detached' });
+  assert.equal((await snapshot(page)).deterministicWorldHash, situationHash, '关闭局势全卷不得改变世界哈希');
+
   await page.click('button[aria-label="保存当前世界"]');
   await page.waitForTimeout(500);
   await page.click('button[aria-label="返回世界书页"]');
@@ -1049,6 +1095,36 @@ try {
   assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 3, '移动端可展开全部三条线索');
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();
   await exerciseMapViewportTouch(mobileContext, mobilePage);
+
+  const mobileSituationState = await advanceTo(mobilePage, 8);
+  const mobileSituationTrigger = mobileLeads.locator('.observer-leads__situation-shortcut');
+  await mobileSituationTrigger.waitFor();
+  assert.equal(await mobileSituationTrigger.isVisible(), true, '移动端紧凑线索条必须直接提供局势卷宗入口');
+  await mobileSituationTrigger.click();
+  const mobileSituation = mobilePage.locator('.situation-workbench');
+  await mobileSituation.waitFor();
+  await assertWithinViewport(mobilePage, '.situation-workbench', '移动端局势全卷不可横向溢出');
+  assert.equal(await mobileSituation.evaluate((element) => Math.round(element.getBoundingClientRect().height)), 844, '移动端局势全卷应占满100dvh');
+  for (const locator of [
+    mobileSituation.locator('.situation-workbench__close'),
+    mobileSituation.locator('.situation-workbench__directory-toggle'),
+    mobileSituation.locator('.situation-workbench__evidence > summary'),
+    mobileSituation.locator('.situation-workbench__audit > summary'),
+  ]) {
+    const bounds = await locator.boundingBox();
+    assert.ok(bounds && bounds.height >= 44 && bounds.width >= 44, '移动端局势操作目标不得小于44px');
+  }
+  await waitForVisualSettled(mobileSituation);
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-situation-workbench-390x844.png`, fullPage: true });
+  await mobileSituation.locator('.situation-workbench__directory-toggle').click();
+  const mobileSituationRows = mobileSituation.locator('.situation-workbench__directory li > button');
+  assert.ok(await mobileSituationRows.count() >= 3, '移动端局势目录应能切换三类真实故事');
+  await mobileSituationRows.nth(1).click();
+  assert.equal(await mobileSituation.locator('.situation-workbench__directory').isVisible(), false, '移动端选择局势后应回到正文');
+  assert.equal((await snapshot(mobilePage)).deterministicWorldHash, mobileSituationState.deterministicWorldHash, '移动端阅卷不得改变世界哈希');
+  await mobilePage.keyboard.press('Escape');
+  await mobileSituation.waitFor({ state: 'detached' });
+  await mobilePage.waitForFunction(() => !document.querySelector('.observer-app')?.inert);
 
   await mobilePage.locator('button[data-observer-desk-trigger="true"]').click();
   const mobileObserverDesk = mobilePage.locator('.observer-desk');

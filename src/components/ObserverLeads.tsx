@@ -7,8 +7,10 @@ export interface ObserverLeadsProps {
   leads: readonly ObserverLead[];
   watchedKeys: ReadonlySet<string>;
   selectedKey?: string | null;
+  situationCount?: number;
   onInspect: (lead: ObserverLead) => void;
   onToggleWatch: (lead: ObserverLead) => void;
+  onOpenSituations?: () => void;
 }
 
 export function observerLeadTargetKey(lead: ObserverLead): string {
@@ -19,8 +21,10 @@ export function ObserverLeads({
   leads,
   watchedKeys,
   selectedKey = null,
+  situationCount = 0,
   onInspect,
   onToggleWatch,
+  onOpenSituations,
 }: ObserverLeadsProps) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
@@ -42,6 +46,16 @@ export function ObserverLeads({
           <h2 id="observer-leads-title">当世三问</h2>
           <small>一人 · 一国 · 一条矛盾</small>
         </div>
+        {onOpenSituations && situationCount > 0 ? (
+          <button
+            type="button"
+            className="observer-leads__situation-shortcut"
+            aria-label={`展开局势全卷，共${situationCount}条可阅局势`}
+            onClick={onOpenSituations}
+          >
+            卷 {situationCount}
+          </button>
+        ) : null}
         <button
           type="button"
           className="observer-leads__mobile-toggle"
@@ -112,9 +126,15 @@ export function ObserverLeads({
         })}
       </ol>
 
-      <p className="observer-leads__footer">
-        选一条关注，推进下一季；有动向时会提醒并停下。
-      </p>
+      <footer className="observer-leads__footer">
+        {onOpenSituations && situationCount > 0 ? (
+          <button type="button" onClick={onOpenSituations}>
+            <ScrollText size={13} aria-hidden="true" />
+            <span>展开局势全卷</span>
+            <strong>{situationCount}</strong>
+          </button>
+        ) : <p>选一条关注，推进下一季；有动向时会提醒并停下。</p>}
+      </footer>
     </aside>
   );
 }
