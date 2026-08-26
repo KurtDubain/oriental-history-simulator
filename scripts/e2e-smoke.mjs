@@ -16,6 +16,17 @@ const SITUATION_OPEN_BUDGETS = Object.freeze({
   inheritance_crisis: 3,
   war_progress: 4,
 });
+const LEAD_SLOTS = Object.freeze(['person', 'polity', 'tension']);
+const SITUATION_TYPE_BY_LEAD_SLOT = Object.freeze({
+  person: 'military_power_crisis',
+  polity: 'inheritance_crisis',
+  tension: 'war_progress',
+});
+const LEAD_STAGE_BY_SITUATION_PHASE = Object.freeze({
+  emerging: '伏线',
+  active: '升温',
+  critical: '临界',
+});
 
 const server = await createServer({
   logLevel: 'error',
@@ -78,9 +89,10 @@ async function waitForLatestAutosave(page, expected, timeoutMs = 2_000) {
   assert.fail(`暂停后 ${timeoutMs}ms 内自动存档未达到 T${expected.time.turn}/${expected.deterministicWorldHash}，实际 ${saved?.turn ?? 'none'}/${saved?.hash ?? 'none'}`);
 }
 
-async function openFreshWorld(page) {
+async function openFreshWorld(page, seed = null) {
   await page.goto(APP_URL, { waitUntil: 'networkidle' });
   assert.equal(await page.evaluate(() => document.activeElement?.id), 'start-world');
+  if (seed) await page.getByLabel('世界种子').fill(seed);
   await page.click('#start-world');
   await page.waitForSelector('.world-map__canvas');
   await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).productVersion === '1.0.0');
@@ -267,7 +279,90 @@ function auditSituationProjection(projection, requiredTypes) {
   }
 }
 
+function assertObserverLeadMilestone(state, expectedSources, label) {
+  const leads = state.observer.focusLeads;
+  assert.equal(leads.length, LEAD_SLOTS.length, `${label}应始终给出三条观察题`);
+  assert.deepEqual(leads.map((lead) => lead.slot), LEAD_SLOTS, `${label}三问槽位顺序不得变化`);
+  assert.deepEqual(
+    leads.map((lead) => lead.source),
+    LEAD_SLOTS.map((slot) => expectedSources[slot]),
+    `${label}应按槽位优先使用 Situation，仅在无匹配时回退`,
+  );
+  const arbitration = state.observer.leadArbitration;
+  assert.equal(arbitration.version, 1, `${label}应暴露有界的连续性仲裁版本`);
+  assert.equal(arbitration.lastArbitratedTurn, state.time.turn, `${label}仲裁必须对应当前季度`);
+  assert.deepEqual(arbitration.slots.map((entry) => entry.slot), LEAD_SLOTS, `${label}仲裁应覆盖三个槽位`);
+
+  for (const lead of leads) {
+    const continuity = arbitration.slots.find((entry) => entry.slot === lead.slot);
+    assert.ok(continuity, `${label} ${lead.slot}应有连续性记录`);
+    assert.equal(continuity.leadId, lead.id, `${label} ${lead.slot}展示题与仲裁身份必须一致`);
+    assert.equal(continuity.situationId, lead.situationId, `${label} ${lead.slot}不得丢失 Situation 身份`);
+    assert.equal(lead.selectedSinceTurn, continuity.selectedSinceTurn, `${label} ${lead.slot}应公开真实留任起点`);
+    assert.equal(lead.retainThroughTurn, continuity.retainThroughTurn, `${label} ${lead.slot}应公开最短留任边界`);
+    assert.equal(lead.trackingTurns, state.time.turn - lead.selectedSinceTurn + 1, `${label} ${lead.slot}追踪季数应可校验`);
+    assert.ok(lead.evidence.length === 2 && lead.nextSignal.length > 0, `${label} ${lead.slot}应保留两条证据与下一观察`);
+
+    if (lead.source === 'fallback') {
+      assert.equal(lead.situationId, null, `${label} ${lead.slot}回退题不得伪造 Situation ID`);
+      assert.equal(lead.situationType, null, `${label} ${lead.slot}回退题不得伪造 Situation 类型`);
+      assert.equal(lead.displayMode, 'fallback', `${label} ${lead.slot}回退题应明示来源`);
+      continue;
+    }
+
+    assert.equal(lead.source, 'situation', `${label} ${lead.slot}只能使用权威 Situation 题源`);
+    assert.equal(lead.situationType, SITUATION_TYPE_BY_LEAD_SLOT[lead.slot], `${label} ${lead.slot}应匹配正确局势类型`);
+    assert.equal(lead.displayMode, 'tracking', `${label} ${lead.slot}的未结案局势应持续追踪`);
+    const situation = state.observer.situations.open.find((item) => item.id === lead.situationId);
+    assert.ok(situation, `${label} ${lead.slot}必须指向当前开放的局势`);
+    assert.equal(situation.type, lead.situationType, `${label} ${lead.slot}题源与局势投影类型必须一致`);
+    assert.equal(lead.stage, LEAD_STAGE_BY_SITUATION_PHASE[situation.phase], `${label} ${lead.slot}阶段必须取自滞回后的 Situation phase`);
+    assert.equal(lead.tension, Math.round(situation.tension), `${label} ${lead.slot}张力必须取自 Situation`);
+  }
+
+  return leads;
+}
+
+function observerLeadIdentity(state) {
+  return state.observer.focusLeads.map((lead) => ({
+    slot: lead.slot,
+    id: lead.id,
+    situationId: lead.situationId,
+    selectedSinceTurn: lead.selectedSinceTurn,
+    retainThroughTurn: lead.retainThroughTurn,
+  }));
+}
+
+async function exerciseSituationLeadCards(page, state) {
+  const panel = page.locator('[data-observer-leads="true"]');
+  await panel.waitFor();
+  await waitForVisualSettled(panel);
+  await page.screenshot({ path: `${ARTIFACT_DIR}/situation-backed-leads-desktop.png`, fullPage: true });
+  for (const lead of state.observer.focusLeads) {
+    assert.ok(lead.situationId, `${lead.slot}卡片必须持有可直达的 Situation ID`);
+    const row = panel.locator(`[data-testid="observer-lead"][data-situation-id="${lead.situationId}"]`);
+    await row.waitFor();
+    assert.equal(await row.count(), 1, `${lead.slot}应只有一张对应局势卡片`);
+    await row.locator('.observer-leads__inspect').click();
+    const opened = await waitForSnapshot(page, (current, situationId) => (
+      current.observer.situationWorkbenchOpen
+      && current.observer.selectedSituationId === situationId
+      && current.observer.selectedSituation?.id === situationId
+    ), lead.situationId);
+    assert.equal(opened.observer.selectedSituation.type, lead.situationType, `${lead.slot}卡片应直达同一类型的局势卷宗`);
+    assert.equal(opened.deterministicWorldHash, state.deterministicWorldHash, `${lead.slot}卡片阅卷不得改变世界哈希`);
+    await page.locator('.situation-workbench__close').click();
+    await page.waitForSelector('.situation-workbench', { state: 'detached' });
+    const inspectorClose = page.locator('.observer-inspector button[aria-label="关闭档案"]');
+    if (await inspectorClose.isVisible().catch(() => false)) await inspectorClose.click();
+    await panel.waitFor();
+    assert.equal((await snapshot(page)).deterministicWorldHash, state.deterministicWorldHash, `${lead.slot}返回当世三问后世界哈希应保持不变`);
+  }
+}
+
 async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes }) {
+  assert.equal(seed, '春战副将', 'C01/C02 端到端验收必须使用冻结种子“春战副将”');
+  assert.equal(turn, 8, 'C01/C02 端到端验收必须覆盖 T0/T4/T6/T8');
   const page = await context.newPage();
   const errors = [];
   collectBrowserErrors(page, errors);
@@ -286,6 +381,36 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
     open: [],
     recentResolved: [],
   });
+  assertObserverLeadMilestone(initial, {
+    person: 'fallback',
+    polity: 'fallback',
+    tension: 'fallback',
+  }, 'T0');
+
+  const turn4 = await advanceTo(page, 4);
+  auditSituationProjection(turn4.observer.situations, ['war_progress']);
+  assertObserverLeadMilestone(turn4, {
+    person: 'fallback',
+    polity: 'fallback',
+    tension: 'situation',
+  }, 'T4');
+
+  const turn6 = await advanceTo(page, 6);
+  auditSituationProjection(turn6.observer.situations, requiredTypes);
+  assertObserverLeadMilestone(turn6, {
+    person: 'situation',
+    polity: 'situation',
+    tension: 'situation',
+  }, 'T6');
+  const turn6Identity = observerLeadIdentity(turn6);
+
+  const turn7 = await advanceTo(page, 7);
+  assertObserverLeadMilestone(turn7, {
+    person: 'situation',
+    polity: 'situation',
+    tension: 'situation',
+  }, 'T7');
+  assert.deepEqual(observerLeadIdentity(turn7), turn6Identity, 'T6→T7 未出现明确高优先级转折时三问不得换题');
 
   const observed = await advanceTo(page, turn);
   const projection = observed.observer.situations;
@@ -293,10 +418,22 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   assert.ok(projection.openCount > 0, '固定种子应从真实季度事实自然形成局势');
   auditSituationProjection(projection, requiredTypes);
   assert.deepEqual((await snapshot(page)).observer.situations, projection, '重复读取必须得到完全相同的局势投影');
-  assert.deepEqual(observed.observer.focusLeads.map((item) => item.slot), ['person', 'polity', 'tension'], '本阶段不得偷换当世三问来源');
+  assertObserverLeadMilestone(observed, {
+    person: 'situation',
+    polity: 'situation',
+    tension: 'situation',
+  }, 'T8');
+  assert.deepEqual(observerLeadIdentity(observed), turn6Identity, 'T6→T8 应跨越三季稳定追踪同三条 Situation');
+  assert.ok(observed.observer.focusLeads.every((lead) => lead.trackingTurns >= 3), 'T8 三问应展示连续追踪季数');
   assert.equal(observed.observer.watchedCount, 0, '本阶段不得自动创建关注项');
   assert.ok(Buffer.byteLength(await snapshotText(page), 'utf8') < SNAPSHOT_LIMIT);
   const situationHash = observed.deterministicWorldHash;
+  const leadProjectionBeforeSave = {
+    focusLeads: observed.observer.focusLeads,
+    leadArbitration: observed.observer.leadArbitration,
+  };
+
+  await exerciseSituationLeadCards(page, observed);
 
   const workbenchTrigger = page.locator('.observer-leads__footer button');
   await workbenchTrigger.waitFor();
@@ -352,10 +489,13 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   const restored = await snapshot(page);
   assert.equal(restored.deterministicWorldHash, situationHash, '形成局势后的 schema-4 存档应精确恢复哈希');
   assert.deepEqual(restored.observer.situations, projection, '形成局势后的存档应精确恢复局势投影');
+  assert.deepEqual(restored.observer.focusLeads, leadProjectionBeforeSave.focusLeads, '续读不得重置三问身份、留任起点或追踪季数');
+  assert.deepEqual(restored.observer.leadArbitration, leadProjectionBeforeSave.leadArbitration, '续读必须恢复同一份非权威连续性仲裁记录');
+  assert.ok(restored.observer.focusLeads.some((lead) => lead.selectedSinceTurn < restored.time.turn), '续读后不得把三问留任起点伪造为当前季度');
   auditSituationProjection(restored.observer.situations, requiredTypes);
   assert.deepEqual(errors, []);
   await page.close();
-  return { seed, turn, requiredTypes, projection };
+  return { seed, turn, requiredTypes, projection, leadProjection: leadProjectionBeforeSave };
 }
 
 async function exerciseObserverLeads(page, initialHash) {
@@ -395,9 +535,29 @@ async function exerciseMapViewportDesktop(page) {
   const before = await snapshot(page);
   const box = await canvas.boundingBox();
   assert.ok(box);
-  await page.mouse.move(box.x + box.width * 0.56, box.y + box.height * 0.52);
+  const wheelPoint = { x: box.x + box.width * 0.56, y: box.y + box.height * 0.52 };
+  await page.mouse.move(wheelPoint.x, wheelPoint.y);
   await page.mouse.wheel(0, -420);
-  await page.waitForFunction(() => Number(document.querySelector('.world-map')?.getAttribute('data-map-zoom')) > 1.05);
+  const nativeWheelObserved = await page.waitForFunction(
+    () => Number(document.querySelector('.world-map')?.getAttribute('data-map-zoom')) > 1.05,
+    undefined,
+    { timeout: 2_000 },
+  ).then(() => true).catch(() => false);
+  if (!nativeWheelObserved) {
+    await canvas.dispatchEvent('wheel', {
+      deltaY: -420,
+      deltaMode: 0,
+      clientX: wheelPoint.x,
+      clientY: wheelPoint.y,
+      bubbles: true,
+      cancelable: true,
+    });
+    await page.waitForFunction(
+      () => Number(document.querySelector('.world-map')?.getAttribute('data-map-zoom')) > 1.05,
+      undefined,
+      { timeout: 5_000 },
+    );
+  }
   const zoomed = await snapshot(page);
   assert.ok(zoomed.interface.mapViewport.zoom > 1.05, '桌面滚轮应放大舆图');
   assert.equal(zoomed.deterministicWorldHash, before.deterministicWorldHash, '舆图缩放不得改变世界哈希');
@@ -1058,7 +1218,7 @@ try {
   const mobilePage = await mobileContext.newPage();
   const mobileErrors = [];
   collectBrowserErrors(mobilePage, mobileErrors);
-  await openFreshWorld(mobilePage);
+  await openFreshWorld(mobilePage, '春战副将');
   assert.equal((await snapshot(mobilePage)).productVersion, '1.0.0');
   assert.equal((await snapshot(mobilePage)).observer.primerOpen, true);
   const mobilePrimer = mobilePage.locator('.map-primer');
@@ -1068,7 +1228,13 @@ try {
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-map-primer-390x844.png`, fullPage: true });
   await mobilePrimer.locator('[data-map-primer-skip]').click();
   await mobilePrimer.waitFor({ state: 'detached' });
-  assert.equal((await snapshot(mobilePage)).observer.primerOpen, false);
+  const mobileTurn0 = await snapshot(mobilePage);
+  assert.equal(mobileTurn0.observer.primerOpen, false);
+  assertObserverLeadMilestone(mobileTurn0, {
+    person: 'fallback',
+    polity: 'fallback',
+    tension: 'fallback',
+  }, '移动端 T0');
   assert.equal(await mobilePage.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth + 1), true);
   const mobileMapLayout = await mobilePage.evaluate(() => {
     const stage = document.querySelector('.observer-stage')?.getBoundingClientRect();
@@ -1096,15 +1262,67 @@ try {
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();
   await exerciseMapViewportTouch(mobileContext, mobilePage);
 
+  const mobileTurn4 = await advanceTo(mobilePage, 4);
+  assertObserverLeadMilestone(mobileTurn4, {
+    person: 'fallback',
+    polity: 'fallback',
+    tension: 'situation',
+  }, '移动端 T4');
+  const mobileTurn6 = await advanceTo(mobilePage, 6);
+  assertObserverLeadMilestone(mobileTurn6, {
+    person: 'situation',
+    polity: 'situation',
+    tension: 'situation',
+  }, '移动端 T6');
+  const mobileTurn6Identity = observerLeadIdentity(mobileTurn6);
   const mobileSituationState = await advanceTo(mobilePage, 8);
+  assertObserverLeadMilestone(mobileSituationState, {
+    person: 'situation',
+    polity: 'situation',
+    tension: 'situation',
+  }, '移动端 T8');
+  assert.deepEqual(observerLeadIdentity(mobileSituationState), mobileTurn6Identity, '移动端 T6→T8 应稳定追踪同三条 Situation');
+  const mobileTurn8Layout = await mobilePage.evaluate(() => {
+    const app = document.querySelector('.observer-app');
+    const stage = document.querySelector('.observer-stage')?.getBoundingClientRect();
+    return {
+      appScrollLeft: app?.scrollLeft ?? -1,
+      appScrollWidth: app?.scrollWidth ?? -1,
+      appClientWidth: app?.clientWidth ?? -1,
+      stageLeft: stage?.left ?? -1,
+      stageRight: stage?.right ?? -1,
+      viewportWidth: window.innerWidth,
+    };
+  });
+  assert.equal(mobileTurn8Layout.appScrollLeft, 0, '移动端连续推进到 T8 不得使观察台横向滚动');
+  assert.ok(
+    mobileTurn8Layout.appScrollWidth <= mobileTurn8Layout.appClientWidth,
+    '隐藏的季度提示不得撑宽移动端观察台',
+  );
+  assert.ok(
+    mobileTurn8Layout.stageLeft >= 0 && mobileTurn8Layout.stageRight <= mobileTurn8Layout.viewportWidth + 1,
+    '移动端 T8 世界舞台必须仍完整覆盖视口',
+  );
   const mobileSituationTrigger = mobileLeads.locator('.observer-leads__situation-shortcut');
   await mobileSituationTrigger.waitFor();
   assert.equal(await mobileSituationTrigger.isVisible(), true, '移动端紧凑线索条必须直接提供局势卷宗入口');
-  await mobileSituationTrigger.click();
+  await mobileLeads.locator('.observer-leads__mobile-toggle').click();
+  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 1, '移动端 T8 应可单独展开首条 Situation 题');
+  const mobileLead = mobileSituationState.observer.focusLeads[0];
+  const mobileLeadRow = mobileLeads.locator(`[data-testid="observer-lead"][data-situation-id="${mobileLead.situationId}"]`);
+  await mobileLeadRow.waitFor();
+  await waitForVisualSettled(mobileLeads);
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-situation-backed-lead-390x844.png`, fullPage: true });
+  await mobileLeadRow.locator('.observer-leads__inspect').click();
   const mobileSituation = mobilePage.locator('.situation-workbench');
   await mobileSituation.waitFor();
+  const mobileLeadOpened = await snapshot(mobilePage);
+  assert.equal(mobileLeadOpened.observer.selectedSituationId, mobileLead.situationId, '移动端局势卡片应直达对应卷宗');
+  assert.equal(mobileLeadOpened.observer.selectedSituation?.id, mobileLead.situationId, '移动端卷宗正文应保留稳定 Situation ID');
+  assert.equal(mobileLeadOpened.deterministicWorldHash, mobileSituationState.deterministicWorldHash, '移动端从卡片阅卷不得改变世界哈希');
   await assertWithinViewport(mobilePage, '.situation-workbench', '移动端局势全卷不可横向溢出');
   assert.equal(await mobileSituation.evaluate((element) => Math.round(element.getBoundingClientRect().height)), 844, '移动端局势全卷应占满100dvh');
+  await waitForVisualSettled(mobileSituation);
   for (const locator of [
     mobileSituation.locator('.situation-workbench__close'),
     mobileSituation.locator('.situation-workbench__directory-toggle'),
@@ -1114,7 +1332,6 @@ try {
     const bounds = await locator.boundingBox();
     assert.ok(bounds && bounds.height >= 44 && bounds.width >= 44, '移动端局势操作目标不得小于44px');
   }
-  await waitForVisualSettled(mobileSituation);
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-situation-workbench-390x844.png`, fullPage: true });
   await mobileSituation.locator('.situation-workbench__directory-toggle').click();
   const mobileSituationRows = mobileSituation.locator('.situation-workbench__directory li > button');
@@ -1125,6 +1342,11 @@ try {
   await mobilePage.keyboard.press('Escape');
   await mobileSituation.waitFor({ state: 'detached' });
   await mobilePage.waitForFunction(() => !document.querySelector('.observer-app')?.inert);
+  const mobileLeadInspectorClose = mobilePage.locator('.observer-inspector button[aria-label="关闭档案"]');
+  if (await mobileLeadInspectorClose.isVisible().catch(() => false)) {
+    await mobileLeadInspectorClose.click();
+    await mobilePage.waitForSelector('.observer-inspector', { state: 'detached' });
+  }
 
   await mobilePage.locator('button[data-observer-desk-trigger="true"]').click();
   const mobileObserverDesk = mobilePage.locator('.observer-desk');

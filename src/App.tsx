@@ -119,7 +119,11 @@ import {
 import {
   type HistoricalTerritoryView,
 } from './view/v1-history';
-import { deriveObserverLeads, type ObserverLead } from './view/observer-leads';
+import {
+  deriveObserverLeadProjection,
+  type ObserverLead,
+  type ObserverLeadProjection,
+} from './view/observer-leads';
 import { projectSituationWorkbench } from './view/situation-detail';
 import { toSituationSnapshot } from './view/situation-snapshot';
 import {
@@ -278,6 +282,7 @@ interface SnapshotOptions {
   historyWorkbenchOpen: boolean;
   situationWorkbenchOpen: boolean;
   selectedSituationId: string | null;
+  observerLeadProjection: ObserverLeadProjection | null;
   historicalTurn: number | null;
   watchedCount: number;
   guideCompleted: number;
@@ -490,7 +495,9 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
   const report = world.lastTurn;
   const interventionHistory = world.history.filter(isV03InterventionEvent);
   const latestIntervention = interventionHistory.at(-1);
-  const focusLeads = deriveObserverLeads(world);
+  const focusLeadProjection = options.observerLeadProjection
+    ?? deriveObserverLeadProjection(world);
+  const focusLeads = focusLeadProjection.leads;
   const situationWorkbench = options.situationWorkbenchOpen
     ? projectSituationWorkbench(world, options.selectedSituationId)
     : null;
@@ -539,7 +546,17 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
       primerOpen: options.primerOpen,
       primerStep: options.primerStep,
       focusLeads: focusLeads.map((lead) => ({
+        id: lead.id,
         slot: lead.slot,
+        source: lead.source ?? 'fallback',
+        situationId: lead.situationId ?? null,
+        situationType: lead.situationType ?? null,
+        displayMode: lead.displayMode ?? 'fallback',
+        selectedSinceTurn: lead.selectedSinceTurn ?? world.turn,
+        retainThroughTurn: lead.retainThroughTurn ?? world.turn,
+        trackingTurns: lead.trackingTurns ?? 1,
+        recentChange: lead.recentChange ?? null,
+        arbitrationReason: lead.arbitrationReason ?? 'legacy_fallback',
         question: lead.question,
         stage: lead.stage,
         tension: lead.tension,
@@ -548,6 +565,11 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
         target: lead.target,
         overlay: lead.overlay,
       })),
+      leadArbitration: {
+        version: focusLeadProjection.continuity.version,
+        lastArbitratedTurn: focusLeadProjection.continuity.lastTurn,
+        slots: focusLeadProjection.continuity.slots.map((entry) => ({ ...entry })),
+      },
       situations: toSituationSnapshot(world),
     },
     interface: {
@@ -740,6 +762,9 @@ export function App() {
   const reactCommitStartedAtRef = useRef<{ startedAt: number; turn: number } | null>(null);
   const autosaveCoordinatorRef = useRef<AutosaveCoordinator | null>(null);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
+  const observerLeadProjection = useMemo(() => (
+    world ? deriveObserverLeadProjection(world, observerSettings.leadContinuity) : null
+  ), [observerSettings.leadContinuity, world]);
   const snapshotOptionsRef = useRef<SnapshotOptions>({
     startOpen,
     running,
@@ -754,6 +779,7 @@ export function App() {
     historyWorkbenchOpen: activeView === 'chronicle',
     situationWorkbenchOpen,
     selectedSituationId,
+    observerLeadProjection,
     historicalTurn: historicalView?.turn ?? null,
     watchedCount: observerSettings.watchlist.length,
     guideCompleted: observerGuideProgress(observerSettings).completed,
@@ -765,7 +791,26 @@ export function App() {
     mapCamera,
   });
 
-  const commitWorld = useCallback((nextWorld: WorldState) => {
+  const commitWorld = useCallback((
+    nextWorld: WorldState,
+    leadLineage: 'advance' | 'restore' | 'reset' = 'advance',
+  ) => {
+    const previousHash = leadLineage === 'advance' ? worldRef.current?.hash ?? null : null;
+    const leadProjection = deriveObserverLeadProjection(
+      nextWorld,
+      leadLineage === 'reset' ? null : observerSettingsRef.current.leadContinuity,
+      previousHash,
+    );
+    const nextObserverSettings = {
+      ...observerSettingsRef.current,
+      leadContinuity: leadProjection.continuity,
+    };
+    observerSettingsRef.current = nextObserverSettings;
+    setObserverSettings(nextObserverSettings);
+    snapshotOptionsRef.current = {
+      ...snapshotOptionsRef.current,
+      observerLeadProjection: leadProjection,
+    };
     reactCommitStartedAtRef.current = { startedAt: runtimeNow(), turn: nextWorld.turn };
     worldRef.current = nextWorld;
     setWorld(nextWorld);
@@ -876,7 +921,7 @@ export function App() {
     restoredObserver = completeObserverGuideStep(restoredObserver, 'world-opened');
     observerSettingsRef.current = restoredObserver;
     setObserverSettings(restoredObserver);
-    commitWorld(validWorld);
+    commitWorld(validWorld, source === 'continue' || source === 'collection' ? 'restore' : 'reset');
     setSeed(validWorld.seed);
     const compactViewport = window.matchMedia('(max-width: 760px)').matches;
     setSelection(source !== 'create' && !compactViewport && defaultRegionId ? { kind: 'region', id: defaultRegionId } : null);
@@ -1292,6 +1337,7 @@ export function App() {
     historyWorkbenchOpen: activeView === 'chronicle',
     situationWorkbenchOpen,
     selectedSituationId,
+    observerLeadProjection,
     historicalTurn: historicalView?.turn ?? null,
     watchedCount: observerSettings.watchlist.length,
     guideCompleted: observerGuideProgress(observerSettings).completed,
@@ -1486,7 +1532,7 @@ export function App() {
   const mapFleets = useMemo(() => world && !historicalView ? toMapFleets(world) : [], [historicalView, world]);
   const mapFlows = useMemo(() => world && !historicalView ? toMapFlows(world, overlay) : [], [historicalView, overlay, world]);
   const mapMarkers = useMemo(() => world && !historicalView ? toMapMarkers(world, overlay) : [], [historicalView, overlay, world]);
-  const observerLeads = useMemo(() => world ? deriveObserverLeads(world) : [], [world]);
+  const observerLeads = observerLeadProjection?.leads ?? [];
   const readableSituationCount = world ? (
     world.situationSystem.situations.filter((item) => item.status === 'open').length
     + Math.min(8, world.situationSystem.situations.filter((item) => item.status === 'resolved').length)
@@ -1611,12 +1657,12 @@ export function App() {
 
   const shouldRestoreSituationFocus = useCallback(() => situationFocusRestoreAllowedRef.current, []);
 
-  const handleOpenSituationWorkbench = useCallback(() => {
+  const handleOpenSituationWorkbench = useCallback((preferredSituationId: string | null = null) => {
     const current = worldRef.current;
     if (!current || current.situationSystem.situations.length === 0) return;
     situationReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
     situationFocusRestoreAllowedRef.current = true;
-    const projection = projectSituationWorkbench(current, selectedSituationId);
+    const projection = projectSituationWorkbench(current, preferredSituationId ?? selectedSituationId);
     setSelectedSituationId(projection.selectedId);
     runningRef.current = false;
     setRunning(false);
@@ -1725,7 +1771,8 @@ export function App() {
     setOverlay(lead.overlay);
     setSelection(lead.target);
     setActiveView('world');
-  }, []);
+    if (lead.situationId) handleOpenSituationWorkbench(lead.situationId);
+  }, [handleOpenSituationWorkbench]);
 
   const handleToggleObserverLead = useCallback((lead: ObserverLead) => {
     const current = worldRef.current;

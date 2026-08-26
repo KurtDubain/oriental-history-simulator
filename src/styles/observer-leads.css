@@ -211,6 +211,13 @@
   background: rgb(255 251 239 / 40%);
 }
 
+.observer-leads__meta > span[data-source="situation"] {
+  padding: 2px 4px;
+  border: 1px solid rgb(126 42 34 / 20%);
+  color: var(--observer-vermilion-dark, #79271f);
+  background: rgb(156 53 43 / 7%);
+}
+
 .observer-leads__meta > span[data-stage="临界"] {
   border-color: rgb(142 52 43 / 25%);
   color: var(--observer-vermilion-dark, #79271f);
@@ -234,6 +241,7 @@
 }
 
 .observer-leads__evidence,
+.observer-leads__continuity,
 .observer-leads__next {
   overflow: hidden;
   color: var(--observer-ink-faint, #858174);
@@ -241,6 +249,18 @@
   line-height: 1.4;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.observer-leads__continuity {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  color: var(--observer-ink-soft, #656357);
+}
+
+.observer-leads__continuity svg {
+  flex: 0 0 auto;
+  color: var(--observer-vermilion-dark, #79271f);
 }
 
 .observer-leads__next {
@@ -409,6 +429,15 @@
   .observer-leads__seal {
     width: 25px;
     height: 27px;
+  }
+
+  .observer-leads__header h2 {
+    font-size: 16px;
+    white-space: nowrap;
+  }
+
+  .observer-leads__header small {
+    display: none;
   }
 
   .observer-leads__list > li {

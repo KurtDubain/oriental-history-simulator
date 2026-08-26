@@ -16,7 +16,8 @@
     "test:audit:v03": "vite-node scripts/v03-audit.ts",
     "test:audit:phase-a": "vite-node scripts/phase-a-audit.ts",
     "test:audit:phase-b": "vite-node scripts/phase-b-audit.ts",
-    "test:release": "npm run test:run && npm run build && npm run test:e2e && npm run test:audit:phase-a && npm run test:audit:phase-b && npm run test:audit",
+    "test:audit:phase-c": "vite-node scripts/phase-c-audit.ts",
+    "test:release": "npm run test:run && npm run build && npm run test:e2e && npm run test:audit:phase-a && npm run test:audit:phase-b && npm run test:audit:phase-c && npm run test:audit",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {

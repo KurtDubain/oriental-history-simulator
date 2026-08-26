@@ -1,7 +1,11 @@
 import type { HistoryEvent } from '../sim/types';
+import {
+  normalizeObserverLeadContinuity,
+  type ObserverLeadContinuityState,
+} from './observer-leads';
 
 export const OBSERVER_DESK_STORAGE_KEY = 'canghai-observer-desk-v1';
-export const OBSERVER_DESK_SETTINGS_VERSION = 1 as const;
+export const OBSERVER_DESK_SETTINGS_VERSION = 2 as const;
 export const MAX_OBSERVER_WATCH_ITEMS = 32;
 
 export type ObserverWatchKind =
@@ -51,6 +55,7 @@ export interface ObserverDeskSettings {
   watchlist: ObserverWatchItem[];
   pauseRules: ObserverPauseRules;
   guide: ObserverGuideState;
+  leadContinuity: ObserverLeadContinuityState | null;
 }
 
 export type ObserverPauseSignal = 'war' | 'power-transfer' | 'outbreak';
@@ -176,6 +181,7 @@ export function createObserverDeskSettings(): ObserverDeskSettings {
       watchlistHits: true,
     },
     guide: { completedSteps: [], dismissed: false },
+    leadContinuity: null,
   };
 }
 
@@ -221,6 +227,7 @@ export function normalizeObserverDeskSettings(value: unknown): ObserverDeskSetti
       completedSteps: [...new Set(completedSteps)],
       dismissed: safeBoolean(rawGuide.dismissed, false),
     },
+    leadContinuity: normalizeObserverLeadContinuity(value.leadContinuity),
   };
 }
 
