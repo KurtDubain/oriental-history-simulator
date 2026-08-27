@@ -48,8 +48,8 @@ const productionDeployment = process.env.VERCEL_GIT_COMMIT_REF === 'main'
   || process.env.RELEASE_REQUIRE_VERSION_BUMP === '1';
 
 let comparisonRef: string | null = null;
-if (productionFilesChanged) comparisonRef = 'HEAD';
-else if (productionDeployment) comparisonRef = process.env.OHS_RELEASE_BASE?.trim() || 'HEAD^';
+if (productionDeployment) comparisonRef = process.env.OHS_RELEASE_BASE?.trim() || 'HEAD^';
+else if (productionFilesChanged) comparisonRef = 'HEAD';
 
 if (comparisonRef) {
   const basePackageText = git(['show', `${comparisonRef}:package.json`]);
@@ -61,4 +61,4 @@ if (comparisonRef) {
   }
 }
 
-console.log(`Release metadata OK: v${currentVersion} · ${latestRelease.title}`);
+console.log(`Release metadata OK: v${currentVersion} · ${latestRelease.title} · base ${comparisonRef ?? 'metadata-only'}`);

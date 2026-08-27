@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.1.3',
+    date: '2026-08-27',
+    title: '正式部署按父提交验版',
+    items: [
+      '正式部署始终与父提交版本比较，不再受云端安装阶段的工作区差异干扰。',
+      '本地未提交开发仍与当前 HEAD 比较，两种环境各自保留版本提升保护。',
+      '游戏内容与 schema 4 存档保持不变。',
+    ],
+  },
+  {
     version: '1.1.2',
     date: '2026-08-27',
     title: '云端发布门禁恢复',
