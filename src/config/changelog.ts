@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.1.1',
+    date: '2026-08-27',
+    title: '正式站点恢复版本检查',
+    items: [
+      'Vercel 的页面回退不再拦截 version.json，正式站点可以读到真实版本与构建标识。',
+      '发布验证会直接检查回退规则，避免本地检查正常、线上却返回首页的情况再次发生。',
+      '人物争取支持、请领军令与朝廷回应仍沿用 v1.1.0 的同一存档格式。',
+    ],
+  },
+  {
     version: '1.1.0',
     date: '2026-08-27',
     title: '人物开始主动争取军权',

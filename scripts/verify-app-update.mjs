@@ -4,10 +4,10 @@ import { chromium } from 'playwright';
 import { preview } from 'vite';
 
 const APP_URL = 'http://127.0.0.1:4176';
-const ARTIFACT_DIR = 'output/app-update-v1.1.0';
+const ARTIFACT_DIR = 'output/app-update-v1.1.1';
 
 const deployed = JSON.parse(await readFile('dist/version.json', 'utf8'));
-assert.equal(deployed.version, '1.1.0');
+assert.equal(deployed.version, '1.1.1');
 assert.equal(typeof deployed.buildId, 'string');
 assert.ok(deployed.buildId.length > 0);
 
@@ -17,6 +17,11 @@ assert.ok(
   versionHeaders.some((entry) => entry.key === 'Cache-Control' && /no-store/.test(entry.value)),
   'version.json 必须由 Vercel 明确禁止缓存',
 );
+const appFallback = vercel.rewrites?.find((entry) => entry.destination === '/index.html');
+assert.ok(appFallback, 'Vercel 必须保留单页应用回退');
+const appFallbackPattern = new RegExp(`^${appFallback.source}$`);
+assert.equal(appFallbackPattern.test('/version.json'), false, '单页应用回退不得拦截 version.json');
+assert.equal(appFallbackPattern.test('/history'), true, '普通应用路径必须继续回退到 index.html');
 
 await mkdir(ARTIFACT_DIR, { recursive: true });
 const server = await preview({
@@ -79,11 +84,11 @@ try {
   await page.route('**/version.json?*', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ version: '1.1.1', buildId: 'remote-build-111' }),
+    body: JSON.stringify({ version: '1.1.2', buildId: 'remote-build-112' }),
   }));
   await release.getByTestId('check-app-update').click();
   await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).appUpdate.phase === 'available');
-  assert.match(await release.getByTestId('app-update-status').textContent(), /发现 v1\.1\.1/);
+  assert.match(await release.getByTestId('app-update-status').textContent(), /发现 v1\.1\.2/);
   assert.equal((await state(page)).deterministicWorldHash, before.deterministicWorldHash);
   assert.match(await page.locator('[data-observer-desk-trigger="true"]').getAttribute('aria-label'), /发现新版本/);
   await page.screenshot({ path: `${ARTIFACT_DIR}/desktop-update-available.png`, fullPage: true });

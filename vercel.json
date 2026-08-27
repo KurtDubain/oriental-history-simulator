@@ -25,7 +25,7 @@
   ],
   "rewrites": [
     {
-      "source": "/((?!assets/).*)",
+      "source": "/((?!assets/|version\\.json$).*)",
       "destination": "/index.html"
     }
   ]

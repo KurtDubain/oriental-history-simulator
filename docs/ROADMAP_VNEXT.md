@@ -107,7 +107,7 @@ LOOP01 不是新的玩法系统，而是所有任务共同遵守的产品管理�
 - 模拟进行中发现更新不会立即刷新；安全更新前完成暂停与自动存档 flush，刷新后恢复同一世界且不形成重复重载。
 - 打开观察台、检查版本或收到远端结果前后，世界 hash、RNG、Fact、Chronicle 和 observer gameplay settings 完全不变。
 
-完成证据（v1.0.1）：构建生成 `version.json` 并通过发布记录一致性检查；浏览器覆盖当前版本、同版本不同构建、新版本、离线/失败纯函数路径、更新前暂停与 IndexedDB flush，以及桌面/390×844 观察台入口。完整 264 项 Vitest 与既有 V1 E2E 通过。功能归属基线见 [FEATURE_LOOP_INVENTORY.md](./FEATURE_LOOP_INVENTORY.md)。
+完成证据（v1.0.1，v1.1.1 补线上路由门禁）：构建生成 `version.json` 并通过发布记录一致性检查；浏览器覆盖当前版本、同版本不同构建、新版本、离线/失败纯函数路径、更新前暂停与 IndexedDB flush，以及桌面/390×844 观察台入口。v1.1.1 进一步要求 Vercel 的 SPA 回退不能匹配 `/version.json`，防止线上端点被首页 HTML 替代。功能归属基线见 [FEATURE_LOOP_INVENTORY.md](./FEATURE_LOOP_INVENTORY.md)。
 
 ## 3. Phase A — 真实性与性能基础
 

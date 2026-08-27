@@ -134,7 +134,7 @@ async function openFreshWorld(page, seed = null) {
   if (seed) await page.getByLabel('世界种子').fill(seed);
   await page.click('#start-world');
   await page.waitForSelector('.world-map__canvas');
-  await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).productVersion === '1.1.0');
+  await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).productVersion === '1.1.1');
 }
 
 async function exerciseMapPrimer(page) {
@@ -1241,7 +1241,7 @@ try {
   const initialText = await snapshotText(page);
   const initial = JSON.parse(initialText);
   assert.equal(initial.mode, 'observing');
-  assert.equal(initial.productVersion, '1.1.0');
+  assert.equal(initial.productVersion, '1.1.1');
   assert.equal(initial.worldSchemaVersion, 4);
   assert.match(initial.mapContentVersion, /^v03/);
   assert.equal(initial.totals.regions, 82);
@@ -1567,7 +1567,7 @@ try {
   await page.click('#continue-world');
   await page.waitForSelector('.world-map__canvas');
   const reloaded = await snapshot(page);
-  assert.equal(reloaded.productVersion, '1.1.0');
+  assert.equal(reloaded.productVersion, '1.1.1');
   assert.equal(reloaded.worldSchemaVersion, 4);
   assert.equal(reloaded.observer.primerOpen, false, '续读不应重复弹出首次读图导览');
   assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 4存档续读应恢复完全相同的世界');
@@ -1598,7 +1598,7 @@ try {
   const mobileErrors = [];
   collectBrowserErrors(mobilePage, mobileErrors);
   await openFreshWorld(mobilePage, '春战副将');
-  assert.equal((await snapshot(mobilePage)).productVersion, '1.1.0');
+  assert.equal((await snapshot(mobilePage)).productVersion, '1.1.1');
   assert.equal((await snapshot(mobilePage)).observer.primerOpen, true);
   const mobilePrimer = mobilePage.locator('.map-primer');
   await mobilePrimer.waitFor();
