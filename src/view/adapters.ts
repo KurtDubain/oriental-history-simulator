@@ -8,6 +8,7 @@ import type {
   CountryInspectorData,
   FamilyInspectorData,
   InspectorRecord,
+  HistoricalSceneView,
   PersonAgencyCommandRequestView,
   PersonAgencyQuarterChoiceView,
   PersonInspectorData,
@@ -49,6 +50,14 @@ import {
   toPersonalMemoryPlayerViews,
   type CharacterAgencyShadowProjection,
 } from '../sim/agency';
+import {
+  calculateCharacterPowerPosition,
+  calculateFactionPowerLedger,
+  recentFactionPowerMovements,
+  type PoliticalPowerMovement,
+  type PoliticalPowerResource,
+} from '../sim/politics/power-ledger';
+import { projectHistoricalScenes, type HistoricalScene } from './historical-scenes';
 
 const compact = new Intl.NumberFormat('zh-CN', {
   notation: 'compact',
@@ -80,6 +89,46 @@ function worldOffices(world: WorldState) {
 function turnLabel(turn: number) {
   const safeTurn = Math.max(0, Number.isFinite(turn) ? Math.floor(turn) : 0);
   return `第 ${Math.floor(safeTurn / 4) + 1} 年 · ${SEASON_NAMES[safeTurn % 4]}`;
+}
+
+function sourceEventIdForFact(world: WorldState, factId: string): string | null {
+  return [...world.history]
+    .filter((event) => event.sourceFactIds.includes(factId))
+    .sort((left, right) => right.turn - left.turn || right.id.localeCompare(left.id))[0]?.id ?? null;
+}
+
+function toHistoricalSceneView(scene: HistoricalScene): HistoricalSceneView {
+  return {
+    id: scene.id,
+    periodLabel: scene.dateLabel,
+    title: scene.title,
+    summary: scene.summary,
+    result: scene.result,
+    sourceEventId: scene.historyEventIds[0] ?? null,
+  };
+}
+
+function toPowerResourceView(world: WorldState, resource: PoliticalPowerResource) {
+  const sourceFactId = resource.evidence.find((item) => item.entityType === 'fact')?.entityId;
+  return {
+    id: resource.id,
+    category: resource.category,
+    label: resource.label,
+    detail: resource.detail,
+    value: resource.value,
+    sourceEventId: sourceFactId ? sourceEventIdForFact(world, sourceFactId) : null,
+  };
+}
+
+function toPowerMovementView(world: WorldState, movement: PoliticalPowerMovement) {
+  return {
+    id: movement.id,
+    periodLabel: turnLabel(movement.turn),
+    direction: movement.direction,
+    label: movement.label,
+    detail: movement.detail,
+    sourceEventId: sourceEventIdForFact(world, movement.factId),
+  };
 }
 
 interface PersonExperienceEntry {
@@ -645,25 +694,37 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
   const rulingFamily = family(world, item.rulingFamilyId);
   const factions = worldFactions(world)
     .filter((faction) => faction.polityId === item.id && faction.active !== false)
-    .sort((a, b) => b.power - a.power || a.id.localeCompare(b.id));
+    .map((faction) => ({ faction, ledger: calculateFactionPowerLedger(world, faction) }))
+    .sort((a, b) => b.ledger.total - a.ledger.total || a.faction.id.localeCompare(b.faction.id));
   const appointments = worldOffices(world).filter((office) => office.polityId === item.id && office.active);
   const powerholders = world.characters
     .filter((candidate) => candidate.alive && candidate.polityId === item.id)
-    .sort((a, b) => (b.influence ?? b.renown) - (a.influence ?? a.renown) || a.id.localeCompare(b.id))
+    .map((candidate) => ({ candidate, position: calculateCharacterPowerPosition(world, candidate.id) }))
+    .sort((a, b) => b.position.total - a.position.total || b.candidate.influence - a.candidate.influence || a.candidate.id.localeCompare(b.candidate.id))
     .slice(0, 5)
-    .map((candidate) => {
+    .map(({ candidate, position }) => {
       const office = appointments
         .filter((appointment) => appointment.holderId === candidate.id)
         .sort((a, b) => b.rank - a.rank)[0];
-      const faction = factions.find((entry) => entry.memberIds.includes(candidate.id));
+      const faction = factions.find((entry) => entry.faction.memberIds.includes(candidate.id))?.faction;
       return {
         id: candidate.id,
         name: candidate.name,
         office: office?.kind ?? candidate.role,
-        influence: candidate.influence ?? candidate.renown,
+        influence: position.total,
         faction: faction?.name,
+        standing: position.standing,
       };
     });
+  const courtScenes = projectHistoricalScenes(
+    world,
+    world.facts.filter((fact) => (
+      fact.polityIds.includes(item.id)
+      && fact.turn >= Math.max(0, world.turn - 16)
+      && ['agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'appointment_started', 'appointment_ended'].includes(fact.kind)
+    )),
+    3,
+  ).map(toHistoricalSceneView);
   const diplomacy = worldDiplomacy(world)
     .filter((relation) => relation.polityAId === item.id || relation.polityBId === item.id)
     .map((relation) => {
@@ -702,15 +763,23 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     administration: item.administration,
     courtInfluence: item.courtInfluence,
     atWarWith: enemies,
-    factions: factions.map((faction) => ({
+    factions: factions.map(({ faction, ledger }) => ({
       id: faction.id,
       name: faction.name,
       kind: faction.kind,
       leaderId: faction.leaderId,
       leader: character(world, faction.leaderId)?.name ?? '领袖不详',
-      power: faction.power,
+      power: ledger.total,
       cohesion: faction.cohesion,
       agenda: faction.agenda,
+      resources: ledger.resources.slice(0, 10).map((resource) => toPowerResourceView(world, resource)),
+      categories: ledger.categories.filter((category) => category.value > 0).map((category) => ({
+        key: category.category,
+        label: category.label,
+        value: category.value,
+        maximum: category.maximum,
+      })),
+      recentMovement: recentFactionPowerMovements(world, faction, 1).map((movement) => toPowerMovementView(world, movement))[0] ?? null,
     })),
     powerholders,
     diplomacy,
@@ -718,6 +787,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     navalBudget: item.navalBudget,
     maritimeOrientation: item.maritimeOrientation,
     maritimeAssets,
+    courtScenes,
     history: scopedHistory(world, (event) => event.polityIds.includes(item.id)),
     status: !item.alive
       ? '该政权已退出当代政治。'
@@ -1189,6 +1259,22 @@ export function toPersonInspector(
   const hasAuthoritativeCommandRequest = options.commandRequest !== undefined
     ? Boolean(options.commandRequest)
     : projectedCommandRequest.authoritative;
+  const powerPosition = calculateCharacterPowerPosition(world, item.id);
+  const powerFaction = powerPosition.factionId
+    ? world.factions.find((faction) => faction.id === powerPosition.factionId)
+    : undefined;
+  const powerScenes = projectHistoricalScenes(
+    world,
+    world.facts.filter((fact) => {
+      if (fact.turn < Math.max(0, world.turn - 24)) return false;
+      if (fact.kind === 'agency_support_resolved' || fact.kind === 'agency_intent_submitted' || fact.kind === 'agency_intent_resolved') {
+        return fact.payload.actorId === item.id;
+      }
+      return (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended')
+        && fact.payload.holderId === item.id;
+    }),
+    3,
+  ).map(toHistoricalSceneView);
   const agency = {
     ...projectedAgency,
     primaryGoal: projectedAgency.primaryGoal
@@ -1205,6 +1291,14 @@ export function toPersonInspector(
     memories: toPersonalMemoryPlayerViews(world, item.id),
     quarterChoice: hasAuthoritativeCommandRequest ? null : options.quarterChoice ?? null,
     commandRequest,
+    powerPosition: {
+      total: powerPosition.total,
+      standing: powerPosition.standing,
+      groupName: powerFaction?.name ?? null,
+      resources: powerPosition.resources.slice(0, 6).map((resource) => toPowerResourceView(world, resource)),
+      recentMovements: powerPosition.recentMovements.map((movement) => toPowerMovementView(world, movement)),
+    },
+    recentPowerScenes: powerScenes,
   };
   const currentStep = agency.currentPlanSteps.find((step) => step.status === 'available');
   const coreDesires = agency.desires.map((desire) => desire.label);

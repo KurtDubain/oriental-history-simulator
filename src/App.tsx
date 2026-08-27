@@ -460,7 +460,6 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
   const characterName = (id: string) => world.characters.find((item) => item.id === id)?.name ?? id;
   const families = Array.isArray(world.families) ? world.families : [];
   const relationships = Array.isArray(world.relationships) ? world.relationships : [];
-  const factions = Array.isArray(world.factions) ? world.factions : [];
   const diplomacy = Array.isArray(world.diplomacy) ? world.diplomacy : [];
   const familyName = (id: string | null | undefined) => families.find((item) => item.id === id)?.name ?? id ?? null;
   let selectedDetail: object | null = null;
@@ -484,7 +483,9 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
     };
   } else if (options.selection?.kind === 'country') {
     const item = world.polities.find((polity) => polity.id === options.selection?.id);
-    if (item) selectedDetail = {
+    if (item) {
+      const countryDossier = toCountryInspector(world, item);
+      selectedDetail = {
       kind: 'country',
       id: item.id,
       name: item.name,
@@ -510,15 +511,20 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
           .filter((port) => world.regions.find((region) => region.id === port.regionId)?.controllerId === item.id)
           .map((port) => port.id),
       },
-      factions: factions.filter((entry) => entry.polityId === item.id && entry.active !== false).map((entry) => ({
+      factions: countryDossier.factions?.map((entry) => ({
         id: entry.id,
         name: entry.name,
         kind: entry.kind,
-        leader: characterName(entry.leaderId),
+        leader: entry.leader,
         power: entry.power,
         cohesion: entry.cohesion,
         agenda: entry.agenda,
-      })),
+        categories: entry.categories,
+        resources: entry.resources,
+        recentMovement: entry.recentMovement,
+      })) ?? [],
+      powerholders: countryDossier.powerholders ?? [],
+      courtScenes: countryDossier.courtScenes ?? [],
       diplomacy: diplomacy.filter((entry) => entry.polityAId === item.id || entry.polityBId === item.id).map((entry) => ({
         with: polityName(entry.polityAId === item.id ? entry.polityBId : entry.polityAId),
         status: entry.status,
@@ -526,7 +532,8 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
         grievance: entry.grievance,
         tradeDependency: entry.tradeDependency,
       })),
-    };
+      };
+    }
   } else if (options.selection?.kind === 'family') {
     const item = families.find((candidate) => candidate.id === options.selection?.id);
     if (item) selectedDetail = {

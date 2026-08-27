@@ -129,6 +129,7 @@ export interface AgencySupportResolvedFactPayload {
   targetKind: AgencySupportTargetKind;
   targetId: string;
   targetArmyId: string;
+  targetArmyName?: string;
   polityId: string;
   outcome: AgencySupportOutcome;
   strength: number;
@@ -145,6 +146,7 @@ export interface AgencyIntentSubmittedFactPayload {
   action: 'request_independent_command';
   attemptOrdinal: number;
   targetArmyId: string;
+  targetArmyName?: string;
   polityId: string;
   currentCommanderId: string;
   appointingAuthorityId: string;
@@ -184,6 +186,7 @@ export interface AgencyIntentResolvedFactPayload {
   action: 'request_independent_command';
   attemptOrdinal: number;
   targetArmyId: string;
+  targetArmyName?: string;
   polityId: string;
   previousCommanderId: string;
   appointingAuthorityId: string;

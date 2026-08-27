@@ -13,6 +13,12 @@ import type { SimulationFact } from '../sim/facts/types';
 import type { DeltaValue, StateDelta, WorldState } from '../sim/types';
 import { historyTurnDate } from './v1-history';
 import {
+  projectFactNarrative,
+  projectHistoricalScenes,
+  projectSituationHistoricalScenes,
+  type HistoricalScene,
+} from './historical-scenes';
+import {
   projectSituationSnapshotItem,
   situationOutcomeLabel,
   situationPhaseLabel,
@@ -159,6 +165,7 @@ export interface SituationDetailProjection {
   };
   participants: SituationSnapshotParticipantGroup[];
   publicDrivers: SituationDetailDriver[];
+  scenes: HistoricalScene[];
   timeline: SituationDetailTimelineItem[];
   evidence: SituationDetailFact[];
   consequences: SituationDetailConsequence[];
@@ -324,125 +331,6 @@ function regionLabel(world: WorldState, id: string): string {
   return world.regions.find((item) => item.id === id)?.name ?? '未载州域';
 }
 
-function armyLabel(world: WorldState, id: string): string {
-  return world.armies.find((item) => item.id === id)?.name ?? '该军团';
-}
-
-function factCopy(world: WorldState, fact: SimulationFact): { title: string; summary: string } {
-  if (fact.kind === 'war_started') {
-    return {
-      title: `${polityLabel(world, fact.payload.attackerId)}向${polityLabel(world, fact.payload.defenderId)}开战`,
-      summary: `战争目标为${fact.payload.goal}。${fact.payload.reason}`,
-    };
-  }
-  if (fact.kind === 'war_ended') {
-    return {
-      title: `${polityLabel(world, fact.payload.attackerId)}与${polityLabel(world, fact.payload.defenderId)}停战`,
-      summary: `${situationOutcomeLabel(fact.payload.result)}；战果记为攻方 ${compactNumber(fact.payload.attackerScore)}、守方 ${compactNumber(fact.payload.defenderScore)}。${fact.payload.reason}`,
-    };
-  }
-  if (fact.kind === 'battle') {
-    const attacker = characterLabel(world, fact.payload.attacker.commanderId);
-    const defenders = fact.payload.defenders.map((item) => characterLabel(world, item.commanderId)).join('、') || '守军';
-    return {
-      title: `${regionLabel(world, fact.payload.targetRegionId)}之战`,
-      summary: `${attacker}所部与${defenders}交战，${fact.payload.attackerWon ? '攻方取胜' : '守方守住战线'}。双方有据可核的损失为 ${compactNumber(fact.payload.attacker.losses + fact.payload.defenders.reduce((sum, item) => sum + item.losses, 0))}。`,
-    };
-  }
-  if (fact.kind === 'territory_control_changed') {
-    return {
-      title: `${regionLabel(world, fact.payload.regionId)}控制权变更`,
-      summary: `${polityLabel(world, fact.payload.previousControllerId)}的控制转入${polityLabel(world, fact.payload.nextControllerId)}。`,
-    };
-  }
-  if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
-    const entering = fact.kind === 'appointment_started';
-    return {
-      title: `${characterLabel(world, fact.payload.holderId)}${entering ? '受任' : '去职'}`,
-      summary: `${entering ? '出任' : '卸下'}${fact.payload.officeKind}，任职政权为${polityLabel(world, fact.payload.polityId)}。`,
-    };
-  }
-  if (fact.kind === 'character_death') {
-    return {
-      title: `${characterLabel(world, fact.payload.characterId)}去世`,
-      summary: `终年 ${fact.payload.age} 岁，身后身份记为${fact.payload.role}。`,
-    };
-  }
-  if (fact.kind === 'marriage') {
-    return {
-      title: `${characterLabel(world, fact.payload.leftCharacterId)}与${characterLabel(world, fact.payload.rightCharacterId)}成婚`,
-      summary: fact.payload.diplomatic ? '这桩婚姻同时承担了政权之间的外交联结。' : '这桩婚姻进入双方家族谱牒。',
-    };
-  }
-  if (fact.kind === 'agency_intent_submitted') {
-    return {
-      title: `${characterLabel(world, fact.payload.actorId)}请掌${armyLabel(world, fact.payload.targetArmyId)}`,
-      summary: `这是其第${fact.payload.attemptOrdinal}次正式请求独立统军，现任主帅为${characterLabel(world, fact.payload.currentCommanderId)}。`,
-    };
-  }
-  if (fact.kind === 'agency_support_resolved') {
-    const target = fact.payload.targetKind === 'army_officers'
-      ? `${armyLabel(world, fact.payload.targetArmyId)}将校`
-      : characterLabel(world, fact.payload.targetId);
-    const outcome = fact.payload.outcome === 'secured'
-      ? '已经答应相助'
-      : fact.payload.outcome === 'deferred'
-        ? '仍在观望'
-        : '没有应允';
-    return {
-      title: `${characterLabel(world, fact.payload.actorId)}争取${target}支持`,
-      summary: `${target}${outcome}；这项结果将进入其后续请令审查。`,
-    };
-  }
-  if (fact.kind === 'agency_intent_resolved') {
-    const outcome = fact.payload.outcome === 'executed'
-      ? '获准生效'
-      : fact.payload.outcome === 'rejected'
-        ? '未获准许'
-        : fact.payload.outcome === 'deferred'
-          ? '暂缓再议'
-          : '因资格变化而作罢';
-    const reason: Record<typeof fact.payload.reasonCode, string> = {
-      permission_lost: '请求资格已经失去',
-      insufficient_record: '军中履历仍显不足',
-      insufficient_support: '主帅、主君或家门支持不足',
-      competing_request: '本季已有另一项换帅军令先获处理',
-      court_risk: '朝廷认为授令风险过高',
-      claim_weaker: '资历尚不足以取代现任主帅',
-      command_granted: '履历、支持与风险审查均已通过',
-    };
-    const claimAssessment = fact.payload.outcome === 'executed'
-      ? fact.payload.decisionScore - fact.payload.decisionThreshold >= 16
-        ? '其军中资望已明显足以受任'
-        : '其军中资望已足以受任'
-      : fact.payload.reasonCode === 'claim_weaker'
-        ? '与现任主帅相比，朝廷认为其资望仍欠火候'
-        : fact.payload.outcome === 'invalidated'
-          ? '原有请求已不再具备裁决条件'
-          : '朝廷本季没有授予军令';
-    const institution = fact.payload.institutionResponse === 'curbed'
-      ? '朝廷同时撤下其副将之职'
-      : fact.payload.institutionResponse === 'appeased'
-        ? '朝廷另以名位与礼遇安抚'
-        : null;
-    return {
-      title: `${characterLabel(world, fact.payload.actorId)}所请军令${outcome}`,
-      summary: `${reason[fact.payload.reasonCode]}；${claimAssessment}${institution ? `；${institution}` : ''}。`,
-    };
-  }
-  const transitionLabel = fact.payload.transition === 'formed'
-    ? '形成'
-    : fact.payload.transition === 'resolved'
-      ? '结案'
-      : '进入新阶段';
-  return {
-    title: `局势${transitionLabel}`,
-    summary: fact.payload.outcomeKey
-      ? `以“${situationOutcomeLabel(fact.payload.outcomeKey)}”结案。`
-      : `局势${transitionLabel}，其证据来自同季的领域事实。`,
-  };
-}
-
 type FactHistoryIndex = ReadonlyMap<string, readonly string[]>;
 
 function buildFactHistoryIndex(world: WorldState): FactHistoryIndex {
@@ -458,7 +346,7 @@ function buildFactHistoryIndex(world: WorldState): FactHistoryIndex {
 }
 
 function projectFact(world: WorldState, fact: SimulationFact, historyByFact: FactHistoryIndex): SituationDetailFact {
-  const copy = factCopy(world, fact);
+  const copy = projectFactNarrative(world, fact);
   return {
     id: fact.id,
     kind: fact.kind,
@@ -530,10 +418,12 @@ function changeSummary(change: SituationRecentChange, phaseLabel: string | null)
 }
 
 function projectTimeline(
+  world: WorldState,
   situation: SituationState,
   milestoneFacts: readonly Extract<SimulationFact, { kind: 'situation_milestone' }>[],
   historyByFact: FactHistoryIndex,
 ): SituationDetailTimelineItem[] {
+  const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
   const changeByKey = new Map(situation.recentChanges.map((change) => [`${change.turn}:${change.kind}`, change]));
   const milestoneItems = milestoneFacts.map((fact) => {
     const kind: SituationRecentChange['kind'] = fact.payload.transition === 'formed'
@@ -545,13 +435,18 @@ function projectTimeline(
     const targetPhase = fact.payload.toPhase ?? matching?.toPhase ?? null;
     const targetPhaseLabel = targetPhase ? situationPhaseLabel(targetPhase) : null;
     const relatedFactIds = unique([...fact.sourceFactIds, ...(matching?.sourceFactIds ?? [])]).slice(0, 8);
+    const scene = projectHistoricalScenes(
+      world,
+      relatedFactIds.map((id) => factById.get(id)).filter((item): item is SimulationFact => Boolean(item)),
+      1,
+    )[0];
     return {
       id: `milestone:${fact.id}`,
       turn: fact.turn,
       dateLabel: `第 ${fact.year} 年 · ${fact.season}季`,
       kind,
       label: CHANGE_LABELS[kind],
-      summary: changeSummary(matching ?? {
+      summary: scene?.shortText ?? changeSummary(matching ?? {
         turn: fact.turn,
         kind,
         tension: fact.payload.tension,
@@ -563,7 +458,7 @@ function projectTimeline(
       tension: fact.payload.tension,
       milestoneFactId: fact.id,
       sourceFactIds: relatedFactIds,
-      historyEventIds: [...(historyByFact.get(fact.id) ?? [])],
+      historyEventIds: unique([...(scene?.historyEventIds ?? []), ...(historyByFact.get(fact.id) ?? [])]),
     } satisfies SituationDetailTimelineItem;
   });
   const milestoneKeys = new Set(milestoneItems.map((item) => `${item.turn}:${item.kind}`));
@@ -571,18 +466,23 @@ function projectTimeline(
     .filter((change) => !milestoneKeys.has(`${change.turn}:${change.kind}`))
     .map((change) => {
       const targetPhaseLabel = change.toPhase ? situationPhaseLabel(change.toPhase) : null;
+      const scene = projectHistoricalScenes(
+        world,
+        change.sourceFactIds.map((id) => factById.get(id)).filter((item): item is SimulationFact => Boolean(item)),
+        1,
+      )[0];
       return {
         id: `change:${change.turn}:${change.kind}`,
         turn: change.turn,
         dateLabel: dateLabel(change.turn),
         kind: change.kind,
         label: CHANGE_LABELS[change.kind],
-        summary: changeSummary(change, targetPhaseLabel),
+        summary: scene?.shortText ?? changeSummary(change, targetPhaseLabel),
         phaseLabel: targetPhaseLabel,
         tension: change.tension,
         milestoneFactId: null,
         sourceFactIds: [...change.sourceFactIds].slice(0, 8),
-        historyEventIds: [],
+        historyEventIds: [...(scene?.historyEventIds ?? [])],
       } satisfies SituationDetailTimelineItem;
     });
   const all = [...milestoneItems, ...retainedChangeItems]
@@ -652,32 +552,37 @@ function playerSummary(
   drivers: readonly SituationDetailDriver[],
   durationLabel: string,
   outcomeLabel: string | null,
+  scenes: readonly HistoricalScene[],
 ): string[] {
   const core = item.participants.find((group) => group.key === 'coreCharacterIds')?.entities[0]?.label;
   const polity = item.participants.find((group) => group.key === 'polityIds')?.entities[0]?.label;
   const preferredDriver = publicDrivers(drivers).find((driver) => driver.direction === 'drives');
   const driving = preferredDriver?.label;
   const restraint = drivers.find((driver) => driver.direction === 'restrains')?.label;
+  const latestScene = scenes[0]?.shortText;
   if (situation.status === 'resolved') {
     return [
+      ...(latestScene ? [latestScene] : []),
       `${item.title}起于${dateLabel(situation.startedTurn)}，于${dateLabel(situation.resolvedTurn ?? situation.lastUpdatedTurn)}结案，历时${durationLabel}。`,
       outcomeSummary(situation, outcomeLabel ?? '结构压力消散'),
-      driving ? `卷宗保留的主要推动因素是“${driving}”${restraint ? `，同时“${restraint}”曾形成约束` : ''}。` : '卷宗只保留有据可核的关键转折。',
-    ];
+    ].slice(0, 3);
   }
   if (situation.type === 'military_power_crisis') {
     return [
+      ...(latestScene ? [latestScene] : []),
       `${core ?? '一名将领'}的实际军令、军中立足与${polity ?? '朝廷'}的约束正在形成持续张力；这不等同于人物已经决定叛乱。`,
       driving ? `目前最值得注意的推动因素是“${driving}”${restraint ? `，而“${restraint}”仍在压住局势` : ''}。` : '现有结构证据仍在积累。',
     ];
   }
   if (situation.type === 'inheritance_crisis') {
     return [
+      ...(latestScene ? [latestScene] : []),
       `${polity ?? '该政权'}的继承次序、候选支持与中央执行能力尚未形成稳定闭环；卷宗不替任何候选人虚构意图。`,
       driving ? `当前矛盾主要由“${driving}”推动${restraint ? `，“${restraint}”仍提供秩序约束` : ''}。` : '现有结构证据仍在积累。',
     ];
   }
   return [
+    ...(latestScene ? [latestScene] : []),
     `${item.title}仍在延续，攻守方向来自同一条权威战争记录，战役与州域易手会继续改变局面。`,
     driving ? `当前战线最重要的信号是“${driving}”${restraint ? `，而“${restraint}”正在抑制升级` : ''}。` : '战线暂时缺少新的决定性事实。',
   ];
@@ -731,7 +636,8 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
   const endTurn = situation.resolvedTurn;
   const durationTurns = Math.max(1, (endTurn ?? situation.lastUpdatedTurn) - situation.startedTurn + 1);
   const durationLabel = durationTurns < 4 ? `${durationTurns}季` : `${Math.floor(durationTurns / 4)}年${durationTurns % 4 ? `${durationTurns % 4}季` : ''}`;
-  const timeline = projectTimeline(situation, milestoneFacts, historyByFact);
+  const scenes = projectSituationHistoricalScenes(world, situation, 3);
+  const timeline = projectTimeline(world, situation, milestoneFacts, historyByFact);
   const latestTimeline = timeline.at(-1);
   const missingResultFacts = resultFactIds.filter((id) => !world.facts.some((fact) => fact.id === id));
   const coverageNotes = [
@@ -760,8 +666,10 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
     endDateLabel: dateLabel(endTurn ?? situation.lastUpdatedTurn),
     durationTurns,
     durationLabel,
-    playerSummary: playerSummary(situation, item, drivers, durationLabel, outcomeLabel),
-    currentChange: latestTimeline
+    playerSummary: playerSummary(situation, item, drivers, durationLabel, outcomeLabel, scenes),
+    currentChange: scenes[0]
+      ? `${scenes[0].dateLabel}，${scenes[0].shortText}`
+      : latestTimeline
       ? `${latestTimeline.dateLabel}，${latestTimeline.summary}`
       : '尚无可公开的阶段转折。',
     nextWatch: item.nextSignal.label,
@@ -776,6 +684,7 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
       entities: group.entities.map((entity) => ({ ...entity })),
     })),
     publicDrivers: publicDrivers(drivers),
+    scenes,
     timeline,
     evidence,
     consequences,

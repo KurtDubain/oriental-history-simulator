@@ -824,6 +824,7 @@ function resolveSupportAction(
       targetKind: action.targetKind,
       targetId: action.targetId,
       targetArmyId: army.id,
+      targetArmyName: army.name,
       polityId: polity.id,
       outcome,
       strength,
@@ -1135,6 +1136,10 @@ function resolveIntent(
   }
   const submittedFactId = intent.submittedFactId;
   if (!submittedFactId) throw new Error('Agency intent must be submitted before resolution');
+  const submittedRecord = world.facts.find((fact) => fact.id === submittedFactId);
+  const submittedArmyName = submittedRecord?.kind === 'agency_intent_submitted'
+    ? submittedRecord.payload.targetArmyName
+    : undefined;
   const reasonCopy: Readonly<Record<typeof reasonCode, string>> = {
     permission_lost: '请求资格已经失去',
     insufficient_record: '军中履历仍显不足',
@@ -1174,6 +1179,7 @@ function resolveIntent(
       action: intent.action,
       attemptOrdinal: intent.attemptOrdinal,
       targetArmyId: intent.targetArmyId,
+      targetArmyName: army?.name ?? submittedArmyName,
       polityId: intent.polityId,
       previousCommanderId: intent.currentCommanderId,
       appointingAuthorityId: intent.appointingAuthorityId,
@@ -1425,6 +1431,7 @@ export function processAgencyDecisionSystem(
         action: intent.action,
         attemptOrdinal: intent.attemptOrdinal,
         targetArmyId: intent.targetArmyId,
+        targetArmyName: world.armies.find((army) => army.id === intent.targetArmyId)?.name,
         polityId: intent.polityId,
         currentCommanderId: intent.currentCommanderId,
         appointingAuthorityId: intent.appointingAuthorityId,

@@ -273,6 +273,35 @@
   transform: translateY(-50%);
 }
 
+.quarter-pulse__situation {
+  padding-right: 12px;
+}
+
+.quarter-pulse__situation .quarter-pulse__event-cause {
+  position: static;
+  display: flex;
+  min-width: 0;
+  align-items: baseline;
+  gap: 10px;
+  overflow: hidden;
+  color: var(--observer-ink-soft, #656357);
+  font-family: var(--observer-serif, "Noto Serif SC", "Songti SC", serif);
+  font-size: 10px;
+  line-height: 1.45;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  transform: none;
+}
+
+.quarter-pulse__situation .quarter-pulse__event-cause b {
+  flex: 0 0 auto;
+  margin-left: auto;
+  color: var(--observer-vermilion-dark, #79271f);
+  font-family: var(--observer-sans, system-ui, sans-serif);
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .quarter-pulse__quiet,
 .quarter-pulse__waiting {
   display: grid;

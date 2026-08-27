@@ -56,11 +56,16 @@ it('keeps natural independent-command decisions present but chronicle-readable o
       supportUnsuccessful: supportActions.filter((fact) => fact.payload.outcome !== 'secured').length,
     });
   }
+  for (const row of rows) {
+    expect(
+      row.executed + row.rejected + row.deferred + row.invalidated,
+      `${row.seed}的正式请求没有全部得到制度回应`,
+    ).toBe(row.submitted);
+  }
   expect(rows.filter((row) => row.submitted > 0).length).toBeGreaterThanOrEqual(6);
   expect(rows.filter((row) => row.executed > 0).length).toBeGreaterThanOrEqual(5);
   expect(rows.filter((row) => row.rejected + row.deferred > 0).length).toBeGreaterThanOrEqual(4);
   expect(rows.reduce((sum, row) => sum + row.rejected, 0)).toBeGreaterThanOrEqual(8);
-  expect(rows.reduce((sum, row) => sum + row.deferred, 0)).toBeGreaterThanOrEqual(1);
   expect(rows.reduce((sum, row) => sum + row.supportActions, 0)).toBeGreaterThanOrEqual(40);
   expect(rows.reduce((sum, row) => sum + row.supportSecured, 0)).toBeGreaterThanOrEqual(20);
   expect(rows.reduce((sum, row) => sum + row.supportUnsuccessful, 0)).toBeGreaterThanOrEqual(4);

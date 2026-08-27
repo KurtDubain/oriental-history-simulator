@@ -4,10 +4,11 @@ import { chromium } from 'playwright';
 import { preview } from 'vite';
 
 const APP_URL = 'http://127.0.0.1:4176';
-const ARTIFACT_DIR = 'output/app-update-v1.1.3';
+const PACKAGE_VERSION = JSON.parse(await readFile('package.json', 'utf8')).version;
+const ARTIFACT_DIR = `output/app-update-v${PACKAGE_VERSION}`;
 
 const deployed = JSON.parse(await readFile('dist/version.json', 'utf8'));
-assert.equal(deployed.version, '1.1.3');
+assert.equal(deployed.version, PACKAGE_VERSION);
 assert.equal(typeof deployed.buildId, 'string');
 assert.ok(deployed.buildId.length > 0);
 
@@ -84,11 +85,11 @@ try {
   await page.route('**/version.json?*', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ version: '1.1.4', buildId: 'remote-build-114' }),
+    body: JSON.stringify({ version: '99.0.0', buildId: 'remote-build-future' }),
   }));
   await release.getByTestId('check-app-update').click();
   await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).appUpdate.phase === 'available');
-  assert.match(await release.getByTestId('app-update-status').textContent(), /发现 v1\.1\.4/);
+  assert.match(await release.getByTestId('app-update-status').textContent(), /发现 v99\.0\.0/);
   assert.equal((await state(page)).deterministicWorldHash, before.deterministicWorldHash);
   assert.match(await page.locator('[data-observer-desk-trigger="true"]').getAttribute('aria-label'), /发现新版本/);
   await page.screenshot({ path: `${ARTIFACT_DIR}/desktop-update-available.png`, fullPage: true });

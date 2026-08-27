@@ -55,6 +55,7 @@ import {
   processAgencyDecisionSystem,
   type AgencyDecisionTurnContext,
 } from './agency/decision';
+import { refreshFactionPowerLedgers } from './politics/power-ledger';
 import {
   SEASONS,
   type ArmyState,
@@ -3150,7 +3151,10 @@ export function advanceWorldDetailed(
   runSystem('knowledge', () => processV03Knowledge(world, context, (input) => pushEvent(world, context, input)));
   runSystem('military_careers', () => processV02MilitaryCareers(world, context, (input) => pushEvent(world, context, input)));
   runSystem('agency_decisions', () => processAgencyDecisionSystem(world, context, (input) => pushEvent(world, context, input)));
-  runSystem('appointments', () => syncOfficeAppointments(world, context.turn, context));
+  runSystem('appointments', () => {
+    syncOfficeAppointments(world, context.turn, context);
+    refreshFactionPowerLedgers(world);
+  });
   runSystem('situations', () => processSituationSystem(world, context, (input) => pushEvent(world, context, input)));
   runSystem('personal_memory', () => {
     world.agencySystem = reducePersonalMemorySystem(world, context.turn, context.facts);

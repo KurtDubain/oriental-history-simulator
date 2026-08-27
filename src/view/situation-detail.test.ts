@@ -18,11 +18,13 @@ function establishedWorld(): WorldState {
 function withoutOptionalHistoryLinks<T extends {
   timeline: Array<{ historyEventIds: string[] }>;
   evidence: Array<{ historyEventIds: string[] }>;
+  scenes: Array<{ historyEventIds: readonly string[] }>;
 }>(detail: T) {
   return {
     ...detail,
     timeline: detail.timeline.map(({ historyEventIds: _historyEventIds, ...item }) => item),
     evidence: detail.evidence.map(({ historyEventIds: _historyEventIds, ...item }) => item),
+    scenes: detail.scenes.map(({ historyEventIds: _historyEventIds, ...item }) => item),
   };
 }
 
@@ -108,7 +110,8 @@ describe('Situation detail projection', () => {
     expect(detail.status).toBe('resolved');
     expect(detail.outcome).toMatchObject({ label: '军职已经解除', resultFactIds: [resultFact.id] });
     expect(detail.playerSummary).toHaveLength(3);
-    expect(detail.playerSummary[0]).toContain('历时');
+    expect(detail.playerSummary.join('')).toContain('历时');
+    expect(detail.playerSummary[0]).toMatch(/[㐀-鿿].*(受任|去职|之战|易手|去世|成婚|请|军令|支持)/u);
     expect(detail.consequences.length).toBeGreaterThan(0);
     expect(new Set(detail.consequences.map((item) => item.factId))).toEqual(new Set([resultFact.id]));
     expect(detail.consequenceCoverage).toContain('直接');

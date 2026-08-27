@@ -61,6 +61,9 @@ export interface CountryFactionView {
   power: number;
   cohesion: number;
   agenda: string;
+  resources?: readonly PoliticalPowerResourceView[];
+  categories?: readonly PoliticalPowerCategoryView[];
+  recentMovement?: PoliticalPowerMovementView | null;
 }
 
 export interface CountryPowerholderView {
@@ -69,6 +72,41 @@ export interface CountryPowerholderView {
   office: string;
   influence: number;
   faction?: string;
+  standing?: string;
+}
+
+export interface PoliticalPowerResourceView {
+  id: string;
+  category: string;
+  label: string;
+  detail: string;
+  value: number;
+  sourceEventId?: string | null;
+}
+
+export interface PoliticalPowerCategoryView {
+  key: string;
+  label: string;
+  value: number;
+  maximum: number;
+}
+
+export interface PoliticalPowerMovementView {
+  id: string;
+  periodLabel: string;
+  direction: 'gained' | 'held' | 'lost';
+  label: string;
+  detail: string;
+  sourceEventId?: string | null;
+}
+
+export interface HistoricalSceneView {
+  id: string;
+  periodLabel: string;
+  title: string;
+  summary: string;
+  result: string;
+  sourceEventId?: string | null;
 }
 
 export interface CountryDiplomacyView {
@@ -108,6 +146,7 @@ export interface CountryInspectorData {
   navalBudget?: DisplayValue;
   maritimeOrientation?: number;
   maritimeAssets?: SystemInspectorLink[];
+  courtScenes?: readonly HistoricalSceneView[];
 }
 
 export interface PersonAbilitySet {
@@ -214,6 +253,14 @@ export interface PersonAgencyView {
   memories?: readonly PersonAgencyMemoryView[];
   quarterChoice?: PersonAgencyQuarterChoiceView | null;
   commandRequest?: PersonAgencyCommandRequestView | null;
+  powerPosition?: {
+    total: number;
+    standing: string;
+    groupName?: string | null;
+    resources: readonly PoliticalPowerResourceView[];
+    recentMovements: readonly PoliticalPowerMovementView[];
+  } | null;
+  recentPowerScenes?: readonly HistoricalSceneView[];
 }
 
 export interface PersonInspectorData {
@@ -411,6 +458,30 @@ function RecordList({ records, onSelectEvent }: { records: InspectorRecord[]; on
   );
 }
 
+function HistoricalSceneList({
+  scenes,
+  onSelectEvent,
+}: {
+  scenes: readonly HistoricalSceneView[];
+  onSelectEvent?: (eventId: string) => void;
+}) {
+  return (
+    <ol className="observer-scene-list">
+      {scenes.map((scene) => (
+        <li key={scene.id}>
+          <span>{scene.periodLabel}</span>
+          <strong>{scene.title}</strong>
+          <p>{scene.summary}</p>
+          {scene.result ? <small>{scene.result}</small> : null}
+          {scene.sourceEventId && onSelectEvent ? (
+            <button type="button" onClick={() => onSelectEvent(scene.sourceEventId!)}>查原事</button>
+          ) : null}
+        </li>
+      ))}
+    </ol>
+  );
+}
+
 function relationshipTone(sentiment: string): 'positive' | 'negative' | 'cautious' | 'neutral' {
   if (/亲|信|恩/.test(sentiment)) return 'positive';
   if (/怨|不睦/.test(sentiment)) return 'negative';
@@ -512,13 +583,48 @@ function CountryInspector({ data, ...actions }: Extract<InspectorProps, { kind: 
       ) : null}
       {tab === 'court' ? (
         <div role="tabpanel">
+          {data.courtScenes?.length ? (
+            <section className="observer-inspector__section observer-court-scenes" aria-labelledby="country-court-scene-heading">
+              <h3 id="country-court-scene-heading"><ScrollText size={14} aria-hidden="true" />朝局近事</h3>
+              <HistoricalSceneList scenes={data.courtScenes} onSelectEvent={actions.onSelectEvent} />
+            </section>
+          ) : null}
           <section className="observer-inspector__section" aria-labelledby="country-powerholder-heading">
             <h3 id="country-powerholder-heading"><Crown size={14} aria-hidden="true" />权力中枢</h3>
-            {data.powerholders?.length ? <ul className="observer-entity-list">{data.powerholders.map((person) => <li key={person.id}><button type="button" onClick={() => actions.onSelectEntity?.('person', person.id)}><span><strong>{person.name}</strong><small>{person.office}{person.faction ? ` · ${person.faction}` : ''}</small></span><b>{Math.round(person.influence)}</b></button></li>)}</ul> : <p className="observer-inspector__empty">朝中尚无足以独据一席的权臣。</p>}
+            {data.powerholders?.length ? <ul className="observer-entity-list">{data.powerholders.map((person) => <li key={person.id}><button type="button" onClick={() => actions.onSelectEntity?.('person', person.id)}><span><strong>{person.name}</strong><small>{person.office}{person.faction ? ` · ${person.faction}` : ''}</small></span><b>{person.standing ?? '权势'} {Math.round(person.influence)}</b></button></li>)}</ul> : <p className="observer-inspector__empty">朝中尚无足以独据一席的权臣。</p>}
           </section>
           <section className="observer-inspector__section" aria-labelledby="country-faction-heading">
             <h3 id="country-faction-heading"><UsersRound size={14} aria-hidden="true" />朝中派系</h3>
-            {data.factions?.length ? data.factions.map((faction) => <div className="observer-faction" key={faction.id}><div><strong>{faction.name}</strong><span>{faction.kind} · 所图：{faction.agenda}</span></div><button type="button" onClick={() => actions.onSelectEntity?.('person', faction.leaderId)}>{faction.leader}领袖</button><Meter label="权势" value={faction.power} /><Meter label="凝聚" value={faction.cohesion} /></div>) : <p className="observer-inspector__empty">派系尚未形成稳定名目。</p>}
+            {data.factions?.length ? data.factions.map((faction) => (
+              <article className="observer-faction" key={faction.id} data-testid="faction-power-ledger">
+                <header>
+                  <div><strong>{faction.name}</strong><span>{faction.kind} · 所图：{faction.agenda}</span></div>
+                  <b>权势 {Math.round(faction.power)}</b>
+                </header>
+                {faction.categories?.length ? (
+                  <dl className="observer-faction__categories">
+                    {faction.categories.slice(0, 5).map((category) => <div key={category.key}><dt>{category.label}</dt><dd>{Math.round(category.value)}</dd></div>)}
+                  </dl>
+                ) : null}
+                {faction.recentMovement ? (
+                  <p className="observer-faction__movement" data-direction={faction.recentMovement.direction}>
+                    <span>{faction.recentMovement.periodLabel} · {faction.recentMovement.label}</span>
+                    <strong>{faction.recentMovement.detail}</strong>
+                    {faction.recentMovement.sourceEventId && actions.onSelectEvent ? <button type="button" onClick={() => actions.onSelectEvent?.(faction.recentMovement!.sourceEventId!)}>查原事</button> : null}
+                  </p>
+                ) : null}
+                {faction.resources?.length ? (
+                  <details className="observer-faction__assets">
+                    <summary>查看权势构成 <span>{faction.resources.length} 项</span></summary>
+                    <ol>{faction.resources.map((resource) => <li key={resource.id}><span><strong>{resource.label}</strong><small>{resource.detail}</small></span><b>+{Math.round(resource.value)}</b></li>)}</ol>
+                  </details>
+                ) : null}
+                <footer>
+                  <button type="button" onClick={() => actions.onSelectEntity?.('person', faction.leaderId)}>看领袖 · {faction.leader}</button>
+                  <span>凝聚 {Math.round(faction.cohesion)}</span>
+                </footer>
+              </article>
+            )) : <p className="observer-inspector__empty">派系尚未形成稳定名目。</p>}
           </section>
         </div>
       ) : null}
@@ -633,6 +739,41 @@ export function PersonAgencySections({
           </ul>
         ) : <p className="observer-inspector__empty">此人的心中轻重尚未显明。</p>}
       </section>
+
+      {agency.powerPosition ? (
+        <section className="observer-inspector__section observer-agency observer-power-position" aria-labelledby="person-power-position-heading" data-testid="person-power-position">
+          <div className="observer-power-position__heading">
+            <h3 id="person-power-position-heading">手中权势</h3>
+            <span><strong>{agency.powerPosition.standing}</strong>{agency.powerPosition.total}</span>
+          </div>
+          {agency.powerPosition.groupName ? <p className="observer-power-position__faction">身在 {agency.powerPosition.groupName}</p> : null}
+          {agency.powerPosition.resources.length ? (
+            <ol className="observer-power-position__resources">
+              {agency.powerPosition.resources.map((resource) => (
+                <li key={resource.id}>
+                  <span><strong>{resource.label}</strong><small>{resource.detail}</small></span>
+                  <b>+{Math.round(resource.value)}</b>
+                  {resource.sourceEventId && onSelectEvent ? <button type="button" onClick={() => onSelectEvent(resource.sourceEventId!)}>查原事</button> : null}
+                </li>
+              ))}
+            </ol>
+          ) : <p className="observer-inspector__empty">尚无正式官位、军令或明确支持可供调用。</p>}
+          {agency.powerPosition.recentMovements[0] ? (
+            <p className="observer-power-position__movement" data-direction={agency.powerPosition.recentMovements[0].direction}>
+              <span>{agency.powerPosition.recentMovements[0].periodLabel} · {agency.powerPosition.recentMovements[0].label}</span>
+              <strong>{agency.powerPosition.recentMovements[0].detail}</strong>
+            </p>
+          ) : null}
+          <p className="observer-power-position__note">权势只来自眼下真实官职、军令、家门、声望和明确支持。</p>
+        </section>
+      ) : null}
+
+      {agency.recentPowerScenes?.length ? (
+        <section className="observer-inspector__section observer-agency observer-person-scenes" aria-labelledby="person-power-scenes-heading" data-testid="person-power-scenes">
+          <h3 id="person-power-scenes-heading">近来发生</h3>
+          <HistoricalSceneList scenes={agency.recentPowerScenes} onSelectEvent={onSelectEvent} />
+        </section>
+      ) : null}
 
       <section className="observer-inspector__section observer-agency observer-agency-memories" aria-labelledby="person-agency-memory-heading">
         <div className="observer-agency-section-heading">

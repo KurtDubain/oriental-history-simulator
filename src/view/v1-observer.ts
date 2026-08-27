@@ -4,6 +4,7 @@ import {
   normalizeObserverLeadContinuity,
   type ObserverLeadContinuityState,
 } from './observer-leads';
+import { projectSituationHistoricalScenes } from './historical-scenes';
 
 export const OBSERVER_DESK_STORAGE_KEY = 'canghai-observer-desk-v1';
 export const OBSERVER_DESK_SETTINGS_VERSION = 3 as const;
@@ -432,6 +433,8 @@ function milestoneCandidateTitle(
   situation: SituationState,
   fact: Extract<SimulationFact, { kind: 'situation_milestone' }>,
 ): string {
+  const scene = projectSituationHistoricalScenes(world, situation, 1, fact.turn)[0];
+  if (scene) return scene.title;
   const title = situationPauseTitle(world, situation);
   if (fact.payload.transition === 'formed') return `${title}开始显形`;
   if (fact.payload.transition === 'resolved') return `${title}告一段落`;

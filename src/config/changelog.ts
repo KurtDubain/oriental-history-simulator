@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.2.0',
+    date: '2026-08-27',
+    title: '权势有账，史事见人',
+    items: [
+      '朝中派系的强弱改由官职、军令、地方任官、家门、声望和盟派等实际根基共同结算，可以逐项查看。',
+      '支持、请令、朝廷裁决和任免会连成一件具体发生的事；会战与同季州域易手也会合并讲清。',
+      '人物所图、国家朝局、局势卷宗、当世三问、本季变化与关注暂停现在采用同一套史事口径。',
+    ],
+  },
+  {
     version: '1.1.3',
     date: '2026-08-27',
     title: '正式部署按父提交验版',

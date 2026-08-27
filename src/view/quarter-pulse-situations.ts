@@ -6,6 +6,7 @@ import {
   situationOutcomeLabel,
   situationPhaseLabel,
 } from './situation-snapshot';
+import { projectSituationHistoricalScenes } from './historical-scenes';
 
 export const MAX_QUARTER_PULSE_SITUATIONS = 4;
 export const MIN_QUARTER_PULSE_TREND_DELTA = 8;
@@ -19,6 +20,7 @@ export interface QuarterPulseSituationChange {
   typeLabel: string;
   kind: QuarterPulseSituationKind;
   kindLabel: '新生' | '升温' | '降温' | '结案';
+  sceneTitle?: string | null;
   basis: QuarterPulseSituationBasis;
   tension: number;
   delta: number;
@@ -87,10 +89,13 @@ function milestoneKind(fact: SituationMilestoneFact): QuarterPulseSituationKind 
 }
 
 function milestoneDetail(
+  world: WorldState,
   situation: SituationState,
   fact: SituationMilestoneFact,
   kind: QuarterPulseSituationKind,
 ): string {
+  const scene = projectSituationHistoricalScenes(world, situation, 1, fact.turn)[0];
+  if (scene) return `${scene.summary}${scene.result ? ` ${scene.result}` : ''}`;
   if (kind === 'born') {
     const phase = fact.payload.toPhase ?? situation.phase;
     return `进入${situationPhaseLabel(phase)} · 张力 ${rounded(fact.payload.tension)}`;
@@ -115,16 +120,18 @@ function milestoneChange(
   const kind = milestoneKind(fact);
   if (!kind) return null;
   const snapshot = projectSituationSnapshotItem(situation, world);
+  const scene = projectSituationHistoricalScenes(world, situation, 1, fact.turn)[0];
   return {
     id: situation.id,
     title: snapshot.title,
     typeLabel: snapshot.typeLabel,
     kind,
     kindLabel: KIND_LABEL[kind],
+    sceneTitle: scene?.title ?? null,
     basis: kind === 'born' || kind === 'resolved' ? 'lifecycle' : 'phase',
     tension: rounded(fact.payload.tension),
     delta: rounded(fact.payload.momentum),
-    detail: milestoneDetail(situation, fact, kind),
+    detail: milestoneDetail(world, situation, fact, kind),
     importance: situation.importance,
     milestoneFactId: fact.id,
   };
@@ -148,16 +155,20 @@ function trendChange(world: WorldState, situation: SituationState, turn: number)
   const signalLabel = leadingSignal
     ? snapshot.evidence.find((evidence) => evidence.key === leadingSignal.key)?.label
     : null;
+  const scene = projectSituationHistoricalScenes(world, situation, 1, turn)[0];
   return {
     id: situation.id,
     title: snapshot.title,
     typeLabel: snapshot.typeLabel,
     kind,
     kindLabel: KIND_LABEL[kind],
+    sceneTitle: scene?.title ?? null,
     basis: 'trend',
     tension: rounded(situation.tension),
     delta: rounded(situation.momentum),
-    detail: `张力 ${rounded(previousTension)}→${rounded(situation.tension)}（${signed(situation.momentum)}）${signalLabel ? ` · ${signalLabel}` : ''}`,
+    detail: scene
+      ? `${scene.summary}${scene.result ? ` ${scene.result}` : ''}`
+      : `张力 ${rounded(previousTension)}→${rounded(situation.tension)}（${signed(situation.momentum)}）${signalLabel ? ` · ${signalLabel}` : ''}`,
     importance: situation.importance,
     milestoneFactId: null,
   };

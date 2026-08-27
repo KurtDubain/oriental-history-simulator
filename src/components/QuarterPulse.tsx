@@ -147,15 +147,15 @@ export function QuarterPulse({
                   data-situation-id={situation.id}
                   data-kind={situation.kind}
                   data-basis={situation.basis}
-                  aria-label={`${situation.kindLabel}：${situation.title}。${situation.detail}。打开局势全卷`}
+                  aria-label={`${situation.kindLabel}：${situation.sceneTitle ?? situation.title}。${situation.detail}。打开局势全卷`}
                   onClick={() => onSelectSituation(situation.id)}
                 >
                   <span className="quarter-pulse__event-meta">
                     <span className="quarter-pulse__situation-kind">{situation.kindLabel}</span>
-                    <span>{situation.detail}</span>
+                    <span>{situation.typeLabel} · {situation.title}</span>
                   </span>
-                  <strong>{situation.title}</strong>
-                  <span className="quarter-pulse__event-cause" aria-hidden="true">看卷 ›</span>
+                  <strong>{situation.sceneTitle ?? situation.title}</strong>
+                  <span className="quarter-pulse__event-cause">{situation.detail}<b aria-hidden="true">看卷 ›</b></span>
                 </button>
               </li>
             ))}

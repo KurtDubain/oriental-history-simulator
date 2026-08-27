@@ -1,6 +1,7 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
+import { APP_VERSION } from '../version';
 import { createObserverDeskSettings, type ObserverPauseMatch } from '../view/v1-observer';
 import { ObserverDesk } from './ObserverDesk';
 
@@ -99,7 +100,7 @@ describe('ObserverDesk Situation UI', () => {
     }));
 
     expect(markup).toContain('版本与更新');
-    expect(markup).toContain('v1.1.0');
+    expect(markup).toContain(`v${APP_VERSION}`);
     expect(markup).toContain('发现 v1.1.1');
     expect(markup).toContain('data-testid="apply-app-update"');
     expect(markup).toContain('更新并重载');

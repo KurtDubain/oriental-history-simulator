@@ -1,6 +1,7 @@
 import { FAMILY_NAMES, GIVEN_NAMES } from './data';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
 import { emitSimulationFact, projectFactLinks } from './facts';
+import { refreshFactionPowerLedgers } from './politics/power-ledger';
 import type {
   BackgroundPersonState,
   BiographyFact,
@@ -224,7 +225,15 @@ function remember(
   const relation = ensureRelationship(world, sourceId, targetId);
   relation.lastInteractionTurn = world.turn;
   relation.memories.push({ turn: world.turn, kind, impact, summary, eventId });
-  if (relation.memories.length > MAX_MEMORIES_PER_RELATIONSHIP) relation.memories.shift();
+  while (relation.memories.length > MAX_MEMORIES_PER_RELATIONSHIP) {
+    const evictionIndex = relation.memories.findIndex((memory) => !world.commitments.some((commitment) => (
+      commitment.resolutionEventId === memory.eventId
+      && commitment.resolvedTurn !== null
+      && world.turn - commitment.resolvedTurn < 32
+      && (commitment.status === '履约' || commitment.status === '背约')
+    )));
+    relation.memories.splice(evictionIndex >= 0 ? evictionIndex : 0, 1);
+  }
   if (kind === '背叛' || kind === '羞辱' || kind === '竞争') {
     relation.grievance = Math.round(clamp(relation.grievance + Math.abs(impact)));
     relation.trust = Math.round(clamp(relation.trust - Math.abs(impact) * 0.65));
@@ -416,13 +425,9 @@ function ensureFactions(world: WorldState, polityId: string): void {
     }
     faction.leaderId = leader.id;
     faction.memberIds = members.map((item) => item.id).sort(stableCompare);
-    const averageInfluence = members.reduce((sum, member) => sum + member.influence, 0) / members.length;
-    const officePower = members.reduce((sum, member) => (
-      sum + (member.role === '君主' ? 22 : member.commandingArmyId || member.commandingFleetId ? 16 : member.governedRegionId ? 10 : 3)
-    ), 0);
-    faction.power = Math.round(clamp(averageInfluence * 0.62 + officePower + members.length * 2));
     faction.cohesion = Math.round(clamp(faction.cohesion + (members.length >= 2 ? 0.2 : -0.5)));
   }
+  refreshFactionPowerLedgers(world, polityId);
 }
 
 function appendBackgroundPerson(world: WorldState, regionId: string, id: string, birthTurn: number, initialOpportunity: number): void {

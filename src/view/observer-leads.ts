@@ -16,6 +16,7 @@ import {
   type SituationParticipantGroupKey,
   type SituationSnapshotItem,
 } from './situation-snapshot';
+import { projectSituationHistoricalScenes } from './historical-scenes';
 
 export type ObserverLeadSlot = 'person' | 'polity' | 'tension';
 export type ObserverLeadStage = '伏线' | '升温' | '临界' | '回响';
@@ -533,10 +534,18 @@ function situationTarget(
 }
 
 function situationEvidence(
+  world: WorldState,
   item: SituationSnapshotItem,
   state: SituationState,
   resolvedEcho: boolean,
 ): readonly [string, string] {
+  const scene = projectSituationHistoricalScenes(world, state, 1)[0];
+  if (scene) {
+    return [
+      `${scene.dateLabel} · ${scene.title}`,
+      scene.result || scene.summary,
+    ];
+  }
   if (resolvedEcho) {
     return [
       `结案结果 · ${situationOutcomeLabel(state.resolution?.outcomeKey ?? '')}`,
@@ -586,7 +595,7 @@ function situationCandidate(
     slot,
     label,
     question: situationQuestion(item, state, resolvedEcho),
-    evidence: situationEvidence(item, state, resolvedEcho),
+    evidence: situationEvidence(world, item, state, resolvedEcho),
     nextSignal: item.nextSignal.label,
     stage: situationStage(item.phase, resolvedEcho),
     tension: item.tension,
