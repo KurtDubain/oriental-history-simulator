@@ -17,6 +17,7 @@ import {
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
   type ReactNode,
 } from 'react';
 import { CausalDrawer, type CausalFactor, type CausalReference } from './components/CausalDrawer';
@@ -62,6 +63,12 @@ import {
 import { WorldCollectionPanel } from './components/WorldCollectionPanel';
 import { WorldStart } from './components/WorldStart';
 import {
+  checkForAppUpdate,
+  getAppUpdateState,
+  startAppUpdateMonitor,
+  subscribeAppUpdate,
+} from './infra/app-update';
+import {
   createAutosaveCoordinator,
   type AutosaveCoordinator,
 } from './persistence/autosave-coordinator';
@@ -100,6 +107,7 @@ import {
   type V03InterventionAction,
   type WorldState,
 } from './sim';
+import { APP_VERSION } from './version';
 import {
   familyRoster,
   militaryRoster,
@@ -434,7 +442,8 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
   if (!world) {
     return JSON.stringify({
       mode: 'start',
-      productVersion: '1.0.0',
+      productVersion: APP_VERSION,
+      appUpdate: getAppUpdateState(),
       title: '沧衡纪',
       seedInputVisible: options.startOpen,
       collectionOpen: options.collectionOpen,
@@ -647,7 +656,8 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
     : null;
   return JSON.stringify({
     mode: options.startOpen ? 'world-menu' : 'observing',
-    productVersion: '1.0.0',
+    productVersion: APP_VERSION,
+    appUpdate: getAppUpdateState(),
     worldSchemaVersion: world.schemaVersion,
     mapContentVersion: world.mapContentVersion,
     coordinates: 'map world coordinates use origin top-left, x rightward, y downward, range 1000x700',
@@ -915,6 +925,11 @@ export function App() {
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [agencyShadowLedger, setAgencyShadowLedger] = useState<AgencyShadowLedger>(() => createAgencyShadowLedger());
   const [agencyShadowBranchId, setAgencyShadowBranchId] = useState<string | null>(null);
+  const appUpdate = useSyncExternalStore(
+    subscribeAppUpdate,
+    getAppUpdateState,
+    getAppUpdateState,
+  );
 
   const worldRef = useRef<WorldState | null>(null);
   const worldShellRef = useRef<HTMLElement>(null);
@@ -944,6 +959,7 @@ export function App() {
   const agencyShadowLedgerRef = useRef(agencyShadowLedger);
   const agencyShadowBranchIdRef = useRef<string | null>(agencyShadowBranchId);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
+  useEffect(() => startAppUpdateMonitor(), []);
   useEffect(() => {
     if (!mobileToolsOpen) return undefined;
     const closeFromOutside = (event: PointerEvent) => {
@@ -1925,6 +1941,22 @@ export function App() {
     window.setTimeout(() => observerDeskTriggerRef.current?.focus(), 0);
   }, []);
 
+  const handleApplyAppUpdate = useCallback(async () => {
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    const coordinator = autosaveCoordinatorRef.current;
+    if (worldRef.current && coordinator) {
+      const result = await coordinator.flush('pause');
+      if (result.status === 'failed' || result.status === 'disposed') {
+        setToast('当前世界尚未保存，暂不重载。请先手动保存后再更新。');
+        return false;
+      }
+    }
+    window.location.reload();
+    return true;
+  }, []);
+
   const handleHistoricalTurnChange = useCallback((turn: number, view: HistoricalTerritoryView) => {
     const current = worldRef.current;
     runningRef.current = false;
@@ -2472,13 +2504,17 @@ export function App() {
                 ref={observerDeskTriggerRef}
                 type="button"
                 data-observer-desk-trigger="true"
-                data-alert={observerSettings.watchlist.some((item) => item.alert) || undefined}
+                data-alert={observerSettings.watchlist.some((item) => item.alert) || appUpdate.phase === 'available' || undefined}
                 onClick={() => {
                   setMobileToolsOpen(false);
                   handleOpenObserverDesk();
                 }}
-                aria-label={`打开观察台，关注${observerSettings.watchlist.length}项`}
-                title={`观察台 · ${observerSettings.watchlist.length}项关注`}
+                aria-label={appUpdate.phase === 'available'
+                  ? `打开观察台，发现新版本${appUpdate.remoteVersion ? ` v${appUpdate.remoteVersion}` : ''}`
+                  : `打开观察台，关注${observerSettings.watchlist.length}项`}
+                title={appUpdate.phase === 'available'
+                  ? `观察台 · 发现${appUpdate.remoteVersion ? ` v${appUpdate.remoteVersion}` : '新版本'}`
+                  : `观察台 · ${observerSettings.watchlist.length}项关注`}
               >
                 <Eye size={16} aria-hidden="true" />
               </button>
@@ -2738,6 +2774,9 @@ export function App() {
         pauseMatch={pauseMatch}
         onSelectPauseMatch={handleSelectPauseMatch}
         returnFocusTo={observerDeskTriggerRef.current}
+        appUpdate={appUpdate}
+        onCheckUpdate={() => checkForAppUpdate(true)}
+        onApplyUpdate={handleApplyAppUpdate}
       />
 
       <WorldCollectionPanel

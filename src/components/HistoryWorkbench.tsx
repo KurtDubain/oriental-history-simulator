@@ -36,6 +36,7 @@ import {
   type HistoryRelatedKind,
 } from '../view/v1-history';
 import '../styles/history-workbench.css';
+import { APP_VERSION } from '../version';
 
 const PAGE_SIZE = 72;
 
@@ -245,7 +246,7 @@ export function HistoryWorkbench({
         <header className="history-workbench__masthead">
           <div className="history-workbench__seal" aria-hidden="true"><Archive size={21} /></div>
           <div>
-            <span>V1 · 可检索世界史</span>
+            <span>v{APP_VERSION} · 可检索世界史</span>
             <h2 id={titleId}>历史工作台</h2>
             <p id={descriptionId}>检索史事、核验因果，并把舆图回拨到任一已记录季度。</p>
           </div>

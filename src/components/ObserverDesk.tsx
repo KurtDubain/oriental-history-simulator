@@ -5,11 +5,15 @@ import {
   ChevronRight,
   Eye,
   ListChecks,
+  RefreshCw,
   RotateCcw,
   Trash2,
   X,
 } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { LATEST_APP_RELEASE } from '../config/changelog';
+import { appUpdateStatusText, type AppUpdateState } from '../infra/app-update';
+import { APP_VERSION } from '../version';
 import {
   OBSERVER_GUIDE_STEPS,
   normalizeObserverDeskSettings,
@@ -51,6 +55,27 @@ export interface ObserverDeskProps {
   pauseMatch?: ObserverPauseMatch | null;
   onSelectPauseMatch?: (match: ObserverPauseMatch) => void;
   returnFocusTo?: HTMLElement | null;
+  appUpdate?: AppUpdateState;
+  onCheckUpdate?: () => Promise<unknown>;
+  onApplyUpdate?: () => Promise<boolean>;
+}
+
+const DEFAULT_APP_UPDATE: AppUpdateState = {
+  phase: 'idle',
+  localVersion: APP_VERSION,
+  localBuildId: 'unknown',
+  remoteVersion: null,
+  remoteBuildId: null,
+  checkedAt: null,
+};
+
+function checkedAtLabel(checkedAt: number | null): string | null {
+  if (!checkedAt) return null;
+  return new Intl.DateTimeFormat('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  }).format(new Date(checkedAt));
 }
 
 interface PauseRuleDefinition {
@@ -77,6 +102,9 @@ export function ObserverDesk({
   pauseMatch,
   onSelectPauseMatch,
   returnFocusTo,
+  appUpdate = DEFAULT_APP_UPDATE,
+  onCheckUpdate,
+  onApplyUpdate,
 }: ObserverDeskProps) {
   const titleId = useId();
   const descriptionId = useId();
@@ -86,6 +114,9 @@ export function ObserverDesk({
   onCloseRef.current = onClose;
   const safeSettings = useMemo(() => normalizeObserverDeskSettings(settings), [settings]);
   const progress = observerGuideProgress(safeSettings);
+  const [updateBusy, setUpdateBusy] = useState(false);
+  const updateAvailable = appUpdate.phase === 'available';
+  const lastChecked = checkedAtLabel(appUpdate.checkedAt);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -165,7 +196,7 @@ export function ObserverDesk({
         <header className="observer-desk__header">
           <div className="observer-desk__seal" aria-hidden="true"><Eye size={20} strokeWidth={1.5} /></div>
           <div>
-            <span>OBSERVER · V1</span>
+            <span>OBSERVER · v{APP_VERSION}</span>
             <h2 id={titleId}>观察台</h2>
             <p id={descriptionId}>只记录你想留意的历史，不改变世界。</p>
           </div>
@@ -362,6 +393,68 @@ export function ObserverDesk({
                 <button type="button" onClick={resetGuide}><RotateCcw size={12} aria-hidden="true" />重置</button>
               ) : null}
             </footer>
+          </section>
+
+          <section
+            className="observer-desk__section observer-desk__release"
+            aria-labelledby="observer-release-heading"
+            data-update-phase={appUpdate.phase}
+          >
+            <div className="observer-desk__section-heading">
+              <div>
+                <span>04</span>
+                <h3 id="observer-release-heading">版本与更新</h3>
+              </div>
+              <strong>v{APP_VERSION}</strong>
+            </div>
+            <div className="observer-desk__release-line">
+              <div role="status" aria-live="polite" data-testid="app-update-status">
+                <strong>{appUpdateStatusText(appUpdate)}</strong>
+                <small>
+                  {updateAvailable
+                    ? '重载前会先暂停并保存当前世界。'
+                    : lastChecked
+                      ? `最近检查 ${lastChecked}`
+                      : LATEST_APP_RELEASE.title}
+                </small>
+              </div>
+              <button
+                type="button"
+                data-testid={updateAvailable ? 'apply-app-update' : 'check-app-update'}
+                disabled={appUpdate.phase === 'checking' || updateBusy || (!onCheckUpdate && !updateAvailable)}
+                onClick={async () => {
+                  if (updateAvailable && onApplyUpdate) {
+                    setUpdateBusy(true);
+                    try {
+                      await onApplyUpdate();
+                    } finally {
+                      setUpdateBusy(false);
+                    }
+                    return;
+                  }
+                  await onCheckUpdate?.();
+                }}
+              >
+                <RefreshCw
+                  size={14}
+                  aria-hidden="true"
+                  className={appUpdate.phase === 'checking' || updateBusy ? 'observer-desk__release-spin' : undefined}
+                />
+                {updateBusy
+                  ? '正在保存'
+                  : updateAvailable
+                    ? '更新并重载'
+                    : appUpdate.phase === 'checking'
+                      ? '检查中'
+                      : '检查更新'}
+              </button>
+            </div>
+            <details className="observer-desk__release-notes">
+              <summary>本版改动</summary>
+              <ul>
+                {LATEST_APP_RELEASE.items.slice(0, 3).map((item) => <li key={item}>{item}</li>)}
+              </ul>
+            </details>
           </section>
         </div>
 

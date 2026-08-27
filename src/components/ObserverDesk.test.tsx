@@ -78,4 +78,31 @@ describe('ObserverDesk Situation UI', () => {
     expect(markup).toContain('局势关注、关键变化提醒与暂停仅属于观察者设置');
     expect(markup).not.toContain('data-testid="observer-pause-open"');
   });
+
+  it('keeps version checking inside the desk and exposes one clear update action', () => {
+    const markup = renderToStaticMarkup(createElement(ObserverDesk, {
+      open: true,
+      settings: createObserverDeskSettings(),
+      onSettingsChange: vi.fn(),
+      onClose: vi.fn(),
+      onSelectWatchItem: vi.fn(),
+      appUpdate: {
+        phase: 'available',
+        localVersion: '1.0.1',
+        localBuildId: 'build-old',
+        remoteVersion: '1.0.2',
+        remoteBuildId: 'build-new',
+        checkedAt: 1_788_000_000_000,
+      },
+      onCheckUpdate: vi.fn(),
+      onApplyUpdate: vi.fn(),
+    }));
+
+    expect(markup).toContain('版本与更新');
+    expect(markup).toContain('v1.0.1');
+    expect(markup).toContain('发现 v1.0.2');
+    expect(markup).toContain('data-testid="apply-app-update"');
+    expect(markup).toContain('更新并重载');
+    expect(markup).not.toContain('部署探针');
+  });
 });

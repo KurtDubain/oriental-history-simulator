@@ -1,5 +1,6 @@
 import { BookOpen, FileUp, Library, Sparkles, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
+import { APP_VERSION } from '../version';
 import '../styles/world-start.css';
 
 const PLAYTEST_SEEDS = [
@@ -89,7 +90,7 @@ export function WorldStart({
         </button>
       ) : null}
       <section className="world-start__content">
-        <p className="world-start__kicker">架空东方历史演化观察台 · V1.0</p>
+        <p className="world-start__kicker">架空东方历史演化观察台 · v{APP_VERSION}</p>
         <h1 id="world-start-title">沧衡纪</h1>
         <p className="world-start__lede">不统治天下，只见证它如何成为历史。</p>
 
@@ -171,7 +172,7 @@ export function WorldStart({
       <footer className="world-start__footer">
         <span>一回合 · 三个月</span>
         <span>82 陆区 · 10 海域 · 全域流变</span>
-        <span>V1 · 按 F 全屏</span>
+        <span>v{APP_VERSION} · 按 F 全屏</span>
       </footer>
     </div>
   );
