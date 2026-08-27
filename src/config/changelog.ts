@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.1.2',
+    date: '2026-08-27',
+    title: '云端发布门禁恢复',
+    items: [
+      '版本提升检查改用项目专属环境变量，不再被 Vercel 的构建环境误判为当前提交。',
+      '正式部署仍必须提升语义版本，保护规则没有被关闭或绕过。',
+      '本版继续包含 v1.1.0 的人物军权玩法与 v1.1.1 的线上版本端点修复。',
+    ],
+  },
+  {
     version: '1.1.1',
     date: '2026-08-27',
     title: '正式站点恢复版本检查',

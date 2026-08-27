@@ -49,7 +49,7 @@ const productionDeployment = process.env.VERCEL_GIT_COMMIT_REF === 'main'
 
 let comparisonRef: string | null = null;
 if (productionFilesChanged) comparisonRef = 'HEAD';
-else if (productionDeployment) comparisonRef = process.env.RELEASE_BASE?.trim() || 'HEAD^';
+else if (productionDeployment) comparisonRef = process.env.OHS_RELEASE_BASE?.trim() || 'HEAD^';
 
 if (comparisonRef) {
   const basePackageText = git(['show', `${comparisonRef}:package.json`]);
