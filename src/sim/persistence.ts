@@ -138,6 +138,7 @@ export function deserializeWorld(serialized: string): WorldState {
       }
     : null;
   let migrated = false;
+  let factsMigrated = false;
   for (const character of world.characters) {
     if (!Number.isFinite(character.rebellionReadiness)) {
       character.rebellionReadiness = 0;
@@ -218,7 +219,40 @@ export function deserializeWorld(serialized: string): WorldState {
     // observer-only shadow ledger or replay earlier Facts into invented intent.
     world.agencyDecisionSystem = createAgencyDecisionSystemState(world.turn - 1);
     migrated = true;
+  } else {
+    // v1.1 adds bounded, authoritative support actions without changing the
+    // public schema number. Authenticate the old save first, then start this
+    // new account empty at the live boundary; never infer past backing from
+    // Chronicle prose or current relationship values.
+    for (const actor of world.agencyDecisionSystem.actors) {
+      const legacyActor = actor as typeof actor & {
+        supportActions?: typeof actor.supportActions;
+        supportAttemptOrdinal?: number;
+        nextEligibleSupportTurn?: number;
+      };
+      if (!Array.isArray(legacyActor.supportActions)) {
+        legacyActor.supportActions = [];
+        legacyActor.supportAttemptOrdinal = 0;
+        legacyActor.nextEligibleSupportTurn = world.turn;
+        migrated = true;
+      }
+      if (!Number.isSafeInteger(legacyActor.supportAttemptOrdinal)) {
+        legacyActor.supportAttemptOrdinal = legacyActor.supportActions.length;
+        migrated = true;
+      }
+      if (!Number.isSafeInteger(legacyActor.nextEligibleSupportTurn)) {
+        legacyActor.nextEligibleSupportTurn = world.turn;
+        migrated = true;
+      }
+    }
   }
+  for (const fact of world.facts ?? []) {
+    if (fact.kind !== 'agency_intent_resolved' || fact.payload.institutionResponse) continue;
+    fact.payload.institutionResponse = fact.payload.outcome === 'executed' ? 'command_granted' : 'none';
+    migrated = true;
+    factsMigrated = true;
+  }
+  if (factsMigrated) world.factDigest = factDigestOf(world.facts);
   if (migrated) world.hash = computeWorldHash(world);
   const violations = validateWorld(world);
   if (violations.length > 0) {

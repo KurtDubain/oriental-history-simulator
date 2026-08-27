@@ -29,6 +29,10 @@ export const PERSONAL_MEMORY_KINDS = [
   'situation_formed',
   'situation_escalated',
   'situation_resolved',
+  'support_secured',
+  'support_denied',
+  'command_appeased',
+  'command_curbed',
 ] as const;
 
 export type PersonalMemoryKind = (typeof PERSONAL_MEMORY_KINDS)[number];
@@ -319,6 +323,48 @@ function situationCandidates(
   }));
 }
 
+function supportCandidates(
+  fact: Extract<SimulationFact, { kind: 'agency_support_resolved' }>,
+): MemoryCandidate[] {
+  const primary = fact.payload.targetKind === 'army_officers'
+    ? subject('army', fact.payload.targetArmyId, true)
+    : subject('character', fact.payload.targetId, true);
+  return [{
+    characterId: fact.payload.actorId,
+    scope: fact.payload.targetKind === 'army_officers' ? 'military' : fact.payload.targetKind === 'family_head' ? 'family' : 'political',
+    kind: fact.payload.outcome === 'secured' ? 'support_secured' : 'support_denied',
+    qualifier: `${fact.payload.action}:${fact.payload.outcome}`,
+    subjects: uniqueSubjects([primary, subject('army', fact.payload.targetArmyId), subject('polity', fact.payload.polityId)]),
+    turn: fact.turn,
+    salience: clamp(28 + fact.importance * 12),
+    valence: fact.payload.outcome === 'secured' ? 48 : fact.payload.outcome === 'refused' ? -42 : -16,
+    pinnedEligible: false,
+    factId: fact.id,
+  }];
+}
+
+function commandResponseCandidates(
+  fact: Extract<SimulationFact, { kind: 'agency_intent_resolved' }>,
+): MemoryCandidate[] {
+  if (fact.payload.institutionResponse !== 'appeased' && fact.payload.institutionResponse !== 'curbed') return [];
+  return [{
+    characterId: fact.payload.actorId,
+    scope: 'political',
+    kind: fact.payload.institutionResponse === 'appeased' ? 'command_appeased' : 'command_curbed',
+    qualifier: fact.payload.reasonCode,
+    subjects: uniqueSubjects([
+      subject('army', fact.payload.targetArmyId, true),
+      subject('character', fact.payload.appointingAuthorityId),
+      subject('polity', fact.payload.polityId),
+    ]),
+    turn: fact.turn,
+    salience: fact.payload.institutionResponse === 'curbed' ? 72 : 54,
+    valence: fact.payload.institutionResponse === 'curbed' ? -78 : 18,
+    pinnedEligible: fact.payload.institutionResponse === 'curbed',
+    factId: fact.id,
+  }];
+}
+
 function candidatesForFact(world: WorldState, fact: SimulationFact): MemoryCandidate[] {
   if (fact.kind === 'battle') return battleCandidates(fact);
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') return appointmentCandidates(fact);
@@ -326,6 +372,8 @@ function candidatesForFact(world: WorldState, fact: SimulationFact): MemoryCandi
   if (fact.kind === 'war_started' || fact.kind === 'war_ended') return warCandidates(world, fact);
   if (fact.kind === 'territory_control_changed') return territoryCandidates(world, fact);
   if (fact.kind === 'situation_milestone') return situationCandidates(fact);
+  if (fact.kind === 'agency_support_resolved') return supportCandidates(fact);
+  if (fact.kind === 'agency_intent_resolved') return commandResponseCandidates(fact);
   return [];
 }
 
@@ -475,6 +523,10 @@ function memoryTitle(world: WorldState, memory: PersonalMemoryState): string {
   if (memory.kind === 'territory_lost') return `${name}脱离己方`;
   if (memory.kind === 'situation_formed') return `${name}初现`;
   if (memory.kind === 'situation_escalated') return `${name}生变`;
+  if (memory.kind === 'support_secured') return `${name}答应相助`;
+  if (memory.kind === 'support_denied') return `${name}未肯相助`;
+  if (memory.kind === 'command_appeased') return `请领${name}未准，另受安抚`;
+  if (memory.kind === 'command_curbed') return `请领${name}未准并遭削权`;
   return `${name}落定`;
 }
 

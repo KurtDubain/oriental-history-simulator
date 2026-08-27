@@ -1,4 +1,10 @@
-import { emitSimulationFact, type FactTurnBuffer } from '../facts';
+import {
+  emitSimulationFact,
+  type AgencySupportActionKind,
+  type AgencySupportOutcome,
+  type AgencySupportTargetKind,
+  type FactTurnBuffer,
+} from '../facts';
 import { stableCompare, stableHash } from '../random';
 import { projectCharacterDesires, ROOT_DESIRES, type RootDesire } from './projection';
 import type {
@@ -19,6 +25,8 @@ export const AGENCY_DECISION_CLOSED_RETENTION_TURNS = 16;
 export const MIN_INDEPENDENT_COMMAND_DEPUTY_TENURE_TURNS = 6;
 export const ARMY_COMMAND_CHANGE_COOLDOWN_TURNS = 32;
 export const COMMAND_CHANGE_PARTICIPANT_COOLDOWN_TURNS = 40;
+export const MAX_AGENCY_SUPPORT_ACTIONS = 8;
+export const MAX_AGENCY_SUPPORT_ACTIONS_PER_TURN = 16;
 
 export const INDEPENDENT_COMMAND_PLAN_ACTIONS = [
   'earn_merit',
@@ -67,10 +75,26 @@ export interface CharacterAgencyDecisionState {
   coreDesireKinds: readonly [RootDesire, RootDesire];
   goal: AgencyDecisionGoalState;
   plan: AgencyDecisionPlanState;
+  supportActions: readonly AgencySupportActionState[];
+  supportAttemptOrdinal: number;
+  nextEligibleSupportTurn: number;
   attemptOrdinal: number;
   nextEligibleIntentTurn: number;
   lastResolutionFactId: string | null;
   lastReviewedTurn: number;
+}
+
+export interface AgencySupportActionState {
+  id: string;
+  action: AgencySupportActionKind;
+  attemptOrdinal: number;
+  targetKind: AgencySupportTargetKind;
+  targetId: string;
+  performedTurn: number;
+  outcome: AgencySupportOutcome;
+  strength: number;
+  sourceFactId: string;
+  sourceEventId: string;
 }
 
 export interface AgencyDecisionSystemState {
@@ -124,6 +148,7 @@ interface PreparationSignals {
   patronage: boolean;
   militarySupport: boolean;
   familyBacking: boolean;
+  explicitSupport: boolean;
   permissionReady: boolean;
   permissionEvidence: string;
   commandOpening: boolean;
@@ -146,6 +171,14 @@ function goalId(seed: string, characterId: string, armyId: string, createdTurn: 
 
 function planId(goal: AgencyDecisionGoalState): string {
   return `plan_${stableHash([goal.id, 'independent-command-plan-v1']).slice(0, 14)}`;
+}
+
+function supportActionId(
+  goal: AgencyDecisionGoalState,
+  action: AgencySupportActionKind,
+  attemptOrdinal: number,
+): string {
+  return `support_${stableHash([goal.id, action, attemptOrdinal, 'agency-support-v1']).slice(0, 14)}`;
 }
 
 function factMentionsDeputy(fact: SimulationFact, characterId: string, armyId: string): boolean {
@@ -244,6 +277,7 @@ function preparationSignals(
   commanderId: string,
   armyId: string,
   turn: number,
+  supportActions: readonly AgencySupportActionState[] = [],
 ): PreparationSignals {
   const polity = world.polities.find((item) => item.id === character.polityId);
   const family = world.families.find((item) => item.id === character.familyId && item.active);
@@ -295,22 +329,32 @@ function preparationSignals(
         : claimAdvantage >= 32
           ? '申请人的军功与统军履历已明显胜过现任主帅'
           : '现任主帅并未失势，申请人的履历优势也还不够明显';
+  const securedActions = supportActions.filter((action) => action.outcome === 'secured');
+  const securedMilitarySupport = securedActions.some((action) => action.action === 'cultivate_military_support');
+  const securedPatronage = securedActions.some((action) => (
+    action.action === 'request_backing'
+    && (action.targetKind === 'commander' || action.targetKind === 'ruler')
+  ));
+  const securedFamilyBacking = securedActions.some((action) => (
+    action.action === 'request_backing' && action.targetKind === 'family_head'
+  ));
   return {
     earnMerit: (character.deputyExperience >= 28 && character.merit >= 38)
       || character.deputyExperience >= 46
       || character.merit >= 58,
-    patronage: Math.max(
+    patronage: securedPatronage || Math.max(
       patronageValue(commanderRelation),
       patronageValue(rulerRelation),
     ) >= AGENCY_SUPPORT_THRESHOLD,
-    militarySupport: character.deputyExperience >= 38
+    militarySupport: securedMilitarySupport || character.deputyExperience >= 38
       || character.merit >= 50
       || (character.influence >= 46 && character.renown >= 32),
-    familyBacking: Boolean(family && (
+    familyBacking: securedFamilyBacking || Boolean(family && (
       family.prestige >= 30
       || family.politicalInfluence >= 26
       || family.traditions.military >= 42
     )),
+    explicitSupport: securedActions.length > 0,
     permissionReady,
     permissionEvidence,
     commandOpening,
@@ -332,6 +376,7 @@ function buildPlan(
   const requestReady = !invalid
     && !achieved
     && signals.earnMerit
+    && signals.explicitSupport
     && preparations >= 2
     && signals.permissionReady
     && signals.commandOpening
@@ -347,13 +392,15 @@ function buildPlan(
   ];
   const evidences = [
     signals.earnMerit ? '已有可核验的副将经历或战功' : '还需更多副将经历或战功',
-    signals.patronage ? '主帅或主君一侧已有可用信任' : '尚未得到主帅或主君的可靠提携',
-    signals.militarySupport ? '军中履历、名望或影响已形成支点' : '军中的履历与影响仍显单薄',
-    signals.familyBacking ? '家门声望、朝中影响或军门传统可以背书' : '家门尚不足以替这次请求背书',
+    signals.patronage ? '主帅或主君一侧已有可用提携' : '尚未得到主帅或主君的可靠提携',
+    signals.militarySupport ? '军中履历、名望或将校支持已形成支点' : '军中的履历与将校支持仍显单薄',
+    signals.familyBacking ? '家门声望、朝中影响或家主背书可以相助' : '家门尚不足以替这次请求背书',
     requestReady ? '准备已经足以递交独立军令请求' : !signals.permissionReady
       ? signals.permissionEvidence
       : !signals.commandOpening
       ? signals.commandOpeningEvidence
+      : !signals.explicitSupport
+      ? '还需亲自争取一项可追溯的军中支持或上位者背书'
       : preparations < 2
       ? '除战功外，至少还需两项支持'
       : attemptOrdinal >= MAX_AGENCY_INTENT_ATTEMPTS
@@ -418,6 +465,9 @@ function createActorState(
     ],
     goal,
     plan: buildPlan(goal, preparationSignals(world, character, commanderId, armyId, turn), 0, turn, turn),
+    supportActions: [],
+    supportAttemptOrdinal: 0,
+    nextEligibleSupportTurn: turn,
     attemptOrdinal: 0,
     nextEligibleIntentTurn: turn,
     lastResolutionFactId: null,
@@ -473,12 +523,20 @@ function reviewActorState(
   }
   const commanderId = target?.commanderId ?? '';
   const signals = character && commanderId
-    ? preparationSignals(world, character, commanderId, target?.id ?? goal.targetArmyId, turn)
+    ? preparationSignals(
+        world,
+        character,
+        commanderId,
+        target?.id ?? goal.targetArmyId,
+        turn,
+        previous.supportActions,
+      )
     : {
         earnMerit: false,
         patronage: false,
         militarySupport: false,
         familyBacking: false,
+        explicitSupport: false,
         permissionReady: false,
         permissionEvidence: '人物或军团状态已经失去核验条件',
         commandOpening: false,
@@ -487,6 +545,7 @@ function reviewActorState(
   goal = { ...goal, lastReviewedTurn: turn };
   return {
     ...previous,
+    supportActions: previous.supportActions.slice(-MAX_AGENCY_SUPPORT_ACTIONS),
     goal,
     plan: buildPlan(goal, signals, previous.attemptOrdinal, previous.nextEligibleIntentTurn, turn),
     lastReviewedTurn: turn,
@@ -532,6 +591,303 @@ function reviewDecisionState(world: WorldState, turn: number): CharacterAgencyDe
     .sort((left, right) => stableCompare(left.characterId, right.characterId));
 }
 
+interface AgencySupportTurnAction {
+  actorId: string;
+  goalId: string;
+  planId: string;
+  planStepId: string;
+  action: AgencySupportActionKind;
+  attemptOrdinal: number;
+  targetKind: AgencySupportTargetKind;
+  targetId: string;
+  targetArmyId: string;
+  polityId: string;
+}
+
+function hashRange(minimum: number, maximum: number, ...parts: readonly unknown[]): number {
+  const span = maximum - minimum + 1;
+  return minimum + (Number.parseInt(stableHash(parts).slice(0, 8), 16) % span);
+}
+
+function ensureAgencyRelationship(
+  world: WorldState,
+  sourceId: string,
+  targetId: string,
+): { relationship: RelationshipState; created: boolean } {
+  const existing = directedRelationship(world, sourceId, targetId);
+  if (existing) return { relationship: existing, created: false };
+  world.counters.relationship += 1;
+  const relationship: RelationshipState = {
+    id: `rel_${String(world.counters.relationship).padStart(5, '0')}`,
+    sourceId,
+    targetId,
+    kinship: '无',
+    affinity: hashRange(34, 52, world.seed, 'agency-support-affinity', sourceId, targetId),
+    trust: hashRange(30, 44, world.seed, 'agency-support-trust', sourceId, targetId),
+    fear: 0,
+    grievance: 0,
+    gratitude: 0,
+    lastInteractionTurn: world.turn,
+    memories: [],
+  };
+  world.relationships.push(relationship);
+  return { relationship, created: true };
+}
+
+function rememberAgencyInteraction(
+  world: WorldState,
+  relationship: RelationshipState,
+  turn: number,
+  kind: RelationshipState['memories'][number]['kind'],
+  impact: number,
+  summary: string,
+  eventId: string,
+): void {
+  relationship.lastInteractionTurn = turn;
+  relationship.memories.push({ turn, kind, impact, summary, eventId });
+  const protectedCommitmentEvents = new Set(world.commitments
+    .filter((commitment) => (
+      (commitment.status === '履约' || commitment.status === '背约')
+      && commitment.resolvedTurn !== null
+      && turn - commitment.resolvedTurn < 32
+      && commitment.resolutionEventId
+    ))
+    .map((commitment) => commitment.resolutionEventId as string));
+  while (relationship.memories.length > 8) {
+    const expendableIndex = relationship.memories.findIndex((memory) => (
+      (memory.eventId === null || !protectedCommitmentEvents.has(memory.eventId)) && memory.eventId !== eventId
+    ));
+    relationship.memories.splice(expendableIndex >= 0 ? expendableIndex : relationship.memories.length - 1, 1);
+  }
+}
+
+function supportActionFor(
+  world: WorldState,
+  actor: CharacterAgencyDecisionState,
+  turn: number,
+): AgencySupportTurnAction | null {
+  if (actor.goal.status !== 'active'
+    || actor.plan.status !== 'active'
+    || turn < actor.nextEligibleSupportTurn
+    || actor.supportActions.some((action) => action.outcome === 'secured')) return null;
+  const character = world.characters.find((item) => item.id === actor.characterId && item.alive);
+  const army = world.armies.find((item) => item.id === actor.goal.targetArmyId);
+  const polity = world.polities.find((item) => item.id === actor.goal.targetPolityId && item.alive);
+  if (!character || !army || !polity || army.deputyCommanderId !== character.id) return null;
+  const signals = preparationSignals(world, character, army.commanderId, army.id, turn, actor.supportActions);
+  let action: AgencySupportActionKind;
+  let targetKind: AgencySupportTargetKind;
+  let targetId: string;
+  let planAction: IndependentCommandPlanAction;
+  if (!signals.patronage || (signals.militarySupport && signals.familyBacking)) {
+    action = 'request_backing';
+    const commanderSupport = patronageValue(directedRelationship(world, army.commanderId, character.id));
+    const rulerSupport = patronageValue(directedRelationship(world, polity.rulerId, character.id));
+    if (commanderSupport >= rulerSupport || army.commanderId === polity.rulerId) {
+      targetKind = army.commanderId === polity.rulerId ? 'ruler' : 'commander';
+      targetId = army.commanderId;
+    } else {
+      targetKind = 'ruler';
+      targetId = polity.rulerId;
+    }
+    planAction = 'seek_patronage';
+  } else if (!signals.militarySupport) {
+    action = 'cultivate_military_support';
+    targetKind = 'army_officers';
+    targetId = army.id;
+    planAction = 'build_military_support';
+  } else {
+    const family = world.families.find((item) => item.id === character.familyId && item.active);
+    action = 'request_backing';
+    targetKind = 'family_head';
+    targetId = family?.headId ?? polity.rulerId;
+    planAction = 'seek_family_backing';
+  }
+  return {
+    actorId: character.id,
+    goalId: actor.goal.id,
+    planId: actor.plan.id,
+    planStepId: actor.plan.steps.find((step) => step.action === planAction)?.id
+      ?? `${actor.plan.id}:step:${planAction}`,
+    action,
+    attemptOrdinal: actor.supportAttemptOrdinal + 1,
+    targetKind,
+    targetId,
+    targetArmyId: army.id,
+    polityId: polity.id,
+  };
+}
+
+function resolveSupportAction(
+  world: WorldState,
+  context: AgencyDecisionTurnContext,
+  actorState: CharacterAgencyDecisionState,
+  action: AgencySupportTurnAction,
+  emit: EmitAgencyDecisionEvent,
+): CharacterAgencyDecisionState {
+  const actor = world.characters.find((item) => item.id === action.actorId && item.alive);
+  const army = world.armies.find((item) => item.id === action.targetArmyId);
+  const polity = world.polities.find((item) => item.id === action.polityId && item.alive);
+  if (!actor || !army || !polity) return actorState;
+  const targetCharacter = action.targetKind === 'army_officers'
+    ? undefined
+    : world.characters.find((item) => item.id === action.targetId && item.alive);
+  let relationship: RelationshipState | undefined;
+  let relationshipCreated = false;
+  if (targetCharacter && targetCharacter.id !== actor.id) {
+    const ensured = ensureAgencyRelationship(world, targetCharacter.id, actor.id);
+    relationship = ensured.relationship;
+    relationshipCreated = ensured.created;
+  }
+  const family = world.families.find((item) => item.id === actor.familyId && item.active);
+  const relationTrust = relationship?.trust ?? 0;
+  const familyWeight = action.targetKind === 'family_head'
+    ? (family?.prestige ?? 0) * 0.18 + (family?.politicalInfluence ?? 0) * 0.16
+    : 0;
+  const score = action.action === 'cultivate_military_support'
+    ? actor.leadership * 0.22 + actor.merit * 0.24 + actor.deputyExperience * 0.24
+      + actor.renown * 0.16 + army.morale * 0.14 - actor.insubordination * 0.08
+    : actor.loyalty * 0.2 + actor.influence * 0.2 + actor.merit * 0.12
+      + actor.cunning * 0.1 + relationTrust * 0.24 + familyWeight - actor.ambition * 0.08;
+  const outcome: AgencySupportOutcome = score >= 42 ? 'secured' : score >= 33 ? 'deferred' : 'refused';
+  const strength = clamp(score);
+  const deltas: StateDelta[] = [];
+  if (relationshipCreated && relationship) {
+    deltas.push({ entityType: 'relationship', entityId: relationship.id, field: 'created', before: false, after: true });
+  }
+  if (action.action === 'cultivate_military_support') {
+    const wealthBefore = actor.personalWealth;
+    actor.personalWealth = Math.max(0, actor.personalWealth - 1);
+    if (actor.personalWealth !== wealthBefore) deltas.push({
+      entityType: 'character', entityId: actor.id, field: 'personalWealth',
+      before: wealthBefore, after: actor.personalWealth, delta: actor.personalWealth - wealthBefore,
+    });
+    if (outcome === 'secured') {
+      const influenceBefore = actor.influence;
+      actor.influence = clamp(actor.influence + 3);
+      deltas.push({
+        entityType: 'character', entityId: actor.id, field: 'influence',
+        before: influenceBefore, after: actor.influence, delta: actor.influence - influenceBefore,
+      });
+    }
+  } else if (relationship) {
+    const trustBefore = relationship.trust;
+    const affinityBefore = relationship.affinity;
+    const grievanceBefore = relationship.grievance;
+    relationship.trust = outcome === 'secured'
+      ? Math.max(AGENCY_SUPPORT_THRESHOLD + 2, clamp(relationship.trust + 8))
+      : clamp(relationship.trust + (outcome === 'deferred' ? -1 : -5));
+    relationship.affinity = clamp(relationship.affinity + (outcome === 'secured' ? 4 : outcome === 'refused' ? -3 : 0));
+    relationship.grievance = clamp(relationship.grievance + (outcome === 'refused' ? 5 : 0));
+    for (const [field, before, after] of [
+      ['trust', trustBefore, relationship.trust],
+      ['affinity', affinityBefore, relationship.affinity],
+      ['grievance', grievanceBefore, relationship.grievance],
+    ] as const) {
+      if (before !== after) deltas.push({ entityType: 'relationship', entityId: relationship.id, field, before, after, delta: after - before });
+    }
+    if (outcome === 'secured' && action.targetKind === 'family_head' && family) {
+      const before = family.politicalInfluence;
+      family.politicalInfluence = clamp(family.politicalInfluence + 2);
+      if (before !== family.politicalInfluence) deltas.push({
+        entityType: 'family', entityId: family.id, field: 'politicalInfluence',
+        before, after: family.politicalInfluence, delta: family.politicalInfluence - before,
+      });
+    }
+  }
+  const targetLabel = action.targetKind === 'army_officers'
+    ? `${army.name}将校`
+    : targetCharacter?.name ?? (action.targetKind === 'family_head' ? '家主' : '上位者');
+  const resultCopy = outcome === 'secured' ? '答应相助' : outcome === 'deferred' ? '留待后议' : '没有应允';
+  const fact = emitSimulationFact(world, context, {
+    kind: 'agency_support_resolved',
+    category: action.targetKind === 'army_officers' ? '军事' : '政治',
+    importance: outcome === 'secured' ? 2 : 1,
+    actorIds: [actor.id, ...(targetCharacter && targetCharacter.id !== actor.id ? [targetCharacter.id] : [])],
+    polityIds: [polity.id],
+    regionIds: [army.regionId],
+    causes: [
+      { label: '独立统军之志', role: '结构', weight: 0.28, evidence: `${actor.name}正在为请领${army.name}军令作准备` },
+      { label: '人物选择', role: '选择', weight: 0.26, evidence: action.action === 'cultivate_military_support' ? `${actor.name}拿出时间与资财联络本军将校` : `${actor.name}亲自向${targetLabel}请求明确背书` },
+      { label: '回应条件', role: '条件', weight: 0.22, evidence: `履历、信任与处境合计为${Math.round(score)}` },
+      { label: '本次结果', role: '结果', weight: 0.24, evidence: `${targetLabel}${resultCopy}` },
+    ],
+    stateDeltas: deltas,
+    sourceFactIds: [...actorState.goal.sourceFactIds],
+    payload: {
+      actorId: actor.id,
+      goalId: actorState.goal.id,
+      planId: actorState.plan.id,
+      planStepId: action.planStepId,
+      action: action.action,
+      attemptOrdinal: action.attemptOrdinal,
+      targetKind: action.targetKind,
+      targetId: action.targetId,
+      targetArmyId: army.id,
+      polityId: polity.id,
+      outcome,
+      strength,
+      retryAfterTurn: outcome === 'secured' ? null : context.turn + (outcome === 'deferred' ? 2 : 4),
+    },
+  }) as Extract<SimulationFact, { kind: 'agency_support_resolved' }>;
+  const eventKind = action.action === 'cultivate_military_support'
+    ? outcome === 'secured' ? 'military_support_secured' : 'military_support_attempted'
+    : outcome === 'secured' ? 'backing_secured' : 'backing_request_unsuccessful';
+  const event = emit({
+    category: action.targetKind === 'army_officers' ? '军事' : '政治',
+    kind: eventKind,
+    title: action.action === 'cultivate_military_support'
+      ? outcome === 'secured' ? `${actor.name}赢得${army.name}将校支持` : `${actor.name}联络${army.name}将校未成`
+      : outcome === 'secured' ? `${targetLabel}答应为${actor.name}背书` : `${targetLabel}未替${actor.name}背书`,
+    summary: action.action === 'cultivate_military_support'
+      ? `${actor.name}为独立统军联络${army.name}将校，付出一季心力与少量资财；${outcome === 'secured' ? '军中已有一批人愿意响应。' : outcome === 'deferred' ? '将校仍在观望。' : '将校没有形成可用支持。'}`
+      : `${actor.name}为请领${army.name}军令向${targetLabel}开口，${resultCopy}；这次回应已经进入双方关系与军令审查。`,
+    importance: outcome === 'secured' ? 2 : 1,
+    actorIds: [actor.id, ...(targetCharacter && targetCharacter.id !== actor.id ? [targetCharacter.id] : [])],
+    polityIds: [polity.id],
+    regionIds: [army.regionId],
+    causes: fact.causes,
+    stateDeltas: deltas,
+    sourceFactIds: [fact.id],
+  });
+  if (relationship) {
+    rememberAgencyInteraction(
+      world,
+      relationship,
+      context.turn,
+      outcome === 'secured' ? '提携' : outcome === 'refused' ? '竞争' : '恩义',
+      outcome === 'secured' ? 12 : outcome === 'refused' ? -8 : 2,
+      `${targetLabel}${resultCopy}，所涉为${actor.name}请领${army.name}军令之事。`,
+      event.id,
+    );
+  }
+  appendBiography(actor, event, action.action === 'cultivate_military_support'
+    ? outcome === 'secured' ? '赢得将校支持' : '联络将校未成'
+    : outcome === 'secured' ? '获人背书' : '求取背书未果');
+  const supportState: AgencySupportActionState = {
+    id: supportActionId(actorState.goal, action.action, action.attemptOrdinal),
+    action: action.action,
+    attemptOrdinal: action.attemptOrdinal,
+    targetKind: action.targetKind,
+    targetId: action.targetId,
+    performedTurn: context.turn,
+    outcome,
+    strength,
+    sourceFactId: fact.id,
+    sourceEventId: event.id,
+  };
+  const supportActions = [...actorState.supportActions, supportState].slice(-MAX_AGENCY_SUPPORT_ACTIONS);
+  const nextEligibleSupportTurn = fact.payload.retryAfterTurn ?? context.turn + 4;
+  const signals = preparationSignals(world, actor, army.commanderId, army.id, context.turn, supportActions);
+  return {
+    ...actorState,
+    supportActions,
+    supportAttemptOrdinal: action.attemptOrdinal,
+    nextEligibleSupportTurn,
+    plan: buildPlan(actorState.goal, signals, actorState.attemptOrdinal, actorState.nextEligibleIntentTurn, context.turn),
+  };
+}
+
 function intentFor(
   world: WorldState,
   actor: CharacterAgencyDecisionState,
@@ -543,6 +899,13 @@ function intentFor(
   const army = world.armies.find((item) => item.id === actor.goal.targetArmyId);
   const polity = world.polities.find((item) => item.id === actor.goal.targetPolityId && item.alive);
   if (!request || !army || !polity || army.deputyCommanderId !== actor.characterId) return null;
+  const securedSupportFactId = actor.supportActions
+    .filter((action) => action.outcome === 'secured')
+    .at(-1)?.sourceFactId;
+  const historicalSources = uniqueStable(
+    actor.goal.sourceFactIds,
+    MAX_AGENCY_GOAL_SOURCE_FACTS - (securedSupportFactId ? 1 : 0),
+  );
   return {
     actorId: actor.characterId,
     goalId: actor.goal.id,
@@ -555,7 +918,9 @@ function intentFor(
     polityId: army.polityId,
     currentCommanderId: army.commanderId,
     appointingAuthorityId: polity.rulerId,
-    sourceFactIds: actor.goal.sourceFactIds,
+    sourceFactIds: securedSupportFactId
+      ? [...historicalSources, securedSupportFactId].sort(stableCompare)
+      : historicalSources,
     submittedFactId: null,
     resolvedFactId: null,
   };
@@ -714,6 +1079,13 @@ function resolveIntent(
     outcome = 'executed';
     reasonCode = 'command_granted';
   }
+  const institutionResponse: Extract<SimulationFact, { kind: 'agency_intent_resolved' }>['payload']['institutionResponse'] = outcome === 'executed'
+    ? 'command_granted'
+    : outcome === 'rejected' && reasonCode === 'court_risk'
+      ? 'curbed'
+      : outcome === 'rejected' && reasonCode === 'claim_weaker'
+        ? 'appeased'
+        : 'none';
   const deltas: StateDelta[] = [];
   if (outcome === 'executed' && actor && commander && army) {
     deltas.push(
@@ -728,6 +1100,38 @@ function resolveIntent(
     actor.locationRegionId = army.regionId;
     commander.commandingArmyId = null;
     commander.locationRegionId = army.regionId;
+  } else if (institutionResponse === 'appeased' && actor) {
+    const influenceBefore = actor.influence;
+    const loyaltyBefore = actor.loyalty;
+    actor.influence = clamp(actor.influence + 4);
+    actor.loyalty = clamp(actor.loyalty + 3);
+    deltas.push(
+      {
+        entityType: 'character', entityId: actor.id, field: 'influence',
+        before: influenceBefore, after: actor.influence, delta: actor.influence - influenceBefore,
+      },
+      {
+        entityType: 'character', entityId: actor.id, field: 'loyalty',
+        before: loyaltyBefore, after: actor.loyalty, delta: actor.loyalty - loyaltyBefore,
+      },
+    );
+  } else if (institutionResponse === 'curbed' && actor && army) {
+    const influenceBefore = actor.influence;
+    const insubordinationBefore = actor.insubordination;
+    army.deputyCommanderId = null;
+    actor.influence = clamp(actor.influence - 8);
+    actor.insubordination = clamp(actor.insubordination + 10);
+    deltas.push(
+      { entityType: 'army', entityId: army.id, field: 'deputyCommanderId', before: actor.id, after: null },
+      {
+        entityType: 'character', entityId: actor.id, field: 'influence',
+        before: influenceBefore, after: actor.influence, delta: actor.influence - influenceBefore,
+      },
+      {
+        entityType: 'character', entityId: actor.id, field: 'insubordination',
+        before: insubordinationBefore, after: actor.insubordination, delta: actor.insubordination - insubordinationBefore,
+      },
+    );
   }
   const submittedFactId = intent.submittedFactId;
   if (!submittedFactId) throw new Error('Agency intent must be submitted before resolution');
@@ -775,7 +1179,8 @@ function resolveIntent(
       appointingAuthorityId: intent.appointingAuthorityId,
       outcome,
       reasonCode,
-      retryAfterTurn: outcome === 'executed' || outcome === 'invalidated'
+      institutionResponse,
+      retryAfterTurn: outcome === 'executed' || outcome === 'invalidated' || institutionResponse === 'curbed'
         ? null
         : context.turn + (outcome === 'deferred' ? 4 : 8),
       checks,
@@ -786,6 +1191,10 @@ function resolveIntent(
   intent.resolvedFactId = resolution.id;
   const eventKind = outcome === 'executed'
     ? 'deputy_promoted'
+    : institutionResponse === 'curbed'
+      ? 'command_request_curbed'
+      : institutionResponse === 'appeased'
+        ? 'command_request_appeased'
     : outcome === 'deferred'
       ? 'command_request_deferred'
       : outcome === 'rejected'
@@ -827,9 +1236,17 @@ function resolveIntent(
         ? `${actor.name}升任${army.name}主帅`
         : requestExhausted
           ? `${labelActor?.name ?? '该副将'}暂搁独立统军之请`
+        : institutionResponse === 'curbed'
+          ? `${labelActor?.name ?? '该副将'}请令未准并遭削权`
+          : institutionResponse === 'appeased'
+            ? `${labelActor?.name ?? '该副将'}请令未准，朝廷另作安抚`
           : `${labelActor?.name ?? '该副将'}所请独立军令${outcomeCopy}`,
       summary: outcome === 'executed' && actor && commander && army
         ? `${actor.name}循军中履历递交独立军令请求，经职位、支持与风险审查后获准；${commander.name}退居副将。`
+        : institutionResponse === 'curbed'
+          ? `${labelActor?.name ?? '该副将'}的请令被朝廷视为军权风险，军令未予授下，其${army?.name ?? '本军'}副将之职也被撤去。`
+          : institutionResponse === 'appeased'
+            ? `${labelActor?.name ?? '该副将'}尚不足以取代现任主帅；朝廷未授军令，但以名位与礼遇安抚，避免此议立即转为离心。`
         : `${labelActor?.name ?? '该副将'}提出独立统军请求，经军中履历、上位者支持或家门背书、朝廷风险审查后${eventOutcomeCopy}。`,
       importance: outcome === 'executed' ? 4 : outcome === 'rejected' ? 2 : 1,
       actorIds: [intent.actorId, intent.currentCommanderId, intent.appointingAuthorityId],
@@ -845,6 +1262,10 @@ function resolveIntent(
           weight: 0.28,
           evidence: outcome === 'executed'
             ? `${labelCommander?.name ?? '前任主帅'}退居副将，${labelActor?.name ?? '申请人'}接掌${army?.name ?? '该军团'}`
+            : institutionResponse === 'curbed'
+              ? `${labelActor?.name ?? '申请人'}失去${army?.name ?? '该军团'}副将之职，影响下降而抗命心上升`
+              : institutionResponse === 'appeased'
+                ? `${labelActor?.name ?? '申请人'}未得军令，但获得礼遇与名位安抚`
             : eventOutcomeCopy,
         },
       ],
@@ -854,6 +1275,11 @@ function resolveIntent(
   if (outcome === 'executed' && actor && commander && army) {
     context.appointmentSourceFactIdsByArmyId[army.id] = resolution.id;
     recordExecutedCommandConsequences(world, actor, commander, event, endedDeputyDuties);
+  } else if (institutionResponse === 'curbed' && actor && army) {
+    context.appointmentSourceFactIdsByArmyId[army.id] = resolution.id;
+    appendBiography(actor, event, '请令未准并遭削权');
+  } else if (institutionResponse === 'appeased' && actor) {
+    appendBiography(actor, event, '请令未准后受安抚');
   }
   return resolution;
 }
@@ -868,6 +1294,7 @@ function applyResolutionToActor(
     && resolution.payload.outcome !== 'invalidated';
   const terminal = resolution.payload.outcome === 'executed'
     || resolution.payload.outcome === 'invalidated'
+    || resolution.payload.institutionResponse === 'curbed'
     || requestExhausted;
   const goal: AgencyDecisionGoalState = terminal
     ? {
@@ -876,6 +1303,8 @@ function applyResolutionToActor(
         resolvedTurn: turn,
         closureReason: resolution.payload.outcome === 'executed'
           ? 'command_obtained'
+          : resolution.payload.institutionResponse === 'curbed'
+            ? 'position_lost'
           : requestExhausted
             ? 'request_exhausted'
             : 'position_lost',
@@ -890,6 +1319,8 @@ function applyResolutionToActor(
         evidence: step.action === 'request_independent_command'
           ? resolution.payload.outcome === 'executed'
             ? '独立军令已经获准并实际生效'
+            : resolution.payload.institutionResponse === 'curbed'
+              ? '请令未准且副将之职被撤，这项打算已经失去职位基础'
             : requestExhausted
               ? '三次正式请求均未获准，这项打算暂且搁置'
             : '原有请求资格已经消失'
@@ -942,6 +1373,17 @@ export function processAgencyDecisionSystem(
   }
   let actors = reviewDecisionState(world, context.turn);
   const actorById = new Map(actors.map((actor) => [actor.characterId, actor]));
+  const supportActions = actors
+    .map((actor) => supportActionFor(world, actor, context.turn))
+    .filter((action): action is AgencySupportTurnAction => Boolean(action))
+    .sort((left, right) => stableCompare(left.actorId, right.actorId))
+    .slice(0, MAX_AGENCY_SUPPORT_ACTIONS_PER_TURN);
+  for (const action of supportActions) {
+    const actorState = actorById.get(action.actorId);
+    if (!actorState) continue;
+    actorById.set(action.actorId, resolveSupportAction(world, context, actorState, action, emit));
+  }
+  actors = actors.map((actor) => actorById.get(actor.characterId) ?? actor);
   const polityCommandGranted = new Set<string>();
   const intents = actors
     .map((actor) => intentFor(world, actor))
@@ -967,7 +1409,7 @@ export function processAgencyDecisionSystem(
         : [],
       causes: [
         { label: '独立统军目标', role: '结构', weight: 0.32, evidence: `这项打算已经持续${Math.max(1, context.turn - intent.goalCreatedTurn + 1)}季` },
-        { label: '准备进展', role: '条件', weight: 0.28, evidence: '战功之外的提携、军中支持与家门背书至少已有两项' },
+        { label: '准备进展', role: '条件', weight: 0.28, evidence: '战功之外至少已有两项支持，且其中一项来自本次目标下的实际联络或背书' },
         { label: '人物选择', role: '选择', weight: 0.22, evidence: `第${intent.attemptOrdinal}次正式提出请求` },
         { label: '请求入册', role: '结果', weight: 0.18, evidence: '请求进入本季军令裁决队列' },
       ],
@@ -1027,6 +1469,46 @@ export function validateAgencyDecisionSystemState(world: WorldState): readonly s
     }
     if (!Number.isSafeInteger(actor.attemptOrdinal) || actor.attemptOrdinal < 0 || actor.attemptOrdinal > MAX_AGENCY_INTENT_ATTEMPTS) {
       messages.push(`${actor.characterId}的意图尝试次数无效`);
+    }
+    if (!Array.isArray(actor.supportActions)
+      || actor.supportActions.length > MAX_AGENCY_SUPPORT_ACTIONS
+      || !Number.isSafeInteger(actor.supportAttemptOrdinal)
+      || actor.supportAttemptOrdinal < 0
+      || !Number.isSafeInteger(actor.nextEligibleSupportTurn)
+      || actor.nextEligibleSupportTurn < actor.goal.createdTurn) {
+      messages.push(`${actor.characterId}的支持行动账户无效`);
+    } else {
+      const supportIds = new Set<string>();
+      for (const [index, action] of actor.supportActions.entries()) {
+        const fact = facts.get(action.sourceFactId);
+        if (supportIds.has(action.id)
+          || action.id !== supportActionId(actor.goal, action.action, action.attemptOrdinal)
+          || action.attemptOrdinal <= 0
+          || action.attemptOrdinal > actor.supportAttemptOrdinal
+          || (index > 0 && action.attemptOrdinal <= (actor.supportActions[index - 1]?.attemptOrdinal ?? 0))
+          || action.performedTurn < actor.goal.createdTurn
+          || action.performedTurn > actor.lastReviewedTurn
+          || action.strength < 0
+          || action.strength > 100
+          || fact?.kind !== 'agency_support_resolved'
+          || fact.payload.actorId !== actor.characterId
+          || fact.payload.goalId !== actor.goal.id
+          || fact.payload.planId !== actor.plan.id
+          || fact.payload.action !== action.action
+          || fact.payload.attemptOrdinal !== action.attemptOrdinal
+          || fact.payload.targetKind !== action.targetKind
+          || fact.payload.targetId !== action.targetId
+          || fact.payload.outcome !== action.outcome
+          || fact.payload.strength !== action.strength
+          || fact.turn !== action.performedTurn) {
+          messages.push(`${actor.characterId}的支持行动${action.id}引用无效`);
+        }
+        supportIds.add(action.id);
+      }
+      const latestSupport = actor.supportActions.at(-1);
+      if (latestSupport && latestSupport.attemptOrdinal !== actor.supportAttemptOrdinal) {
+        messages.push(`${actor.characterId}的支持行动序号不连续`);
+      }
     }
     if (!Number.isSafeInteger(actor.nextEligibleIntentTurn) || actor.nextEligibleIntentTurn < actor.goal.createdTurn) {
       messages.push(`${actor.characterId}的再议时间无效`);

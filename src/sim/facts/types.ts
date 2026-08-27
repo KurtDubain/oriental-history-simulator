@@ -15,6 +15,7 @@ export type SimulationFactKind =
   | 'appointment_ended'
   | 'character_death'
   | 'marriage'
+  | 'agency_support_resolved'
   | 'agency_intent_submitted'
   | 'agency_intent_resolved'
   | 'situation_milestone';
@@ -114,6 +115,26 @@ export interface MarriageFactPayload {
   diplomatic: boolean;
 }
 
+export type AgencySupportActionKind = 'cultivate_military_support' | 'request_backing';
+export type AgencySupportTargetKind = 'army_officers' | 'commander' | 'ruler' | 'family_head';
+export type AgencySupportOutcome = 'secured' | 'deferred' | 'refused';
+
+export interface AgencySupportResolvedFactPayload {
+  actorId: string;
+  goalId: string;
+  planId: string;
+  planStepId: string;
+  action: AgencySupportActionKind;
+  attemptOrdinal: number;
+  targetKind: AgencySupportTargetKind;
+  targetId: string;
+  targetArmyId: string;
+  polityId: string;
+  outcome: AgencySupportOutcome;
+  strength: number;
+  retryAfterTurn: number | null;
+}
+
 export interface AgencyIntentSubmittedFactPayload {
   actorId: string;
   goalId: string;
@@ -168,6 +189,7 @@ export interface AgencyIntentResolvedFactPayload {
   appointingAuthorityId: string;
   outcome: AgencyIntentResolutionOutcome;
   reasonCode: AgencyIntentResolutionReason;
+  institutionResponse: 'command_granted' | 'appeased' | 'curbed' | 'none';
   retryAfterTurn: number | null;
   checks: AgencyIntentResolutionCheck[];
   decisionScore: number;
@@ -210,6 +232,7 @@ export type AppointmentStartedFact = SimulationFactBase<'appointment_started', A
 export type AppointmentEndedFact = SimulationFactBase<'appointment_ended', AppointmentFactPayload>;
 export type CharacterDeathFact = SimulationFactBase<'character_death', CharacterDeathFactPayload>;
 export type MarriageFact = SimulationFactBase<'marriage', MarriageFactPayload>;
+export type AgencySupportResolvedFact = SimulationFactBase<'agency_support_resolved', AgencySupportResolvedFactPayload>;
 export type AgencyIntentSubmittedFact = SimulationFactBase<'agency_intent_submitted', AgencyIntentSubmittedFactPayload>;
 export type AgencyIntentResolvedFact = SimulationFactBase<'agency_intent_resolved', AgencyIntentResolvedFactPayload>;
 export type SituationMilestoneFact = SimulationFactBase<'situation_milestone', SituationMilestoneFactPayload>;
@@ -223,6 +246,7 @@ export type SimulationFact =
   | AppointmentEndedFact
   | CharacterDeathFact
   | MarriageFact
+  | AgencySupportResolvedFact
   | AgencyIntentSubmittedFact
   | AgencyIntentResolvedFact
   | SituationMilestoneFact;

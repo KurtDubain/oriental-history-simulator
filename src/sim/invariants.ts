@@ -7,6 +7,7 @@ import {
   MAX_AGENCY_GOAL_SOURCE_FACTS,
   MAX_AGENCY_INTENT_ATTEMPTS,
   MAX_AGENCY_INTENTS_PER_TURN,
+  MAX_AGENCY_SUPPORT_ACTIONS,
   validateAgencyDecisionSystemState,
 } from './agency/decision';
 import type { SituationRecentChange } from './situations/types';
@@ -213,12 +214,32 @@ function sourceFactMentionsDeputy(
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
     return fact.payload.holderId === actorId && fact.payload.armyId === armyId;
   }
+  if (fact.kind === 'agency_support_resolved') {
+    return fact.payload.actorId === actorId && fact.payload.targetArmyId === armyId;
+  }
   return false;
 }
 
 function agencyResolutionDeltasAreExact(fact: AgencyIntentResolvedFact): boolean {
   const payload = fact.payload;
-  if (payload.outcome !== 'executed') return fact.stateDeltas.length === 0;
+  if (payload.institutionResponse === 'appeased') {
+    if (payload.outcome !== 'rejected' || payload.reasonCode !== 'claim_weaker' || fact.stateDeltas.length !== 2) return false;
+    const influence = fact.stateDeltas.find((delta) => delta.entityType === 'character' && delta.entityId === payload.actorId && delta.field === 'influence');
+    const loyalty = fact.stateDeltas.find((delta) => delta.entityType === 'character' && delta.entityId === payload.actorId && delta.field === 'loyalty');
+    return typeof influence?.before === 'number' && typeof influence.after === 'number' && influence.after >= influence.before
+      && typeof loyalty?.before === 'number' && typeof loyalty.after === 'number' && loyalty.after >= loyalty.before;
+  }
+  if (payload.institutionResponse === 'curbed') {
+    if (payload.outcome !== 'rejected' || payload.reasonCode !== 'court_risk' || fact.stateDeltas.length !== 3) return false;
+    const deputy = fact.stateDeltas.find((delta) => delta.entityType === 'army' && delta.entityId === payload.targetArmyId && delta.field === 'deputyCommanderId');
+    const influence = fact.stateDeltas.find((delta) => delta.entityType === 'character' && delta.entityId === payload.actorId && delta.field === 'influence');
+    const insubordination = fact.stateDeltas.find((delta) => delta.entityType === 'character' && delta.entityId === payload.actorId && delta.field === 'insubordination');
+    return deputy?.before === payload.actorId && deputy.after === null
+      && typeof influence?.before === 'number' && typeof influence.after === 'number' && influence.after <= influence.before
+      && typeof insubordination?.before === 'number' && typeof insubordination.after === 'number' && insubordination.after >= insubordination.before;
+  }
+  if (payload.outcome !== 'executed') return payload.institutionResponse === 'none' && fact.stateDeltas.length === 0;
+  if (payload.institutionResponse !== 'command_granted') return false;
   return stableHash(fact.stateDeltas) === stableHash([
     {
       entityType: 'army',
@@ -289,21 +310,23 @@ function agencyResolutionReasonIsCoherent(fact: AgencyIntentResolvedFact): boole
   const resource = checks.get('resource')?.passed === true;
   const relationship = checks.get('relationship')?.passed === true;
   const risk = checks.get('risk')?.passed === true;
-  if (payload.outcome === 'invalidated' && payload.reasonCode === 'permission_lost') return !permission;
+  if (payload.outcome === 'invalidated' && payload.reasonCode === 'permission_lost') return !permission && payload.institutionResponse === 'none';
   if (payload.outcome === 'deferred' && payload.reasonCode === 'insufficient_record') {
-    return permission && !resource;
+    return permission && !resource && payload.institutionResponse === 'none';
   }
   if (payload.outcome === 'deferred' && payload.reasonCode === 'insufficient_support') {
-    return permission && resource && !relationship;
+    return permission && resource && !relationship && payload.institutionResponse === 'none';
   }
   if (payload.outcome === 'deferred' && payload.reasonCode === 'competing_request') {
-    return permission && resource && relationship;
+    return permission && resource && relationship && payload.institutionResponse === 'none';
   }
   if (payload.outcome === 'rejected' && payload.reasonCode === 'court_risk') {
-    return permission && resource && relationship && !risk;
+    return permission && resource && relationship && !risk
+      && (payload.institutionResponse === 'curbed' || payload.institutionResponse === 'none');
   }
   if (payload.outcome === 'rejected' && payload.reasonCode === 'claim_weaker') {
-    return permission && resource && relationship && risk && payload.decisionScore < payload.decisionThreshold;
+    return permission && resource && relationship && risk && payload.decisionScore < payload.decisionThreshold
+      && (payload.institutionResponse === 'appeased' || payload.institutionResponse === 'none');
   }
   return payload.outcome === 'executed'
     && payload.reasonCode === 'command_granted'
@@ -311,6 +334,7 @@ function agencyResolutionReasonIsCoherent(fact: AgencyIntentResolvedFact): boole
     && resource
     && relationship
     && risk
+    && payload.institutionResponse === 'command_granted'
     && payload.decisionScore >= payload.decisionThreshold;
 }
 
@@ -325,6 +349,9 @@ function validateAgencyDecisionStateFromReferences(
       referenceFactIds.add(factId);
     }
     if (actor.lastResolutionFactId) referenceFactIds.add(actor.lastResolutionFactId);
+    for (const action of actor.supportActions.slice(0, MAX_AGENCY_SUPPORT_ACTIONS + 1)) {
+      referenceFactIds.add(action.sourceFactId);
+    }
   }
   const referencedFacts: SimulationFact[] = [];
   for (const factId of referenceFactIds) {
@@ -543,7 +570,7 @@ function validateAgencyIntentArchive(
     if (!checksValid) {
       push(violations, code('checks'), `${resolution.id}的资格、资源、关系或风险检查无效`, resolution.id);
     }
-    const retryValid = payload.outcome === 'executed' || payload.outcome === 'invalidated'
+    const retryValid = payload.outcome === 'executed' || payload.outcome === 'invalidated' || payload.institutionResponse === 'curbed'
       ? payload.retryAfterTurn === null
       : payload.retryAfterTurn === resolution.turn + (payload.outcome === 'deferred' ? 4 : 8);
     if (!Number.isSafeInteger(payload.decisionScore)
@@ -559,6 +586,10 @@ function validateAgencyIntentArchive(
 
     const expectedEventKind = payload.outcome === 'executed'
       ? 'deputy_promoted'
+      : payload.institutionResponse === 'curbed'
+        ? 'command_request_curbed'
+        : payload.institutionResponse === 'appeased'
+          ? 'command_request_appeased'
       : payload.outcome === 'deferred'
         ? 'command_request_deferred'
         : payload.outcome === 'rejected'
@@ -850,7 +881,7 @@ function validateRuntimeFact(
   }
 }
 
-function authoritativeTransientArmyIds(
+export function authoritativeTransientArmyIds(
   appendedFacts: readonly SimulationFact[],
   appendedEvents: readonly HistoryEvent[],
 ): ReadonlySet<string> {
@@ -1003,11 +1034,15 @@ export function validateTurnRuntime(
       && resolution.payload.outcome !== 'invalidated';
     const expectedGoalStatus = resolution.payload.outcome === 'executed'
       ? 'achieved'
-      : resolution.payload.outcome === 'invalidated' || requestExhausted
+      : resolution.payload.outcome === 'invalidated'
+        || resolution.payload.institutionResponse === 'curbed'
+        || requestExhausted
         ? 'invalidated'
         : 'active';
     const expectedClosureReason = resolution.payload.outcome === 'executed'
       ? 'command_obtained'
+      : resolution.payload.institutionResponse === 'curbed'
+        ? 'position_lost'
       : requestExhausted
         ? 'request_exhausted'
         : resolution.payload.outcome === 'invalidated'

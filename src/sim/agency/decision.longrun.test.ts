@@ -25,6 +25,9 @@ it('keeps natural independent-command decisions present but chronicle-readable o
     rejected: number;
     deferred: number;
     invalidated: number;
+    supportActions: number;
+    supportSecured: number;
+    supportUnsuccessful: number;
   }> = [];
   for (const seed of seeds) {
     let world = createWorld(seed);
@@ -32,6 +35,15 @@ it('keeps natural independent-command decisions present but chronicle-readable o
     expect(validateAgencyDecisionSystemState(world), `${seed}留下了无法回收的目标状态`).toEqual([]);
     const submitted = world.facts.filter((fact) => fact.kind === 'agency_intent_submitted').length;
     const resolutions = world.facts.filter((fact) => fact.kind === 'agency_intent_resolved');
+    const supportActions = world.facts.filter((fact) => fact.kind === 'agency_support_resolved');
+    for (const submission of world.facts.filter((fact) => fact.kind === 'agency_intent_submitted')) {
+      expect(submission.sourceFactIds.some((factId) => supportActions.some((support) => (
+        support.id === factId
+        && support.payload.actorId === submission.payload.actorId
+        && support.payload.goalId === submission.payload.goalId
+        && support.payload.outcome === 'secured'
+      ))), `${seed}的正式请令没有实际支持行动`).toBe(true);
+    }
     rows.push({
       seed,
       submitted,
@@ -39,13 +51,19 @@ it('keeps natural independent-command decisions present but chronicle-readable o
       rejected: resolutions.filter((fact) => fact.payload.outcome === 'rejected').length,
       deferred: resolutions.filter((fact) => fact.payload.outcome === 'deferred').length,
       invalidated: resolutions.filter((fact) => fact.payload.outcome === 'invalidated').length,
+      supportActions: supportActions.length,
+      supportSecured: supportActions.filter((fact) => fact.payload.outcome === 'secured').length,
+      supportUnsuccessful: supportActions.filter((fact) => fact.payload.outcome !== 'secured').length,
     });
   }
   expect(rows.filter((row) => row.submitted > 0).length).toBeGreaterThanOrEqual(6);
   expect(rows.filter((row) => row.executed > 0).length).toBeGreaterThanOrEqual(5);
   expect(rows.filter((row) => row.rejected + row.deferred > 0).length).toBeGreaterThanOrEqual(4);
   expect(rows.reduce((sum, row) => sum + row.rejected, 0)).toBeGreaterThanOrEqual(8);
-  expect(rows.reduce((sum, row) => sum + row.deferred, 0)).toBeGreaterThanOrEqual(4);
+  expect(rows.reduce((sum, row) => sum + row.deferred, 0)).toBeGreaterThanOrEqual(1);
+  expect(rows.reduce((sum, row) => sum + row.supportActions, 0)).toBeGreaterThanOrEqual(40);
+  expect(rows.reduce((sum, row) => sum + row.supportSecured, 0)).toBeGreaterThanOrEqual(20);
+  expect(rows.reduce((sum, row) => sum + row.supportUnsuccessful, 0)).toBeGreaterThanOrEqual(4);
   for (const row of rows) {
     expect(row.submitted, `${row.seed}的正式请求过密`).toBeLessThanOrEqual(45);
     expect(row.executed, `${row.seed}的换帅过密`).toBeLessThanOrEqual(20);

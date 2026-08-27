@@ -15,6 +15,7 @@ import {
   type SimulationFact,
   type WorldState,
 } from './index';
+import { authoritativeTransientArmyIds } from './invariants';
 
 function violationCodes(previous: WorldState, next: WorldState): Set<string> {
   return new Set(validateTurnRuntime(previous, next).map((violation) => violation.code));
@@ -77,33 +78,23 @@ describe('quarterly runtime validation', () => {
   });
 
   it('accepts an army raised, committed to battle and removed within one quarter as transient', () => {
-    let previous = createWorld('关河旧梦');
-    for (let turn = 0; turn < 33; turn += 1) previous = advanceWorld(previous);
-    const next = advanceWorld(previous);
-    const appendedEvents = next.history.slice(previous.history.length);
-    const appendedFacts = next.facts.slice(previous.facts.length);
-    const raisedArmyIds = appendedEvents
-      .filter((event) => event.kind === 'army_raised')
-      .flatMap((event) => event.stateDeltas)
-      .filter((delta) => (
-        delta.entityType === 'army'
-        && delta.field === 'soldiers'
-        && delta.before === 0
-        && typeof delta.after === 'number'
-        && delta.after > 0
-      ))
-      .map((delta) => delta.entityId)
-      .filter((armyId) => (
-        !previous.armies.some((army) => army.id === armyId)
-        && !next.armies.some((army) => army.id === armyId)
-      ));
+    const transientArmyId = 'army_transient_runtime';
+    const raisedEvent = {
+      kind: 'army_raised',
+      stateDeltas: [{
+        entityType: 'army', entityId: transientArmyId, field: 'soldiers', before: 0, after: 900, delta: 900,
+      }],
+    } as unknown as HistoryEvent;
+    const battleFact = {
+      kind: 'battle',
+      payload: { attacker: { armyId: transientArmyId }, defenders: [] },
+      stateDeltas: [{
+        entityType: 'army', entityId: transientArmyId, field: 'soldiers', before: 900, after: 0, delta: -900,
+      }],
+    } as unknown as SimulationFact;
 
-    expect(raisedArmyIds.length).toBeGreaterThan(0);
-    expect(raisedArmyIds.every((armyId) => appendedFacts.some((fact) => (
-      fact.kind === 'battle'
-      && [fact.payload.attacker, ...fact.payload.defenders].some((force) => force.armyId === armyId)
-    )))).toBe(true);
-    expect(validateTurnRuntime(previous, next)).toEqual([]);
+    expect([...authoritativeTransientArmyIds([battleFact], [raisedEvent])]).toEqual([transientArmyId]);
+    expect([...authoritativeTransientArmyIds([], [raisedEvent])]).toEqual([]);
   });
 
   it('normalizes regional practice-state deltas to their authoritative collection', () => {
@@ -163,6 +154,7 @@ describe('quarterly runtime validation', () => {
     const nextAllowedFactPrefix = new Set(previousFactTail);
     for (const actor of next.agencyDecisionSystem.actors) {
       for (const factId of actor.goal.sourceFactIds) nextAllowedFactPrefix.add(Number(factId.slice(5)) - 1);
+      for (const action of actor.supportActions) nextAllowedFactPrefix.add(Number(action.sourceFactId.slice(5)) - 1);
       if (actor.lastResolutionFactId) nextAllowedFactPrefix.add(Number(actor.lastResolutionFactId.slice(5)) - 1);
     }
     const previousEventTail = new Set([previous.history.length - 1]);

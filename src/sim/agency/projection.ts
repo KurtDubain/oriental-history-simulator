@@ -319,7 +319,7 @@ const PLAN_LABELS: Readonly<Record<AgencyPlanAction, string>> = {
   reduce_exposure: '降低眼下风险',
   serve_ruler: '履行对主君的职责',
   study_practice: '学习并实际运用一门技艺',
-  gather_evidence: '收集旧怨的证据与支持',
+  gather_evidence: '查明隐患，争取同道',
   seek_redress: '寻求申诉或追责',
 };
 

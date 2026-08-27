@@ -8,6 +8,7 @@ import {
   deserializeWorld,
   emitSimulationFact,
   getDateForTurn,
+  reducePersonalMemorySystem,
   serializeWorld,
   stableHash,
   type HistoryEvent,
@@ -215,6 +216,7 @@ describe('C10/C11 authoritative agency decision core', () => {
     const submitted = context.facts.find((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_submitted' }> => fact.kind === 'agency_intent_submitted');
     const resolved = context.facts.find((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_resolved' }> => fact.kind === 'agency_intent_resolved');
     expect(submitted?.sourceFactIds).toContain(evidenceId);
+    expect(submitted?.sourceFactIds).toContain(context.facts.find((fact) => fact.kind === 'agency_support_resolved')?.id);
     expect(resolved?.sourceFactIds).toEqual([submitted?.id]);
     expect(resolved?.payload.outcome).toBe('executed');
     expect(resolved?.stateDeltas).toHaveLength(4);
@@ -223,7 +225,7 @@ describe('C10/C11 authoritative agency decision core', () => {
     expect(context.agencyIntents).toHaveLength(1);
     expect(context.agencyIntents[0]).toMatchObject({ submittedFactId: submitted?.id, resolvedFactId: resolved?.id });
     expect(context.events.find((event) => event.kind === 'deputy_promoted')?.sourceFactIds).toEqual([submitted?.id, resolved?.id].sort());
-    expect(stableHash(world.relationships)).toBe(relationshipsBefore);
+    expect(stableHash(world.relationships)).not.toBe(relationshipsBefore);
     expect(world.counters.relationship).toBe(relationshipCounterBefore);
 
     syncOfficeAppointments(world, context.turn, context);
@@ -250,12 +252,46 @@ describe('C10/C11 authoritative agency decision core', () => {
     expect(submitted).toBeDefined();
     expect(resolved?.payload.outcome).toBe('rejected');
     expect(resolved?.payload.reasonCode).toBe('claim_weaker');
-    expect(resolved?.stateDeltas).toEqual([]);
+    expect(resolved?.payload.institutionResponse).toBe('appeased');
+    expect(resolved?.stateDeltas.map((delta) => delta.field)).toEqual(['influence', 'loyalty']);
     expect(world.armies.find((army) => army.id === armyId)).toMatchObject({ commanderId, deputyCommanderId: deputyId });
-    expect(context.events.find((event) => event.kind === 'command_request_rejected')?.sourceFactIds).toEqual([submitted?.id, resolved?.id].sort());
+    expect(context.events.find((event) => event.kind === 'command_request_appeased')?.sourceFactIds).toEqual([submitted?.id, resolved?.id].sort());
     const actor = world.agencyDecisionSystem.actors.find((item) => item.characterId === deputyId);
     expect(actor?.attemptOrdinal).toBe(1);
     expect(actor?.nextEligibleIntentTurn).toBe(context.turn + 8);
+
+    world.agencySystem = reducePersonalMemorySystem(world, context.turn, context.facts);
+    const memoryKinds = world.agencySystem.characters
+      .find((entry) => entry.characterId === deputyId)?.memories.map((memory) => memory.kind) ?? [];
+    expect(memoryKinds).toEqual(expect.arrayContaining(['support_secured', 'command_appeased']));
+  });
+
+  it('removes a high-risk deputy from command access instead of recording an empty rejection', () => {
+    const { world, context, armyId, deputyId } = decisionFixture('agency-command-curbed', 'executed');
+    const deputy = world.characters.find((character) => character.id === deputyId);
+    if (!deputy) throw new Error('Expected deputy for curbing fixture');
+    deputy.loyalty = 0;
+    deputy.caution = 0;
+    deputy.insubordination = 100;
+    deputy.influence = 100;
+    deputy.merit = 100;
+    deputy.cunning = 100;
+    const influenceBefore = deputy.influence;
+
+    processAgencyDecisionSystem(world, context, eventEmitter(world, context));
+
+    const resolution = context.facts.find((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_resolved' }> => (
+      fact.kind === 'agency_intent_resolved'
+    ));
+    expect(resolution).toMatchObject({
+      payload: { outcome: 'rejected', reasonCode: 'court_risk', institutionResponse: 'curbed', retryAfterTurn: null },
+    });
+    expect(world.armies.find((army) => army.id === armyId)?.deputyCommanderId).toBeNull();
+    expect(deputy.influence).toBeLessThan(influenceBefore);
+    expect(world.agencyDecisionSystem.actors.find((actor) => actor.characterId === deputyId)).toMatchObject({
+      goal: { status: 'invalidated', closureReason: 'position_lost' },
+    });
+    expect(context.events.some((event) => event.kind === 'command_request_curbed' && event.title.includes('遭削权'))).toBe(true);
   });
 
   it('closes a three-times-denied goal, frees the actor slot, and permits a later fresh goal', () => {
@@ -309,16 +345,15 @@ describe('C10/C11 authoritative agency decision core', () => {
 
     const actor = world.agencyDecisionSystem.actors.find((item) => item.characterId === deputyId);
     expect(actor?.plan.steps.find((step) => step.action === 'seek_patronage')?.status).toBe('available');
-    const resolution = context.facts.find((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_resolved' }> => (
-      fact.kind === 'agency_intent_resolved'
+    const supportAction = context.facts.find((fact): fact is Extract<SimulationFact, { kind: 'agency_support_resolved' }> => (
+      fact.kind === 'agency_support_resolved'
     ));
-    const support = resolution?.payload.checks.find((check) => check.kind === 'relationship');
-    expect(support?.components).toEqual(expect.arrayContaining([
-      expect.objectContaining({ source: 'commander_patronage', value: 0, passed: false }),
-      expect.objectContaining({ source: 'ruler_patronage', value: 0, passed: false }),
-      expect.objectContaining({ source: 'family_backing', passed: true }),
-    ]));
-    expect(context.events.every((event) => !event.summary.includes('人事支持'))).toBe(true);
+    expect(supportAction).toMatchObject({
+      payload: { action: 'request_backing', targetKind: 'commander' },
+    });
+    expect(context.facts.some((fact) => fact.kind === 'agency_intent_resolved')).toBe(false);
+    expect(actor?.plan.steps.find((step) => step.action === 'seek_family_backing')?.status).toBe('completed');
+    expect(context.events.every((event) => !event.summary.includes('已经明确背书'))).toBe(true);
   });
 
   it('does not invent gratitude or fulfilled duty when the former commander opposed replacement', () => {
@@ -365,7 +400,7 @@ describe('C10/C11 authoritative agency decision core', () => {
     expect(world.relationships.some((relationship) => (
       relationship.sourceId === deputyId && relationship.targetId === commanderId
     ))).toBe(false);
-    expect(stableHash(world.relationships)).toBe(relationshipsBefore);
+    expect(stableHash(world.relationships)).not.toBe(relationshipsBefore);
     expect(world.counters.relationship).toBe(relationshipCounterBefore);
     expect(world.commitments.find((commitment) => commitment.id === dutyId)).toMatchObject({
       status: '失效',
@@ -419,5 +454,42 @@ describe('C10/C11 authoritative agency decision core', () => {
     expect(restored.agencyDecisionSystem).toEqual(createAgencyDecisionSystemState(restored.turn - 1));
     expect(restored.agencySystem).toEqual(early.agencySystem);
     expect(advanceWorld(restored).agencyDecisionSystem.reviewedThroughTurn).toBe(restored.turn);
+  });
+
+  it('opens a v1.0 schema-4 save without inventing historical support actions', () => {
+    let legacy = createWorld('agency-v10-support-migration');
+    for (let index = 0; index < 80; index += 1) {
+      legacy = advanceWorld(legacy);
+      if (legacy.agencyDecisionSystem.actors.length > 0
+        && legacy.facts.some((fact) => fact.kind === 'agency_intent_resolved' && fact.payload.outcome === 'executed')) break;
+    }
+    expect(legacy.agencyDecisionSystem.actors.length).toBeGreaterThan(0);
+    const legacyResolution = legacy.facts.find((fact) => (
+      fact.kind === 'agency_intent_resolved' && fact.payload.outcome === 'executed'
+    ));
+    expect(legacyResolution).toBeDefined();
+    for (const actor of legacy.agencyDecisionSystem.actors) {
+      const raw = actor as unknown as Record<string, unknown>;
+      delete raw.supportActions;
+      delete raw.supportAttemptOrdinal;
+      delete raw.nextEligibleSupportTurn;
+    }
+    if (legacyResolution?.kind === 'agency_intent_resolved') {
+      delete (legacyResolution.payload as unknown as Record<string, unknown>).institutionResponse;
+    }
+    legacy.factDigest = legacy.facts.reduce((digest, fact) => stableHash([digest, fact]), stableHash([]));
+    legacy.hash = computeWorldHash(legacy);
+
+    const restored = deserializeWorld(JSON.stringify(legacy));
+
+    expect(restored.agencyDecisionSystem.actors.every((actor) => (
+      actor.supportActions.length === 0
+      && actor.supportAttemptOrdinal === 0
+      && actor.nextEligibleSupportTurn === restored.turn
+    ))).toBe(true);
+    expect(restored.facts.find((fact) => fact.id === legacyResolution?.id)).toMatchObject({
+      payload: { institutionResponse: 'command_granted' },
+    });
+    expect(validateAgencyDecisionSystemState(restored)).toEqual([]);
   });
 });

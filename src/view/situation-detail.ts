@@ -201,6 +201,7 @@ const FACT_KIND_LABELS: Record<SimulationFact['kind'], string> = {
   appointment_ended: '去职事实',
   character_death: '人物事实',
   marriage: '婚姻事实',
+  agency_support_resolved: '支持行动',
   agency_intent_submitted: '军令请求',
   agency_intent_resolved: '军令裁决',
   situation_milestone: '局势里程碑',
@@ -379,6 +380,20 @@ function factCopy(world: WorldState, fact: SimulationFact): { title: string; sum
       summary: `这是其第${fact.payload.attemptOrdinal}次正式请求独立统军，现任主帅为${characterLabel(world, fact.payload.currentCommanderId)}。`,
     };
   }
+  if (fact.kind === 'agency_support_resolved') {
+    const target = fact.payload.targetKind === 'army_officers'
+      ? `${armyLabel(world, fact.payload.targetArmyId)}将校`
+      : characterLabel(world, fact.payload.targetId);
+    const outcome = fact.payload.outcome === 'secured'
+      ? '已经答应相助'
+      : fact.payload.outcome === 'deferred'
+        ? '仍在观望'
+        : '没有应允';
+    return {
+      title: `${characterLabel(world, fact.payload.actorId)}争取${target}支持`,
+      summary: `${target}${outcome}；这项结果将进入其后续请令审查。`,
+    };
+  }
   if (fact.kind === 'agency_intent_resolved') {
     const outcome = fact.payload.outcome === 'executed'
       ? '获准生效'
@@ -405,9 +420,14 @@ function factCopy(world: WorldState, fact: SimulationFact): { title: string; sum
         : fact.payload.outcome === 'invalidated'
           ? '原有请求已不再具备裁决条件'
           : '朝廷本季没有授予军令';
+    const institution = fact.payload.institutionResponse === 'curbed'
+      ? '朝廷同时撤下其副将之职'
+      : fact.payload.institutionResponse === 'appeased'
+        ? '朝廷另以名位与礼遇安抚'
+        : null;
     return {
       title: `${characterLabel(world, fact.payload.actorId)}所请军令${outcome}`,
-      summary: `${reason[fact.payload.reasonCode]}；${claimAssessment}。`,
+      summary: `${reason[fact.payload.reasonCode]}；${claimAssessment}${institution ? `；${institution}` : ''}。`,
     };
   }
   const transitionLabel = fact.payload.transition === 'formed'

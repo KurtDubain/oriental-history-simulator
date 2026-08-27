@@ -12,6 +12,7 @@ import {
 import {
   MAX_AGENCY_DECISION_ACTORS,
   MAX_AGENCY_INTENTS_PER_TURN,
+  MAX_AGENCY_SUPPORT_ACTIONS_PER_TURN,
   validateAgencyDecisionSystemState,
 } from '../src/sim/agency';
 
@@ -57,6 +58,7 @@ const maximumSubmissionsPerWorld = positiveIntegerFromEnv('PHASE_C_INTENT_AUDIT_
 const maximumExecutionsPerWorld = positiveIntegerFromEnv('PHASE_C_INTENT_AUDIT_MAX_EXECUTIONS', 20);
 
 type ResolutionFact = Extract<SimulationFact, { kind: 'agency_intent_resolved' }>;
+type SupportFact = Extract<SimulationFact, { kind: 'agency_support_resolved' }>;
 
 interface OutcomeCounts {
   executed: number;
@@ -72,6 +74,11 @@ interface SeedSample extends OutcomeCounts {
   submitted: number;
   maximumSubmittedInQuarter: number;
   maximumDecisionActors: number;
+  supportActions: number;
+  supportSecured: number;
+  supportUnsuccessful: number;
+  appeased: number;
+  curbed: number;
   saveResumeExact: boolean;
 }
 
@@ -111,11 +118,13 @@ function timingSummary(values: readonly number[]) {
 function appendedDecisionFacts(previous: WorldState, next: WorldState): {
   submitted: SimulationFact[];
   resolved: ResolutionFact[];
+  support: SupportFact[];
 } {
   const appended = next.facts.slice(previous.facts.length);
   return {
     submitted: appended.filter((fact) => fact.kind === 'agency_intent_submitted'),
     resolved: appended.filter((fact): fact is ResolutionFact => fact.kind === 'agency_intent_resolved'),
+    support: appended.filter((fact): fact is SupportFact => fact.kind === 'agency_support_resolved'),
   };
 }
 
@@ -133,6 +142,29 @@ function auditCompletedQuarter(previous: WorldState, next: WorldState): void {
     previous.turn,
     `submitted/resolved mismatch ${decisionFacts.submitted.length}/${decisionFacts.resolved.length}`,
   );
+  check(
+    decisionFacts.support.length <= MAX_AGENCY_SUPPORT_ACTIONS_PER_TURN,
+    next.seed,
+    previous.turn,
+    `quarter support action count ${decisionFacts.support.length} exceeds ${MAX_AGENCY_SUPPORT_ACTIONS_PER_TURN}`,
+  );
+  for (const submission of decisionFacts.submitted) {
+    if (submission.kind !== 'agency_intent_submitted') continue;
+    check(
+      submission.sourceFactIds.some((factId) => {
+        const factNumber = Number.parseInt(factId.slice('fact_'.length), 10);
+        const support = next.facts[factNumber - 1];
+        return support?.id === factId
+          && support.kind === 'agency_support_resolved'
+          && support.payload.actorId === submission.payload.actorId
+          && support.payload.goalId === submission.payload.goalId
+          && support.payload.outcome === 'secured';
+      }),
+      next.seed,
+      previous.turn,
+      `${submission.id} has no secured support action source`,
+    );
+  }
   check(
     decisionFacts.submitted.length <= MAX_AGENCY_INTENTS_PER_TURN,
     next.seed,
@@ -194,6 +226,7 @@ function runSeed(seed: string): SeedSample {
     deferred: resolutions.filter((fact) => fact.payload.outcome === 'deferred').length,
     invalidated: resolutions.filter((fact) => fact.payload.outcome === 'invalidated').length,
   };
+  const supportActions = world.facts.filter((fact): fact is SupportFact => fact.kind === 'agency_support_resolved');
   check(submitted === resolutions.length, seed, world.turn, `archive submitted/resolved mismatch ${submitted}/${resolutions.length}`);
   check(submitted <= maximumSubmissionsPerWorld, seed, world.turn, `${submitted} submissions exceed density ceiling ${maximumSubmissionsPerWorld}`);
   check(outcomes.executed <= maximumExecutionsPerWorld, seed, world.turn, `${outcomes.executed} grants exceed density ceiling ${maximumExecutionsPerWorld}`);
@@ -215,6 +248,11 @@ function runSeed(seed: string): SeedSample {
     ...outcomes,
     maximumSubmittedInQuarter,
     maximumDecisionActors,
+    supportActions: supportActions.length,
+    supportSecured: supportActions.filter((fact) => fact.payload.outcome === 'secured').length,
+    supportUnsuccessful: supportActions.filter((fact) => fact.payload.outcome !== 'secured').length,
+    appeased: resolutions.filter((fact) => fact.payload.institutionResponse === 'appeased').length,
+    curbed: resolutions.filter((fact) => fact.payload.institutionResponse === 'curbed').length,
     saveResumeExact,
   };
 }
@@ -234,9 +272,20 @@ const totals = samples.reduce((sum, sample) => ({
   rejected: sum.rejected + sample.rejected,
   deferred: sum.deferred + sample.deferred,
   invalidated: sum.invalidated + sample.invalidated,
-}), { submitted: 0, executed: 0, rejected: 0, deferred: 0, invalidated: 0 });
+  supportActions: sum.supportActions + sample.supportActions,
+  supportSecured: sum.supportSecured + sample.supportSecured,
+  supportUnsuccessful: sum.supportUnsuccessful + sample.supportUnsuccessful,
+  appeased: sum.appeased + sample.appeased,
+  curbed: sum.curbed + sample.curbed,
+}), {
+  submitted: 0, executed: 0, rejected: 0, deferred: 0, invalidated: 0,
+  supportActions: 0, supportSecured: 0, supportUnsuccessful: 0, appeased: 0, curbed: 0,
+});
 check(totals.executed > 0, 'aggregate', turns, 'natural cohort produced no granted independent command');
 check(totals.rejected + totals.deferred > 0, 'aggregate', turns, 'natural cohort produced no rejected or deferred request');
+check(totals.supportSecured > 0, 'aggregate', turns, 'natural cohort secured no concrete support');
+check(totals.supportUnsuccessful > 0, 'aggregate', turns, 'natural cohort produced no failed or deferred support action');
+check(totals.appeased + totals.curbed > 0, 'aggregate', turns, 'natural cohort produced no institutional response');
 const phaseTiming = timingSummary(agencyPhaseTimingsMs);
 check(
   phaseTiming.p95Ms <= maximumAgencyPhaseP95Ms,
@@ -246,7 +295,7 @@ check(
 );
 
 console.log(JSON.stringify({
-  phase: 'C10-C11',
+  phase: 'C12-C13',
   scope: {
     seeds: seeds.length,
     quartersPerSeed: turns,
@@ -254,9 +303,10 @@ console.log(JSON.stringify({
     fullValidationInterval,
   },
   contract: {
-    owner: 'WorldState.agencyDecisionSystem + agency intent Facts',
+    owner: 'WorldState.agencyDecisionSystem + support / intent Facts',
     maximumActors: MAX_AGENCY_DECISION_ACTORS,
     maximumIntentsPerQuarter: MAX_AGENCY_INTENTS_PER_TURN,
+    maximumSupportActionsPerQuarter: MAX_AGENCY_SUPPORT_ACTIONS_PER_TURN,
     maximumSubmissionsPerWorld,
     maximumExecutionsPerWorld,
     maximumAgencyPhaseP95Ms,

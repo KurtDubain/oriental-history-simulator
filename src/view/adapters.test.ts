@@ -50,6 +50,9 @@ function rejectedCommandFixture(seed: string) {
         { id: `${planId}:request`, action: 'request_independent_command', order: 5, status: 'blocked', evidence: '本次未准' },
       ],
     },
+    supportActions: [],
+    supportAttemptOrdinal: 0,
+    nextEligibleSupportTurn: world.turn,
     attemptOrdinal: 1,
     nextEligibleIntentTurn: world.turn + 8,
     lastResolutionFactId: `fact-command-resolved-view:${seed}`,
@@ -107,6 +110,7 @@ function rejectedCommandFixture(seed: string) {
       appointingAuthorityId: polity.rulerId,
       outcome: 'rejected',
       reasonCode: 'court_risk',
+      institutionResponse: 'none',
       retryAfterTurn: world.turn + 8,
       checks: [
         { kind: 'permission', passed: true, value: 100, threshold: 100, comparison: 'at_least' },
@@ -279,6 +283,9 @@ describe('person Agency dossier', () => {
           { id: `${planId}:request`, action: 'request_independent_command', order: 5, status: 'blocked', evidence: '尚不能正式请令' },
         ],
       },
+      supportActions: [],
+      supportAttemptOrdinal: 0,
+      nextEligibleSupportTurn: 0,
       attemptOrdinal: 0,
       nextEligibleIntentTurn: 0,
       lastResolutionFactId: null,
@@ -339,6 +346,73 @@ describe('person Agency dossier', () => {
     expect(inspector.agency?.quarterChoice).toBeNull();
     expect(requestText).not.toMatch(/decisionScore|decisionThreshold|61|48|Resolver|Intent/i);
     expect(JSON.stringify(world)).toBe(before);
+  });
+
+  it('names the person who explicitly backed a request while it is still being prepared', () => {
+    const { world, army, deputy, actor, resolved, sourceEvent } = rejectedCommandFixture('具体背书投影');
+    world.facts = world.facts.filter((fact) => fact.id !== resolved.id && !fact.id.includes('submitted-view'));
+    world.history = world.history.filter((event) => event.id !== sourceEvent.id);
+    world.agencyDecisionSystem = {
+      ...world.agencyDecisionSystem,
+      actors: [{
+        ...actor,
+        attemptOrdinal: 0,
+        lastResolutionFactId: null,
+        supportAttemptOrdinal: 1,
+        supportActions: [{
+          id: 'support-view',
+          action: 'request_backing',
+          attemptOrdinal: 1,
+          targetKind: 'commander',
+          targetId: army.commanderId,
+          performedTurn: world.turn,
+          outcome: 'secured',
+          strength: 72,
+          sourceFactId: 'fact-support-view',
+          sourceEventId: 'event-support-view',
+        }],
+      }],
+    };
+
+    const request = toPersonInspector(world, deputy).agency?.commandRequest;
+    const commanderName = world.characters.find((character) => character.id === army.commanderId)?.name;
+
+    expect(request).toMatchObject({ stage: 'preparing' });
+    expect(request?.evidence[0]).toEqual(expect.objectContaining({
+      tone: 'support',
+      label: '已行',
+      detail: `${commanderName}已经明确答应背书`,
+    }));
+  });
+
+  it('shows a curbing response as the current result instead of a stale generic departure', () => {
+    const { world, army, deputy, actor, resolved, sourceEvent } = rejectedCommandFixture('削权回应投影');
+    (resolved.payload as Extract<SimulationFact, { kind: 'agency_intent_resolved' }>['payload']).institutionResponse = 'curbed';
+    sourceEvent.kind = 'command_request_curbed';
+    sourceEvent.title = `${deputy.name}请令未准并遭削权`;
+    army.deputyCommanderId = null;
+    world.agencyDecisionSystem = {
+      ...world.agencyDecisionSystem,
+      actors: [{
+        ...actor,
+        goal: {
+          ...actor.goal,
+          status: 'invalidated',
+          resolvedTurn: world.turn,
+          closureReason: 'position_lost',
+        },
+      }],
+    };
+
+    const request = toPersonInspector(world, deputy).agency?.commandRequest;
+
+    expect(request).toMatchObject({
+      stage: 'blocked',
+      statusLabel: '已遭削权',
+      title: `请领${army.name}军令未准，副将之职被撤`,
+      sourceEventId: sourceEvent.id,
+    });
+    expect(request?.evidence[0]?.detail).toContain('副将之职也已被撤下');
   });
 
   it('names family backing without inventing support from the ruler or commander', () => {

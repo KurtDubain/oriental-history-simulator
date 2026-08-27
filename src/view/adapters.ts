@@ -805,6 +805,11 @@ function commandCheckEvidence(
     },
   };
   const reasonCode = String(fact.payload.reasonCode);
+  const institution = fact.payload.institutionResponse === 'curbed'
+    ? [{ tone: 'barrier' as const, label: '朝廷回应', detail: '军令未授，此人的副将之职也已被撤下' }]
+    : fact.payload.institutionResponse === 'appeased'
+      ? [{ tone: 'support' as const, label: '朝廷回应', detail: '军令未授，但朝廷另以名位与礼遇安抚' }]
+      : [];
   const decisive = reasonCode === 'claim_weaker'
     ? [{ tone: 'barrier' as const, label: '掣肘', detail: '与现任主帅相比，朝廷认为其资望仍不足' }]
     : reasonCode === 'competing_request'
@@ -836,7 +841,7 @@ function commandCheckEvidence(
           ? copy[check.kind]?.pass ?? '这项条件已经具备'
           : copy[check.kind]?.fail ?? '这项条件仍未具备',
     }));
-  return [...decisive, ...checks].slice(0, 3);
+  return [...institution, ...decisive, ...checks].slice(0, 3);
 }
 
 function commandResolutionCopy(
@@ -874,6 +879,22 @@ function commandResolutionCopy(
             : '朝廷本季没有作出授令决定，留待日后复议。',
     };
   }
+  if (fact.payload.institutionResponse === 'curbed') {
+    return {
+      stage: 'blocked',
+      statusLabel: '已遭削权',
+      title: `请领${armyName}军令未准，副将之职被撤`,
+      summary: '朝廷把这次请令视作军权风险；没有授令，并撤下其副将之职。',
+    };
+  }
+  if (fact.payload.institutionResponse === 'appeased') {
+    return {
+      stage: 'blocked',
+      statusLabel: '另受安抚',
+      title: `未获${armyName}军令，朝廷另作安抚`,
+      summary: '资望尚不足以换帅；朝廷没有交出军令，但以名位与礼遇作了安抚。',
+    };
+  }
   return {
     stage: 'blocked',
     statusLabel: '此次未准',
@@ -892,6 +913,7 @@ function naturalCommandEvidence(value: string): string {
 }
 
 function preparedCommandEvidence(
+  world: WorldState,
   actor: WorldState['agencyDecisionSystem']['actors'][number],
 ): PersonAgencyCommandRequestView['evidence'] {
   const preparations = actor.plan.steps.filter((step) => step.action !== 'request_independent_command');
@@ -905,7 +927,17 @@ function preparedCommandEvidence(
   const missing = preparations
     .filter((step) => step.status !== 'completed')
     .map((step) => ({ tone: 'barrier' as const, label: '掣肘', detail: naturalCommandEvidence(step.evidence) }));
-  return [...requestBarrier, ...missing.slice(0, requestBarrier.length ? 0 : 1), ...completed].slice(0, 3);
+  const latestSupport = actor.supportActions.at(-1);
+  const supportEvidence = latestSupport ? [{
+    tone: latestSupport.outcome === 'secured' ? 'support' as const : 'barrier' as const,
+    label: latestSupport.outcome === 'secured' ? '已行' : '上次所行',
+    detail: latestSupport.action === 'cultivate_military_support'
+      ? latestSupport.outcome === 'secured'
+        ? `${world.armies.find((army) => army.id === actor.goal.targetArmyId)?.name ?? '本军'}已有将校明确响应`
+        : '联络本军将校未成，眼下还没有可用的军中支持'
+      : `${world.characters.find((character) => character.id === latestSupport.targetId)?.name ?? '所请之人'}${latestSupport.outcome === 'secured' ? '已经明确答应背书' : latestSupport.outcome === 'deferred' ? '仍在观望，没有明确答应' : '没有答应替其背书'}`,
+  }] : [];
+  return [...supportEvidence, ...requestBarrier, ...missing.slice(0, supportEvidence.length || requestBarrier.length ? 0 : 1), ...completed].slice(0, 3);
 }
 
 interface CommandRequestProjection {
@@ -967,7 +999,16 @@ function currentTerminalCommandRequest(
   if (!commandAchieved && !requestInvalidated) return null;
 
   const terminalOutcome = commandAchieved ? 'executed' : 'invalidated';
-  const terminalResolution = latestTerminalCommandResolution(world, actor, terminalOutcome);
+  const terminalResolution = latestTerminalCommandResolution(world, actor, terminalOutcome)
+    ?? (actor.lastResolutionFactId
+      ? world.facts.find((fact): fact is AgencyIntentResolvedFact => (
+          fact.kind === 'agency_intent_resolved'
+          && fact.id === actor.lastResolutionFactId
+          && fact.payload.actorId === actor.characterId
+          && fact.payload.goalId === actor.goal.id
+          && fact.payload.institutionResponse === 'curbed'
+        ))
+      : undefined);
   if (terminalResolution) {
     return {
       id: terminalResolution.payload.submissionFactId,
@@ -1124,7 +1165,7 @@ export function toPersonCommandRequestView(
         : requestStep?.evidence
           ? `${naturalCommandEvidence(requestStep.evidence)}，尚未正式请令。`
           : '所需准备尚未齐备，眼下还不能正式请令。',
-      evidence: preparedCommandEvidence(actor),
+      evidence: preparedCommandEvidence(world, actor),
       sourceEventId: null,
     },
   };

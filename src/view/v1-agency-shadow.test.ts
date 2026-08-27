@@ -534,6 +534,7 @@ describe('C09 observer-side Agency shadow ledger', () => {
         appointingAuthorityId: ownedPolity.rulerId,
         outcome: 'executed',
         reasonCode: 'command_granted',
+        institutionResponse: 'command_granted',
         retryAfterTurn: null,
         checks: [
           { kind: 'permission', passed: true, value: 100, threshold: 100, comparison: 'at_least' },

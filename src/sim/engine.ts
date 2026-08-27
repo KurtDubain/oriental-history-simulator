@@ -17,10 +17,9 @@ import {
   type WarStartedFact,
 } from './facts';
 import {
-  SIMULATION_SYSTEM_PHASES,
   type SimulationAdvanceTimings,
-  type SimulationSystemPhase,
 } from './advance-timing';
+import { createTurnPipelineRunner } from './turn-pipeline';
 import type { V03TurnContext } from './v03-context';
 import {
   createV03LifeSystems,
@@ -3131,15 +3130,8 @@ export function advanceWorldDetailed(
   const world = cloneWorld(currentWorld);
   const cloneMs = Math.max(0, now() - cloneStartedAt);
   const context = createTurnContext(world);
-  const systems = Object.fromEntries(
-    SIMULATION_SYSTEM_PHASES.map((phase) => [phase, 0]),
-  ) as Record<SimulationSystemPhase, number>;
-  const runSystem = (phase: SimulationSystemPhase, operation: () => void): void => {
-    const startedAt = now();
-    operation();
-    systems[phase] = Math.max(0, now() - startedAt);
-  };
-  const systemsStartedAt = now();
+  const pipeline = createTurnPipelineRunner(now);
+  const runSystem = pipeline.run;
   runSystem('environment', () => processRegions(world, context));
   runSystem('economy_trade', () => processV03EconomyAndTrade(world, context, (input) => pushEvent(world, context, input)));
   runSystem('migration', () => processV03Migration(world, context, (input) => pushEvent(world, context, input)));
@@ -3170,7 +3162,7 @@ export function advanceWorldDetailed(
     world.year = nextDate.year;
     world.season = nextDate.season;
   });
-  const systemsMs = Math.max(0, now() - systemsStartedAt);
+  const { systems, elapsedMs: systemsMs } = pipeline.finish();
   const hashStartedAt = now();
   world.hash = computeWorldHash(world);
   const hashMs = Math.max(0, now() - hashStartedAt);

@@ -88,9 +88,9 @@ describe('ObserverDesk Situation UI', () => {
       onSelectWatchItem: vi.fn(),
       appUpdate: {
         phase: 'available',
-        localVersion: '1.0.1',
+        localVersion: '1.1.0',
         localBuildId: 'build-old',
-        remoteVersion: '1.0.2',
+        remoteVersion: '1.1.1',
         remoteBuildId: 'build-new',
         checkedAt: 1_788_000_000_000,
       },
@@ -99,8 +99,8 @@ describe('ObserverDesk Situation UI', () => {
     }));
 
     expect(markup).toContain('版本与更新');
-    expect(markup).toContain('v1.0.1');
-    expect(markup).toContain('发现 v1.0.2');
+    expect(markup).toContain('v1.1.0');
+    expect(markup).toContain('发现 v1.1.1');
     expect(markup).toContain('data-testid="apply-app-update"');
     expect(markup).toContain('更新并重载');
     expect(markup).not.toContain('部署探针');

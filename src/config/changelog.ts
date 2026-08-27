@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.1.0',
+    date: '2026-08-27',
+    title: '人物开始主动争取军权',
+    items: [
+      '副将会先联络将校或向主帅、主君、家主请求背书，不再只等数值自然成熟。',
+      '请令未准后，朝廷可能另作安抚，也可能撤下副将军权；结果会改变关系、权势与后续局势。',
+      '人物所图、关系记忆和经历会写明谁向谁开口、对方如何回应，以及军职实际发生了什么。',
+    ],
+  },
+  {
     version: '1.0.1',
     date: '2026-08-27',
     title: '版本与更新闭环',
