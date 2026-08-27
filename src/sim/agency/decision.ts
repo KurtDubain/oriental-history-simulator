@@ -7,6 +7,7 @@ import {
 } from '../facts';
 import { stableCompare, stableHash } from '../random';
 import { projectCharacterDesires, ROOT_DESIRES, type RootDesire } from './projection';
+import { resolveEmbodiedAction, type EmbodiedActionTurnContext } from './embodiment';
 import type {
   CharacterState,
   EventCause,
@@ -120,7 +121,7 @@ export interface AgencyTurnIntent {
   resolvedFactId: string | null;
 }
 
-export interface AgencyDecisionTurnContext extends FactTurnBuffer {
+export interface AgencyDecisionTurnContext extends FactTurnBuffer, EmbodiedActionTurnContext {
   agencyIntents: AgencyTurnIntent[];
   appointmentSourceFactIdsByArmyId: Record<string, string>;
 }
@@ -1378,8 +1379,10 @@ export function processAgencyDecisionSystem(
     throw new Error(`AgencyDecision expected turn ${current.reviewedThroughTurn + 1}, received ${context.turn}`);
   }
   let actors = reviewDecisionState(world, context.turn);
+  const embodiedActorId = resolveEmbodiedAction(world, context, emit);
   const actorById = new Map(actors.map((actor) => [actor.characterId, actor]));
   const supportActions = actors
+    .filter((actor) => actor.characterId !== embodiedActorId)
     .map((actor) => supportActionFor(world, actor, context.turn))
     .filter((action): action is AgencySupportTurnAction => Boolean(action))
     .sort((left, right) => stableCompare(left.actorId, right.actorId))

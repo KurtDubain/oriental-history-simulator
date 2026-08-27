@@ -44,6 +44,21 @@ export {
   validateAgencySystemState,
 } from './memory';
 
+export {
+  EMBODIED_ACTION_KINDS,
+  projectEmbodiedActions,
+  resolveEmbodiedAction,
+} from './embodiment';
+
+export type {
+  EmbodiedActionCommand,
+  EmbodiedActionKind,
+  EmbodiedActionProjection,
+  EmbodiedActionStance,
+  EmbodiedActionTurnContext,
+  EmitEmbodiedActionEvent,
+} from './embodiment';
+
 export type {
   AgencyDecisionEventInput,
   AgencyDecisionGoalState,

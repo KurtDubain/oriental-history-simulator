@@ -25,6 +25,7 @@ import { HistoryWorkbench } from './components/HistoryWorkbench';
 import {
   Inspector,
   type PersonAgencyQuarterChoiceView,
+  type PersonEmbodimentView,
 } from './components/Inspector';
 import { MandatePanel, type MandateMessage, type MandateTarget } from './components/MandatePanel';
 import {
@@ -102,8 +103,10 @@ import {
   isV03InterventionEvent,
   serializeWorld,
   measureRuntimeValidation,
+  projectEmbodiedActions,
   SIMULATION_SYSTEM_PHASES,
   validateWorld,
+  type EmbodiedActionCommand,
   type V03InterventionAction,
   type WorldState,
 } from './sim';
@@ -360,6 +363,63 @@ function agencyDossierOptions(
   };
 }
 
+function personEmbodimentView(
+  world: WorldState,
+  characterId: string,
+  activeCharacterId: string | null,
+  pendingCommand: EmbodiedActionCommand | null,
+): PersonEmbodimentView {
+  const activeCharacter = activeCharacterId
+    ? world.characters.find((item) => item.id === activeCharacterId)
+    : null;
+  const actions = projectEmbodiedActions(world, characterId);
+  const pendingActions = pendingCommand
+    ? projectEmbodiedActions(world, pendingCommand.actorId)
+    : [];
+  const pendingOption = pendingCommand
+    ? pendingActions.find((item) => item.command.actionId === pendingCommand.actionId)
+    : null;
+  const pendingActor = pendingCommand
+    ? world.characters.find((item) => item.id === pendingCommand.actorId)
+    : null;
+  const lastResult = [...world.facts].reverse().find((fact) => (
+    fact.kind === 'embodied_action_resolved' && fact.payload.actorId === characterId
+  ));
+  const resultEvent = lastResult
+    ? [...world.history].reverse().find((event) => event.sourceFactIds.includes(lastResult.id))
+    : null;
+  return {
+    active: activeCharacterId === characterId,
+    activeCharacterName: activeCharacter?.name ?? null,
+    pending: pendingCommand ? {
+      actorName: pendingActor?.name ?? '原定人物',
+      label: pendingOption?.label ?? '本季行动',
+      targetLabel: pendingOption?.targetLabel ?? pendingCommand.targetId,
+    } : null,
+    usedThisQuarter: world.facts.some((fact) => (
+      fact.turn === world.turn && fact.kind === 'embodied_action_submitted'
+    )),
+    actions: actions.map((item) => ({
+      actionId: item.command.actionId,
+      label: item.label,
+      targetLabel: item.targetLabel,
+      intent: item.intent,
+      cost: item.cost,
+      obstacle: item.obstacle,
+      nextSignal: item.nextSignal,
+      available: item.available,
+      unavailableReason: item.unavailableReason,
+    })),
+    lastResult: lastResult?.kind === 'embodied_action_resolved' ? {
+      periodLabel: agencyPeriodLabel(lastResult.turn),
+      outcome: lastResult.payload.outcome,
+      summary: lastResult.payload.resultSummary,
+      nextSignal: lastResult.payload.nextSignal,
+      sourceEventId: resultEvent?.id ?? null,
+    } : null,
+  };
+}
+
 function availableCollectionSlot(prefix: string, saves: WorldSaveSummary[]): string {
   const occupied = new Set(saves.filter((save) => !save.isAutosave).map((save) => save.slot));
   for (let index = 1; index <= 99; index += 1) {
@@ -436,6 +496,8 @@ interface SnapshotOptions {
   mapCamera: MapCamera;
   agencyShadowLedger: AgencyShadowLedger;
   agencyShadowBranchId: string | null;
+  embodiedCharacterId: string | null;
+  pendingEmbodiedAction: EmbodiedActionCommand | null;
 }
 
 function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
@@ -758,6 +820,32 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
             && branch.head.hash === world.hash,
         } : null;
       })(),
+      embodiment: (() => {
+        const actor = options.embodiedCharacterId
+          ? world.characters.find((item) => item.id === options.embodiedCharacterId)
+          : null;
+        const pendingOption = options.pendingEmbodiedAction
+          ? projectEmbodiedActions(world, options.pendingEmbodiedAction.actorId)
+              .find((item) => item.command.actionId === options.pendingEmbodiedAction?.actionId)
+          : null;
+        return {
+          actorId: actor?.id ?? null,
+          actorName: actor?.name ?? null,
+          pending: options.pendingEmbodiedAction ? {
+            actionId: options.pendingEmbodiedAction.actionId,
+            actorId: options.pendingEmbodiedAction.actorId,
+            label: pendingOption?.label ?? options.pendingEmbodiedAction.kind,
+            targetLabel: pendingOption?.targetLabel ?? options.pendingEmbodiedAction.targetId,
+          } : null,
+          actions: actor?.alive ? projectEmbodiedActions(world, actor.id).map((item) => ({
+            actionId: item.command.actionId,
+            label: item.label,
+            targetLabel: item.targetLabel,
+            available: item.available,
+            unavailableReason: item.unavailableReason,
+          })) : [],
+        };
+      })(),
       commandCandidates: world.agencyDecisionSystem.actors.map((actor) => ({
         characterId: actor.characterId,
         name: characterName(actor.characterId),
@@ -932,6 +1020,8 @@ export function App() {
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [agencyShadowLedger, setAgencyShadowLedger] = useState<AgencyShadowLedger>(() => createAgencyShadowLedger());
   const [agencyShadowBranchId, setAgencyShadowBranchId] = useState<string | null>(null);
+  const [embodiedCharacterId, setEmbodiedCharacterId] = useState<string | null>(null);
+  const [pendingEmbodiedAction, setPendingEmbodiedAction] = useState<EmbodiedActionCommand | null>(null);
   const appUpdate = useSyncExternalStore(
     subscribeAppUpdate,
     getAppUpdateState,
@@ -965,6 +1055,8 @@ export function App() {
   const autosaveCoordinatorRef = useRef<AutosaveCoordinator | null>(null);
   const agencyShadowLedgerRef = useRef(agencyShadowLedger);
   const agencyShadowBranchIdRef = useRef<string | null>(agencyShadowBranchId);
+  const embodiedCharacterIdRef = useRef<string | null>(embodiedCharacterId);
+  const pendingEmbodiedActionRef = useRef<EmbodiedActionCommand | null>(pendingEmbodiedAction);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
   useEffect(() => startAppUpdateMonitor(), []);
   useEffect(() => {
@@ -1019,6 +1111,8 @@ export function App() {
     mapCamera,
     agencyShadowLedger,
     agencyShadowBranchId,
+    embodiedCharacterId,
+    pendingEmbodiedAction,
   });
 
   const commitAgencyShadow = useCallback((nextLedger: AgencyShadowLedger, nextBranchId: string | null) => {
@@ -1026,6 +1120,13 @@ export function App() {
     agencyShadowBranchIdRef.current = nextBranchId;
     setAgencyShadowLedger(nextLedger);
     setAgencyShadowBranchId(nextBranchId);
+  }, []);
+
+  const commitEmbodiedObserver = useCallback((characterId: string | null, pending: EmbodiedActionCommand | null) => {
+    embodiedCharacterIdRef.current = characterId;
+    pendingEmbodiedActionRef.current = pending;
+    setEmbodiedCharacterId(characterId);
+    setPendingEmbodiedAction(pending);
   }, []);
 
   const resetAgencyShadowAtWorld = useCallback((nextWorld: WorldState) => {
@@ -1284,6 +1385,7 @@ export function App() {
       resetAgencyShadowAtWorld(validWorld);
     }
     commitWorld(validWorld, source === 'continue' || source === 'collection' ? 'restore' : 'reset');
+    commitEmbodiedObserver(null, null);
     setSeed(validWorld.seed);
     const compactViewport = window.matchMedia('(max-width: 760px)').matches;
     setSelection(source !== 'create' && !compactViewport && defaultRegionId ? { kind: 'region', id: defaultRegionId } : null);
@@ -1323,7 +1425,7 @@ export function App() {
     runningRef.current = false;
     setRunning(false);
     clockAccumulatorRef.current = 0;
-  }, [commitAgencyShadow, commitWorld, resetAgencyShadowAtWorld, resetAutosaveCoordinator]);
+  }, [commitAgencyShadow, commitEmbodiedObserver, commitWorld, resetAgencyShadowAtWorld, resetAutosaveCoordinator]);
 
   const handleCreate = useCallback(() => {
     setStartBusy(true);
@@ -1633,7 +1735,10 @@ export function App() {
     advancingRef.current = true;
     try {
       const oldHistoryLength = current.history.length;
-      const detailed = advanceWorldDetailed(current);
+      const queuedEmbodiedAction = pendingEmbodiedActionRef.current?.issuedTurn === current.turn
+        ? pendingEmbodiedActionRef.current
+        : null;
+      const detailed = advanceWorldDetailed(current, { embodiedAction: queuedEmbodiedAction });
       const advanced = detailed.world;
       recordRuntimeMetric('simulation.clone', detailed.timings.cloneMs, current.turn);
       recordRuntimeMetric('simulation.systems', detailed.timings.systemsMs, current.turn);
@@ -1671,6 +1776,23 @@ export function App() {
         resetAgencyShadowAtWorld(next);
       }
       commitWorld(next);
+      if (queuedEmbodiedAction) {
+        pendingEmbodiedActionRef.current = null;
+        setPendingEmbodiedAction(null);
+        const resolution = [...next.facts].reverse().find((fact) => (
+          fact.kind === 'embodied_action_resolved'
+          && fact.payload.actionId === queuedEmbodiedAction.actionId
+        ));
+        if (resolution?.kind === 'embodied_action_resolved') {
+          setToast(resolution.payload.resultSummary);
+        }
+      }
+      const embodiedId = embodiedCharacterIdRef.current;
+      if (embodiedId && !next.characters.some((item) => item.id === embodiedId && item.alive)) {
+        embodiedCharacterIdRef.current = null;
+        setEmbodiedCharacterId(null);
+        setToast('所代入的人物已经离世，你已回到历史观察者视角。');
+      }
       const newEvents = next.history.slice(oldHistoryLength);
       const pauseCandidates = [
         ...worldToSituationPauseCandidates(next),
@@ -1808,6 +1930,8 @@ export function App() {
     mapCamera,
     agencyShadowLedger,
     agencyShadowBranchId,
+    embodiedCharacterId,
+    pendingEmbodiedAction,
   };
   useEffect(() => {
     window.render_game_to_text = () => makeTextSnapshot(worldRef.current, snapshotOptionsRef.current);
@@ -2192,6 +2316,51 @@ export function App() {
     completeGuideStep('cause-traced');
   }, [completeGuideStep]);
 
+  const handleEnterEmbodiment = useCallback((characterId: string) => {
+    const current = worldRef.current;
+    const character = current?.characters.find((item) => item.id === characterId && item.alive);
+    if (!current || !character) {
+      setToast('此人已经无法入世。');
+      return;
+    }
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    embodiedCharacterIdRef.current = character.id;
+    setEmbodiedCharacterId(character.id);
+    setToast(`现在以${character.name}入世；本季可以替其定下一件事。`);
+  }, []);
+
+  const handleLeaveEmbodiment = useCallback(() => {
+    const pending = pendingEmbodiedActionRef.current;
+    embodiedCharacterIdRef.current = null;
+    setEmbodiedCharacterId(null);
+    setToast(pending ? '已回到观察者视角；此前定下的本季行动仍会照常结算。' : '已回到历史观察者视角。');
+  }, []);
+
+  const handleChooseEmbodiedAction = useCallback((actionId: string) => {
+    const current = worldRef.current;
+    const actorId = embodiedCharacterIdRef.current;
+    if (!current || !actorId) return;
+    const option = projectEmbodiedActions(current, actorId).find((item) => item.command.actionId === actionId);
+    if (!option?.available) {
+      setToast(option?.unavailableReason ?? '此事眼下已经不能进行。');
+      return;
+    }
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    pendingEmbodiedActionRef.current = option.command;
+    setPendingEmbodiedAction(option.command);
+    setToast(`已定下“${option.label}”；推进下一季后查看结果。`);
+  }, []);
+
+  const handleCancelEmbodiedAction = useCallback(() => {
+    pendingEmbodiedActionRef.current = null;
+    setPendingEmbodiedAction(null);
+    setToast('已撤回本季尚未结算的决定。');
+  }, []);
+
   const inspector = useMemo<ReactNode>(() => {
     if (!world || !selection) return null;
     const followKey = `${selection.kind}:${selection.id}`;
@@ -2235,6 +2404,11 @@ export function App() {
           item,
           agencyDossierOptions(agencyShadowLedger, agencyShadowBranchId, item.id),
         )}
+        embodiment={personEmbodimentView(world, item.id, embodiedCharacterId, pendingEmbodiedAction)}
+        onEnterEmbodiment={() => handleEnterEmbodiment(item.id)}
+        onLeaveEmbodiment={handleLeaveEmbodiment}
+        onChooseEmbodiedAction={handleChooseEmbodiedAction}
+        onCancelEmbodiedAction={handleCancelEmbodiedAction}
         {...shared}
       /> : null;
     }
@@ -2244,9 +2418,15 @@ export function App() {
     agencyShadowBranchId,
     agencyShadowLedger,
     commitObserverSettings,
+    embodiedCharacterId,
     followed,
+    handleCancelEmbodiedAction,
+    handleChooseEmbodiedAction,
+    handleEnterEmbodiment,
+    handleLeaveEmbodiment,
     handleSelectArchiveEntity,
     handleSelectScopedEvent,
+    pendingEmbodiedAction,
     selection,
     world,
   ]);

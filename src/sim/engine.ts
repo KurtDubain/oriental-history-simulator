@@ -55,6 +55,7 @@ import {
   processAgencyDecisionSystem,
   type AgencyDecisionTurnContext,
 } from './agency/decision';
+import type { EmbodiedActionCommand } from './agency/embodiment';
 import { refreshFactionPowerLedgers } from './politics/power-ledger';
 import {
   SEASONS,
@@ -2870,7 +2871,7 @@ function processMilitary(world: WorldState, context: MutableTurnContext): void {
   repairAppointments(world, context);
 }
 
-function createTurnContext(world: WorldState): MutableTurnContext {
+function createTurnContext(world: WorldState, embodiedActionCommand: EmbodiedActionCommand | null = null): MutableTurnContext {
   const boundaryInterventions = world.history.filter((event) => (
     event.turn === world.turn && event.kind.startsWith('observer_intervention_')
   ));
@@ -2885,6 +2886,7 @@ function createTurnContext(world: WorldState): MutableTurnContext {
     facts: [],
     agencyIntents: [],
     appointmentSourceFactIdsByArmyId: {},
+    embodiedActionCommand,
     population: {
       start: totalPopulation(world),
       births: 0,
@@ -3116,6 +3118,10 @@ export interface DetailedAdvanceResult {
 
 type SimulationClock = () => number;
 
+export interface AdvanceWorldOptions {
+  embodiedAction?: EmbodiedActionCommand | null;
+}
+
 function simulationClock(): number {
   return typeof performance !== 'undefined' && typeof performance.now === 'function'
     ? performance.now()
@@ -3124,13 +3130,15 @@ function simulationClock(): number {
 
 export function advanceWorldDetailed(
   currentWorld: WorldState,
-  now: SimulationClock = simulationClock,
+  clockOrOptions: SimulationClock | AdvanceWorldOptions = simulationClock,
 ): DetailedAdvanceResult {
+  const now = typeof clockOrOptions === 'function' ? clockOrOptions : simulationClock;
+  const options = typeof clockOrOptions === 'function' ? {} : clockOrOptions;
   const totalStartedAt = now();
   const cloneStartedAt = now();
   const world = cloneWorld(currentWorld);
   const cloneMs = Math.max(0, now() - cloneStartedAt);
-  const context = createTurnContext(world);
+  const context = createTurnContext(world, options.embodiedAction ?? null);
   const pipeline = createTurnPipelineRunner(now);
   const runSystem = pipeline.run;
   runSystem('environment', () => processRegions(world, context));
@@ -3182,8 +3190,8 @@ export function advanceWorldDetailed(
   };
 }
 
-export function advanceWorld(currentWorld: WorldState): WorldState {
-  return advanceWorldDetailed(currentWorld).world;
+export function advanceWorld(currentWorld: WorldState, options: AdvanceWorldOptions = {}): WorldState {
+  return advanceWorldDetailed(currentWorld, options).world;
 }
 
 export function advanceWorldBy(currentWorld: WorldState, turns: number): WorldState {

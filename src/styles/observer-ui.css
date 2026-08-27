@@ -471,6 +471,271 @@
   line-height: 1.85;
 }
 
+.observer-embodiment-seal {
+  display: inline-flex;
+  min-height: 20px;
+  align-items: center;
+  margin-left: 5px;
+  padding: 0 5px;
+  border: 1px solid currentColor;
+  border-radius: 2px;
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+}
+
+.observer-embodiment-switch {
+  display: flex;
+  min-height: 50px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 7px;
+  padding: 8px 0;
+  border-top: 1px solid var(--observer-line);
+  border-bottom: 1px dotted var(--observer-line-strong);
+}
+
+.observer-embodiment-switch > div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.observer-embodiment-switch strong {
+  color: var(--observer-ink);
+  font-family: var(--observer-serif);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.observer-embodiment-switch span {
+  color: var(--observer-ink-faint);
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.observer-embodiment-switch > button,
+.observer-embodiment-pending > button,
+.observer-embodiment-result > button {
+  display: inline-flex;
+  min-height: 34px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  padding: 0 10px;
+  border: 1px solid var(--observer-vermilion-dark);
+  color: var(--observer-vermilion-dark);
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.06em;
+  background: transparent;
+  cursor: pointer;
+}
+
+.observer-embodiment-switch[data-active="true"] > button {
+  border-color: var(--observer-line-strong);
+  color: var(--observer-ink-faint);
+}
+
+.observer-embodiment-actions {
+  border-top-color: var(--observer-vermilion-dark);
+}
+
+.observer-embodiment-actions__heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 9px;
+}
+
+.observer-embodiment-actions__heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.observer-embodiment-actions__heading span {
+  color: var(--observer-ink-faint);
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.12em;
+}
+
+.observer-inspector__section .observer-embodiment-actions__heading h3 {
+  margin: 0;
+  color: var(--observer-ink);
+  font-family: var(--observer-serif);
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+}
+
+.observer-embodiment-actions__heading > b {
+  padding: 4px 5px;
+  border: 1px solid var(--observer-vermilion-dark);
+  color: var(--observer-vermilion-dark);
+  font-family: var(--observer-serif);
+  font-size: 9px;
+  letter-spacing: 0.12em;
+}
+
+.observer-embodiment-action-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.observer-embodiment-action-list li + li {
+  border-top: 1px solid var(--observer-line);
+}
+
+.observer-embodiment-action-list button {
+  width: 100%;
+  padding: 11px 2px 12px;
+  border: 0;
+  color: var(--observer-ink-soft);
+  text-align: left;
+  background: transparent;
+  cursor: pointer;
+}
+
+.observer-embodiment-action-list button:disabled {
+  cursor: not-allowed;
+  opacity: 0.52;
+}
+
+.observer-embodiment-action-list button:hover:not(:disabled),
+.observer-embodiment-action-list button:focus-visible {
+  color: var(--observer-vermilion-dark);
+  outline: 0;
+}
+
+.observer-embodiment-action-list button > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.observer-embodiment-action-list strong {
+  color: var(--observer-ink);
+  font-family: var(--observer-serif);
+  font-size: 14px;
+}
+
+.observer-embodiment-action-list button > span b {
+  overflow: hidden;
+  color: var(--observer-vermilion-dark);
+  font-size: 9px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.observer-embodiment-action-list button > p {
+  margin: 5px 0 8px;
+  color: var(--observer-ink-soft);
+  font-family: var(--observer-serif);
+  font-size: 11px;
+  line-height: 1.65;
+}
+
+.observer-embodiment-action-list dl {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+}
+
+.observer-embodiment-action-list dl > div {
+  display: grid;
+  grid-template-columns: 43px minmax(0, 1fr);
+  gap: 6px;
+}
+
+.observer-embodiment-action-list dt,
+.observer-embodiment-action-list dd {
+  margin: 0;
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.observer-embodiment-action-list dt {
+  color: var(--observer-ink-faint);
+  font-weight: 700;
+}
+
+.observer-embodiment-action-list dd {
+  color: var(--observer-ink-soft);
+}
+
+.observer-embodiment-action-list em,
+.observer-embodiment-action-list small {
+  display: block;
+  margin-top: 8px;
+  color: var(--observer-vermilion-dark);
+  font-size: 9px;
+  font-style: normal;
+  font-weight: 750;
+}
+
+.observer-embodiment-pending,
+.observer-embodiment-result {
+  padding: 12px 0;
+  border-top: 1px solid var(--observer-line);
+  border-bottom: 1px solid var(--observer-line);
+}
+
+.observer-embodiment-pending > span,
+.observer-embodiment-result > span {
+  color: var(--observer-vermilion-dark);
+  font-size: 8px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+}
+
+.observer-embodiment-pending > strong {
+  display: block;
+  margin-top: 5px;
+  color: var(--observer-ink);
+  font-family: var(--observer-serif);
+  font-size: 14px;
+}
+
+.observer-embodiment-pending > p,
+.observer-embodiment-result > p {
+  margin: 5px 0 9px;
+  color: var(--observer-ink-soft);
+  font-family: var(--observer-serif);
+  font-size: 10px;
+  line-height: 1.7;
+}
+
+.observer-embodiment-result {
+  margin-top: 10px;
+  border-bottom-style: dotted;
+}
+
+.observer-embodiment-result > small {
+  display: block;
+  color: var(--observer-ink-faint);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.observer-embodiment-result > button {
+  margin-top: 8px;
+  border-color: var(--observer-line-strong);
+}
+
+.observer-embodiment-actions__note {
+  margin: 10px 0 0;
+  color: var(--observer-ink-faint);
+  font-size: 8px;
+  line-height: 1.65;
+}
+
 .observer-inspector__section {
   padding: 15px 0 13px;
   border-top: 1px solid var(--observer-line);
@@ -2722,6 +2987,28 @@ button.observer-causal-chain__evidence:hover {
   .observer-inspector-tabs button {
     min-width: 44px;
     min-height: 44px;
+  }
+
+  .observer-embodiment-switch > button,
+  .observer-embodiment-pending > button,
+  .observer-embodiment-result > button,
+  .observer-embodiment-action-list button {
+    min-height: 44px;
+  }
+
+  .observer-embodiment-switch {
+    min-height: 60px;
+  }
+
+  .observer-embodiment-action-list button {
+    padding-top: 13px;
+    padding-bottom: 14px;
+  }
+
+  .observer-embodiment-action-list button > p,
+  .observer-embodiment-pending > p,
+  .observer-embodiment-result > p {
+    font-size: 11px;
   }
 
   .observer-inspector__header {

@@ -1612,6 +1612,38 @@ try {
   assert.equal(continuityReloaded.deterministicWorldHash, hashBeforeBrowsing, '核对人物续读不得改变世界哈希');
   assert.deepEqual(desktopErrors, []);
 
+  const embodimentContext = await browser.newContext({ viewport: { width: 1_280, height: 720 } });
+  const embodimentPage = await embodimentContext.newPage();
+  const embodimentErrors = [];
+  collectBrowserErrors(embodimentPage, embodimentErrors);
+  await openFreshWorld(embodimentPage, '入世验收');
+  await embodimentPage.locator('[data-map-primer-skip]').click();
+  await embodimentPage.click('button[data-observer-view="people"]');
+  const embodimentRows = embodimentPage.locator('.roster-panel button[data-roster-id]');
+  await embodimentRows.first().click();
+  const embodimentBefore = await snapshot(embodimentPage);
+  await embodimentPage.getByRole('button', { name: '以此人入世' }).click();
+  const embodimentPanel = embodimentPage.locator('[data-testid="embodiment-actions"]');
+  await embodimentPanel.waitFor();
+  const embodimentEntered = await snapshot(embodimentPage);
+  assert.equal(embodimentEntered.deterministicWorldHash, embodimentBefore.deterministicWorldHash, '单纯入世不得改变世界哈希');
+  assert.equal(embodimentEntered.observer.embodiment.actorId, embodimentEntered.interface.selected.id);
+  assert.equal(embodimentEntered.observer.embodiment.actions.length, 3, '人物每季只显示三项具体通用行动');
+  const availableEmbodiedAction = embodimentPanel.locator('.observer-embodiment-action-list button:not(:disabled)').first();
+  await availableEmbodiedAction.click();
+  const embodimentQueued = await snapshot(embodimentPage);
+  assert.ok(embodimentQueued.observer.embodiment.pending, '定下人物行动后应等待下一季结算');
+  assert.equal(embodimentQueued.deterministicWorldHash, embodimentBefore.deterministicWorldHash, '排队中的观察者意图不得提前修改世界');
+  await embodimentPage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-queued.png`, fullPage: true });
+  const embodimentSettled = await advanceOneQuarter(embodimentPage);
+  assert.equal(embodimentSettled.observer.embodiment.pending, null, '季度推进必须唯一消费已定行动');
+  await embodimentPage.locator('.observer-embodiment-result').waitFor();
+  assert.match(await embodimentPage.locator('.observer-embodiment-result').textContent(), /上次结果/);
+  assert.ok(embodimentSettled.interface.selectedDetail.biography.some((item) => item.factId), '入世结果必须进入人物传记');
+  await embodimentPage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-result.png`, fullPage: true });
+  assert.deepEqual(embodimentErrors, []);
+  await embodimentContext.close();
+
   const mobileContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,
@@ -1751,6 +1783,17 @@ try {
     const bounds = await mobileCommandSource.boundingBox();
     assert.ok(bounds && bounds.height >= 44, '移动端请令原事入口触控高度不得小于44px');
   }
+  await mobilePage.getByRole('button', { name: '以此人入世' }).click();
+  const mobileEmbodiment = mobilePage.locator('[data-testid="embodiment-actions"]');
+  await mobileEmbodiment.waitFor();
+  const mobileEmbodiedActions = mobileEmbodiment.locator('.observer-embodiment-action-list button');
+  assert.equal(await mobileEmbodiedActions.count(), 3, '移动端入世也只能看到三项情境行动');
+  for (let index = 0; index < await mobileEmbodiedActions.count(); index += 1) {
+    const bounds = await mobileEmbodiedActions.nth(index).boundingBox();
+    assert.ok(bounds && bounds.height >= 44, '移动端人物行动触控高度不得小于44px');
+  }
+  await assertWithinViewport(mobilePage, '.observer-inspector', '移动端入世行动不可横向溢出');
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-390x844.png`, fullPage: true });
   await waitForVisualSettled(mobilePage.locator('.observer-inspector'));
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-390x844.png`, fullPage: true });
   await mobileAgency.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();

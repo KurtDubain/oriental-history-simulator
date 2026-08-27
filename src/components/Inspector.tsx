@@ -263,6 +263,37 @@ export interface PersonAgencyView {
   recentPowerScenes?: readonly HistoricalSceneView[];
 }
 
+export interface PersonEmbodiedActionView {
+  actionId: string;
+  label: string;
+  targetLabel: string;
+  intent: string;
+  cost: string;
+  obstacle: string;
+  nextSignal: string;
+  available: boolean;
+  unavailableReason: string | null;
+}
+
+export interface PersonEmbodimentView {
+  active: boolean;
+  activeCharacterName: string | null;
+  pending: {
+    actorName: string;
+    label: string;
+    targetLabel: string;
+  } | null;
+  usedThisQuarter: boolean;
+  actions: readonly PersonEmbodiedActionView[];
+  lastResult: {
+    periodLabel: string;
+    outcome: 'succeeded' | 'deferred' | 'refused' | 'invalidated';
+    summary: string;
+    nextSignal: string;
+    sourceEventId: string | null;
+  } | null;
+}
+
 export interface PersonInspectorData {
   id: string;
   name: string;
@@ -364,6 +395,11 @@ interface InspectorSharedProps {
   onOpenArchive?: () => void;
   onSelectEntity?: (kind: ArchiveEntityKind, id: string) => void;
   onSelectEvent?: (eventId: string) => void;
+  embodiment?: PersonEmbodimentView;
+  onEnterEmbodiment?: () => void;
+  onLeaveEmbodiment?: () => void;
+  onChooseEmbodiedAction?: (actionId: string) => void;
+  onCancelEmbodiedAction?: () => void;
 }
 
 export type InspectorProps =
@@ -703,9 +739,15 @@ function agencyEmptyGoalCopy(agency: PersonAgencyView) {
 export function PersonAgencySections({
   agency,
   onSelectEvent,
+  embodiment,
+  onChooseEmbodiedAction,
+  onCancelEmbodiedAction,
 }: {
   agency: PersonAgencyView;
   onSelectEvent?: (eventId: string) => void;
+  embodiment?: PersonEmbodimentView;
+  onChooseEmbodiedAction?: (actionId: string) => void;
+  onCancelEmbodiedAction?: () => void;
 }) {
   const [memoriesExpanded, setMemoriesExpanded] = useState(false);
   const emptyGoal = agencyEmptyGoalCopy(agency);
@@ -726,6 +768,56 @@ export function PersonAgencySections({
       : '查考说明';
   return (
     <>
+      {embodiment?.active ? (
+        <section className="observer-inspector__section observer-embodiment-actions" aria-labelledby="person-embodiment-actions-heading" data-testid="embodiment-actions">
+          <div className="observer-embodiment-actions__heading">
+            <div><span>本季只定一事</span><h3 id="person-embodiment-actions-heading">此刻能做什么</h3></div>
+            <b>入世</b>
+          </div>
+          {embodiment.pending ? (
+            <div className="observer-embodiment-pending" role="status" aria-live="polite">
+              <span>已定 · 随下一季结算</span>
+              <strong>{embodiment.pending.actorName} · {embodiment.pending.label}</strong>
+              <p>对象：{embodiment.pending.targetLabel}。推进季度后，系统会按人物当时的身份、资源和关系给出结果。</p>
+              {onCancelEmbodiedAction ? <button type="button" onClick={onCancelEmbodiedAction}>撤回本季决定</button> : null}
+            </div>
+          ) : embodiment.usedThisQuarter ? (
+            <p className="observer-inspector__empty">本季的决定已经进入史册；到下一季才可再定一事。</p>
+          ) : (
+            <ol className="observer-embodiment-action-list">
+              {embodiment.actions.map((action) => (
+                <li key={action.actionId} data-available={action.available || undefined}>
+                  <button
+                    type="button"
+                    disabled={!action.available}
+                    onClick={() => onChooseEmbodiedAction?.(action.actionId)}
+                  >
+                    <span><strong>{action.label}</strong><b>{action.targetLabel}</b></span>
+                    <p>{action.intent}</p>
+                    <dl>
+                      <div><dt>代价</dt><dd>{action.cost}</dd></div>
+                      <div><dt>难处</dt><dd>{action.obstacle}</dd></div>
+                      <div><dt>之后看</dt><dd>{action.nextSignal}</dd></div>
+                    </dl>
+                    {!action.available ? <small>{action.unavailableReason}</small> : <em>定下此事</em>}
+                  </button>
+                </li>
+              ))}
+            </ol>
+          )}
+          {embodiment.lastResult ? (
+            <div className="observer-embodiment-result" data-outcome={embodiment.lastResult.outcome}>
+              <span>{embodiment.lastResult.periodLabel} · 上次结果</span>
+              <p>{embodiment.lastResult.summary}</p>
+              <small>接着看：{embodiment.lastResult.nextSignal}</small>
+              {embodiment.lastResult.sourceEventId && onSelectEvent ? (
+                <button type="button" onClick={() => onSelectEvent(embodiment.lastResult!.sourceEventId!)}>查这件事</button>
+              ) : null}
+            </div>
+          ) : null}
+          <p className="observer-embodiment-actions__note">你只替此人定下意图，不保证成功；其他人物与天下仍照常行动。</p>
+        </section>
+      ) : null}
       <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-desire-heading">
         <h3 id="person-agency-desire-heading">此人所重</h3>
         {agency.desires.length ? (
@@ -933,12 +1025,27 @@ function PersonInspector({ data, onOpenMind, ...actions }: Extract<InspectorProp
     setTab('mind');
     onOpenMind?.();
   };
+  const enterEmbodiment = () => {
+    actions.onEnterEmbodiment?.();
+    openMind();
+  };
   const abilities: Array<[string, number]> = [['统率', data.abilities.command], ['武勇', data.abilities.martial], ['政略', data.abilities.governance], ['谋略', data.abilities.strategy], ['魅力', data.abilities.charisma], ['学识', data.abilities.scholarship]];
   return (
     <>
       <div className="observer-inspector__header">
-        <div className="observer-inspector__identity"><span className="observer-inspector__kind"><UserRound size={14} aria-hidden="true" />人物档案</span><h2>{data.name}{data.courtesyName ? <small> 字{data.courtesyName}</small> : null}</h2><p>{[data.polity, data.role, data.lifeStage, data.tier, `${data.age}岁`].filter(Boolean).join(' · ')}</p></div>
+        <div className="observer-inspector__identity"><span className="observer-inspector__kind"><UserRound size={14} aria-hidden="true" />人物档案{actions.embodiment?.active ? <b className="observer-embodiment-seal">入世中</b> : null}</span><h2>{data.name}{data.courtesyName ? <small> 字{data.courtesyName}</small> : null}</h2><p>{[data.polity, data.role, data.lifeStage, data.tier, `${data.age}岁`].filter(Boolean).join(' · ')}</p></div>
         <InspectorActions label={data.name} {...actions} />
+      </div>
+      <div className="observer-embodiment-switch" data-active={actions.embodiment?.active || undefined}>
+        <div>
+          <strong>{actions.embodiment?.active ? '正从此人的位置看世事' : actions.embodiment?.activeCharacterName ? `当前以${actions.embodiment.activeCharacterName}入世` : '仍是历史观察者'}</strong>
+          <span>{actions.embodiment?.active ? '每季可替此人定下一件事' : '入世不会接管国家，只增加一次人物决定'}</span>
+        </div>
+        {actions.embodiment?.active
+          ? <button type="button" onClick={actions.onLeaveEmbodiment}>离开此人</button>
+          : data.lifeStage !== '已故' && actions.onEnterEmbodiment
+            ? <button type="button" onClick={enterEmbodiment}>{actions.embodiment?.activeCharacterName ? '改以此人入世' : '以此人入世'}</button>
+            : null}
       </div>
       {data.summary ? <p className="observer-inspector__summary">{data.summary}</p> : null}
       <button type="button" className="observer-person-quick-mind" aria-controls={`${tabsId}-panel-mind`} onClick={openMind}>
@@ -950,7 +1057,7 @@ function PersonInspector({ data, onOpenMind, ...actions }: Extract<InspectorProp
         <section className="observer-inspector__section" aria-labelledby="person-origin-heading"><h3 id="person-origin-heading">身世与处境</h3><dl className="observer-facts"><Fact label="性别" value={data.gender} /><Fact label="出身" value={data.origin} /><Fact label="阶层" value={data.politicalClass} /><Fact label="家族" value={data.family} /><Fact label="影响" value={data.influence} /><Fact label="私产" value={data.personalWealth} /></dl>{data.family ? <p className="observer-inspector__jump"><Network size={13} aria-hidden="true" /><LinkedName kind="family" id={data.familyId} onSelect={actions.onSelectEntity}>{data.family}</LinkedName></p> : null}{data.health !== undefined ? <div className="observer-health"><HeartPulse size={14} aria-hidden="true" /><Meter label="健康" value={data.health} /></div> : null}</section>
         <section className="observer-inspector__section" aria-labelledby="person-ability-heading"><h3 id="person-ability-heading">才能</h3><div className="observer-ability-grid">{abilities.map(([label, value]) => <div className="observer-ability" key={label}><span>{label}</span><strong>{Math.round(value)}</strong></div>)}</div><dl className="observer-facts observer-facts--after-grid"><Fact label="功绩" value={data.merit} /><Fact label="副将历练" value={data.deputyExperience} /></dl></section>
       </div> : null}
-      {tab === 'mind' ? <div id={`${tabsId}-panel-mind`} role="tabpanel" aria-labelledby={`${tabsId}-tab-mind`}>{data.agency ? <PersonAgencySections key={data.id} agency={data.agency} onSelectEvent={actions.onSelectEvent} /> : <section className="observer-inspector__section" aria-labelledby="person-motive-heading"><h3 id="person-motive-heading">心志与打算</h3><p className="observer-inspector__empty">现有记载不足以判断此人的打算。</p></section>}</div> : null}
+      {tab === 'mind' ? <div id={`${tabsId}-panel-mind`} role="tabpanel" aria-labelledby={`${tabsId}-tab-mind`}>{data.agency ? <PersonAgencySections key={data.id} agency={data.agency} onSelectEvent={actions.onSelectEvent} embodiment={actions.embodiment} onChooseEmbodiedAction={actions.onChooseEmbodiedAction} onCancelEmbodiedAction={actions.onCancelEmbodiedAction} /> : <section className="observer-inspector__section" aria-labelledby="person-motive-heading"><h3 id="person-motive-heading">心志与打算</h3><p className="observer-inspector__empty">现有记载不足以判断此人的打算。</p></section>}</div> : null}
       {tab === 'relations' ? <div id={`${tabsId}-panel-relations`} role="tabpanel" aria-labelledby={`${tabsId}-tab-relations`}><section className="observer-inspector__section" aria-labelledby="person-relation-heading"><h3 id="person-relation-heading"><Network size={14} aria-hidden="true" />关系与记忆</h3>{data.relationships?.length ? <><RelationshipConstellation name={data.name} relationships={data.relationships} onSelect={actions.onSelectEntity} /><ul className="observer-relation-list">{data.relationships.map((relation) => <li key={relation.id}><button type="button" onClick={() => actions.onSelectEntity?.('person', relation.targetId)}><span><strong>{relation.name}</strong><small>{relation.relation} · {relation.sentiment}</small></span>{relation.detail ? <b>{relation.detail}</b> : null}</button>{relation.memories?.length ? <p>{relation.memories.join('；')}</p> : null}</li>)}</ul></> : <p className="observer-inspector__empty">此人尚无足以入档的人际记忆。</p>}</section></div> : null}
       {tab === 'history' ? <div id={`${tabsId}-panel-history`} role="tabpanel" aria-labelledby={`${tabsId}-tab-history`}><section className="observer-inspector__section" aria-labelledby="person-history-heading"><h3 id="person-history-heading"><ScrollText size={14} aria-hidden="true" />人生经历</h3><RecordList records={data.experiences ?? []} onSelectEvent={actions.onSelectEvent} /></section></div> : null}
     </>

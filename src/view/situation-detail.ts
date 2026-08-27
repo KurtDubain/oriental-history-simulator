@@ -211,6 +211,8 @@ const FACT_KIND_LABELS: Record<SimulationFact['kind'], string> = {
   agency_support_resolved: '支持行动',
   agency_intent_submitted: '军令请求',
   agency_intent_resolved: '军令裁决',
+  embodied_action_submitted: '人物行动',
+  embodied_action_resolved: '行动结果',
   situation_milestone: '局势里程碑',
 };
 

@@ -6,7 +6,7 @@ export {
   createWorld,
   getDateForTurn,
 } from './engine';
-export type { DetailedAdvanceResult } from './engine';
+export type { AdvanceWorldOptions, DetailedAdvanceResult } from './engine';
 export { SIMULATION_SYSTEM_PHASES } from './advance-timing';
 export type { SimulationAdvanceTimings, SimulationSystemPhase } from './advance-timing';
 export {

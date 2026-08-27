@@ -997,6 +997,31 @@ export function validateTurnRuntime(
     if (fact.id !== expectedId) push(violations, 'runtime.fact-id', `本季事实ID应为${expectedId}，实际${fact.id}`, fact.id);
     validateRuntimeFact(fact, previous.turn, next.counters.fact, characterIds, polityIds, regionIds, violations);
   }
+  const embodiedSubmissions = appendedFacts.filter(
+    (fact): fact is Extract<SimulationFact, { kind: 'embodied_action_submitted' }> => fact.kind === 'embodied_action_submitted',
+  );
+  const embodiedResolutions = appendedFacts.filter(
+    (fact): fact is Extract<SimulationFact, { kind: 'embodied_action_resolved' }> => fact.kind === 'embodied_action_resolved',
+  );
+  if (embodiedSubmissions.length > 1) {
+    push(violations, 'runtime.embodied-action-limit', '同一季度只能登记一项入世行动');
+  }
+  for (const submission of embodiedSubmissions) {
+    const matches = embodiedResolutions.filter((resolution) => (
+      resolution.payload.submissionFactId === submission.id
+      && resolution.payload.actionId === submission.payload.actionId
+      && resolution.payload.actorId === submission.payload.actorId
+      && resolution.payload.source === 'player_embodied'
+      && resolution.sourceFactIds.length === 1
+      && resolution.sourceFactIds[0] === submission.id
+    ));
+    if (matches.length !== 1) {
+      push(violations, 'runtime.embodied-action-pair', `${submission.id}没有唯一且一致的入世行动结果`, submission.id);
+    }
+  }
+  if (embodiedResolutions.some((resolution) => !embodiedSubmissions.some((submission) => submission.id === resolution.payload.submissionFactId))) {
+    push(violations, 'runtime.embodied-action-orphan', '本季存在没有权威提交来源的入世行动结果');
+  }
   const expectedFactDigest = appendedFacts.reduce(
     (digest, fact) => extendAppendOnlyDigest(digest, fact),
     previous.factDigest,

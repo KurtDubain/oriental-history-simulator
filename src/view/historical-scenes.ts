@@ -176,6 +176,18 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact): F
     }
     return { title: `${actor}所请${army}军令未准`, summary: '朝廷没有改变现任主帅与副将的军令次序。' };
   }
+  if (fact.kind === 'embodied_action_submitted') {
+    return {
+      title: `${characterName(world, fact.payload.actorId)}定下一件事`,
+      summary: '此事已经进入本季人物行动结算，结果由人物当时的身份、资源与关系决定。',
+    };
+  }
+  if (fact.kind === 'embodied_action_resolved') {
+    return {
+      title: `${characterName(world, fact.payload.actorId)}${fact.payload.outcome === 'succeeded' ? '办成此事' : '尝试此事'}`,
+      summary: fact.payload.resultSummary,
+    };
+  }
   const transition = fact.payload.transition === 'formed'
     ? '形成'
     : fact.payload.transition === 'resolved'

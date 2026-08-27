@@ -33,6 +33,8 @@ export const PERSONAL_MEMORY_KINDS = [
   'support_denied',
   'command_appeased',
   'command_curbed',
+  'embodied_action_succeeded',
+  'embodied_action_setback',
 ] as const;
 
 export type PersonalMemoryKind = (typeof PERSONAL_MEMORY_KINDS)[number];
@@ -365,6 +367,26 @@ function commandResponseCandidates(
   }];
 }
 
+function embodiedActionCandidates(
+  fact: Extract<SimulationFact, { kind: 'embodied_action_resolved' }>,
+): MemoryCandidate[] {
+  const primary = fact.payload.targetKind === 'character'
+    ? subject('character', fact.payload.targetId, true)
+    : subject('polity', fact.polityIds[0] ?? '', true);
+  return [{
+    characterId: fact.payload.actorId,
+    scope: fact.payload.action === 'strengthen_relationship' ? 'personal' : 'political',
+    kind: fact.payload.outcome === 'succeeded' ? 'embodied_action_succeeded' : 'embodied_action_setback',
+    qualifier: `${fact.payload.action}:${fact.payload.outcome}`,
+    subjects: uniqueSubjects([primary]),
+    turn: fact.turn,
+    salience: clamp(34 + fact.importance * 12),
+    valence: fact.payload.outcome === 'succeeded' ? 50 : fact.payload.outcome === 'invalidated' ? -20 : -35,
+    pinnedEligible: false,
+    factId: fact.id,
+  }];
+}
+
 function candidatesForFact(world: WorldState, fact: SimulationFact): MemoryCandidate[] {
   if (fact.kind === 'battle') return battleCandidates(fact);
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') return appointmentCandidates(fact);
@@ -374,6 +396,7 @@ function candidatesForFact(world: WorldState, fact: SimulationFact): MemoryCandi
   if (fact.kind === 'situation_milestone') return situationCandidates(fact);
   if (fact.kind === 'agency_support_resolved') return supportCandidates(fact);
   if (fact.kind === 'agency_intent_resolved') return commandResponseCandidates(fact);
+  if (fact.kind === 'embodied_action_resolved') return embodiedActionCandidates(fact);
   return [];
 }
 
@@ -527,6 +550,8 @@ function memoryTitle(world: WorldState, memory: PersonalMemoryState): string {
   if (memory.kind === 'support_denied') return `${name}未肯相助`;
   if (memory.kind === 'command_appeased') return `请领${name}未准，另受安抚`;
   if (memory.kind === 'command_curbed') return `请领${name}未准并遭削权`;
+  if (memory.kind === 'embodied_action_succeeded') return `与${name}有关的一件事办成了`;
+  if (memory.kind === 'embodied_action_setback') return `与${name}有关的一件事未能如愿`;
   return `${name}落定`;
 }
 

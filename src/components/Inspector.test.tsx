@@ -5,6 +5,7 @@ import {
   PersonAgencySections,
   type PersonAgencyCommandRequestStage,
   type PersonAgencyView,
+  type PersonEmbodimentView,
 } from './Inspector';
 
 function agency(stage: PersonAgencyCommandRequestStage): PersonAgencyView {
@@ -99,5 +100,53 @@ describe('person command request reading flow', () => {
     expect(submitted).toContain('查请令原事');
     expect(approved).toContain('查授令原事');
     expect(blocked).toContain('查未准原事');
+  });
+});
+
+describe('embodied character action reading flow', () => {
+  const embodiment: PersonEmbodimentView = {
+    active: true,
+    activeCharacterName: '顾庭芳',
+    pending: null,
+    usedThisQuarter: false,
+    actions: [{
+      actionId: 'emb-action',
+      label: '经营关系',
+      targetLabel: '顾云岫',
+      intent: '亲自与顾云岫往来，争取更多信任。',
+      cost: '1 点私产与本季精力',
+      obstacle: '顾云岫目前对其信任为58',
+      nextSignal: '观察顾云岫是否回应，以及双方信任如何变化',
+      available: true,
+      unavailableReason: null,
+    }],
+    lastResult: null,
+  };
+
+  it('states the one-action boundary and exact target, cost, obstacle and next signal', () => {
+    const markup = renderToStaticMarkup(createElement(PersonAgencySections, {
+      agency: agency('planned'),
+      embodiment,
+      onChooseEmbodiedAction: () => undefined,
+    }));
+
+    expect(markup).toContain('本季只定一事');
+    expect(markup).toContain('顾云岫');
+    expect(markup).toContain('1 点私产与本季精力');
+    expect(markup).toContain('信任为58');
+    expect(markup).toContain('之后看');
+    expect(markup).not.toMatch(/\bAI\b|Intent|Resolver|BUFF/);
+  });
+
+  it('keeps a queued action legible without claiming it has already succeeded', () => {
+    const markup = renderToStaticMarkup(createElement(PersonAgencySections, {
+      agency: agency('planned'),
+      embodiment: { ...embodiment, pending: { actorName: '顾庭芳', label: '经营关系', targetLabel: '顾云岫' } },
+      onCancelEmbodiedAction: () => undefined,
+    }));
+
+    expect(markup).toContain('随下一季结算');
+    expect(markup).toContain('撤回本季决定');
+    expect(markup).not.toContain('定下此事');
   });
 });

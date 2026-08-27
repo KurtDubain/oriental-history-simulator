@@ -18,6 +18,8 @@ export type SimulationFactKind =
   | 'agency_support_resolved'
   | 'agency_intent_submitted'
   | 'agency_intent_resolved'
+  | 'embodied_action_submitted'
+  | 'embodied_action_resolved'
   | 'situation_milestone';
 
 export interface BattleForceFact {
@@ -210,6 +212,33 @@ export interface SituationMilestoneFactPayload {
   outcomeKey: string | null;
 }
 
+export type EmbodiedActionFactKind = 'strengthen_relationship' | 'seek_opportunity' | 'declare_stance';
+export type EmbodiedActionTargetKind = 'character' | 'faction';
+export type EmbodiedActionOutcome = 'succeeded' | 'deferred' | 'refused' | 'invalidated';
+
+export interface EmbodiedActionSubmittedFactPayload {
+  actionId: string;
+  issuedTurn: number;
+  source: 'player_embodied';
+  actorId: string;
+  action: EmbodiedActionFactKind;
+  targetKind: EmbodiedActionTargetKind;
+  targetId: string;
+  stance: 'support' | 'oppose' | null;
+}
+
+export interface EmbodiedActionResolvedFactPayload extends EmbodiedActionSubmittedFactPayload {
+  submissionFactId: string;
+  targetLabel: string;
+  outcome: EmbodiedActionOutcome;
+  reasonCode: 'conditions_changed' | 'accepted' | 'insufficient_support' | 'target_refused';
+  score: number;
+  threshold: number;
+  cost: string;
+  resultSummary: string;
+  nextSignal: string;
+}
+
 interface SimulationFactBase<K extends SimulationFactKind, P> {
   id: string;
   turn: number;
@@ -239,6 +268,8 @@ export type AgencySupportResolvedFact = SimulationFactBase<'agency_support_resol
 export type AgencyIntentSubmittedFact = SimulationFactBase<'agency_intent_submitted', AgencyIntentSubmittedFactPayload>;
 export type AgencyIntentResolvedFact = SimulationFactBase<'agency_intent_resolved', AgencyIntentResolvedFactPayload>;
 export type SituationMilestoneFact = SimulationFactBase<'situation_milestone', SituationMilestoneFactPayload>;
+export type EmbodiedActionSubmittedFact = SimulationFactBase<'embodied_action_submitted', EmbodiedActionSubmittedFactPayload>;
+export type EmbodiedActionResolvedFact = SimulationFactBase<'embodied_action_resolved', EmbodiedActionResolvedFactPayload>;
 
 export type SimulationFact =
   | WarStartedFact
@@ -252,6 +283,8 @@ export type SimulationFact =
   | AgencySupportResolvedFact
   | AgencyIntentSubmittedFact
   | AgencyIntentResolvedFact
+  | EmbodiedActionSubmittedFact
+  | EmbodiedActionResolvedFact
   | SituationMilestoneFact;
 
 export type SimulationFactInput = SimulationFact extends infer Fact

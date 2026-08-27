@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.3.0',
+    date: '2026-08-27',
+    title: '以一人之身，入一季世事',
+    items: [
+      '人物档案现在可以随时入世、离开或换人；入世只改变观察位置，不会暗中改写世界。',
+      '每季可替当前人物定下一件事：经营具体关系、向具体人物争取机会，或支持/反对一项明确议程。',
+      '行动在下一季按人物真实身份、履历、资源和关系结算，结果会进入史事、人生记忆、传记与权势账。',
+    ],
+  },
+  {
     version: '1.2.0',
     date: '2026-08-27',
     title: '权势有账，史事见人',
