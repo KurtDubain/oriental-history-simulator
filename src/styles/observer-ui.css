@@ -538,6 +538,72 @@
   color: var(--observer-ink-faint);
 }
 
+.observer-embodiment-closure {
+  margin: 1px 0 9px;
+  padding: 13px 0 14px 12px;
+  border-top: 1px solid var(--observer-vermilion-dark);
+  border-bottom: 1px dotted var(--observer-line-strong);
+  border-left: 2px solid var(--observer-vermilion-dark);
+}
+
+.observer-embodiment-closure > span {
+  color: var(--observer-vermilion-dark);
+  font-size: 8px;
+  font-weight: 760;
+  letter-spacing: 0.1em;
+}
+
+.observer-embodiment-closure > h3 {
+  margin: 5px 0 4px;
+  color: var(--observer-ink);
+  font-family: var(--observer-serif);
+  font-size: 17px;
+  font-weight: 650;
+  letter-spacing: 0.08em;
+}
+
+.observer-embodiment-closure > p {
+  margin: 0;
+  color: var(--observer-ink-soft);
+  font-family: var(--observer-serif);
+  font-size: 11px;
+  line-height: 1.75;
+}
+
+.observer-embodiment-closure > ul {
+  display: grid;
+  gap: 4px;
+  margin: 10px 0 0;
+  padding: 9px 0 0 16px;
+  border-top: 1px solid var(--observer-line);
+  color: var(--observer-ink-faint);
+  font-family: var(--observer-serif);
+  font-size: 9px;
+  line-height: 1.6;
+}
+
+.observer-embodiment-closure > div {
+  display: flex;
+  gap: 8px;
+  margin-top: 11px;
+}
+
+.observer-embodiment-closure button {
+  min-height: 34px;
+  padding: 0 10px;
+  border: 1px solid var(--observer-line-strong);
+  color: var(--observer-ink-soft);
+  font-size: 9px;
+  font-weight: 730;
+  background: transparent;
+  cursor: pointer;
+}
+
+.observer-embodiment-closure button:first-child {
+  border-color: var(--observer-vermilion-dark);
+  color: var(--observer-vermilion-dark);
+}
+
 .observer-embodiment-actions {
   border-top-color: var(--observer-vermilion-dark);
 }
@@ -3006,6 +3072,7 @@ button.observer-causal-chain__evidence:hover {
   .observer-embodiment-switch > button,
   .observer-embodiment-pending > button,
   .observer-embodiment-result > button,
+  .observer-embodiment-closure button,
   .observer-embodiment-action-list button {
     min-height: 44px;
   }

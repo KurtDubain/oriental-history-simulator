@@ -293,6 +293,12 @@ export interface PersonEmbodimentView {
     nextSignal: string;
     sourceEventId: string | null;
   } | null;
+  closure: {
+    reason: 'died' | 'missing';
+    summary: string;
+    highlights: readonly string[];
+    sourceEventId: string | null;
+  } | null;
 }
 
 export interface PersonInspectorData {
@@ -401,6 +407,7 @@ interface InspectorSharedProps {
   onLeaveEmbodiment?: () => void;
   onChooseEmbodiedAction?: (actionId: string) => void;
   onCancelEmbodiedAction?: () => void;
+  onDismissEmbodimentClosure?: () => void;
 }
 
 export type InspectorProps =
@@ -1018,6 +1025,35 @@ export function PersonAgencySections({
   );
 }
 
+export function PersonEmbodimentClosureNotice({
+  closure,
+  onSelectEvent,
+  onDismiss,
+}: {
+  closure: NonNullable<PersonEmbodimentView['closure']>;
+  onSelectEvent?: (eventId: string) => void;
+  onDismiss?: () => void;
+}) {
+  return (
+    <section className="observer-embodiment-closure" role="status" aria-live="polite" data-testid="embodiment-closure" data-reason={closure.reason}>
+      <span>{closure.reason === 'died' ? '人物离世 · 已回到观察' : '人物离场 · 已回到观察'}</span>
+      <h3>一生至此</h3>
+      <p>{closure.summary}</p>
+      {closure.highlights.length ? (
+        <ul aria-label="此人生前留下的事">
+          {closure.highlights.map((highlight) => <li key={highlight}>{highlight}</li>)}
+        </ul>
+      ) : null}
+      <div>
+        {closure.sourceEventId && onSelectEvent
+          ? <button type="button" onClick={() => onSelectEvent(closure.sourceEventId!)}>查最后一页</button>
+          : null}
+        {onDismiss ? <button type="button" onClick={onDismiss}>收起</button> : null}
+      </div>
+    </section>
+  );
+}
+
 function PersonInspector({ data, onOpenMind, ...actions }: Extract<InspectorProps, { kind: 'person' }> & { onOpenMind?: () => void }) {
   const [tab, setTab] = useState<'life' | 'mind' | 'relations' | 'history'>('life');
   const tabsId = useId();
@@ -1048,6 +1084,13 @@ function PersonInspector({ data, onOpenMind, ...actions }: Extract<InspectorProp
             ? <button type="button" onClick={enterEmbodiment}>{actions.embodiment?.activeCharacterName ? '改以此人入世' : '以此人入世'}</button>
             : null}
       </div>
+      {actions.embodiment?.closure ? (
+        <PersonEmbodimentClosureNotice
+          closure={actions.embodiment.closure}
+          onSelectEvent={actions.onSelectEvent}
+          onDismiss={actions.onDismissEmbodimentClosure}
+        />
+      ) : null}
       {data.summary ? <p className="observer-inspector__summary">{data.summary}</p> : null}
       <button type="button" className="observer-person-quick-mind" aria-controls={`${tabsId}-panel-mind`} onClick={openMind}>
         <span><strong>看所图</strong><small>旧事、盘算与本季所行</small></span>
@@ -1109,7 +1152,13 @@ export function Inspector(props: InspectorProps) {
   const [mobileExpanded, setMobileExpanded] = useState(false);
   const inspectorId = useId();
   const selectionKey = `${props.kind}:${props.data.id}`;
+  const embodimentClosureKey = props.kind === 'person' && props.embodiment?.closure
+    ? `${props.data.id}:${props.embodiment.closure.reason}:${props.embodiment.closure.sourceEventId ?? 'no-event'}`
+    : null;
   useEffect(() => setMobileExpanded(false), [selectionKey]);
+  useEffect(() => {
+    if (embodimentClosureKey) setMobileExpanded(true);
+  }, [embodimentClosureKey]);
   return (
     <aside
       id={inspectorId}

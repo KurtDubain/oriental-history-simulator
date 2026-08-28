@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.5.0',
+    date: '2026-08-28',
+    title: '人会离场，历史仍往前走',
+    items: [
+      '人物入世视角与未结算行动现在可随精确存档续读；换人只换视角，不会刷新或丢失本季已定之事。',
+      '当前人物自然离世或失去载体时，会自动回到历史观察，并留下生平收束、近事与唯一离世史页入口。',
+      '副将入世投影和队列适配已从总决策文件拆出；玩家候选仍走与 AI 相同的容量、排序与裁决，没有插队权。',
+    ],
+  },
+  {
     version: '1.4.0',
     date: '2026-08-28',
     title: '从副将的位置，亲手走向军令',

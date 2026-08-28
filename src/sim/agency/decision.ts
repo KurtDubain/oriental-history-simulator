@@ -8,14 +8,21 @@ import {
 import { stableCompare, stableHash } from '../random';
 import { projectCharacterDesires, ROOT_DESIRES, type RootDesire } from './projection';
 import {
-  createEmbodiedActionCommand,
-  EMBODIED_IDENTITY_ACTION_KINDS,
   projectEmbodiedActions,
   resolveEmbodiedAction,
   type EmbodiedActionCommand,
   type EmbodiedActionProjection,
   type EmbodiedActionTurnContext,
 } from './embodiment';
+import {
+  embodiedCommandsMatch,
+  isEmbodiedIdentityAction,
+  mergeEmbodiedQueueCandidate,
+  projectEmbodiedMilitaryAction,
+  resolveEmbodiedIdentityEnvelope,
+  submitEmbodiedIdentityAction,
+  type EmbodiedMilitaryActionCandidate,
+} from './embodied-military';
 import type {
   CharacterState,
   EventCause,
@@ -950,122 +957,13 @@ function intentFor(
   };
 }
 
-interface EmbodiedMilitaryActionCandidate {
-  projection: EmbodiedActionProjection;
-  supportAction: AgencySupportTurnAction | null;
-  intent: AgencyTurnIntent | null;
-}
-
-function identityActionLabel(
-  world: WorldState,
-  action: AgencySupportTurnAction,
-): { label: string; targetLabel: string; intent: string; cost: string; obstacle: string; nextSignal: string } {
-  const army = world.armies.find((item) => item.id === action.targetArmyId);
-  const target = world.characters.find((item) => item.id === action.targetId);
-  const armyLabel = army?.name ?? '本军';
-  if (action.action === 'cultivate_military_support') {
-    return {
-      label: '联络本军将校',
-      targetLabel: `${armyLabel}将校`,
-      intent: `亲自巡营联络${armyLabel}将校，为日后独当一面争取军中支持。`,
-      cost: '本季心力与至多 1 点私产',
-      obstacle: `将校会衡量其战功、统率、名望与${armyLabel}当前军心`,
-      nextSignal: `观察${armyLabel}将校是响应、观望还是拒绝`,
-    };
-  }
-  const relation = target ? directedRelationship(world, target.id, action.actorId) : undefined;
-  const relationLabel = action.targetKind === 'family_head'
-    ? '家主'
-    : action.targetKind === 'ruler'
-      ? '主君'
-      : '主帅';
-  return {
-    label: `请${relationLabel}背书`,
-    targetLabel: target?.name ?? relationLabel,
-    intent: `向${target?.name ?? relationLabel}说明独立统军之志，请其为日后的军令请求明确背书。`,
-    cost: '本季人情与双方关系',
-    obstacle: `${target?.name ?? relationLabel}目前对其信任为${relation?.trust ?? 0}，也会衡量忠诚与军功`,
-    nextSignal: `观察${target?.name ?? relationLabel}是答应相助、留待后议还是拒绝`,
-  };
-}
-
 function embodiedMilitaryActionFor(
   world: WorldState,
   actorState: CharacterAgencyDecisionState,
-): EmbodiedMilitaryActionCandidate | null {
-  if (actorState.goal.status !== 'active' || actorState.plan.status !== 'active') return null;
-  const actor = world.characters.find((item) => item.id === actorState.characterId && item.alive);
-  const army = world.armies.find((item) => item.id === actorState.goal.targetArmyId);
-  if (!actor || !army || army.deputyCommanderId !== actor.id) return null;
+): EmbodiedMilitaryActionCandidate<AgencySupportTurnAction, AgencyTurnIntent> | null {
   const intent = intentFor(world, actorState);
-  if (intent) {
-    return {
-      projection: {
-        command: createEmbodiedActionCommand(
-          world,
-          actor.id,
-          'request_independent_command',
-          'army',
-          army.id,
-        ),
-        label: '请领独立军令',
-        targetLabel: army.name,
-        intent: `正式向朝廷请求接掌${army.name}，由军令审查决定是否换帅。`,
-        cost: '押上本季军中声望与朝廷信任',
-        obstacle: `朝廷将同时审查职位、履历、明确支持、风险，并与本季其他军令请求一并裁定`,
-        nextSignal: `观察朝廷是授下${army.name}军令、暂缓、安抚还是削权`,
-        available: true,
-        unavailableReason: null,
-      },
-      supportAction: null,
-      intent,
-    };
-  }
-  const supportAction = supportActionFor(world, actorState, world.turn);
-  if (supportAction) {
-    const copy = identityActionLabel(world, supportAction);
-    return {
-      projection: {
-        command: createEmbodiedActionCommand(
-          world,
-          actor.id,
-          supportAction.action,
-          supportAction.targetKind === 'army_officers' ? 'army' : 'character',
-          supportAction.targetId,
-        ),
-        ...copy,
-        available: true,
-        unavailableReason: null,
-      },
-      supportAction,
-      intent: null,
-    };
-  }
-  const request = actorState.plan.steps.find((step) => step.action === 'request_independent_command');
-  const retry = actorState.nextEligibleSupportTurn > world.turn
-    ? `上一次争取支持后，需等到第${actorState.nextEligibleSupportTurn}回合再行动`
-    : request?.evidence ?? '军功、支持或职位条件仍不足';
-  return {
-    projection: {
-      command: createEmbodiedActionCommand(
-        world,
-        actor.id,
-        'request_independent_command',
-        'army',
-        army.id,
-      ),
-      label: '筹措独立军令',
-      targetLabel: army.name,
-      intent: `继续为接掌${army.name}准备履历、军中支持与上位者背书。`,
-      cost: '本季尚无可提交的具体行动',
-      obstacle: retry,
-      nextSignal: `观察${army.name}军功、支持与朝廷受理条件是否出现缺口`,
-      available: false,
-      unavailableReason: retry,
-    },
-    supportAction: null,
-    intent: null,
-  };
+  const supportAction = intent ? null : supportActionFor(world, actorState, world.turn);
+  return projectEmbodiedMilitaryAction(world, actorState, supportAction, intent);
 }
 
 /** Pure player projection: generic actions plus at most one role-specific military action. */
@@ -1077,113 +975,6 @@ export function projectCharacterEmbodiedActions(
   const actorState = world.agencyDecisionSystem.actors.find((item) => item.characterId === actorId);
   const military = actorState ? embodiedMilitaryActionFor(world, actorState) : null;
   return military ? [...generic, military.projection] : generic;
-}
-
-function embodiedCommandsMatch(left: EmbodiedActionCommand, right: EmbodiedActionCommand): boolean {
-  return left.actionId === right.actionId
-    && left.issuedTurn === right.issuedTurn
-    && left.actorId === right.actorId
-    && left.kind === right.kind
-    && left.targetKind === right.targetKind
-    && left.targetId === right.targetId
-    && left.stance === right.stance;
-}
-
-function isEmbodiedIdentityAction(command: EmbodiedActionCommand | null | undefined): command is EmbodiedActionCommand {
-  return Boolean(command && EMBODIED_IDENTITY_ACTION_KINDS.includes(
-    command.kind as (typeof EMBODIED_IDENTITY_ACTION_KINDS)[number],
-  ));
-}
-
-function submitEmbodiedIdentityAction(
-  world: WorldState,
-  context: AgencyDecisionTurnContext,
-  command: EmbodiedActionCommand,
-  option: EmbodiedActionProjection | null,
-): Extract<SimulationFact, { kind: 'embodied_action_submitted' }> {
-  const actor = world.characters.find((item) => item.id === command.actorId);
-  const army = world.armies.find((item) => item.id === command.targetId);
-  return emitSimulationFact(world, context, {
-    kind: 'embodied_action_submitted',
-    category: '军事',
-    importance: 1,
-    actorIds: actor ? [actor.id] : [],
-    polityIds: actor?.polityId ? [actor.polityId] : [],
-    regionIds: army?.regionId ? [army.regionId] : actor?.locationRegionId ? [actor.locationRegionId] : [],
-    causes: [
-      { label: '军中身份', role: '结构', weight: 0.3, evidence: actor ? `${actor.name}正处在独立统军的军职链上` : '原定人物已经失去军职载体' },
-      { label: '人物所求', role: '选择', weight: 0.45, evidence: option?.intent ?? '原定军中行动已经失去可核验条件' },
-      { label: '同一裁决', role: '条件', weight: 0.25, evidence: '此事与其他人物使用相同的军职、关系、资源、风险与冷却规则' },
-    ],
-    stateDeltas: [],
-    sourceFactIds: [],
-    payload: {
-      actionId: command.actionId,
-      issuedTurn: command.issuedTurn,
-      source: 'player_embodied',
-      actorId: command.actorId,
-      action: command.kind,
-      targetKind: command.targetKind,
-      targetId: command.targetId,
-      stance: command.stance,
-    },
-  }) as Extract<SimulationFact, { kind: 'embodied_action_submitted' }>;
-}
-
-function resolveEmbodiedIdentityEnvelope(
-  world: WorldState,
-  context: AgencyDecisionTurnContext,
-  command: EmbodiedActionCommand,
-  option: EmbodiedActionProjection | null,
-  submission: Extract<SimulationFact, { kind: 'embodied_action_submitted' }>,
-  result: {
-    outcome: 'succeeded' | 'deferred' | 'refused' | 'invalidated';
-    reasonCode: 'conditions_changed' | 'accepted' | 'insufficient_support' | 'target_refused';
-    score: number;
-    threshold: number;
-    summary: string;
-    domainFact: SimulationFact | null;
-  },
-): Extract<SimulationFact, { kind: 'embodied_action_resolved' }> {
-  const actor = world.characters.find((item) => item.id === command.actorId);
-  const domainFact = result.domainFact;
-  return emitSimulationFact(world, context, {
-    kind: 'embodied_action_resolved',
-    category: domainFact?.category ?? '军事',
-    importance: domainFact?.importance ?? 1,
-    actorIds: domainFact?.actorIds ?? (actor ? [actor.id] : []),
-    polityIds: domainFact?.polityIds ?? (actor?.polityId ? [actor.polityId] : []),
-    regionIds: domainFact?.regionIds ?? (actor?.locationRegionId ? [actor.locationRegionId] : []),
-    causes: [
-      { label: '入世决定', role: '触发', weight: 0.25, evidence: option?.intent ?? '原定军中行动已经失去条件' },
-      { label: '军中裁决', role: '选择', weight: 0.45, evidence: domainFact ? '沿用人物原本的支持或军令裁决，没有玩家加成与优先权' : '行动条件或本季受理名额已经变化' },
-      { label: '实际结果', role: '结果', weight: 0.3, evidence: result.summary },
-    ],
-    // The domain Fact owns the mutation. This envelope only ties the observer
-    // choice to that authoritative result and must not claim the delta twice.
-    stateDeltas: [],
-    sourceFactIds: [submission.id, ...(domainFact ? [domainFact.id] : [])],
-    payload: {
-      actionId: command.actionId,
-      issuedTurn: command.issuedTurn,
-      source: 'player_embodied',
-      actorId: command.actorId,
-      action: command.kind,
-      targetKind: command.targetKind,
-      targetId: command.targetId,
-      stance: command.stance,
-      submissionFactId: submission.id,
-      domainFactId: domainFact?.id ?? null,
-      targetLabel: option?.targetLabel ?? command.targetId,
-      outcome: result.outcome,
-      reasonCode: result.reasonCode,
-      score: result.score,
-      threshold: result.threshold,
-      cost: option?.cost ?? '没有实际支出',
-      resultSummary: result.summary,
-      nextSignal: option?.nextSignal ?? '观察此人的军职与支持条件是否重新出现',
-    },
-  }) as Extract<SimulationFact, { kind: 'embodied_action_resolved' }>;
 }
 
 function check(
@@ -1681,17 +1472,17 @@ export function processAgencyDecisionSystem(
   } else {
     embodiedActorId = resolveEmbodiedAction(world, context, emit);
   }
-  const supportCandidates = [
-    ...actors
+  const supportQueue = mergeEmbodiedQueueCandidate(
+    actors
     .filter((actor) => actor.characterId !== embodiedActorId)
     .map((actor) => supportActionFor(world, actor, context.turn))
     .filter((action): action is AgencySupportTurnAction => Boolean(action)),
-    ...(playerSupportAction ? [playerSupportAction] : []),
-  ];
-  const supportActions = supportCandidates
-    .sort((left, right) => stableCompare(left.actorId, right.actorId))
-    .slice(0, MAX_AGENCY_SUPPORT_ACTIONS_PER_TURN);
-  if (playerSupportAction && identitySubmission && identityOption && !supportActions.includes(playerSupportAction)) {
+    playerSupportAction,
+    MAX_AGENCY_SUPPORT_ACTIONS_PER_TURN,
+    (left, right) => stableCompare(left.actorId, right.actorId),
+  );
+  const supportActions = supportQueue.items;
+  if (playerSupportAction && identitySubmission && identityOption && !supportQueue.playerAccepted) {
     resolveEmbodiedIdentityEnvelope(world, context, requested as EmbodiedActionCommand, identityOption, identitySubmission, {
       outcome: 'deferred',
       reasonCode: 'insufficient_support',
@@ -1730,23 +1521,23 @@ export function processAgencyDecisionSystem(
   }
   actors = actors.map((actor) => actorById.get(actor.characterId) ?? actor);
   const polityCommandGranted = new Set<string>();
-  const intentCandidates = [
-    ...actors
+  const intentQueue = mergeEmbodiedQueueCandidate(
+    actors
     .filter((actor) => actor.characterId !== embodiedActorId)
     .map((actor) => intentFor(world, actor))
     .filter((intent): intent is AgencyTurnIntent => Boolean(intent)),
-    ...(playerIntent ? [playerIntent] : []),
-  ];
-  const intents = intentCandidates
-    .sort((left, right) => {
+    playerIntent,
+    MAX_AGENCY_INTENTS_PER_TURN,
+    (left, right) => {
       const leftActor = world.characters.find((character) => character.id === left.actorId);
       const rightActor = world.characters.find((character) => character.id === right.actorId);
       const leftClaim = (leftActor?.merit ?? 0) + (leftActor?.deputyExperience ?? 0) + (leftActor?.leadership ?? 0);
       const rightClaim = (rightActor?.merit ?? 0) + (rightActor?.deputyExperience ?? 0) + (rightActor?.leadership ?? 0);
       return rightClaim - leftClaim || stableCompare(left.actorId, right.actorId);
-    })
-    .slice(0, MAX_AGENCY_INTENTS_PER_TURN);
-  if (playerIntent && identitySubmission && identityOption && !intents.includes(playerIntent)) {
+    },
+  );
+  const intents = intentQueue.items;
+  if (playerIntent && identitySubmission && identityOption && !intentQueue.playerAccepted) {
     resolveEmbodiedIdentityEnvelope(world, context, requested as EmbodiedActionCommand, identityOption, identitySubmission, {
       outcome: 'deferred',
       reasonCode: 'insufficient_support',

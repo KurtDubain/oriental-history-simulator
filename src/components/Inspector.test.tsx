@@ -3,6 +3,7 @@ import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
   PersonAgencySections,
+  PersonEmbodimentClosureNotice,
   type PersonAgencyCommandRequestStage,
   type PersonAgencyView,
   type PersonEmbodimentView,
@@ -121,6 +122,7 @@ describe('embodied character action reading flow', () => {
       unavailableReason: null,
     }],
     lastResult: null,
+    closure: null,
   };
 
   it('states the one-action boundary and exact target, cost, obstacle and next signal', () => {
@@ -169,5 +171,25 @@ describe('embodied character action reading flow', () => {
     expect(markup).toContain('联络本军将校');
     expect(markup).toContain('燕京中军将校');
     expect(markup).not.toMatch(/Intent|Resolver|request_backing|cultivate_military_support/i);
+  });
+
+  it('closes a departed life with concrete experiences and a direct last-page route', () => {
+    const markup = renderToStaticMarkup(createElement(PersonEmbodimentClosureNotice, {
+      closure: {
+        reason: 'died',
+        summary: '将领顾庭芳一生至此，享年六十三岁。世界仍会沿着此人留下的关系继续演变。',
+        highlights: ['曾在雁门击退来敌', '请领军令后升任主帅'],
+        sourceEventId: 'event-death',
+      },
+      onSelectEvent: () => undefined,
+      onDismiss: () => undefined,
+    }));
+
+    expect(markup).toContain('人物离世 · 已回到观察');
+    expect(markup).toContain('一生至此');
+    expect(markup).toContain('雁门击退来敌');
+    expect(markup).toContain('查最后一页');
+    expect(markup).toContain('收起');
+    expect(markup).not.toMatch(/observer metadata|activeActor|worldHash|Fact ID/i);
   });
 });

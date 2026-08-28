@@ -187,6 +187,21 @@ import {
   type AgencyShadowLedger,
   type AgencyShadowPlayerEntry,
 } from './view/v1-agency-shadow';
+import {
+  advanceEmbodimentObserverState,
+  cancelEmbodiedObserverAction,
+  createEmbodimentObserverState,
+  dismissEmbodimentClosure,
+  embodimentObserverStorageKey,
+  enterEmbodimentObserverState,
+  leaveEmbodimentObserverState,
+  queueEmbodiedObserverAction,
+  reanchorEmbodimentObserverState,
+  restoreEmbodimentObserverState,
+  serializeEmbodimentObserverState,
+  type EmbodimentClosure,
+  type EmbodimentObserverState,
+} from './view/embodiment-observer';
 import './styles/app.css';
 
 type Selection =
@@ -368,6 +383,7 @@ function personEmbodimentView(
   characterId: string,
   activeCharacterId: string | null,
   pendingCommand: EmbodiedActionCommand | null,
+  closure: EmbodimentClosure | null,
 ): PersonEmbodimentView {
   const activeCharacter = activeCharacterId
     ? world.characters.find((item) => item.id === activeCharacterId)
@@ -423,6 +439,12 @@ function personEmbodimentView(
       summary: lastResult.payload.resultSummary,
       nextSignal: lastResult.payload.nextSignal,
       sourceEventId: resultEvent?.id ?? null,
+    } : null,
+    closure: closure?.actorId === characterId ? {
+      reason: closure.reason,
+      summary: closure.summary,
+      highlights: closure.highlights,
+      sourceEventId: closure.sourceEventId,
     } : null,
   };
 }
@@ -505,6 +527,7 @@ interface SnapshotOptions {
   agencyShadowBranchId: string | null;
   embodiedCharacterId: string | null;
   pendingEmbodiedAction: EmbodiedActionCommand | null;
+  embodimentClosure: EmbodimentClosure | null;
 }
 
 function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
@@ -838,6 +861,14 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
         return {
           actorId: actor?.id ?? null,
           actorName: actor?.name ?? null,
+          usedThisQuarter: world.facts.some((fact) => fact.turn === world.turn && fact.kind === 'embodied_action_submitted'),
+          closure: options.embodimentClosure ? {
+            actorId: options.embodimentClosure.actorId,
+            actorName: options.embodimentClosure.actorName,
+            reason: options.embodimentClosure.reason,
+            summary: options.embodimentClosure.summary,
+            sourceEventId: options.embodimentClosure.sourceEventId,
+          } : null,
           pending: options.pendingEmbodiedAction ? {
             actionId: options.pendingEmbodiedAction.actionId,
             actorId: options.pendingEmbodiedAction.actorId,
@@ -1030,8 +1061,9 @@ export function App() {
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
   const [agencyShadowLedger, setAgencyShadowLedger] = useState<AgencyShadowLedger>(() => createAgencyShadowLedger());
   const [agencyShadowBranchId, setAgencyShadowBranchId] = useState<string | null>(null);
-  const [embodiedCharacterId, setEmbodiedCharacterId] = useState<string | null>(null);
-  const [pendingEmbodiedAction, setPendingEmbodiedAction] = useState<EmbodiedActionCommand | null>(null);
+  const [embodimentObserver, setEmbodimentObserver] = useState<EmbodimentObserverState>(() => createEmbodimentObserverState());
+  const embodiedCharacterId = embodimentObserver.activeActor?.id ?? null;
+  const pendingEmbodiedAction = embodimentObserver.pendingAction;
   const appUpdate = useSyncExternalStore(
     subscribeAppUpdate,
     getAppUpdateState,
@@ -1065,8 +1097,7 @@ export function App() {
   const autosaveCoordinatorRef = useRef<AutosaveCoordinator | null>(null);
   const agencyShadowLedgerRef = useRef(agencyShadowLedger);
   const agencyShadowBranchIdRef = useRef<string | null>(agencyShadowBranchId);
-  const embodiedCharacterIdRef = useRef<string | null>(embodiedCharacterId);
-  const pendingEmbodiedActionRef = useRef<EmbodiedActionCommand | null>(pendingEmbodiedAction);
+  const embodimentObserverRef = useRef<EmbodimentObserverState>(embodimentObserver);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
   useEffect(() => startAppUpdateMonitor(), []);
   useEffect(() => {
@@ -1123,6 +1154,7 @@ export function App() {
     agencyShadowBranchId,
     embodiedCharacterId,
     pendingEmbodiedAction,
+    embodimentClosure: embodimentObserver.closure,
   });
 
   const commitAgencyShadow = useCallback((nextLedger: AgencyShadowLedger, nextBranchId: string | null) => {
@@ -1132,11 +1164,9 @@ export function App() {
     setAgencyShadowBranchId(nextBranchId);
   }, []);
 
-  const commitEmbodiedObserver = useCallback((characterId: string | null, pending: EmbodiedActionCommand | null) => {
-    embodiedCharacterIdRef.current = characterId;
-    pendingEmbodiedActionRef.current = pending;
-    setEmbodiedCharacterId(characterId);
-    setPendingEmbodiedAction(pending);
+  const commitEmbodiedObserver = useCallback((nextState: EmbodimentObserverState) => {
+    embodimentObserverRef.current = nextState;
+    setEmbodimentObserver(nextState);
   }, []);
 
   const resetAgencyShadowAtWorld = useCallback((nextWorld: WorldState) => {
@@ -1291,6 +1321,22 @@ export function App() {
   }, [observerSettings, world]);
 
   useEffect(() => {
+    embodimentObserverRef.current = embodimentObserver;
+    if (!world
+      || embodimentObserver.anchor?.seed !== world.seed
+      || embodimentObserver.anchor.turn !== world.turn
+      || embodimentObserver.anchor.hash !== world.hash) return;
+    try {
+      localStorage.setItem(
+        embodimentObserverStorageKey(world.seed),
+        serializeEmbodimentObserverState(embodimentObserver),
+      );
+    } catch {
+      // The embodied viewpoint is expendable observer metadata; the world remains authoritative.
+    }
+  }, [embodimentObserver, world]);
+
+  useEffect(() => {
     const timeout = window.setTimeout(() => {
       try {
         localStorage.setItem(AGENCY_SHADOW_STORAGE_KEY, serializeAgencyShadowLedger(agencyShadowLedger));
@@ -1319,6 +1365,17 @@ export function App() {
           AGENCY_SHADOW_STORAGE_KEY,
           serializeAgencyShadowLedger(agencyShadowLedgerRef.current),
         );
+        const currentWorld = worldRef.current;
+        const currentEmbodiment = embodimentObserverRef.current;
+        if (currentWorld
+          && currentEmbodiment.anchor?.seed === currentWorld.seed
+          && currentEmbodiment.anchor.turn === currentWorld.turn
+          && currentEmbodiment.anchor.hash === currentWorld.hash) {
+          localStorage.setItem(
+            embodimentObserverStorageKey(currentWorld.seed),
+            serializeEmbodimentObserverState(currentEmbodiment),
+          );
+        }
       } catch {
         // Keep page shutdown best-effort when localStorage is unavailable.
       }
@@ -1394,11 +1451,31 @@ export function App() {
     } catch {
       resetAgencyShadowAtWorld(validWorld);
     }
+    let restoredEmbodiment = createEmbodimentObserverState(validWorld);
+    if (source === 'continue' || source === 'collection') {
+      try {
+        restoredEmbodiment = restoreEmbodimentObserverState(
+          validWorld,
+          localStorage.getItem(embodimentObserverStorageKey(validWorld.seed)),
+        );
+      } catch {
+        restoredEmbodiment = createEmbodimentObserverState(validWorld);
+      }
+    }
     commitWorld(validWorld, source === 'continue' || source === 'collection' ? 'restore' : 'reset');
-    commitEmbodiedObserver(null, null);
+    commitEmbodiedObserver(restoredEmbodiment);
     setSeed(validWorld.seed);
     const compactViewport = window.matchMedia('(max-width: 760px)').matches;
-    setSelection(source !== 'create' && !compactViewport && defaultRegionId ? { kind: 'region', id: defaultRegionId } : null);
+    const restoredPersonId = restoredEmbodiment.activeActor?.id
+      ?? (restoredEmbodiment.closure
+        && validWorld.characters.some((item) => item.id === restoredEmbodiment.closure?.actorId)
+        ? restoredEmbodiment.closure.actorId
+        : null);
+    setSelection(restoredPersonId
+      ? { kind: 'person', id: restoredPersonId }
+      : source !== 'create' && !compactViewport && defaultRegionId
+        ? { kind: 'region', id: defaultRegionId }
+        : null);
     setSelectedEventId(null);
     setArchiveOpen(false);
     setMandateOpen(false);
@@ -1415,7 +1492,7 @@ export function App() {
     setPauseMatch(null);
     setHistoricalView(null);
     setResumeHistoryAfterEvent(false);
-    setActiveView('world');
+    setActiveView(restoredPersonId ? 'people' : 'world');
     setOverlay('political');
     setMapCamera({ ...DEFAULT_MAP_CAMERA });
     setMapCameraKey((current) => current + 1);
@@ -1550,6 +1627,7 @@ export function App() {
         resetAgencyShadowAtWorld(next);
       }
       commitWorld(next);
+      commitEmbodiedObserver(reanchorEmbodimentObserverState(embodimentObserverRef.current, next));
       try {
         const flushResult = await autosaveCoordinatorRef.current?.flush('intervention');
         if (flushResult?.status === 'failed') throw flushResult.error;
@@ -1571,7 +1649,7 @@ export function App() {
     } finally {
       setMandateBusy(false);
     }
-  }, [commitAgencyShadow, commitWorld, mandateBusy, resetAgencyShadowAtWorld, selection]);
+  }, [commitAgencyShadow, commitEmbodiedObserver, commitWorld, mandateBusy, resetAgencyShadowAtWorld, selection]);
 
   const handleExport = useCallback(() => {
     const current = worldRef.current;
@@ -1745,8 +1823,9 @@ export function App() {
     advancingRef.current = true;
     try {
       const oldHistoryLength = current.history.length;
-      const queuedEmbodiedAction = pendingEmbodiedActionRef.current?.issuedTurn === current.turn
-        ? pendingEmbodiedActionRef.current
+      const embodimentBeforeAdvance = embodimentObserverRef.current;
+      const queuedEmbodiedAction = embodimentBeforeAdvance.pendingAction?.issuedTurn === current.turn
+        ? embodimentBeforeAdvance.pendingAction
         : null;
       const detailed = advanceWorldDetailed(current, { embodiedAction: queuedEmbodiedAction });
       const advanced = detailed.world;
@@ -1786,9 +1865,13 @@ export function App() {
         resetAgencyShadowAtWorld(next);
       }
       commitWorld(next);
+      const nextEmbodiment = advanceEmbodimentObserverState(
+        embodimentBeforeAdvance,
+        current,
+        next,
+      );
+      commitEmbodiedObserver(nextEmbodiment);
       if (queuedEmbodiedAction) {
-        pendingEmbodiedActionRef.current = null;
-        setPendingEmbodiedAction(null);
         const resolution = [...next.facts].reverse().find((fact) => (
           fact.kind === 'embodied_action_resolved'
           && fact.payload.actionId === queuedEmbodiedAction.actionId
@@ -1797,11 +1880,12 @@ export function App() {
           setToast(resolution.payload.resultSummary);
         }
       }
-      const embodiedId = embodiedCharacterIdRef.current;
-      if (embodiedId && !next.characters.some((item) => item.id === embodiedId && item.alive)) {
-        embodiedCharacterIdRef.current = null;
-        setEmbodiedCharacterId(null);
-        setToast('所代入的人物已经离世，你已回到历史观察者视角。');
+      if (nextEmbodiment.closure && nextEmbodiment.closure !== embodimentBeforeAdvance.closure) {
+        const closureActorExists = next.characters.some((item) => item.id === nextEmbodiment.closure?.actorId);
+        if (closureActorExists) {
+          setActiveView('people');
+          setSelection({ kind: 'person', id: nextEmbodiment.closure.actorId });
+        }
       }
       const newEvents = next.history.slice(oldHistoryLength);
       const pauseCandidates = [
@@ -1845,7 +1929,7 @@ export function App() {
       if (!advanceRef.current('auto')) break;
       steps += 1;
     }
-  }, []);
+  }, [commitEmbodiedObserver]);
 
   useEffect(() => {
     let animationFrame = 0;
@@ -1942,6 +2026,7 @@ export function App() {
     agencyShadowBranchId,
     embodiedCharacterId,
     pendingEmbodiedAction,
+    embodimentClosure: embodimentObserver.closure,
   };
   useEffect(() => {
     window.render_game_to_text = () => makeTextSnapshot(worldRef.current, snapshotOptionsRef.current);
@@ -2336,21 +2421,25 @@ export function App() {
     runningRef.current = false;
     setRunning(false);
     clockAccumulatorRef.current = 0;
-    embodiedCharacterIdRef.current = character.id;
-    setEmbodiedCharacterId(character.id);
-    setToast(`现在以${character.name}入世；本季可以替其定下一件事。`);
-  }, []);
+    const nextState = enterEmbodimentObserverState(embodimentObserverRef.current, current, character.id);
+    if (!nextState) {
+      setToast('此人已经无法入世。');
+      return;
+    }
+    commitEmbodiedObserver(nextState);
+  }, [commitEmbodiedObserver]);
 
   const handleLeaveEmbodiment = useCallback(() => {
-    const pending = pendingEmbodiedActionRef.current;
-    embodiedCharacterIdRef.current = null;
-    setEmbodiedCharacterId(null);
-    setToast(pending ? '已回到观察者视角；此前定下的本季行动仍会照常结算。' : '已回到历史观察者视角。');
-  }, []);
+    const current = worldRef.current;
+    if (!current) return;
+    const pending = embodimentObserverRef.current.pendingAction;
+    commitEmbodiedObserver(leaveEmbodimentObserverState(embodimentObserverRef.current, current));
+    if (pending) setToast('已回到观察者视角；此前定下的本季行动仍会照常结算。');
+  }, [commitEmbodiedObserver]);
 
   const handleChooseEmbodiedAction = useCallback((actionId: string) => {
     const current = worldRef.current;
-    const actorId = embodiedCharacterIdRef.current;
+    const actorId = embodimentObserverRef.current.activeActor?.id ?? null;
     if (!current || !actorId) return;
     const option = projectCharacterEmbodiedActions(current, actorId).find((item) => item.command.actionId === actionId);
     if (!option?.available) {
@@ -2360,16 +2449,23 @@ export function App() {
     runningRef.current = false;
     setRunning(false);
     clockAccumulatorRef.current = 0;
-    pendingEmbodiedActionRef.current = option.command;
-    setPendingEmbodiedAction(option.command);
-    setToast(`已定下“${option.label}”；推进下一季后查看结果。`);
-  }, []);
+    const nextState = queueEmbodiedObserverAction(embodimentObserverRef.current, current, option.command);
+    if (!nextState) {
+      setToast('此事眼下已经不能进行。');
+      return;
+    }
+    commitEmbodiedObserver(nextState);
+  }, [commitEmbodiedObserver]);
 
   const handleCancelEmbodiedAction = useCallback(() => {
-    pendingEmbodiedActionRef.current = null;
-    setPendingEmbodiedAction(null);
-    setToast('已撤回本季尚未结算的决定。');
-  }, []);
+    const current = worldRef.current;
+    if (!current) return;
+    commitEmbodiedObserver(cancelEmbodiedObserverAction(embodimentObserverRef.current, current));
+  }, [commitEmbodiedObserver]);
+
+  const handleDismissEmbodimentClosure = useCallback(() => {
+    commitEmbodiedObserver(dismissEmbodimentClosure(embodimentObserverRef.current));
+  }, [commitEmbodiedObserver]);
 
   const inspector = useMemo<ReactNode>(() => {
     if (!world || !selection) return null;
@@ -2414,11 +2510,18 @@ export function App() {
           item,
           agencyDossierOptions(agencyShadowLedger, agencyShadowBranchId, item.id),
         )}
-        embodiment={personEmbodimentView(world, item.id, embodiedCharacterId, pendingEmbodiedAction)}
+        embodiment={personEmbodimentView(
+          world,
+          item.id,
+          embodiedCharacterId,
+          pendingEmbodiedAction,
+          embodimentObserver.closure,
+        )}
         onEnterEmbodiment={() => handleEnterEmbodiment(item.id)}
         onLeaveEmbodiment={handleLeaveEmbodiment}
         onChooseEmbodiedAction={handleChooseEmbodiedAction}
         onCancelEmbodiedAction={handleCancelEmbodiedAction}
+        onDismissEmbodimentClosure={handleDismissEmbodimentClosure}
         {...shared}
       /> : null;
     }
@@ -2429,10 +2532,12 @@ export function App() {
     agencyShadowLedger,
     commitObserverSettings,
     embodiedCharacterId,
+    embodimentObserver.closure,
     followed,
     handleCancelEmbodiedAction,
     handleChooseEmbodiedAction,
     handleEnterEmbodiment,
+    handleDismissEmbodimentClosure,
     handleLeaveEmbodiment,
     handleSelectArchiveEntity,
     handleSelectScopedEvent,

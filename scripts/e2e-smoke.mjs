@@ -1634,7 +1634,37 @@ try {
   const embodimentQueued = await snapshot(embodimentPage);
   assert.ok(embodimentQueued.observer.embodiment.pending, '定下人物行动后应等待下一季结算');
   assert.equal(embodimentQueued.deterministicWorldHash, embodimentBefore.deterministicWorldHash, '排队中的观察者意图不得提前修改世界');
+  const originalEmbodimentActorId = embodimentEntered.interface.selected.id;
+  await embodimentPage.getByRole('button', { name: '离开此人' }).click();
+  await embodimentPage.locator('.roster-panel button[data-roster-id]').nth(1).click();
+  await embodimentPage.getByRole('button', { name: '以此人入世' }).click();
+  const embodimentSwitched = await snapshot(embodimentPage);
+  assert.equal(embodimentSwitched.observer.embodiment.pending.actionId, embodimentQueued.observer.embodiment.pending.actionId, '同季换人不得刷新或丢失已定行动');
+  assert.equal(embodimentSwitched.deterministicWorldHash, embodimentQueued.deterministicWorldHash, '换人只改观察视角');
+  assert.equal(await embodimentPage.locator('.observer-embodiment-action-list button').count(), 0, '已定一事后同季不应再给可点行动');
+  await embodimentPage.getByRole('button', { name: '离开此人' }).click();
+  await embodimentPage.locator(`.roster-panel button[data-roster-id="${originalEmbodimentActorId}"]`).click();
+  await embodimentPage.getByRole('button', { name: '以此人入世' }).click();
   await embodimentPage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-queued.png`, fullPage: true });
+  await embodimentPage.getByLabel('保存当前世界').click();
+  await waitForLatestAutosave(embodimentPage, embodimentQueued);
+  await embodimentPage.waitForFunction((actionId) => (
+    Object.values(localStorage).some((value) => value.includes(actionId))
+  ), embodimentQueued.observer.embodiment.pending.actionId);
+  await embodimentPage.reload({ waitUntil: 'networkidle' });
+  await embodimentPage.click('#continue-world');
+  await embodimentPage.waitForSelector('.world-map__canvas');
+  const embodimentRestored = await snapshot(embodimentPage);
+  assert.equal(embodimentRestored.deterministicWorldHash, embodimentQueued.deterministicWorldHash, '续读入世视角不得改变世界');
+  assert.equal(embodimentRestored.observer.embodiment.actorId, embodimentQueued.observer.embodiment.actorId, '续读应恢复原人物视角');
+  assert.equal(embodimentRestored.observer.embodiment.pending.actionId, embodimentQueued.observer.embodiment.pending.actionId, '续读应恢复尚未结算的行动');
+  await waitForSnapshot(
+    embodimentPage,
+    (state, actorId) => state.interface.selected?.kind === 'person' && state.interface.selected.id === actorId,
+    embodimentQueued.observer.embodiment.actorId,
+  );
+  await embodimentPage.getByRole('tab', { name: '所图' }).click();
+  await embodimentPage.locator('[data-testid="embodiment-actions"]').waitFor();
   const embodimentSettled = await advanceOneQuarter(embodimentPage);
   assert.equal(embodimentSettled.observer.embodiment.pending, null, '季度推进必须唯一消费已定行动');
   await embodimentPage.locator('.observer-embodiment-result').waitFor();
@@ -1643,6 +1673,46 @@ try {
   await embodimentPage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-result.png`, fullPage: true });
   assert.deepEqual(embodimentErrors, []);
   await embodimentContext.close();
+
+  const closureContext = await browser.newContext({ viewport: { width: 1_280, height: 720 } });
+  const closurePage = await closureContext.newPage();
+  const closureErrors = [];
+  collectBrowserErrors(closurePage, closureErrors);
+  await openFreshWorld(closurePage, '入世生平收束');
+  await closurePage.locator('[data-map-primer-skip]').click();
+  await advanceTo(closurePage, 3);
+  await closurePage.click('button[data-observer-view="people"]');
+  await closurePage.locator('.roster-panel button[data-roster-id="c_102"]').click();
+  const closureBefore = await snapshot(closurePage);
+  assert.equal(closureBefore.interface.selectedDetail.name, '郑季安', '离世验收种子应稳定定位人物');
+  await closurePage.getByRole('button', { name: '以此人入世' }).click();
+  const closureEntered = await snapshot(closurePage);
+  assert.equal(closureEntered.observer.embodiment.actorId, 'c_102');
+  const closureAfter = await advanceOneQuarter(closurePage);
+  assert.equal(closureAfter.observer.embodiment.actorId, null, '人物离世应自动回到观察身份');
+  assert.equal(closureAfter.observer.embodiment.closure?.reason, 'died');
+  assert.match(closureAfter.observer.embodiment.closure?.summary ?? '', /一生至此/);
+  assert.ok(closureAfter.observer.embodiment.closure?.sourceEventId, '生平收束应连回离世史事');
+  const closureNotice = closurePage.locator('[data-testid="embodiment-closure"]');
+  await closureNotice.waitFor();
+  await closurePage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-life-closure.png`, fullPage: true });
+  await closurePage.setViewportSize({ width: 390, height: 844 });
+  await closurePage.waitForFunction(() => (
+    document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true'
+  ));
+  await waitForVisualSettled(closurePage.locator('.observer-inspector'));
+  await assertWithinViewport(closurePage, '[data-testid="embodiment-closure"]', '移动端生平收束不可横向溢出');
+  const closureButtons = closureNotice.locator('button');
+  for (let index = 0; index < await closureButtons.count(); index += 1) {
+    const bounds = await closureButtons.nth(index).boundingBox();
+    assert.ok(bounds && bounds.height >= 44, '移动端生平收束按钮触控高度不得小于44px');
+  }
+  await closurePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-life-closure-390x844.png`, fullPage: true });
+  await closureNotice.getByRole('button', { name: '查最后一页' }).click();
+  const closureHistory = await waitForSnapshot(closurePage, (state) => Boolean(state.interface.selectedEventId));
+  assert.match(closureHistory.interface.selectedEvent.title, /卒|离世|逝/);
+  assert.deepEqual(closureErrors, []);
+  await closureContext.close();
 
   const identityContext = await browser.newContext({ viewport: { width: 1_280, height: 720 } });
   const identityPage = await identityContext.newPage();
