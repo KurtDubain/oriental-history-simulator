@@ -149,4 +149,25 @@ describe('embodied character action reading flow', () => {
     expect(markup).toContain('撤回本季决定');
     expect(markup).not.toContain('定下此事');
   });
+
+  it('marks a role-specific action without exposing resolver terminology', () => {
+    const identityAction = {
+      ...embodiment.actions[0],
+      actionId: 'emb-military',
+      identityLabel: '副将行事',
+      label: '联络本军将校',
+      targetLabel: '燕京中军将校',
+      intent: '亲自巡营联络本军将校，为日后独当一面争取军中支持。',
+    };
+    const markup = renderToStaticMarkup(createElement(PersonAgencySections, {
+      agency: agency('planned'),
+      embodiment: { ...embodiment, actions: [identityAction] },
+      onChooseEmbodiedAction: () => undefined,
+    }));
+
+    expect(markup).toContain('副将行事');
+    expect(markup).toContain('联络本军将校');
+    expect(markup).toContain('燕京中军将校');
+    expect(markup).not.toMatch(/Intent|Resolver|request_backing|cultivate_military_support/i);
+  });
 });

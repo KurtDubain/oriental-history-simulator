@@ -12,6 +12,7 @@ export {
   MAX_AGENCY_SUPPORT_ACTIONS_PER_TURN,
   MIN_INDEPENDENT_COMMAND_DEPUTY_TENURE_TURNS,
   processAgencyDecisionSystem,
+  projectCharacterEmbodiedActions,
   validateAgencyDecisionSystemState,
 } from './decision';
 
@@ -46,6 +47,8 @@ export {
 
 export {
   EMBODIED_ACTION_KINDS,
+  EMBODIED_IDENTITY_ACTION_KINDS,
+  createEmbodiedActionCommand,
   projectEmbodiedActions,
   resolveEmbodiedAction,
 } from './embodiment';

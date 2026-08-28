@@ -314,6 +314,16 @@ export function projectHistoricalScenes(
   const facts = [...new Map(inputFacts.map((fact) => [fact.id, fact])).values()]
     .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
 
+  // Identity actions are observer envelopes around an Agency domain Fact.
+  // Let the concrete support/request scene own the story instead of showing a
+  // second generic “人物尝试此事” scene beside it.
+  for (const resolution of facts.filter((fact): fact is Extract<SimulationFact, { kind: 'embodied_action_resolved' }> => (
+    fact.kind === 'embodied_action_resolved' && Boolean(fact.payload.domainFactId)
+  ))) {
+    consumed.add(resolution.id);
+    consumed.add(resolution.payload.submissionFactId);
+  }
+
   for (const resolution of facts.filter((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_resolved' }> => fact.kind === 'agency_intent_resolved')) {
     const chain = collectAgencyChain(world, resolution);
     chain.forEach((fact) => consumed.add(fact.id));

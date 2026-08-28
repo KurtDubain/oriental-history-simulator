@@ -13,6 +13,15 @@ export const EMBODIED_ACTION_KINDS = [
   'strengthen_relationship',
   'seek_opportunity',
   'declare_stance',
+  'cultivate_military_support',
+  'request_backing',
+  'request_independent_command',
+] as const;
+
+export const EMBODIED_IDENTITY_ACTION_KINDS = [
+  'cultivate_military_support',
+  'request_backing',
+  'request_independent_command',
 ] as const;
 
 export type EmbodiedActionKind = (typeof EMBODIED_ACTION_KINDS)[number];
@@ -23,7 +32,7 @@ export interface EmbodiedActionCommand {
   issuedTurn: number;
   actorId: string;
   kind: EmbodiedActionKind;
-  targetKind: 'character' | 'faction';
+  targetKind: 'character' | 'faction' | 'army';
   targetId: string;
   stance: EmbodiedActionStance;
 }
@@ -80,7 +89,7 @@ function actionId(
   return `emb_${stableHash([world.seed, world.turn, actorId, kind, targetId, stance, 'embodied-action-v1']).slice(0, 14)}`;
 }
 
-function command(
+export function createEmbodiedActionCommand(
   world: WorldState,
   actorId: string,
   kind: EmbodiedActionKind,
@@ -165,7 +174,7 @@ function opportunityTarget(world: WorldState, actor: CharacterState): CharacterS
 
 function opportunityLabel(world: WorldState, actor: CharacterState): string {
   if (world.armies.some((item) => item.deputyCommanderId === actor.id)
-    || world.fleets.some((item) => item.deputyCommanderId === actor.id)) return '独当一面的军令';
+    || world.fleets.some((item) => item.deputyCommanderId === actor.id)) return '一项随军重任';
   if (actor.role === '廷臣') return '一项朝廷差遣';
   if (actor.role === '地方长官') return '更多施政支持';
   if (actor.role === '将领') return '更多军政资源';
@@ -200,7 +209,7 @@ export function projectEmbodiedActions(world: WorldState, actorId: string): read
   const stanceUnavailable = adultReason ?? (!faction ? '所属政权尚无可公开表态的政治集团' : null);
   return [
     {
-      command: command(world, actor.id, 'strengthen_relationship', 'character', relationTarget?.id ?? 'missing'),
+      command: createEmbodiedActionCommand(world, actor.id, 'strengthen_relationship', 'character', relationTarget?.id ?? 'missing'),
       label: '经营关系',
       targetLabel: relationTarget?.name ?? '暂无对象',
       intent: relationTarget ? `亲自与${relationTarget.name}往来，争取更多信任。` : '寻找一位能够长期往来的人。',
@@ -213,7 +222,7 @@ export function projectEmbodiedActions(world: WorldState, actorId: string): read
       unavailableReason: relationUnavailable,
     },
     {
-      command: command(world, actor.id, 'seek_opportunity', 'character', chanceTarget?.id ?? 'missing'),
+      command: createEmbodiedActionCommand(world, actor.id, 'seek_opportunity', 'character', chanceTarget?.id ?? 'missing'),
       label: '争取机会',
       targetLabel: chanceTarget ? `${chanceTarget.name} · ${opportunity}` : opportunity,
       intent: chanceTarget ? `向${chanceTarget.name}争取${opportunity}。` : `寻找能够给予${opportunity}的人。`,
@@ -226,7 +235,7 @@ export function projectEmbodiedActions(world: WorldState, actorId: string): read
       unavailableReason: chanceUnavailable,
     },
     {
-      command: command(world, actor.id, 'declare_stance', 'faction', faction?.id ?? 'missing', stance),
+      command: createEmbodiedActionCommand(world, actor.id, 'declare_stance', 'faction', faction?.id ?? 'missing', stance),
       label: stance === 'support' ? '表明支持' : '公开反对',
       targetLabel: faction ? `${faction.name} · ${faction.agenda}` : '暂无议程',
       intent: faction
@@ -542,6 +551,7 @@ export function resolveEmbodiedAction(
     sourceFactIds: [submission.id],
     payload: {
       submissionFactId: submission.id,
+      domainFactId: null,
       actionId: requested.actionId,
       issuedTurn: requested.issuedTurn,
       source: 'player_embodied',

@@ -1644,6 +1644,63 @@ try {
   assert.deepEqual(embodimentErrors, []);
   await embodimentContext.close();
 
+  const identityContext = await browser.newContext({ viewport: { width: 1_280, height: 720 } });
+  const identityPage = await identityContext.newPage();
+  const identityErrors = [];
+  collectBrowserErrors(identityPage, identityErrors);
+  await openFreshWorld(identityPage, '军权春秋');
+  await identityPage.locator('[data-map-primer-skip]').click();
+  let identityTurnState = await snapshot(identityPage);
+  while (identityTurnState.time.turn < 8) identityTurnState = await advanceOneQuarter(identityPage);
+  assert.ok(identityTurnState.observer.commandCandidates.length > 0, 'T8 应出现可观察的副将军令链');
+  await identityPage.click('button[data-observer-view="people"]');
+  await identityPage.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
+  let identityAction = null;
+  let identityActorId = null;
+  for (const candidate of identityTurnState.observer.commandCandidates) {
+    const row = identityPage.locator(`.roster-panel button[data-roster-id="${candidate.characterId}"]`);
+    if (!await row.count()) continue;
+    await row.click();
+    await identityPage.getByRole('button', { name: /以此人入世/ }).click();
+    await identityPage.locator('[data-testid="embodiment-actions"]').waitFor();
+    const current = await snapshot(identityPage);
+    identityAction = current.observer.embodiment.actions.find((action) => (
+      action.identityLabel === '副将行事' && action.available
+    )) ?? null;
+    if (identityAction) {
+      identityActorId = candidate.characterId;
+      break;
+    }
+  }
+  assert.ok(identityAction && identityActorId, '应找到一位拥有可执行身份行动的副将');
+  const identityBeforeQueue = await snapshot(identityPage);
+  assert.equal(identityBeforeQueue.observer.embodiment.actions.length, 4, '副将只比通用人物多一项身份行动');
+  const identityActionButton = identityPage.locator('.observer-embodiment-action-list li', { hasText: '副将行事' })
+    .locator('button:not(:disabled)');
+  await identityActionButton.scrollIntoViewIfNeeded();
+  await identityPage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-identity-action.png`, fullPage: false });
+  await identityActionButton.click();
+  const identityQueued = await snapshot(identityPage);
+  assert.equal(identityQueued.observer.embodiment.pending.actionId, identityAction.actionId);
+  assert.equal(identityQueued.deterministicWorldHash, identityBeforeQueue.deterministicWorldHash, '身份行动排队不得提前修改世界');
+  await identityPage.locator('.observer-embodiment-pending').scrollIntoViewIfNeeded();
+  await identityPage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-identity-queued.png`, fullPage: true });
+  const identitySettled = await advanceOneQuarter(identityPage);
+  assert.equal(identitySettled.observer.embodiment.pending, null, '身份行动必须在下一季唯一结算');
+  const identityResult = identityPage.locator('.observer-embodiment-result');
+  await identityResult.waitFor();
+  assert.match(await identityResult.textContent(), /上次结果.*(军|帅|君|将校)/s);
+  assert.ok(identitySettled.interface.selectedDetail.biography.length > identityBeforeQueue.interface.selectedDetail.biography.length, '身份行动领域结果必须进入人物传记');
+  const identityHistoryButton = identityResult.getByRole('button', { name: '查这件事' });
+  await identityHistoryButton.waitFor();
+  await identityResult.scrollIntoViewIfNeeded();
+  await identityPage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-identity-result.png`, fullPage: true });
+  await identityHistoryButton.click();
+  const identityHistory = await waitForSnapshot(identityPage, (state) => Boolean(state.interface.selectedEventId));
+  assert.ok(identityHistory.interface.selectedEvent.summary, '身份行动结果应能直达同一领域史事');
+  assert.deepEqual(identityErrors, []);
+  await identityContext.close();
+
   const mobileContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,
@@ -1787,13 +1844,17 @@ try {
   const mobileEmbodiment = mobilePage.locator('[data-testid="embodiment-actions"]');
   await mobileEmbodiment.waitFor();
   const mobileEmbodiedActions = mobileEmbodiment.locator('.observer-embodiment-action-list button');
-  assert.equal(await mobileEmbodiedActions.count(), 3, '移动端入世也只能看到三项情境行动');
+  assert.equal(await mobileEmbodiedActions.count(), 4, '移动端副将应只比通用人物多一项身份行动');
+  assert.equal(await mobileEmbodiment.getByText('副将行事', { exact: true }).count(), 1, '移动端应清楚标出唯一身份行动');
   for (let index = 0; index < await mobileEmbodiedActions.count(); index += 1) {
     const bounds = await mobileEmbodiedActions.nth(index).boundingBox();
     assert.ok(bounds && bounds.height >= 44, '移动端人物行动触控高度不得小于44px');
   }
   await assertWithinViewport(mobilePage, '.observer-inspector', '移动端入世行动不可横向溢出');
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-390x844.png`, fullPage: true });
+  const mobileIdentityAction = mobileEmbodiment.locator('.observer-embodiment-action-list li', { hasText: '副将行事' });
+  await mobileIdentityAction.scrollIntoViewIfNeeded();
+  await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-identity-390x844.png`, fullPage: false });
   await waitForVisualSettled(mobilePage.locator('.observer-inspector'));
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-390x844.png`, fullPage: true });
   await mobileAgency.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();

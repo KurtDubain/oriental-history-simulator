@@ -265,6 +265,7 @@ export interface PersonAgencyView {
 
 export interface PersonEmbodiedActionView {
   actionId: string;
+  identityLabel?: string | null;
   label: string;
   targetLabel: string;
   intent: string;
@@ -792,7 +793,7 @@ export function PersonAgencySections({
                     disabled={!action.available}
                     onClick={() => onChooseEmbodiedAction?.(action.actionId)}
                   >
-                    <span><strong>{action.label}</strong><b>{action.targetLabel}</b></span>
+                    <span><strong>{action.identityLabel ? <i>{action.identityLabel}</i> : null}{action.label}</strong><b>{action.targetLabel}</b></span>
                     <p>{action.intent}</p>
                     <dl>
                       <div><dt>代价</dt><dd>{action.cost}</dd></div>

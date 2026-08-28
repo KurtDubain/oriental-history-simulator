@@ -1003,6 +1003,7 @@ export function validateTurnRuntime(
   const embodiedResolutions = appendedFacts.filter(
     (fact): fact is Extract<SimulationFact, { kind: 'embodied_action_resolved' }> => fact.kind === 'embodied_action_resolved',
   );
+  const appendedFactById = new Map(appendedFacts.map((fact) => [fact.id, fact]));
   if (embodiedSubmissions.length > 1) {
     push(violations, 'runtime.embodied-action-limit', '同一季度只能登记一项入世行动');
   }
@@ -1012,8 +1013,11 @@ export function validateTurnRuntime(
       && resolution.payload.actionId === submission.payload.actionId
       && resolution.payload.actorId === submission.payload.actorId
       && resolution.payload.source === 'player_embodied'
-      && resolution.sourceFactIds.length === 1
       && resolution.sourceFactIds[0] === submission.id
+      && (resolution.payload.domainFactId == null
+        ? resolution.sourceFactIds.length === 1
+        : resolution.sourceFactIds.length === 2
+          && resolution.sourceFactIds[1] === resolution.payload.domainFactId)
     ));
     if (matches.length !== 1) {
       push(violations, 'runtime.embodied-action-pair', `${submission.id}没有唯一且一致的入世行动结果`, submission.id);
@@ -1021,6 +1025,24 @@ export function validateTurnRuntime(
   }
   if (embodiedResolutions.some((resolution) => !embodiedSubmissions.some((submission) => submission.id === resolution.payload.submissionFactId))) {
     push(violations, 'runtime.embodied-action-orphan', '本季存在没有权威提交来源的入世行动结果');
+  }
+  for (const resolution of embodiedResolutions) {
+    if (!resolution.payload.domainFactId) continue;
+    const domain = appendedFactById.get(resolution.payload.domainFactId);
+    const matchingSupport = domain?.kind === 'agency_support_resolved'
+      && domain.payload.actorId === resolution.payload.actorId
+      && domain.payload.action === resolution.payload.action;
+    const matchingIntent = domain?.kind === 'agency_intent_resolved'
+      && domain.payload.actorId === resolution.payload.actorId
+      && resolution.payload.action === 'request_independent_command';
+    if (!matchingSupport && !matchingIntent) {
+      push(
+        violations,
+        'runtime.embodied-action-domain',
+        `${resolution.id}没有链接同一人物与行动的领域裁决事实`,
+        resolution.id,
+      );
+    }
   }
   const expectedFactDigest = appendedFacts.reduce(
     (digest, fact) => extendAppendOnlyDigest(digest, fact),

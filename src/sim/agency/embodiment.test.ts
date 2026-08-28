@@ -4,6 +4,7 @@ import {
   advanceWorld,
   computeWorldHash,
   createWorld,
+  projectCharacterEmbodiedActions,
   projectEmbodiedActions,
   stableHash,
   validateTurnRuntime,
@@ -17,6 +18,25 @@ function playable(world: WorldState) {
     if (action) return { character, action };
   }
   throw new Error('Embodiment fixture requires one available action');
+}
+
+const IDENTITY_ACTIONS = new Set([
+  'cultivate_military_support',
+  'request_backing',
+  'request_independent_command',
+]);
+
+function militaryPlayable(seed: string) {
+  let world = createWorld(seed);
+  for (let turn = 0; turn < 32; turn += 1) {
+    for (const actor of world.agencyDecisionSystem.actors) {
+      const action = projectCharacterEmbodiedActions(world, actor.characterId)
+        .find((item) => IDENTITY_ACTIONS.has(item.command.kind) && item.available);
+      if (action) return { world, actorId: actor.characterId, action };
+    }
+    world = advanceWorld(world);
+  }
+  throw new Error('Identity action fixture requires an eligible deputy');
 }
 
 describe('EMB01-04 embodied character action', () => {
@@ -71,5 +91,143 @@ describe('EMB01-04 embodied character action', () => {
     expect(next.facts.filter((fact) => fact.kind === 'embodied_action_submitted')).toHaveLength(1);
     expect(next.facts.filter((fact) => fact.kind === 'embodied_action_resolved')).toHaveLength(1);
     expect(validateTurnRuntime(initial, next)).toEqual([]);
+  });
+});
+
+describe('EMB05-06 deputy identity action', () => {
+  it('adds at most one stage-specific military action without mutating the world', () => {
+    const { world, actorId, action } = militaryPlayable('副将入世投影');
+    const before = stableHash(world);
+    const actions = projectCharacterEmbodiedActions(world, actorId);
+
+    expect(actions).toHaveLength(4);
+    expect(action.targetLabel).toBeTruthy();
+    expect(action.intent).toMatch(/军|帅|君|将校/);
+    expect(action.cost).toBeTruthy();
+    expect(action.obstacle).toBeTruthy();
+    expect(action.nextSignal).toBeTruthy();
+    expect(stableHash(world)).toBe(before);
+  });
+
+  it('uses the same Agency resolver result as the AI action and records one observer envelope', () => {
+    const { world, actorId, action } = militaryPlayable('副将共用裁决');
+    const baseline = advanceWorld(world);
+    const played = advanceWorld(world, { embodiedAction: action.command });
+    const submission = played.facts.find((fact) => (
+      fact.turn === world.turn
+      && fact.kind === 'embodied_action_submitted'
+      && fact.payload.actionId === action.command.actionId
+    ));
+    const wrapper = played.facts.find((fact) => (
+      fact.turn === world.turn
+      && fact.kind === 'embodied_action_resolved'
+      && fact.payload.actionId === action.command.actionId
+    ));
+
+    expect(submission?.kind).toBe('embodied_action_submitted');
+    expect(wrapper?.kind).toBe('embodied_action_resolved');
+    if (wrapper?.kind !== 'embodied_action_resolved') throw new Error('missing identity wrapper');
+    expect(wrapper.payload.domainFactId).not.toBeNull();
+    expect(wrapper.stateDeltas).toEqual([]);
+    expect(wrapper.sourceFactIds).toEqual([submission?.id, wrapper.payload.domainFactId]);
+    const domain = played.facts.find((fact) => fact.id === wrapper.payload.domainFactId);
+    const baselineDomain = baseline.facts.find((fact) => (
+      fact.turn === world.turn
+      && fact.payload && 'actorId' in fact.payload
+      && fact.payload.actorId === actorId
+      && ((domain?.kind === 'agency_support_resolved' && fact.kind === 'agency_support_resolved')
+        || (domain?.kind === 'agency_intent_resolved' && fact.kind === 'agency_intent_resolved'))
+    ));
+    expect(domain?.kind).toMatch(/agency_(support|intent)_resolved/);
+    expect(baselineDomain?.kind).toBe(domain?.kind);
+    if (domain?.kind === 'agency_support_resolved' && baselineDomain?.kind === 'agency_support_resolved') {
+      expect(domain.payload.outcome).toBe(baselineDomain.payload.outcome);
+      expect(domain.payload.strength).toBe(baselineDomain.payload.strength);
+      expect(domain.stateDeltas).toEqual(baselineDomain.stateDeltas);
+    } else if (domain?.kind === 'agency_intent_resolved' && baselineDomain?.kind === 'agency_intent_resolved') {
+      expect(domain.payload.outcome).toBe(baselineDomain.payload.outcome);
+      expect(domain.payload.reasonCode).toBe(baselineDomain.payload.reasonCode);
+      expect(domain.payload.decisionScore).toBe(baselineDomain.payload.decisionScore);
+      expect(domain.stateDeltas).toEqual(baselineDomain.stateDeltas);
+    }
+    const memories = played.agencySystem.characters.find((item) => item.characterId === actorId)?.memories ?? [];
+    expect(memories.some((item) => item.sourceFactIds.includes(domain?.id ?? 'missing'))).toBe(true);
+    expect(memories.some((item) => item.sourceFactIds.includes(wrapper.id))).toBe(false);
+    expect(played.history.some((event) => event.sourceFactIds.includes(domain?.id ?? 'missing'))).toBe(true);
+    expect(validateTurnRuntime(world, played)).toEqual([]);
+  });
+
+  it('invalidates a forged identity target without invoking a domain resolver', () => {
+    const { world, action } = militaryPlayable('副将身份防滥用');
+    const forged: EmbodiedActionCommand = { ...action.command, targetId: 'army_missing' };
+    const next = advanceWorld(world, { embodiedAction: forged });
+    const wrapper = next.facts.find((fact) => (
+      fact.turn === world.turn
+      && fact.kind === 'embodied_action_resolved'
+      && fact.payload.actionId === forged.actionId
+    ));
+
+    expect(wrapper?.kind).toBe('embodied_action_resolved');
+    if (wrapper?.kind !== 'embodied_action_resolved') throw new Error('missing invalid identity wrapper');
+    expect(wrapper.payload.outcome).toBe('invalidated');
+    expect(wrapper.payload.domainFactId).toBeNull();
+    expect(wrapper.stateDeltas).toEqual([]);
+    expect(validateTurnRuntime(world, next)).toEqual([]);
+  });
+
+  it('lets a player-held deputy carry support into a next-quarter request using the same intent resolver', () => {
+    let world = createWorld('军权春秋');
+    while (world.turn < 8) world = advanceWorld(world);
+    const autonomous = advanceWorld(world);
+    const naturallyRequesting = autonomous.facts
+      .flatMap((fact) => (
+        fact.turn === world.turn && fact.kind === 'agency_intent_resolved'
+          ? [fact.payload.actorId]
+          : []
+      ))
+      .find((actorId) => projectCharacterEmbodiedActions(world, actorId).some((item) => (
+        item.available
+        && (item.command.kind === 'cultivate_military_support' || item.command.kind === 'request_backing')
+      )));
+    expect(naturallyRequesting).toBeTruthy();
+    if (!naturallyRequesting) throw new Error('fixture requires a deputy whose support unlocks a request');
+    const support = projectCharacterEmbodiedActions(world, naturallyRequesting).find((item) => (
+      item.available
+      && (item.command.kind === 'cultivate_military_support' || item.command.kind === 'request_backing')
+    ));
+    if (!support) throw new Error('missing player support action');
+
+    const afterSupport = advanceWorld(world, { embodiedAction: support.command });
+    const request = projectCharacterEmbodiedActions(afterSupport, naturallyRequesting)
+      .find((item) => item.command.kind === 'request_independent_command' && item.available);
+    expect(request?.label).toBe('请领独立军令');
+    if (!request) throw new Error('support should leave the formal request for the next player quarter');
+
+    const aiResult = advanceWorld(afterSupport);
+    const playerResult = advanceWorld(afterSupport, { embodiedAction: request.command });
+    const wrapper = playerResult.facts.find((fact) => (
+      fact.turn === afterSupport.turn
+      && fact.kind === 'embodied_action_resolved'
+      && fact.payload.actionId === request.command.actionId
+    ));
+    if (wrapper?.kind !== 'embodied_action_resolved' || !wrapper.payload.domainFactId) {
+      throw new Error('formal player request must link its domain resolution');
+    }
+    const playerDomain = playerResult.facts.find((fact) => fact.id === wrapper.payload.domainFactId);
+    const aiDomain = aiResult.facts.find((fact) => (
+      fact.turn === afterSupport.turn
+      && fact.kind === 'agency_intent_resolved'
+      && fact.payload.actorId === naturallyRequesting
+    ));
+    expect(playerDomain?.kind).toBe('agency_intent_resolved');
+    expect(aiDomain?.kind).toBe('agency_intent_resolved');
+    if (playerDomain?.kind !== 'agency_intent_resolved' || aiDomain?.kind !== 'agency_intent_resolved') {
+      throw new Error('missing comparable command resolutions');
+    }
+    expect(playerDomain.payload.outcome).toBe(aiDomain.payload.outcome);
+    expect(playerDomain.payload.reasonCode).toBe(aiDomain.payload.reasonCode);
+    expect(playerDomain.payload.decisionScore).toBe(aiDomain.payload.decisionScore);
+    expect(playerDomain.stateDeltas).toEqual(aiDomain.stateDeltas);
+    expect(validateTurnRuntime(afterSupport, playerResult)).toEqual([]);
   });
 });

@@ -625,6 +625,20 @@
   font-size: 14px;
 }
 
+.observer-embodiment-action-list strong > i {
+  display: inline-block;
+  margin-right: 7px;
+  padding-right: 7px;
+  border-right: 1px solid color-mix(in srgb, var(--observer-vermilion-dark) 46%, transparent);
+  color: var(--observer-vermilion-dark);
+  font-family: var(--observer-sans);
+  font-size: 8px;
+  font-style: normal;
+  font-weight: 760;
+  letter-spacing: 0.12em;
+  vertical-align: 2px;
+}
+
 .observer-embodiment-action-list button > span b {
   overflow: hidden;
   color: var(--observer-vermilion-dark);

@@ -212,8 +212,14 @@ export interface SituationMilestoneFactPayload {
   outcomeKey: string | null;
 }
 
-export type EmbodiedActionFactKind = 'strengthen_relationship' | 'seek_opportunity' | 'declare_stance';
-export type EmbodiedActionTargetKind = 'character' | 'faction';
+export type EmbodiedActionFactKind =
+  | 'strengthen_relationship'
+  | 'seek_opportunity'
+  | 'declare_stance'
+  | 'cultivate_military_support'
+  | 'request_backing'
+  | 'request_independent_command';
+export type EmbodiedActionTargetKind = 'character' | 'faction' | 'army';
 export type EmbodiedActionOutcome = 'succeeded' | 'deferred' | 'refused' | 'invalidated';
 
 export interface EmbodiedActionSubmittedFactPayload {
@@ -229,6 +235,8 @@ export interface EmbodiedActionSubmittedFactPayload {
 
 export interface EmbodiedActionResolvedFactPayload extends EmbodiedActionSubmittedFactPayload {
   submissionFactId: string;
+  /** Missing on v1.3.0 schema-4 archives; absence means a legacy generic action. */
+  domainFactId?: string | null;
   targetLabel: string;
   outcome: EmbodiedActionOutcome;
   reasonCode: 'conditions_changed' | 'accepted' | 'insufficient_support' | 'target_refused';

@@ -103,7 +103,7 @@ import {
   isV03InterventionEvent,
   serializeWorld,
   measureRuntimeValidation,
-  projectEmbodiedActions,
+  projectCharacterEmbodiedActions,
   SIMULATION_SYSTEM_PHASES,
   validateWorld,
   type EmbodiedActionCommand,
@@ -372,9 +372,9 @@ function personEmbodimentView(
   const activeCharacter = activeCharacterId
     ? world.characters.find((item) => item.id === activeCharacterId)
     : null;
-  const actions = projectEmbodiedActions(world, characterId);
+  const actions = projectCharacterEmbodiedActions(world, characterId);
   const pendingActions = pendingCommand
-    ? projectEmbodiedActions(world, pendingCommand.actorId)
+    ? projectCharacterEmbodiedActions(world, pendingCommand.actorId)
     : [];
   const pendingOption = pendingCommand
     ? pendingActions.find((item) => item.command.actionId === pendingCommand.actionId)
@@ -382,11 +382,15 @@ function personEmbodimentView(
   const pendingActor = pendingCommand
     ? world.characters.find((item) => item.id === pendingCommand.actorId)
     : null;
-  const lastResult = [...world.facts].reverse().find((fact) => (
+  const lastResult = [...world.facts].reverse().find((fact): fact is Extract<WorldState['facts'][number], { kind: 'embodied_action_resolved' }> => (
     fact.kind === 'embodied_action_resolved' && fact.payload.actorId === characterId
   ));
   const resultEvent = lastResult
-    ? [...world.history].reverse().find((event) => event.sourceFactIds.includes(lastResult.id))
+    ? [...world.history].reverse().find((event) => (
+        event.sourceFactIds.includes(lastResult.id)
+        || (Boolean(lastResult.payload.domainFactId)
+          && event.sourceFactIds.includes(lastResult.payload.domainFactId as string))
+      ))
     : null;
   return {
     active: activeCharacterId === characterId,
@@ -401,6 +405,9 @@ function personEmbodimentView(
     )),
     actions: actions.map((item) => ({
       actionId: item.command.actionId,
+      identityLabel: ['cultivate_military_support', 'request_backing', 'request_independent_command'].includes(item.command.kind)
+        ? '副将行事'
+        : null,
       label: item.label,
       targetLabel: item.targetLabel,
       intent: item.intent,
@@ -825,7 +832,7 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
           ? world.characters.find((item) => item.id === options.embodiedCharacterId)
           : null;
         const pendingOption = options.pendingEmbodiedAction
-          ? projectEmbodiedActions(world, options.pendingEmbodiedAction.actorId)
+          ? projectCharacterEmbodiedActions(world, options.pendingEmbodiedAction.actorId)
               .find((item) => item.command.actionId === options.pendingEmbodiedAction?.actionId)
           : null;
         return {
@@ -837,8 +844,11 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
             label: pendingOption?.label ?? options.pendingEmbodiedAction.kind,
             targetLabel: pendingOption?.targetLabel ?? options.pendingEmbodiedAction.targetId,
           } : null,
-          actions: actor?.alive ? projectEmbodiedActions(world, actor.id).map((item) => ({
+          actions: actor?.alive ? projectCharacterEmbodiedActions(world, actor.id).map((item) => ({
             actionId: item.command.actionId,
+            identityLabel: ['cultivate_military_support', 'request_backing', 'request_independent_command'].includes(item.command.kind)
+              ? '副将行事'
+              : null,
             label: item.label,
             targetLabel: item.targetLabel,
             available: item.available,
@@ -2342,7 +2352,7 @@ export function App() {
     const current = worldRef.current;
     const actorId = embodiedCharacterIdRef.current;
     if (!current || !actorId) return;
-    const option = projectEmbodiedActions(current, actorId).find((item) => item.command.actionId === actionId);
+    const option = projectCharacterEmbodiedActions(current, actorId).find((item) => item.command.actionId === actionId);
     if (!option?.available) {
       setToast(option?.unavailableReason ?? '此事眼下已经不能进行。');
       return;

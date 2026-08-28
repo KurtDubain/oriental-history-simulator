@@ -370,9 +370,15 @@ function commandResponseCandidates(
 function embodiedActionCandidates(
   fact: Extract<SimulationFact, { kind: 'embodied_action_resolved' }>,
 ): MemoryCandidate[] {
+  // Role-specific actions already produce the authoritative Agency support or
+  // command memory. The observer envelope must not create a second memory for
+  // the same deed.
+  if (fact.payload.domainFactId) return [];
   const primary = fact.payload.targetKind === 'character'
     ? subject('character', fact.payload.targetId, true)
-    : subject('polity', fact.polityIds[0] ?? '', true);
+    : fact.payload.targetKind === 'army'
+      ? subject('army', fact.payload.targetId, true)
+      : subject('polity', fact.polityIds[0] ?? '', true);
   return [{
     characterId: fact.payload.actorId,
     scope: fact.payload.action === 'strengthen_relationship' ? 'personal' : 'political',
