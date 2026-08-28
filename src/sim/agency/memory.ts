@@ -33,6 +33,9 @@ export const PERSONAL_MEMORY_KINDS = [
   'support_denied',
   'command_appeased',
   'command_curbed',
+  'local_relief_enacted',
+  'local_levy_reduced',
+  'local_measure_setback',
   'embodied_action_succeeded',
   'embodied_action_setback',
 ] as const;
@@ -367,6 +370,29 @@ function commandResponseCandidates(
   }];
 }
 
+function localGovernanceCandidates(
+  fact: Extract<SimulationFact, { kind: 'local_governance_resolved' }>,
+): MemoryCandidate[] {
+  const enacted = fact.payload.outcome === 'enacted';
+  return [{
+    characterId: fact.payload.actorId,
+    scope: 'political',
+    kind: enacted
+      ? fact.payload.action === 'open_granary' ? 'local_relief_enacted' : 'local_levy_reduced'
+      : 'local_measure_setback',
+    qualifier: `${fact.payload.action}:${fact.payload.outcome}`,
+    subjects: uniqueSubjects([
+      subject('region', fact.payload.regionId, true),
+      subject('polity', fact.payload.polityId),
+    ]),
+    turn: fact.turn,
+    salience: clamp(32 + fact.importance * 12 + fact.payload.pressure * 0.16),
+    valence: enacted ? 54 : fact.payload.outcome === 'refused' ? -38 : -20,
+    pinnedEligible: enacted && fact.payload.pressure >= 70,
+    factId: fact.id,
+  }];
+}
+
 function embodiedActionCandidates(
   fact: Extract<SimulationFact, { kind: 'embodied_action_resolved' }>,
 ): MemoryCandidate[] {
@@ -402,6 +428,7 @@ function candidatesForFact(world: WorldState, fact: SimulationFact): MemoryCandi
   if (fact.kind === 'situation_milestone') return situationCandidates(fact);
   if (fact.kind === 'agency_support_resolved') return supportCandidates(fact);
   if (fact.kind === 'agency_intent_resolved') return commandResponseCandidates(fact);
+  if (fact.kind === 'local_governance_resolved') return localGovernanceCandidates(fact);
   if (fact.kind === 'embodied_action_resolved') return embodiedActionCandidates(fact);
   return [];
 }
@@ -556,6 +583,9 @@ function memoryTitle(world: WorldState, memory: PersonalMemoryState): string {
   if (memory.kind === 'support_denied') return `${name}未肯相助`;
   if (memory.kind === 'command_appeased') return `请领${name}未准，另受安抚`;
   if (memory.kind === 'command_curbed') return `请领${name}未准并遭削权`;
+  if (memory.kind === 'local_relief_enacted') return `在${name}开仓赈济`;
+  if (memory.kind === 'local_levy_reduced') return `为${name}减免本季赋`;
+  if (memory.kind === 'local_measure_setback') return `为${name}所请施政未成`;
   if (memory.kind === 'embodied_action_succeeded') return `与${name}有关的一件事办成了`;
   if (memory.kind === 'embodied_action_setback') return `与${name}有关的一件事未能如愿`;
   return `${name}落定`;

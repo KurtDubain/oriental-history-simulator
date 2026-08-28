@@ -176,6 +176,31 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact): F
     }
     return { title: `${actor}所请${army}军令未准`, summary: '朝廷没有改变现任主帅与副将的军令次序。' };
   }
+  if (fact.kind === 'local_governance_resolved') {
+    const actor = characterName(world, fact.payload.actorId);
+    const region = regionName(world, fact.payload.regionId);
+    if (fact.payload.outcome === 'enacted' && fact.payload.action === 'open_granary') {
+      return {
+        title: `${actor}在${region}开仓赈济`,
+        summary: `实际发出${compactNumber(fact.payload.foodSpent)}石州粮，当地动荡由${Math.round(fact.payload.unrestBefore)}降至${Math.round(fact.payload.unrestAfter)}。`,
+      };
+    }
+    if (fact.payload.outcome === 'enacted') {
+      return {
+        title: `${actor}为${region}减免本季赋`,
+        summary: `国库退回${compactNumber(fact.payload.treasurySpent)}财力，当地动荡由${Math.round(fact.payload.unrestBefore)}降至${Math.round(fact.payload.unrestAfter)}。`,
+      };
+    }
+    const result = fact.payload.outcome === 'deferred'
+      ? '朝廷留待再议，本季没有动用粮财'
+      : fact.payload.outcome === 'refused'
+        ? '朝廷没有准行，本季没有动用粮财'
+        : '任所或职权发生变化，原定措施未能进行';
+    return {
+      title: `${actor}所请${region}${fact.payload.action === 'open_granary' ? '赈济' : '减赋'}未行`,
+      summary: `${result}；提出时当地动荡为${Math.round(fact.payload.unrestBefore)}。`,
+    };
+  }
   if (fact.kind === 'embodied_action_submitted') {
     return {
       title: `${characterName(world, fact.payload.actorId)}定下一件事`,

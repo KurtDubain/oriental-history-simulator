@@ -58,7 +58,13 @@ async function selectPersonWithCommandRequest(page, rows, maximum = 120) {
   const current = await snapshot(page);
   const candidates = current.observer.commandCandidates ?? [];
   const search = page.getByLabel('检索时人群像');
+  const ensureRoster = async () => {
+    if (await search.isVisible().catch(() => false)) return;
+    await page.click('button[data-observer-view="people"]');
+    await page.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
+  };
   for (const candidate of candidates) {
+    await ensureRoster();
     const id = candidate.characterId;
     await search.fill(candidate.name);
     const row = page.locator(`.roster-panel button[data-roster-id="${id}"]`);
@@ -69,13 +75,15 @@ async function selectPersonWithCommandRequest(page, rows, maximum = 120) {
       && currentState.interface.selected.id === expectedId
     ), id);
     if (state.interface.selectedDetail.agency?.commandRequest) {
-      await search.fill('');
+      if (await search.isVisible().catch(() => false)) await search.fill('');
       return state;
     }
   }
+  await ensureRoster();
   await search.fill('');
   const count = Math.min(maximum, await rows.count());
   for (let index = 0; index < count; index += 1) {
+    await ensureRoster();
     const id = await rows.nth(index).getAttribute('data-roster-id');
     if (!id) continue;
     await rows.nth(index).click();
@@ -1771,6 +1779,69 @@ try {
   assert.deepEqual(identityErrors, []);
   await identityContext.close();
 
+  const governanceContext = await browser.newContext({ viewport: { width: 1_280, height: 720 } });
+  const governancePage = await governanceContext.newPage();
+  const governanceErrors = [];
+  collectBrowserErrors(governancePage, governanceErrors);
+  await openFreshWorld(governancePage, '州县民生');
+  await governancePage.locator('[data-map-primer-skip]').click();
+  await advanceTo(governancePage, 5);
+  await governancePage.click('button[data-observer-view="people"]');
+  await governancePage.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
+  await governancePage.locator('.roster-panel button[data-roster-id="c_022"]').click();
+  const governanceSelected = await snapshot(governancePage);
+  assert.equal(governanceSelected.interface.selectedDetail.name, '卫延昭', '地方施政验收种子应稳定定位人物');
+  await governancePage.getByRole('button', { name: '以此人入世' }).click();
+  const governancePanel = governancePage.locator('[data-testid="embodiment-actions"]');
+  await governancePanel.waitFor();
+  const governanceEntered = await snapshot(governancePage);
+  const localActions = governanceEntered.observer.embodiment.actions.filter((action) => action.identityLabel === '地方施政');
+  const availableLocalAction = localActions.find((action) => action.available);
+  assert.equal(governanceEntered.observer.embodiment.actions.length, 4, '地方长官应保留四项清楚可读的当季行动');
+  assert.deepEqual(localActions.map((action) => action.label), ['开仓赈济', '减免本季赋']);
+  assert.ok(availableLocalAction, '地方长官必须能看见并选择一项由真实压力触发的地方措施');
+  const governanceActionButton = governancePage.locator('.observer-embodiment-action-list li', { hasText: '地方施政' })
+    .filter({ has: governancePage.locator('button:not(:disabled)') })
+    .locator('button:not(:disabled)')
+    .first();
+  await governanceActionButton.scrollIntoViewIfNeeded();
+  await governancePage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-local-governance-action.png`, fullPage: true });
+  await governancePage.getByRole('button', { name: '关闭时人群像' }).click();
+  await governancePage.setViewportSize({ width: 390, height: 844 });
+  if (await governancePage.locator('.observer-inspector').getAttribute('data-mobile-expanded') === 'false') {
+    await governancePage.getByRole('button', { name: /看所图/ }).click();
+    await governancePage.waitForFunction(() => (
+      document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true'
+    ));
+  }
+  await waitForVisualSettled(governancePage.locator('.observer-inspector'));
+  await assertWithinViewport(governancePage, '[data-testid="embodiment-actions"]', '移动端地方施政不可横向溢出');
+  const governanceActionBounds = await governanceActionButton.boundingBox();
+  assert.ok(governanceActionBounds && governanceActionBounds.height >= 44, '移动端地方施政按钮触控高度不得小于44px');
+  await governancePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-local-governance-390x844.png`, fullPage: true });
+  await governanceActionButton.click();
+  const governanceQueued = await snapshot(governancePage);
+  assert.equal(governanceQueued.observer.embodiment.pending.actionId, availableLocalAction.actionId);
+  assert.equal(governanceQueued.deterministicWorldHash, governanceEntered.deterministicWorldHash, '地方措施排队不得提前修改世界');
+  const governanceSettled = await advanceOneQuarter(governancePage);
+  assert.equal(governanceSettled.observer.embodiment.pending, null, '地方措施必须在下一季唯一结算');
+  const governanceResult = governancePage.locator('.observer-embodiment-result');
+  await governanceResult.waitFor();
+  assert.match(await governanceResult.textContent(), /上次结果.*(开仓|赈济|减赋|赋款|百姓|地方)/s);
+  assert.ok(
+    governanceSettled.interface.selectedDetail.biography.length > governanceSelected.interface.selectedDetail.biography.length,
+    '地方施政领域结果必须进入人物传记',
+  );
+  const governanceHistoryButton = governanceResult.getByRole('button', { name: '查这件事' });
+  await governanceHistoryButton.waitFor();
+  await governanceResult.scrollIntoViewIfNeeded();
+  await governancePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-local-governance-result-390x844.png`, fullPage: true });
+  await governanceHistoryButton.click();
+  const governanceHistory = await waitForSnapshot(governancePage, (state) => Boolean(state.interface.selectedEventId));
+  assert.match(governanceHistory.interface.selectedEvent.summary, /(开仓|赈济|减免|减赋|赋款)/);
+  assert.deepEqual(governanceErrors, []);
+  await governanceContext.close();
+
   const mobileContext = await browser.newContext({
     viewport: { width: 390, height: 844 },
     isMobile: true,
@@ -1878,6 +1949,8 @@ try {
   const mobilePersonRows = mobilePage.locator('.roster-panel button[data-roster-id]');
   const mobilePerson = await selectPersonWithCommandRequest(mobilePage, mobilePersonRows);
   assert.ok(mobilePerson, '移动端人物名录中应能找到副将请令计划');
+  await mobilePage.waitForSelector('.roster-panel', { state: 'detached' });
+  assert.equal(mobilePerson.interface.view, 'world', '移动端点选名录后应直接收起名录，露出人物速览');
   assert.equal(mobilePerson.interface.selectedDetail.kind, 'person');
   assert.equal(mobilePerson.interface.selectedDetail.agency.desires.length, 2);
   assert.ok(mobilePerson.interface.selectedDetail.agency.primaryGoal?.label);

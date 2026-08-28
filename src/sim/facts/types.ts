@@ -18,6 +18,7 @@ export type SimulationFactKind =
   | 'agency_support_resolved'
   | 'agency_intent_submitted'
   | 'agency_intent_resolved'
+  | 'local_governance_resolved'
   | 'embodied_action_submitted'
   | 'embodied_action_resolved'
   | 'situation_milestone';
@@ -201,6 +202,35 @@ export interface AgencyIntentResolvedFactPayload {
   decisionThreshold: number;
 }
 
+export type LocalGovernanceActionKind = 'open_granary' | 'reduce_levy';
+export type LocalGovernanceOutcome = 'enacted' | 'deferred' | 'refused' | 'invalidated';
+export type LocalGovernanceReason =
+  | 'measure_enacted'
+  | 'permission_lost'
+  | 'pressure_eased'
+  | 'insufficient_grain'
+  | 'insufficient_treasury'
+  | 'institution_deferred'
+  | 'institution_refused';
+
+export interface LocalGovernanceResolvedFactPayload {
+  actorId: string;
+  polityId: string;
+  regionId: string;
+  authorityId: string;
+  action: LocalGovernanceActionKind;
+  outcome: LocalGovernanceOutcome;
+  reasonCode: LocalGovernanceReason;
+  score: number;
+  threshold: number;
+  pressure: number;
+  foodSeasonsBefore: number;
+  unrestBefore: number;
+  unrestAfter: number;
+  foodSpent: number;
+  treasurySpent: number;
+}
+
 export interface SituationMilestoneFactPayload {
   situationId: string;
   situationType: string;
@@ -218,8 +248,10 @@ export type EmbodiedActionFactKind =
   | 'declare_stance'
   | 'cultivate_military_support'
   | 'request_backing'
-  | 'request_independent_command';
-export type EmbodiedActionTargetKind = 'character' | 'faction' | 'army';
+  | 'request_independent_command'
+  | 'open_granary'
+  | 'reduce_levy';
+export type EmbodiedActionTargetKind = 'character' | 'faction' | 'army' | 'region';
 export type EmbodiedActionOutcome = 'succeeded' | 'deferred' | 'refused' | 'invalidated';
 
 export interface EmbodiedActionSubmittedFactPayload {
@@ -275,6 +307,7 @@ export type MarriageFact = SimulationFactBase<'marriage', MarriageFactPayload>;
 export type AgencySupportResolvedFact = SimulationFactBase<'agency_support_resolved', AgencySupportResolvedFactPayload>;
 export type AgencyIntentSubmittedFact = SimulationFactBase<'agency_intent_submitted', AgencyIntentSubmittedFactPayload>;
 export type AgencyIntentResolvedFact = SimulationFactBase<'agency_intent_resolved', AgencyIntentResolvedFactPayload>;
+export type LocalGovernanceResolvedFact = SimulationFactBase<'local_governance_resolved', LocalGovernanceResolvedFactPayload>;
 export type SituationMilestoneFact = SimulationFactBase<'situation_milestone', SituationMilestoneFactPayload>;
 export type EmbodiedActionSubmittedFact = SimulationFactBase<'embodied_action_submitted', EmbodiedActionSubmittedFactPayload>;
 export type EmbodiedActionResolvedFact = SimulationFactBase<'embodied_action_resolved', EmbodiedActionResolvedFactPayload>;
@@ -291,6 +324,7 @@ export type SimulationFact =
   | AgencySupportResolvedFact
   | AgencyIntentSubmittedFact
   | AgencyIntentResolvedFact
+  | LocalGovernanceResolvedFact
   | EmbodiedActionSubmittedFact
   | EmbodiedActionResolvedFact
   | SituationMilestoneFact;

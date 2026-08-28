@@ -1035,7 +1035,11 @@ export function validateTurnRuntime(
     const matchingIntent = domain?.kind === 'agency_intent_resolved'
       && domain.payload.actorId === resolution.payload.actorId
       && resolution.payload.action === 'request_independent_command';
-    if (!matchingSupport && !matchingIntent) {
+    const matchingLocalGovernance = domain?.kind === 'local_governance_resolved'
+      && domain.payload.actorId === resolution.payload.actorId
+      && domain.payload.action === resolution.payload.action
+      && domain.payload.regionId === resolution.payload.targetId;
+    if (!matchingSupport && !matchingIntent && !matchingLocalGovernance) {
       push(
         violations,
         'runtime.embodied-action-domain',

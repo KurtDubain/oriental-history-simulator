@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.6.0',
+    date: '2026-08-28',
+    title: '一州饥困，也能成为一段亲历',
+    items: [
+      '地方长官入世后可按任所实情选择开仓赈济或减免本季赋；粮仓、国库、地方财富与动荡都会真实结算。',
+      '人物 AI 与玩家共用同一地方施政裁决和季度容量；结果会进入史事、传记、人生记忆与权势得失。',
+      '移动端点选人物、列国、世家或军旅后会自动收起名录，直接露出速览与至少 44px 的行动入口。',
+    ],
+  },
+  {
     version: '1.5.0',
     date: '2026-08-28',
     title: '人会离场，历史仍往前走',

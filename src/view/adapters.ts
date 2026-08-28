@@ -721,7 +721,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     world.facts.filter((fact) => (
       fact.polityIds.includes(item.id)
       && fact.turn >= Math.max(0, world.turn - 16)
-      && ['agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'appointment_started', 'appointment_ended'].includes(fact.kind)
+      && ['agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'local_governance_resolved', 'appointment_started', 'appointment_ended'].includes(fact.kind)
     )),
     3,
   ).map(toHistoricalSceneView);
@@ -1267,7 +1267,10 @@ export function toPersonInspector(
     world,
     world.facts.filter((fact) => {
       if (fact.turn < Math.max(0, world.turn - 24)) return false;
-      if (fact.kind === 'agency_support_resolved' || fact.kind === 'agency_intent_submitted' || fact.kind === 'agency_intent_resolved') {
+      if (fact.kind === 'agency_support_resolved'
+        || fact.kind === 'agency_intent_submitted'
+        || fact.kind === 'agency_intent_resolved'
+        || fact.kind === 'local_governance_resolved') {
         return fact.payload.actorId === item.id;
       }
       return (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended')

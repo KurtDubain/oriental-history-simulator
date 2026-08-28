@@ -349,6 +349,24 @@ function agencyMovement(world: WorldState, fact: SimulationFact): PoliticalPower
       characterIds: [fact.payload.actorId, fact.payload.targetId].filter((id, index, all) => all.indexOf(id) === index),
     };
   }
+  if (fact.kind === 'local_governance_resolved') {
+    const actor = world.characters.find((item) => item.id === fact.payload.actorId)?.name ?? '该长官';
+    const region = world.regions.find((item) => item.id === fact.payload.regionId)?.name ?? '所治州域';
+    const enacted = fact.payload.outcome === 'enacted';
+    return {
+      id: `movement:${fact.id}`,
+      turn: fact.turn,
+      direction: enacted ? 'gained' : 'held',
+      label: enacted
+        ? fact.payload.action === 'open_granary' ? '赈济地方' : '减赋安民'
+        : '施政所请未行',
+      detail: enacted
+        ? `${actor}${fact.payload.action === 'open_granary' ? `在${region}开仓赈济` : `为${region}减免本季赋`}`
+        : `${actor}为${region}所请${fact.payload.action === 'open_granary' ? '赈济' : '减赋'}没有在本季施行`,
+      factId: fact.id,
+      characterIds: [fact.payload.actorId],
+    };
+  }
   if (fact.kind !== 'agency_intent_resolved') return null;
   const actor = world.characters.find((item) => item.id === fact.payload.actorId)?.name ?? '该副将';
   const army = world.armies.find((item) => item.id === fact.payload.targetArmyId)?.name ?? fact.payload.targetArmyName ?? '旧日所部';

@@ -423,7 +423,9 @@ function personEmbodimentView(
       actionId: item.command.actionId,
       identityLabel: ['cultivate_military_support', 'request_backing', 'request_independent_command'].includes(item.command.kind)
         ? '副将行事'
-        : null,
+        : ['open_granary', 'reduce_levy'].includes(item.command.kind)
+          ? '地方施政'
+          : null,
       label: item.label,
       targetLabel: item.targetLabel,
       intent: item.intent,
@@ -879,7 +881,9 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
             actionId: item.command.actionId,
             identityLabel: ['cultivate_military_support', 'request_backing', 'request_independent_command'].includes(item.command.kind)
               ? '副将行事'
-              : null,
+              : ['open_granary', 'reduce_levy'].includes(item.command.kind)
+                ? '地方施政'
+                : null,
             label: item.label,
             targetLabel: item.targetLabel,
             available: item.available,
@@ -2330,16 +2334,22 @@ export function App() {
   const handleRosterSelect = useCallback((id: string) => {
     const current = worldRef.current;
     if (!current) return;
+    const closeCompactRoster = () => {
+      if (window.matchMedia('(max-width: 780px)').matches) setActiveView('world');
+    };
     if (activeView === 'polities') {
       setSelection({ kind: 'country', id });
+      closeCompactRoster();
       return;
     }
     if (activeView === 'families') {
       setSelection({ kind: 'family', id });
+      closeCompactRoster();
       return;
     }
     if (activeView === 'people') {
       setSelection({ kind: 'person', id });
+      closeCompactRoster();
       return;
     }
     if (activeView === 'military') {
@@ -2348,6 +2358,7 @@ export function App() {
       setFocusedArmyId(id);
       if (army) setSelection({ kind: 'army', id: army.id });
       else if (fleet) setSelection({ kind: 'fleet', id: fleet.id });
+      closeCompactRoster();
       return;
     }
     if (activeView === 'chronicle') setSelectedEventId(id);

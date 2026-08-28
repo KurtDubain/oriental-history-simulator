@@ -48,10 +48,21 @@ export {
 export {
   EMBODIED_ACTION_KINDS,
   EMBODIED_IDENTITY_ACTION_KINDS,
+  EMBODIED_LOCAL_GOVERNANCE_ACTION_KINDS,
+  EMBODIED_MILITARY_ACTION_KINDS,
   createEmbodiedActionCommand,
   projectEmbodiedActions,
   resolveEmbodiedAction,
 } from './embodiment';
+
+export {
+  LOCAL_GOVERNANCE_ACTION_COOLDOWN_TURNS,
+  LOCAL_GOVERNANCE_POLITY_COOLDOWN_TURNS,
+  MAX_LOCAL_GOVERNANCE_ACTIONS_PER_TURN,
+  isEmbodiedLocalGovernanceAction,
+  localGovernanceCandidateFor,
+  projectEmbodiedLocalGovernanceActions,
+} from './embodied-governance';
 
 export type {
   EmbodiedActionCommand,

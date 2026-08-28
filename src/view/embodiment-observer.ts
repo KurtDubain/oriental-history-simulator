@@ -54,7 +54,7 @@ function parseCommand(value: unknown): EmbodiedActionCommand | null {
     || (command.issuedTurn as number) < 0
     || !validIdentifier(command.actorId)
     || !EMBODIED_ACTION_KINDS.includes(command.kind as (typeof EMBODIED_ACTION_KINDS)[number])
-    || !['character', 'faction', 'army'].includes(command.targetKind ?? '')
+    || !['character', 'faction', 'army', 'region'].includes(command.targetKind ?? '')
     || !validIdentifier(command.targetId)
     || ![null, 'support', 'oppose'].includes(command.stance ?? null)) return null;
   return {

@@ -26,6 +26,19 @@ import {
   type AgencyDecisionTurnContext,
 } from './decision';
 
+function emptyFoodLedger() {
+  return {
+    start: 0,
+    produced: 0,
+    civilianConsumed: 0,
+    armyConsumed: 0,
+    spoiled: 0,
+    warDestroyed: 0,
+    transferred: 0,
+    end: 0,
+  };
+}
+
 function emptyDecisionContext(turn: number): AgencyDecisionTurnContext & { events: HistoryEvent[] } {
   const date = getDateForTurn(turn);
   return {
@@ -36,6 +49,7 @@ function emptyDecisionContext(turn: number): AgencyDecisionTurnContext & { event
     events: [],
     agencyIntents: [],
     appointmentSourceFactIdsByArmyId: {},
+    food: emptyFoodLedger(),
   };
 }
 
@@ -150,6 +164,7 @@ function decisionFixture(seed: string, expected: 'executed' | 'rejected'): Decis
     events: [],
     agencyIntents: [],
     appointmentSourceFactIdsByArmyId: {},
+    food: emptyFoodLedger(),
   };
   const opponent = world.armies.find((item) => item.polityId !== army.polityId) ?? world.armies[1];
   const region = world.regions.find((item) => item.id === army.regionId) ?? world.regions[0];

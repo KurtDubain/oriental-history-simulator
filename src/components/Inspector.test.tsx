@@ -173,6 +173,41 @@ describe('embodied character action reading flow', () => {
     expect(markup).not.toMatch(/Intent|Resolver|request_backing|cultivate_military_support/i);
   });
 
+  it('keeps local governance inside the same four-action reading surface', () => {
+    const localActions = [
+      {
+        ...embodiment.actions[0],
+        actionId: 'emb-relief',
+        identityLabel: '地方施政',
+        label: '开仓赈济',
+        targetLabel: '河间',
+        intent: '动用河间仓粮，先缓解饥困、流民与地方不安。',
+        cost: '预计动用540石州粮',
+      },
+      {
+        ...embodiment.actions[0],
+        actionId: 'emb-levy',
+        identityLabel: '地方施政',
+        label: '减免本季赋',
+        targetLabel: '河间',
+        intent: '请朝廷把本季部分赋款退回河间。',
+        cost: '预计由国库退还120财力',
+      },
+    ];
+    const markup = renderToStaticMarkup(createElement(PersonAgencySections, {
+      agency: agency('planned'),
+      embodiment: { ...embodiment, actions: localActions },
+      onChooseEmbodiedAction: () => undefined,
+    }));
+
+    expect(markup).toContain('地方施政');
+    expect(markup).toContain('开仓赈济');
+    expect(markup).toContain('减免本季赋');
+    expect(markup).toContain('540石州粮');
+    expect(markup).toContain('120财力');
+    expect(markup).not.toMatch(/local_governance|open_granary|reduce_levy|Resolver/i);
+  });
+
   it('closes a departed life with concrete experiences and a direct last-page route', () => {
     const markup = renderToStaticMarkup(createElement(PersonEmbodimentClosureNotice, {
       closure: {

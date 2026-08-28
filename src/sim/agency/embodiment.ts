@@ -16,12 +16,27 @@ export const EMBODIED_ACTION_KINDS = [
   'cultivate_military_support',
   'request_backing',
   'request_independent_command',
+  'open_granary',
+  'reduce_levy',
 ] as const;
 
 export const EMBODIED_IDENTITY_ACTION_KINDS = [
   'cultivate_military_support',
   'request_backing',
   'request_independent_command',
+  'open_granary',
+  'reduce_levy',
+] as const;
+
+export const EMBODIED_MILITARY_ACTION_KINDS = [
+  'cultivate_military_support',
+  'request_backing',
+  'request_independent_command',
+] as const;
+
+export const EMBODIED_LOCAL_GOVERNANCE_ACTION_KINDS = [
+  'open_granary',
+  'reduce_levy',
 ] as const;
 
 export type EmbodiedActionKind = (typeof EMBODIED_ACTION_KINDS)[number];
@@ -32,7 +47,7 @@ export interface EmbodiedActionCommand {
   issuedTurn: number;
   actorId: string;
   kind: EmbodiedActionKind;
-  targetKind: 'character' | 'faction' | 'army';
+  targetKind: 'character' | 'faction' | 'army' | 'region';
   targetId: string;
   stance: EmbodiedActionStance;
 }

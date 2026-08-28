@@ -17,16 +17,28 @@ import {
 import {
   embodiedCommandsMatch,
   isEmbodiedIdentityAction,
+  isEmbodiedMilitaryAction,
   mergeEmbodiedQueueCandidate,
   projectEmbodiedMilitaryAction,
   resolveEmbodiedIdentityEnvelope,
   submitEmbodiedIdentityAction,
   type EmbodiedMilitaryActionCandidate,
 } from './embodied-military';
+import {
+  MAX_LOCAL_GOVERNANCE_ACTIONS_PER_TURN,
+  compareLocalGovernanceCandidates,
+  isEmbodiedLocalGovernanceAction,
+  localGovernanceCandidateFor,
+  localGovernanceCandidateFromCommand,
+  projectEmbodiedLocalGovernanceActions,
+  resolveLocalGovernanceAction,
+  type LocalGovernanceActionCandidate,
+} from './embodied-governance';
 import type {
   CharacterState,
   EventCause,
   HistoryEvent,
+  FoodLedger,
   RelationshipState,
   SimulationFact,
   StateDelta,
@@ -141,6 +153,7 @@ export interface AgencyTurnIntent {
 export interface AgencyDecisionTurnContext extends FactTurnBuffer, EmbodiedActionTurnContext {
   agencyIntents: AgencyTurnIntent[];
   appointmentSourceFactIdsByArmyId: Record<string, string>;
+  food: FoodLedger;
 }
 
 export interface AgencyDecisionEventInput {
@@ -966,12 +979,19 @@ function embodiedMilitaryActionFor(
   return projectEmbodiedMilitaryAction(world, actorState, supportAction, intent);
 }
 
-/** Pure player projection: generic actions plus at most one role-specific military action. */
+/** Pure player projection: four generic or role-specific actions for one embodied character. */
 export function projectCharacterEmbodiedActions(
   world: WorldState,
   actorId: string,
 ): readonly EmbodiedActionProjection[] {
   const generic = projectEmbodiedActions(world, actorId);
+  const localGovernance = projectEmbodiedLocalGovernanceActions(world, actorId);
+  if (localGovernance.length) {
+    return [
+      ...generic.filter((item) => item.command.kind !== 'seek_opportunity'),
+      ...localGovernance,
+    ];
+  }
   const actorState = world.agencyDecisionSystem.actors.find((item) => item.characterId === actorId);
   const military = actorState ? embodiedMilitaryActionFor(world, actorState) : null;
   return military ? [...generic, military.projection] : generic;
@@ -1431,12 +1451,15 @@ export function processAgencyDecisionSystem(
   const actorById = new Map(actors.map((actor) => [actor.characterId, actor]));
   const requested = context.embodiedActionCommand;
   const identityRequested = isEmbodiedIdentityAction(requested);
+  const militaryIdentityRequested = isEmbodiedMilitaryAction(requested);
+  const localIdentityRequested = isEmbodiedLocalGovernanceAction(requested);
   let embodiedActorId: string | null = null;
   let identityOption: EmbodiedActionProjection | null = null;
   let identitySubmission: Extract<SimulationFact, { kind: 'embodied_action_submitted' }> | null = null;
   let playerSupportAction: AgencySupportTurnAction | null = null;
   let playerIntent: AgencyTurnIntent | null = null;
-  if (identityRequested) {
+  let playerLocalGovernance: LocalGovernanceActionCandidate | null = null;
+  if (identityRequested && militaryIdentityRequested) {
     embodiedActorId = world.characters.some((item) => item.id === requested.actorId) ? requested.actorId : null;
     const actorState = actorById.get(requested.actorId);
     const candidate = actorState ? embodiedMilitaryActionFor(world, actorState) : null;
@@ -1469,8 +1492,81 @@ export function processAgencyDecisionSystem(
         domainFact: null,
       });
     }
+  } else if (identityRequested && localIdentityRequested) {
+    embodiedActorId = world.characters.some((item) => item.id === requested.actorId) ? requested.actorId : null;
+    const local = localGovernanceCandidateFromCommand(world, requested);
+    identityOption = local.option;
+    identitySubmission = submitEmbodiedIdentityAction(world, context, requested, identityOption);
+    if (requested.issuedTurn === context.turn && local.candidate && identityOption?.available) {
+      playerLocalGovernance = local.candidate;
+    } else {
+      resolveEmbodiedIdentityEnvelope(world, context, requested, identityOption, identitySubmission, {
+        outcome: 'invalidated',
+        reasonCode: 'conditions_changed',
+        score: 0,
+        threshold: 0,
+        summary: world.characters.some((item) => item.id === requested.actorId && item.alive)
+          ? '原定地方措施因任所、职权、财力或民生压力变化，未能进入实际裁决。'
+          : '原定人物已经失去行动载体，地方措施未能进行。',
+        domainFact: null,
+      });
+    }
   } else {
     embodiedActorId = resolveEmbodiedAction(world, context, emit);
+  }
+  const autonomousLocalGovernance = world.characters
+      .filter((character) => character.id !== embodiedActorId)
+      .map((character) => localGovernanceCandidateFor(world, character.id))
+      .filter((candidate): candidate is LocalGovernanceActionCandidate => Boolean(candidate))
+      .sort(compareLocalGovernanceCandidates)
+      .filter((candidate, index, all) => (
+        all.findIndex((item) => item.polityId === candidate.polityId) === index
+      ));
+  // A polity can place only one local measure on the quarterly docket. When the
+  // embodied governor submits one, that concrete intent represents the polity's
+  // proposal; it still competes normally for global capacity and uses the same
+  // domain resolver as every autonomous proposal.
+  const localGovernanceQueue = mergeEmbodiedQueueCandidate(
+    playerLocalGovernance
+      ? autonomousLocalGovernance.filter((candidate) => candidate.polityId !== playerLocalGovernance.polityId)
+      : autonomousLocalGovernance,
+    playerLocalGovernance,
+    MAX_LOCAL_GOVERNANCE_ACTIONS_PER_TURN,
+    compareLocalGovernanceCandidates,
+  );
+  if (playerLocalGovernance && identitySubmission && identityOption && !localGovernanceQueue.playerAccepted) {
+    resolveEmbodiedIdentityEnvelope(world, context, requested as EmbodiedActionCommand, identityOption, identitySubmission, {
+      outcome: 'deferred',
+      reasonCode: 'insufficient_support',
+      score: 0,
+      threshold: 1,
+      summary: '本季各地请行的赈济与减赋过多，这项措施未获排入实际处置，需待下一季再议。',
+      domainFact: null,
+    });
+  }
+  for (const action of localGovernanceQueue.items) {
+    const resolved = resolveLocalGovernanceAction(world, context, action, emit);
+    if (action.embodiedCommand && identitySubmission && identityOption) {
+      const outcome = resolved.fact.payload.outcome === 'enacted'
+        ? 'succeeded'
+        : resolved.fact.payload.outcome === 'refused'
+          ? 'refused'
+          : resolved.fact.payload.outcome;
+      resolveEmbodiedIdentityEnvelope(world, context, action.embodiedCommand, identityOption, identitySubmission, {
+        outcome,
+        reasonCode: outcome === 'succeeded'
+          ? 'accepted'
+          : outcome === 'deferred'
+            ? 'insufficient_support'
+            : outcome === 'refused'
+              ? 'target_refused'
+              : 'conditions_changed',
+        score: resolved.fact.payload.score,
+        threshold: resolved.fact.payload.threshold,
+        summary: resolved.event.summary,
+        domainFact: resolved.fact,
+      });
+    }
   }
   const supportQueue = mergeEmbodiedQueueCandidate(
     actors
