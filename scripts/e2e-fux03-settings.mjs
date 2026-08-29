@@ -25,6 +25,10 @@ async function snapshot(page) {
   return page.evaluate(() => JSON.parse(window.render_game_to_text()));
 }
 
+async function audioProbe(page) {
+  return page.evaluate(() => ({ ...window.__ohsAudioProbe }));
+}
+
 async function waitForSettings(page, open) {
   await page.waitForFunction((expected) => {
     if (typeof window.render_game_to_text !== 'function') return false;
@@ -50,6 +54,23 @@ try {
     const browserErrors = [];
     collectBrowserErrors(page, browserErrors);
     await page.addInitScript(() => {
+      window.__ohsAudioProbe = { oscillators: 0, bufferSources: 0 };
+      const patched = new Set();
+      for (const AudioContextType of [window.AudioContext, window.webkitAudioContext]) {
+        const prototype = AudioContextType?.prototype;
+        if (!prototype || patched.has(prototype)) continue;
+        patched.add(prototype);
+        const createOscillator = prototype.createOscillator;
+        const createBufferSource = prototype.createBufferSource;
+        prototype.createOscillator = function trackedOscillator(...args) {
+          window.__ohsAudioProbe.oscillators += 1;
+          return createOscillator.apply(this, args);
+        };
+        prototype.createBufferSource = function trackedBufferSource(...args) {
+          window.__ohsAudioProbe.bufferSources += 1;
+          return createBufferSource.apply(this, args);
+        };
+      }
       if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
       localStorage.setItem('canghai-map-primer-complete-v1', '1');
       localStorage.removeItem('canghai-observer-interface-settings-v1');
@@ -62,7 +83,9 @@ try {
     const baseline = await snapshot(page);
     assert.equal(baseline.productVersion, PACKAGE_VERSION);
     assert.equal(baseline.interface.settings.soundEnabled, false);
+    assert.equal(baseline.interface.settings.soundPromptVisible, false);
     assert.equal(baseline.interface.settings.mapAtmosphere, true);
+    assert.deepEqual(await audioProbe(page), { oscillators: 0, bufferSources: 0 });
 
     const trigger = page.locator('[data-settings-trigger="true"]');
     await trigger.click();
@@ -87,8 +110,43 @@ try {
     }
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-settings-initial.png`, fullPage: true });
 
+    await panel.locator('.settings-panel__hero > button').click();
+    await waitForSettings(page, false);
+    await page.getByRole('button', { name: '推进至下一季' }).click();
+    await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).time.turn === 1);
+    const prompted = await snapshot(page);
+    assert.equal(prompted.interface.settings.soundPromptVisible, true, '首次手动推进后应明确提示声音');
+    const invitation = page.getByTestId('audio-invitation');
+    await invitation.waitFor();
+    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-audio-invitation.png`, fullPage: true });
+
+    if (scenario.slug === 'desktop') {
+      await invitation.getByRole('button', { name: '开启声音', exact: true }).click();
+      await page.waitForFunction(() => {
+        const settings = JSON.parse(window.render_game_to_text()).interface.settings;
+        return settings.soundEnabled && settings.audioState === 'ready';
+      });
+    } else {
+      await invitation.getByRole('button', { name: '暂不开启声音' }).click();
+      await page.waitForFunction(() => !JSON.parse(window.render_game_to_text()).interface.settings.soundPromptVisible);
+      assert.equal((await snapshot(page)).interface.settings.soundEnabled, false);
+    }
+
+    await trigger.click();
+    await waitForSettings(page, true);
     const soundToggle = panel.locator('[data-testid="settings-sound-toggle"] input');
-    await soundToggle.check();
+    if (!(await soundToggle.isChecked())) await soundToggle.check();
+    await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.settings.audioState === 'ready');
+    const unlockedProbe = await audioProbe(page);
+    assert.ok(unlockedProbe.oscillators >= 9, '开启声音后应真正创建程序化声景');
+
+    const beforePreview = await audioProbe(page);
+    await panel.getByRole('button', { name: '试听季度落钟' }).click();
+    await page.waitForTimeout(80);
+    const afterPreview = await audioProbe(page);
+    assert.ok(afterPreview.oscillators >= beforePreview.oscillators + 2, '试听必须真正播放季度落钟');
+    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-audio-ready.png`, fullPage: true });
+
     await volumeInputs.nth(0).fill('0.55');
     await panel.getByRole('button', { name: /^减少 / }).click();
     await panel.getByRole('button', { name: /紧凑/ }).click();
@@ -100,9 +158,9 @@ try {
     assert.equal(configured.interface.settings.motion, 'reduced');
     assert.equal(configured.interface.settings.density, 'compact');
     assert.equal(configured.interface.settings.mapAtmosphere, false);
-    assert.ok(['ready', 'waiting', 'suspended'].includes(configured.interface.settings.audioState));
-    assert.equal(configured.time.turn, baseline.time.turn);
-    assert.equal(configured.deterministicWorldHash, baseline.deterministicWorldHash);
+    assert.equal(configured.interface.settings.audioState, 'ready');
+    assert.equal(configured.time.turn, prompted.time.turn);
+    assert.equal(configured.deterministicWorldHash, prompted.deterministicWorldHash);
     const stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), SETTINGS_KEY);
     assert.equal(stored.sound.masterVolume, 0.55);
     assert.equal(stored.motion, 'reduced');
@@ -122,12 +180,18 @@ try {
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-settings.png`, fullPage: true });
     await panel.locator('.settings-panel__hero > button').click();
     const closed = await waitForSettings(page, false);
-    assert.equal(closed.deterministicWorldHash, baseline.deterministicWorldHash);
+    assert.equal(closed.deterministicWorldHash, prompted.deterministicWorldHash);
     assert.equal(await page.locator('.observer-app').getAttribute('data-motion'), 'reduced');
     assert.equal(await page.locator('.observer-app').getAttribute('data-interface-density'), 'compact');
     assert.equal(await page.locator('.world-map').getAttribute('data-atmosphere'), null);
     assert.equal(await trigger.evaluate((element) => document.activeElement === element), true, '关闭设置后应归还焦点');
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-map.png`, fullPage: true });
+
+    const beforeNavigation = await audioProbe(page);
+    await page.locator('button[data-observer-view="polities"]').click();
+    await page.waitForTimeout(80);
+    const afterNavigation = await audioProbe(page);
+    assert.ok(afterNavigation.oscillators > beforeNavigation.oscillators, '主导航切换应有语义提示音');
 
     assert.deepEqual(browserErrors, [], `${scenario.slug} 不应出现浏览器错误`);
     await context.close();

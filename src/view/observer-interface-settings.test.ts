@@ -46,6 +46,7 @@ describe('observer interface settings', () => {
       version: OBSERVER_INTERFACE_SETTINGS_VERSION,
       sound: {
         enabled: false,
+        promptDismissed: false,
         masterVolume: 0.72,
         ambienceVolume: 0.42,
         effectsVolume: 0.68,
@@ -75,6 +76,7 @@ describe('observer interface settings', () => {
       version: OBSERVER_INTERFACE_SETTINGS_VERSION,
       sound: {
         enabled: false,
+        promptDismissed: false,
         masterVolume: 1,
         ambienceVolume: 0,
         effectsVolume: 0.333,

@@ -96,6 +96,27 @@ describe('SettingsPanel', () => {
     expect(rangeInputs.every((element) => element.props.disabled === true)).toBe(true);
   });
 
+  it('offers an explicit preview once sound is enabled', () => {
+    const onPreviewSound = vi.fn();
+    const defaults = createObserverInterfaceSettings();
+    const root = renderPanel({
+      settings: {
+        ...defaults,
+        sound: { ...defaults.sound, enabled: true, promptDismissed: true },
+      },
+      audioState: 'ready',
+      onPreviewSound,
+    });
+    const preview = collectElements(root).find((element) => (
+      element.type === 'button' && nodeText(element).includes('试听季度落钟')
+    ));
+
+    expect(preview).toBeDefined();
+    preview?.props.onClick?.();
+    expect(onPreviewSound).toHaveBeenCalledOnce();
+    expect(nodeText(root)).toContain('声景已就绪');
+  });
+
   it('emits normalized settings for switches, motion, and density choices', () => {
     const onSettingsChange = vi.fn();
     const malformed = {
@@ -125,7 +146,7 @@ describe('SettingsPanel', () => {
 
     expect(onSettingsChange).toHaveBeenNthCalledWith(1, normalizeObserverInterfaceSettings({
       ...malformed,
-      sound: { ...malformed.sound, enabled: true },
+      sound: { ...malformed.sound, enabled: true, promptDismissed: true },
     }));
     expect(onSettingsChange).toHaveBeenNthCalledWith(2, normalizeObserverInterfaceSettings({
       ...malformed,

@@ -19,6 +19,9 @@ export interface ObserverInterfaceController {
   audioState: ObserverAudioState;
   fullscreen: boolean;
   commitSettings: (settings: ObserverInterfaceSettings) => void;
+  enableSound: () => void;
+  dismissSoundInvitation: () => void;
+  previewSound: () => Promise<boolean>;
   toggleFullscreen: () => void;
 }
 
@@ -61,7 +64,7 @@ export function useObserverInterface(context: ObserverInterfaceContext): Observe
         if (!settingsRef.current.sound.enabled) {
           void gameAudio.pause();
         } else if (ready) {
-          gameAudio.play('open', 0.72);
+          gameAudio.play('open', 1);
         }
       });
     } else if (previous.sound.enabled && next.sound.enabled && (
@@ -79,6 +82,28 @@ export function useObserverInterface(context: ObserverInterfaceContext): Observe
     gameAudio.play('select', 0.42);
     if (document.fullscreenElement) void document.exitFullscreen();
     else void document.documentElement.requestFullscreen();
+  }, []);
+
+  const enableSound = useCallback(() => {
+    const current = settingsRef.current;
+    commitSettings({
+      ...current,
+      sound: { ...current.sound, enabled: true, promptDismissed: true },
+    });
+  }, [commitSettings]);
+
+  const dismissSoundInvitation = useCallback(() => {
+    const current = settingsRef.current;
+    commitSettings({
+      ...current,
+      sound: { ...current.sound, enabled: false, promptDismissed: true },
+    });
+  }, [commitSettings]);
+
+  const previewSound = useCallback(async () => {
+    const ready = await gameAudio.resume();
+    if (ready) gameAudio.play('quarter', 1);
+    return ready;
   }, []);
 
   useEffect(() => gameAudio.subscribe(setAudioSnapshot), []);
@@ -120,6 +145,9 @@ export function useObserverInterface(context: ObserverInterfaceContext): Observe
     audioState: audioStateFor(settings, audioSnapshot),
     fullscreen,
     commitSettings,
+    enableSound,
+    dismissSoundInvitation,
+    previewSound,
     toggleFullscreen,
   };
 }

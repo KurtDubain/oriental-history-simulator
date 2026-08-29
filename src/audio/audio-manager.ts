@@ -197,7 +197,10 @@ function normalizeSoundscapeMix(mix: Partial<SoundscapeMix> | null | undefined):
 }
 
 function volumeCurve(value: number): number {
-  return value * value;
+  // Keep fine control near zero without making normal laptop/mobile settings
+  // effectively inaudible. This is roughly +3 dB for effects and +5 dB for
+  // the default ambience compared with the former square curve.
+  return value * (0.45 + value * 0.55);
 }
 
 function getBrowserAudioContextFactory(): (() => AudioContext) | undefined {

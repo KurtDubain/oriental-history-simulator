@@ -29,6 +29,7 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { ArchiveEntityKind } from './HistoricalArchive';
+import { gameAudio } from '../audio';
 import type { PersonEmbodimentView } from '../view/embodiment-view';
 import '../styles/observer-ui.css';
 
@@ -442,13 +443,14 @@ function InspectorTabs<T extends string>({ value, items, onChange, idPrefix }: {
       : event.key === 'End'
         ? items.length - 1
         : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length;
+    gameAudio.play('select', 0.4);
     onChange(items[nextIndex].id);
     requestAnimationFrame(() => tabsRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus());
   };
   return (
     <div ref={tabsRef} className="observer-inspector-tabs" role="tablist" aria-label="档案分页" onKeyDown={moveFocus}>
       {items.map((item) => (
-        <button key={item.id} id={`${id}-tab-${item.id}`} type="button" role="tab" aria-selected={value === item.id} aria-controls={idPrefix ? `${id}-panel-${item.id}` : undefined} tabIndex={value === item.id ? 0 : -1} onClick={() => onChange(item.id)}>
+        <button key={item.id} id={`${id}-tab-${item.id}`} type="button" role="tab" aria-selected={value === item.id} aria-controls={idPrefix ? `${id}-panel-${item.id}` : undefined} tabIndex={value === item.id ? 0 : -1} onClick={() => { gameAudio.play('select', 0.4); onChange(item.id); }}>
           {item.label}
         </button>
       ))}

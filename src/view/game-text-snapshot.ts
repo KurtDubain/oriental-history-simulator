@@ -81,6 +81,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       settings: {
         open: options.settingsOpen,
         soundEnabled: options.interfaceSettings.sound.enabled,
+        soundPromptVisible: false,
         motion: options.interfaceSettings.motion,
         mapAtmosphere: options.interfaceSettings.mapAtmosphere,
         density: options.interfaceSettings.interfaceDensity,
@@ -430,6 +431,9 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       settings: {
         open: options.settingsOpen,
         soundEnabled: options.interfaceSettings.sound.enabled,
+        soundPromptVisible: world.turn > 0
+          && !options.interfaceSettings.sound.enabled
+          && !options.interfaceSettings.sound.promptDismissed,
         motion: options.interfaceSettings.motion,
         mapAtmosphere: options.interfaceSettings.mapAtmosphere,
         density: options.interfaceSettings.interfaceDensity,

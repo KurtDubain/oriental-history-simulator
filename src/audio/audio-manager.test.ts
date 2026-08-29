@@ -264,7 +264,7 @@ describe('GameAudioManager', () => {
       ambienceVolume: 0,
       effectsVolume: 1,
     });
-    expect(context.gains[0]?.gain.value).toBeCloseTo(0.25);
+    expect(context.gains[0]?.gain.value).toBeCloseTo(0.3625);
     expect(context.gains[1]?.gain.value).toBe(0);
     expect(context.gains[2]?.gain.value).toBe(1);
 

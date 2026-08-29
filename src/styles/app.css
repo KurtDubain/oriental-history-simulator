@@ -138,6 +138,32 @@
   content: '';
 }
 
+.observer-world-tools__audio-state {
+  position: absolute;
+  right: 2px;
+  bottom: 1px;
+  display: grid;
+  width: 13px;
+  height: 13px;
+  place-items: center;
+  border: 1px solid rgb(239 233 216 / 92%);
+  border-radius: 50%;
+  color: #79756a;
+  background: #e9e1cf;
+  pointer-events: none;
+}
+
+.observer-world-tools button[data-audio-state='ready'] .observer-world-tools__audio-state {
+  color: #f8f1df;
+  background: var(--observer-positive);
+}
+
+.observer-world-tools button[data-audio-unset='true'] .observer-world-tools__audio-state {
+  color: #fff8e9;
+  background: var(--observer-vermilion-dark);
+  box-shadow: 0 0 0 3px rgb(155 60 49 / 10%);
+}
+
 .observer-world-tools__rule {
   width: 1px;
   height: 21px;

@@ -27,6 +27,7 @@ export interface SettingsPanelProps {
   audioState?: ObserverAudioState;
   fullscreen?: boolean;
   onSettingsChange: (settings: ObserverInterfaceSettings) => void;
+  onPreviewSound?: () => void;
   onToggleFullscreen?: () => void;
   onClose: () => void;
   returnFocusTo?: HTMLElement | null;
@@ -43,9 +44,9 @@ const MOTION_OPTIONS: ReadonlyArray<{
 ];
 
 const AUDIO_STATE_LABEL: Record<ObserverAudioState, string> = {
-  silent: '等待开启',
-  waiting: '轻触页面后启用',
-  ready: '正在聆听',
+  silent: '声音关闭',
+  waiting: '等待轻触',
+  ready: '声音已开启',
   suspended: '已随页面暂停',
   unsupported: '此浏览器不支持',
 };
@@ -60,6 +61,7 @@ export function SettingsPanel({
   audioState = settings.sound.enabled ? 'ready' : 'silent',
   fullscreen = false,
   onSettingsChange,
+  onPreviewSound,
   onToggleFullscreen,
   onClose,
   returnFocusTo,
@@ -113,7 +115,15 @@ export function SettingsPanel({
     onSettingsChange(normalizeObserverInterfaceSettings({ ...safeSettings, ...patch }));
   };
   const commitSound = (patch: Partial<ObserverInterfaceSettings['sound']>) => {
-    commit({ sound: { ...safeSettings.sound, ...patch } });
+    commit({
+      sound: {
+        ...safeSettings.sound,
+        ...patch,
+        promptDismissed: patch.enabled === undefined
+          ? safeSettings.sound.promptDismissed
+          : true,
+      },
+    });
   };
 
   return (
@@ -165,8 +175,10 @@ export function SettingsPanel({
                 {safeSettings.sound.enabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
               </span>
               <span>
-                <strong>开启声音</strong>
-                <small>需由你主动开启；切到后台会自动停下</small>
+                <strong>游戏声音</strong>
+                <small>{safeSettings.sound.enabled
+                  ? '风水声景与点选、展卷、史事提示已开启'
+                  : '默认静音；开启后切到后台会自动停下'}</small>
               </span>
               <input
                 type="checkbox"
@@ -176,6 +188,22 @@ export function SettingsPanel({
               />
               <i aria-hidden="true" />
             </label>
+
+            {safeSettings.sound.enabled ? (
+              <div className="settings-audio-proof" data-state={audioState}>
+                <span>{audioState === 'ready'
+                  ? '声景已就绪；点选州域或推进季度都会回应。'
+                  : '浏览器还在等待一次轻触，可直接试听。'}</span>
+                <button
+                  type="button"
+                  onClick={onPreviewSound}
+                  disabled={audioState === 'unsupported'}
+                >
+                  <Volume2 size={14} aria-hidden="true" />
+                  试听季度落钟
+                </button>
+              </div>
+            ) : null}
 
             <div className="settings-volume-list" aria-disabled={!safeSettings.sound.enabled}>
               {([

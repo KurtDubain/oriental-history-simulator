@@ -1,5 +1,5 @@
 export const OBSERVER_INTERFACE_SETTINGS_STORAGE_KEY = 'canghai-observer-interface-settings-v1';
-export const OBSERVER_INTERFACE_SETTINGS_VERSION = 1 as const;
+export const OBSERVER_INTERFACE_SETTINGS_VERSION = 2 as const;
 export const MAX_OBSERVER_INTERFACE_SETTINGS_CHARS = 4_096;
 
 export type ObserverMotionPreference = 'system' | 'full' | 'reduced';
@@ -8,6 +8,8 @@ export type ObserverAudioState = 'silent' | 'waiting' | 'ready' | 'suspended' | 
 
 export interface ObserverSoundSettings {
   enabled: boolean;
+  /** True once the observer explicitly enables or declines the first sound invitation. */
+  promptDismissed: boolean;
   masterVolume: number;
   ambienceVolume: number;
   effectsVolume: number;
@@ -74,6 +76,7 @@ export function createObserverInterfaceSettings(): ObserverInterfaceSettings {
     version: OBSERVER_INTERFACE_SETTINGS_VERSION,
     sound: {
       enabled: false,
+      promptDismissed: false,
       masterVolume: 0.72,
       ambienceVolume: 0.42,
       effectsVolume: 0.68,
@@ -93,6 +96,7 @@ export function normalizeObserverInterfaceSettings(value: unknown): ObserverInte
     version: OBSERVER_INTERFACE_SETTINGS_VERSION,
     sound: {
       enabled: safeBoolean(sound.enabled, defaults.sound.enabled),
+      promptDismissed: safeBoolean(sound.promptDismissed, defaults.sound.promptDismissed),
       masterVolume: safeVolume(sound.masterVolume, defaults.sound.masterVolume),
       ambienceVolume: safeVolume(sound.ambienceVolume, defaults.sound.ambienceVolume),
       effectsVolume: safeVolume(sound.effectsVolume, defaults.sound.effectsVolume),

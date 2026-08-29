@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.10.2',
+    date: '2026-08-29',
+    title: '风声可寻，落钟可辨',
+    items: [
+      '首次亲手推进季度后会出现一次声音邀请，设置入口也会明确显示声音是否开启。',
+      '设置卷新增“试听季度落钟”，环境声与操作音量重新校准，常用点选、展卷和切页都有克制反馈。',
+      '浏览器验收会直接核对真实声源；声音仍由玩家主动开启，不改变世界、存档或历史结果。',
+    ],
+  },
+  {
     version: '1.10.1',
     date: '2026-08-29',
     title: '骨架收束，山河照旧',

@@ -9,6 +9,8 @@ import {
   Save,
   Settings2,
   Sparkles,
+  Volume2,
+  VolumeX,
 } from 'lucide-react';
 import {
   useCallback,
@@ -21,6 +23,7 @@ import {
   type ReactNode,
 } from 'react';
 import { CausalDrawer, type CausalFactor, type CausalReference } from './components/CausalDrawer';
+import { AudioInvitation } from './components/AudioInvitation';
 import { HistoryWorkbench } from './components/HistoryWorkbench';
 import { Inspector } from './components/Inspector';
 import { MandatePanel, type MandateMessage, type MandateTarget } from './components/MandatePanel';
@@ -354,6 +357,9 @@ export function App() {
     audioState: settingsAudioState,
     fullscreen,
     commitSettings: commitInterfaceSettings,
+    enableSound,
+    dismissSoundInvitation,
+    previewSound,
     toggleFullscreen: handleFullscreen,
   } = useObserverInterface({
     seaFocused: seaAudioFocused,
@@ -1375,6 +1381,7 @@ export function App() {
       return;
     }
     setPauseMatch(null);
+    gameAudio.play('select', 0.42);
     setRunning((current) => {
       const next = !current;
       runningRef.current = next;
@@ -1384,6 +1391,7 @@ export function App() {
   }, [historicalView]);
 
   const handleSpeedChange = useCallback((nextSpeed: PlaybackSpeed) => {
+    gameAudio.play('select', 0.38);
     speedRef.current = nextSpeed;
     setSpeed(nextSpeed);
   }, []);
@@ -1404,6 +1412,7 @@ export function App() {
   }, [commitObserverSettings]);
 
   const handleOverlayChange = useCallback((nextOverlay: MapOverlay) => {
+    gameAudio.play('select', 0.46);
     setOverlay(nextOverlay);
     if (selection && shouldCloseMapSelectionForOverlay(selection.kind, nextOverlay)) {
       setSelection(null);
@@ -1432,6 +1441,7 @@ export function App() {
     setPrimerStep('terrain');
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setPrimerOpen(true);
+    gameAudio.play('open', 0.6);
   }, []);
 
   const handleCloseMapPrimer = useCallback((_reason: MapPrimerCloseReason) => {
@@ -1441,6 +1451,7 @@ export function App() {
       // Primer completion is a preference only; storage failures must not block the world.
     }
     setPrimerOpen(false);
+    gameAudio.play('close', 0.46);
   }, []);
 
   const handlePrimerAdvance = useCallback(() => {
@@ -1483,7 +1494,9 @@ export function App() {
       setRunning(false);
       clockAccumulatorRef.current = 0;
       setSelectedEventId(null);
-      gameAudio.play('open', 0.54);
+      gameAudio.play('open', 0.64);
+    } else {
+      gameAudio.play('select', 0.44);
     }
     setActiveView(nextView);
   }, []);
@@ -1518,6 +1531,12 @@ export function App() {
     gameAudio.play('close', 0.48);
     window.setTimeout(() => settingsTriggerRef.current?.focus(), 0);
   }, []);
+
+  const handlePreviewSound = useCallback(() => {
+    void previewSound().then((ready) => {
+      if (!ready) setToast('浏览器尚未允许声音，请再轻触一次试听。');
+    });
+  }, [previewSound]);
 
   const handleApplyAppUpdate = useCallback(async () => {
     runningRef.current = false;
@@ -1709,12 +1728,14 @@ export function App() {
   }, [activeView]);
 
   const handleSelectArchiveEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
+    gameAudio.play('select', 0.44);
     setSelectedEventId(null);
     setSelection({ kind, id });
     setActiveView(kind === 'country' ? 'polities' : kind === 'family' ? 'families' : kind === 'person' ? 'people' : 'world');
   }, []);
 
   const handleSelectScopedEvent = useCallback((eventId: string) => {
+    gameAudio.play('open', 0.58);
     archiveFocusRestoreAllowedRef.current = false;
     setResumeSituationAfterEvent(false);
     setResumeArchiveAfterEvent(archiveOpen);
@@ -1741,12 +1762,14 @@ export function App() {
     clockAccumulatorRef.current = 0;
     setSituationWorkbenchOpen(true);
     setResumeSituationAfterEvent(false);
+    gameAudio.play('open', 0.64);
   }, [selectedSituationId]);
 
   const handleCloseSituationWorkbench = useCallback(() => {
     situationFocusRestoreAllowedRef.current = true;
     setSituationWorkbenchOpen(false);
     setResumeSituationAfterEvent(false);
+    gameAudio.play('close', 0.48);
   }, []);
 
   const handleSelectSituationEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
@@ -1825,6 +1848,7 @@ export function App() {
   }, [commitEmbodiedObserver]);
 
   const closeInspectorToMap = useCallback(() => {
+    gameAudio.play('close', 0.38);
     setSelection(null);
     setMobileInspectorExpanded(false);
     window.setTimeout(() => {
@@ -1844,6 +1868,7 @@ export function App() {
           ? removeObserverWatch(observerSettingsRef.current, item.kind, item.id)
           : upsertObserverWatch(observerSettingsRef.current, item);
         commitObserverSettings(nextSettings);
+        gameAudio.play('select', 0.5);
       },
       onClose: closeInspectorToMap,
       mobileExpanded: mobileInspectorExpanded,
@@ -1852,6 +1877,7 @@ export function App() {
         archiveReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         archiveFocusRestoreAllowedRef.current = true;
         setArchiveOpen(true);
+        gameAudio.play('open', 0.62);
       } : undefined,
       onSelectEntity: handleSelectArchiveEntity,
       onSelectEvent: handleSelectScopedEvent,
@@ -1916,6 +1942,7 @@ export function App() {
   ]);
 
   const selectQuarterEvent = useCallback((eventId: string) => {
+    gameAudio.play('open', 0.58);
     setResumeArchiveAfterEvent(false);
     setResumeSituationAfterEvent(false);
     setSelectedEventId(eventId);
@@ -1968,6 +1995,7 @@ export function App() {
   }, [handleOpenSituationWorkbench]);
 
   const handleInspectObserverLead = useCallback((lead: ObserverLead) => {
+    if (!lead.situationId) gameAudio.play('select', 0.52);
     setPauseMatch(null);
     setOverlay(lead.overlay);
     setSelection(lead.target);
@@ -1989,6 +2017,7 @@ export function App() {
       ? removeObserverWatch(observerSettingsRef.current, item.kind, item.id)
       : upsertObserverWatch(observerSettingsRef.current, item);
     commitObserverSettings(nextSettings);
+    gameAudio.play('select', 0.5);
     setToast(watched
       ? `已取消关注：${item.label}`
       : item.kind === 'situation'
@@ -2240,11 +2269,20 @@ export function App() {
                 ref={settingsTriggerRef}
                 type="button"
                 data-settings-trigger="true"
+                data-audio-state={settingsAudioState}
+                data-audio-unset={!interfaceSettings.sound.promptDismissed || undefined}
                 onClick={handleOpenSettings}
-                aria-label="打开设置"
-                title="设置"
+                aria-label={`打开设置，${interfaceSettings.sound.enabled
+                  ? settingsAudioState === 'ready' ? '声音已开启' : '声音等待轻触'
+                  : '声音尚未开启'}`}
+                title={interfaceSettings.sound.enabled ? '设置 · 声音已开启' : '设置 · 声音尚未开启'}
               >
                 <Settings2 size={16} aria-hidden="true" />
+                <span className="observer-world-tools__audio-state" aria-hidden="true">
+                  {interfaceSettings.sound.enabled
+                    ? <Volume2 size={9} />
+                    : <VolumeX size={9} />}
+                </span>
               </button>
               <button
                 ref={mobileToolsTriggerRef}
@@ -2284,6 +2322,14 @@ export function App() {
                 </button>
               </div>
             </div>
+
+            <AudioInvitation
+              open={world.turn > 0
+                && !interfaceSettings.sound.enabled
+                && !interfaceSettings.sound.promptDismissed}
+              onEnable={enableSound}
+              onDismiss={dismissSoundInvitation}
+            />
 
             <div className="observer-world-signature" aria-label="确定性世界签名">
               <span>SEED {world.seed}</span>
@@ -2482,6 +2528,7 @@ export function App() {
         audioState={settingsAudioState}
         fullscreen={fullscreen}
         onSettingsChange={commitInterfaceSettings}
+        onPreviewSound={handlePreviewSound}
         onToggleFullscreen={handleFullscreen}
         onClose={handleCloseSettings}
         returnFocusTo={settingsTriggerRef.current}
