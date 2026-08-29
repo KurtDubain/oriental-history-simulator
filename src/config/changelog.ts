@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.6.3',
+    date: '2026-08-29',
+    title: '人物、家国与史事，各归其卷',
+    items: [
+      '人物、国家、家族、历史因果与名册现在分别拥有独立的玩家投影，打开一类档案不再依赖一份总解释文件。',
+      '旧的统一入口继续兼容，固定种子的档案内容、史事因果和世界状态保持不变。',
+      '本次只完成多地图前的架构收口，不改变玩法、平衡、地图内容或 schema 4 存档。',
+    ],
+  },
+  {
     version: '1.6.2',
     date: '2026-08-29',
     title: '舆图的眼与手，看向同一处',

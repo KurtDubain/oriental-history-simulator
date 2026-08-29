@@ -52,3 +52,9 @@ engine.ts（季度顺序与提交）
 - 军团与城港图标的 Canvas 绘制和点按使用同一 screen-space layout；悬停与轻点读取同一优先级 Scene Hit，不再维护两套距离判断。移动端宽容半径、14/10px 触控拖动阈值、28px 点按取消线和双指锚点语义未改。
 - 世界到地图的玩家投影，以及地区、军团、水师、商路、疫病与技艺速览已从总 `view/adapters.ts` 抽离；旧公共入口只作稳定 re-export，组件仍只消费有界 view model。
 - 当前架构检查为 84 个生产 TS/TSX 文件、46,290 行，无新增运行时循环；`WorldMap.tsx` 已退出热点告警，总 `view/adapters.ts` 降至 1,474 行。ARC06 尚需继续拆人物、国家、家族与历史因果档案，因此任务 28 仍保持开放。
+
+## v1.6.3 档案投影收口
+
+- 人物、国家、家族、历史因果与名册投影分别由 `person-dossier-adapter`、`country-dossier-adapter`、`family-dossier-adapter`、`history-causal-adapter` 与 `roster-adapter` 拥有；重复的查找、日期与证据链接只保留在内部共享层。
+- `view/adapters.ts` 从 1,474 行降至 26 行，只保留地图、档案与名册的兼容 re-export；人物模块 837 行，其余新领域模块均低于 200 行。
+- 架构检查为 90 个生产 TS/TSX 文件、46,384 行；没有新增依赖环。独立模块与兼容入口在固定世界上逐项相等，全部投影前后序列化世界保持一致，ARC06 与任务 28 已关闭。
