@@ -41,6 +41,7 @@ const OLIVE = "#66705b";
 const DEFAULT_VISUAL_SETTINGS: Readonly<MapVisualSettings> = Object.freeze({
   season: '春',
   atmosphere: false,
+  highlightStrength: 1,
 });
 
 const SEASON_PALETTE: Readonly<Record<MapVisualSettings['season'], {
@@ -1149,6 +1150,7 @@ export function drawWorldMap(
     regionNodesByRegion.set(node.region.id, nodes);
   }
   const highlightedRegions = new Set(highlightedRegionIds);
+  const highlightStrength = clamp(visualSettings.highlightStrength ?? 1);
   const maxPopulation = Math.max(1, ...regions.map((region) => region.population));
   const geography = deriveGeography(regions, routes, profile);
 
@@ -1232,16 +1234,16 @@ export function drawWorldMap(
     const selected = region.id === selectedRegionId;
     const hovered = region.id === hoveredRegionId;
     const highlighted = highlightedRegions.has(region.id);
-    if (highlighted && !selected && !hovered) {
+    if (highlighted && !selected && !hovered && highlightStrength > 0.015) {
       const path = makeRegionPath(region, transform);
       context.save();
       clipToRegionCoast(context, region, transform, profile);
       context.strokeStyle = VERMILION;
-      context.globalAlpha = 0.72;
-      context.lineWidth = 1.45;
+      context.globalAlpha = 0.16 + highlightStrength * 0.48;
+      context.lineWidth = 0.8 + highlightStrength * 0.85;
       context.setLineDash([4, 3]);
-      context.shadowColor = "rgba(163, 58, 46, 0.25)";
-      context.shadowBlur = 5;
+      context.shadowColor = `rgba(163, 58, 46, ${0.08 + highlightStrength * 0.18})`;
+      context.shadowBlur = 2 + highlightStrength * 4;
       context.stroke(path);
       context.restore();
     }

@@ -8,6 +8,8 @@ export type MapSeason = '春' | '夏' | '秋' | '冬';
 export interface MapVisualSettings {
   season: MapSeason;
   atmosphere: boolean;
+  /** Observer-only emphasis; never enters simulation state or save data. */
+  highlightStrength?: number;
 }
 
 export interface MapRegionView {

@@ -1,22 +1,16 @@
 import { useId } from 'react';
 import type { TurnReport } from '../sim/types';
-import type { QuarterPulseSituationChange } from '../view/quarter-pulse-situations';
+import {
+  MAX_QUARTER_PULSE_STORIES,
+  type QuarterPulseStory,
+} from '../view/quarter-pulse-stories';
 import '../styles/quarter-pulse.css';
 
 export type QuarterPulseLedger = 'population' | 'food' | 'wealth';
 
-export interface QuarterPulseEvent {
-  id: string;
-  title: string;
-  category: string;
-  importance: number;
-  location?: string;
-}
-
 export interface QuarterPulseProps {
   report: TurnReport | null;
-  events: QuarterPulseEvent[];
-  situationChanges: QuarterPulseSituationChange[];
+  stories: readonly QuarterPulseStory[];
   onSelectEvent: (id: string) => void;
   onSelectSituation: (id: string) => void;
   onSelectLedger: (ledger: QuarterPulseLedger) => void;
@@ -44,8 +38,7 @@ function netTone(value: number): 'gain' | 'loss' | 'even' {
 
 export function QuarterPulse({
   report,
-  events,
-  situationChanges,
+  stories,
   onSelectEvent,
   onSelectSituation,
   onSelectLedger,
@@ -92,10 +85,7 @@ export function QuarterPulse({
       breakdown: `期初 ${formatNumber(report.wealth.start)}；产出 +${formatNumber(report.wealth.produced)}；民用 −${formatNumber(report.wealth.householdConsumed)}；战毁 −${formatNumber(report.wealth.warDestroyed)}；征税流转 ${formatNumber(report.wealth.taxed)}；军饷流转 ${formatNumber(report.wealth.militaryPayments)}；期末 ${formatNumber(report.wealth.end)}`,
     },
   ];
-  const visibleEvents = [...events]
-    .sort((left, right) => right.importance - left.importance)
-    .slice(0, 3);
-  const visibleSituations = situationChanges.slice(0, 4);
+  const visibleStories = stories.slice(0, MAX_QUARTER_PULSE_STORIES);
 
   return (
     <section
@@ -103,6 +93,7 @@ export function QuarterPulse({
       data-compact={compact || undefined}
       data-testid="quarter-pulse"
       data-turn={report.turn}
+      data-story-count={visibleStories.length}
       aria-labelledby={`${tooltipId}-heading`}
     >
       <header className="quarter-pulse__date" data-testid="quarter-pulse-date">
@@ -136,54 +127,67 @@ export function QuarterPulse({
       </div>
 
       <div className="quarter-pulse__events" aria-label="本季局势与重要史事">
-        {visibleSituations.length || visibleEvents.length ? (
+        {visibleStories.length ? (
           <ol className="quarter-pulse__event-list">
-            {visibleSituations.map((situation) => (
-              <li key={`situation:${situation.id}`} data-story-kind="situation">
-                <button
-                  type="button"
-                  className="quarter-pulse__event quarter-pulse__situation"
-                  data-testid="quarter-pulse-situation"
-                  data-situation-id={situation.id}
-                  data-kind={situation.kind}
-                  data-basis={situation.basis}
-                  aria-label={`${situation.kindLabel}：${situation.sceneTitle ?? situation.title}。${situation.detail}。打开局势全卷`}
-                  onClick={() => onSelectSituation(situation.id)}
-                >
-                  <span className="quarter-pulse__event-meta">
-                    <span className="quarter-pulse__situation-kind">{situation.kindLabel}</span>
-                    <span>{situation.typeLabel} · {situation.title}</span>
-                  </span>
-                  <strong>{situation.sceneTitle ?? situation.title}</strong>
-                  <span className="quarter-pulse__event-cause">{situation.detail}<b aria-hidden="true">看卷 ›</b></span>
-                </button>
-              </li>
-            ))}
-            {visibleEvents.map((event) => (
-              <li key={event.id} data-story-kind="event">
-                <button
-                  type="button"
-                  className="quarter-pulse__event"
-                  data-testid="quarter-pulse-event"
-                  data-event-id={event.id}
-                  data-importance={event.importance}
-                  aria-label={`${event.category}：${event.title}${event.location ? `，发生于${event.location}` : ''}。查看因果`}
-                  onClick={() => onSelectEvent(event.id)}
-                >
-                  <span className="quarter-pulse__event-meta">
-                    <span>{event.category}</span>
-                    {event.location ? <span>{event.location}</span> : null}
-                  </span>
-                  <strong>{event.title}</strong>
-                  <span className="quarter-pulse__event-cause" aria-hidden="true">何故 ›</span>
-                </button>
-              </li>
-            ))}
+            {visibleStories.map((story) => {
+              if (story.kind === 'situation') return (
+                <li key={story.id} data-story-id={story.id} data-story-kind="situation">
+                  <button
+                    type="button"
+                    className="quarter-pulse__event quarter-pulse__situation"
+                    data-testid="quarter-pulse-situation"
+                    data-situation-id={story.situationId}
+                    data-kind={story.situationKind}
+                    data-basis={story.basis}
+                    aria-label={`${story.kindLabel}：${story.title}。${story.summary}。打开局势全卷`}
+                    onClick={() => onSelectSituation(story.situationId)}
+                  >
+                    <span className="quarter-pulse__event-meta">
+                      <span className="quarter-pulse__situation-kind">{story.kindLabel}</span>
+                      <span>{story.typeLabel} · {story.threadTitle}</span>
+                    </span>
+                    <strong>{story.title}</strong>
+                    <span className="quarter-pulse__event-cause">{story.summary}<b aria-hidden="true">看卷 ›</b></span>
+                  </button>
+                </li>
+              );
+              const content = <>
+                <span className="quarter-pulse__event-meta">
+                  <span>{story.category}</span>
+                  {story.location ? <span>{story.location}</span> : null}
+                </span>
+                <strong>{story.title}</strong>
+                <span className="quarter-pulse__event-cause">
+                  <span>{story.summary || (story.eventId ? '史页载有此事，可继续查明前因。' : '此项仅见于官档，尚无独立史事页。')}</span>
+                  <b aria-hidden="true">{story.eventId ? '何故 ›' : '官档'}</b>
+                </span>
+              </>;
+              const eventId = story.eventId;
+              return (
+                <li key={story.id} data-story-id={story.id} data-story-kind="event">
+                  {eventId ? <button
+                    type="button"
+                    className="quarter-pulse__event"
+                    data-testid="quarter-pulse-event"
+                    data-event-id={eventId}
+                    data-source={story.source}
+                    data-importance={story.importance}
+                    aria-label={`${story.category}：${story.title}${story.location ? `，发生于${story.location}` : ''}。${story.summary}。查看因果`}
+                    onClick={() => onSelectEvent(eventId)}
+                  >{content}</button> : <article
+                    className="quarter-pulse__event quarter-pulse__event--record"
+                    data-testid="quarter-pulse-record"
+                    data-source={story.source}
+                    aria-label={`${story.category}官档：${story.title}。${story.summary}`}
+                  >{content}</article>}
+                </li>
+              );
+            })}
           </ol>
         ) : (
           <p className="quarter-pulse__quiet" data-testid="quarter-pulse-quiet">
-            <strong>平静之季</strong>
-            <span>此季没有足以改变天下走向的大事。</span>
+            <strong>本季无大事</strong>
+            <span>人口、粮食与财富变化仍已记入总账。</span>
           </p>
         )}
       </div>

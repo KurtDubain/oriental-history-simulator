@@ -24,6 +24,7 @@ describe('ObserverLeads', () => {
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('展开局势全卷');
     expect(markup).toContain('7 条局势');
+    expect(markup.match(/data-situation-workbench-trigger/g)).toHaveLength(1);
   });
 
   it('uses Situation identity for watching while fallback leads retain their target identity', () => {

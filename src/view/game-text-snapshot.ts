@@ -28,6 +28,7 @@ import { projectEmbodimentTextSnapshot } from './embodiment-view';
 import { agencyDossierOptions } from './observer-agency-projection';
 import { deriveObserverLeadProjection } from './observer-leads';
 import { selectedEntityLabel } from './observer-selection';
+import { projectQuarterPulse } from './quarter-pulse-stories';
 import type { SnapshotOptions } from './observer-shell-contract';
 import { projectSituationWorkbench } from './situation-detail';
 import { toSituationSnapshot } from './situation-snapshot';
@@ -288,6 +289,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       || right.strategicValue - left.strategicValue)
     .slice(0, 40);
   const report = world.lastTurn;
+  const quarterPulse = projectQuarterPulse(world);
   const interventionHistory = world.history.filter(isV03InterventionEvent);
   const latestIntervention = interventionHistory.at(-1);
   const focusLeadProjection = options.observerLeadProjection
@@ -439,6 +441,26 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         panX: Number(options.mapCamera.panX.toFixed(1)),
         panY: Number(options.mapCamera.panY.toFixed(1)),
         lod: options.mapLod,
+      },
+      quarterPulse: {
+        turn: report?.turn ?? null,
+        storyCount: quarterPulse.stories.length,
+        stories: quarterPulse.stories.map((story) => ({
+          id: story.id,
+          kind: story.kind,
+          title: story.title,
+          summary: story.summary,
+          importance: story.importance,
+          destination: story.kind === 'situation'
+            ? { kind: 'situation', id: story.situationId }
+            : story.eventId
+              ? { kind: 'event', id: story.eventId }
+              : { kind: 'record', id: story.id },
+          sourceFactIds: story.sourceFactIds,
+          historyEventIds: story.historyEventIds,
+          regionIds: story.regionIds,
+        })),
+        highlightedRegionIds: quarterPulse.highlightedRegionIds,
       },
       mobileInspectorMode: options.selection
         ? options.mobileInspectorExpanded ? 'full' : 'quick'

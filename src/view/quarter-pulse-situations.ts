@@ -6,7 +6,10 @@ import {
   situationOutcomeLabel,
   situationPhaseLabel,
 } from './situation-snapshot';
-import { projectSituationHistoricalScenes } from './historical-scenes';
+import {
+  projectSituationHistoricalScenes,
+  type HistoricalScene,
+} from './historical-scenes';
 
 export const MAX_QUARTER_PULSE_SITUATIONS = 4;
 export const MIN_QUARTER_PULSE_TREND_DELTA = 8;
@@ -27,6 +30,9 @@ export interface QuarterPulseSituationChange {
   detail: string;
   importance: number;
   milestoneFactId: string | null;
+  sourceFactIds: readonly string[];
+  historyEventIds: readonly string[];
+  regionIds: readonly string[];
 }
 
 const KIND_LABEL: Record<QuarterPulseSituationKind, QuarterPulseSituationChange['kindLabel']> = {
@@ -62,6 +68,95 @@ function signed(value: number): string {
   return amount > 0 ? `+${amount}` : amount < 0 ? `−${Math.abs(amount)}` : '±0';
 }
 
+function unique(values: readonly string[]): string[] {
+  return [...new Set(values)].sort(stableCompare);
+}
+
+function uniqueInOrder(values: readonly string[]): string[] {
+  return [...new Set(values.filter(Boolean))];
+}
+
+function reportFactIds(world: WorldState, turn: number): ReadonlySet<string> {
+  return new Set(world.lastTurn?.turn === turn ? world.lastTurn.factIds : []);
+}
+
+function currentSituationFactIds(
+  world: WorldState,
+  situation: SituationState,
+  turn: number,
+  extraFactIds: readonly string[] = [],
+): string[] {
+  const current = reportFactIds(world, turn);
+  return unique([
+    ...extraFactIds,
+    ...situation.causalFactIds,
+    ...situation.recentChanges
+      .filter((change) => change.turn === turn)
+      .flatMap((change) => change.sourceFactIds),
+    ...situation.signals.flatMap((signal) => signal.refs.flatMap((ref) => (
+      ref.kind === 'fact' ? [ref.factId] : []
+    ))),
+  ].filter((id) => current.has(id)));
+}
+
+function currentSituationScene(
+  world: WorldState,
+  situation: SituationState,
+  turn: number,
+): HistoricalScene | undefined {
+  const current = reportFactIds(world, turn);
+  return projectSituationHistoricalScenes(world, situation, 3, turn)
+    .find((scene) => (
+      scene.turn === turn
+      && scene.sourceFactIds.some((id) => current.has(id))
+    ));
+}
+
+function currentHistoryEventIds(
+  world: WorldState,
+  turn: number,
+  factIds: readonly string[],
+): string[] {
+  const reportEvents = new Set(world.lastTurn?.turn === turn ? world.lastTurn.eventIds : []);
+  const facts = new Set(factIds);
+  return unique(world.history
+    .filter((event) => (
+      event.turn === turn
+      && reportEvents.has(event.id)
+      && event.sourceFactIds.some((id) => facts.has(id))
+    ))
+    .map((event) => event.id));
+}
+
+function fallbackRegionIds(world: WorldState, situation: SituationState): string[] {
+  if (situation.type === 'war_progress') {
+    const war = world.wars.find((item) => item.id === situation.scopeKey);
+    if (war?.targetRegionIds.length) return war.targetRegionIds.slice(0, 2);
+  }
+  const scopedPolity = world.polities.find((item) => item.id === situation.scopeKey);
+  if (scopedPolity?.capitalRegionId) return [scopedPolity.capitalRegionId];
+  return situation.participants.regionIds.slice(0, 2);
+}
+
+function currentRegionIds(
+  world: WorldState,
+  situation: SituationState,
+  factIds: readonly string[],
+): string[] {
+  const factSet = new Set(factIds);
+  const currentFacts = world.facts.filter((fact) => factSet.has(fact.id));
+  const concreteRegions = currentFacts
+    .filter((fact) => fact.kind !== 'situation_milestone')
+    .flatMap((fact) => fact.regionIds);
+  const indexedRegions = currentFacts.flatMap((fact) => fact.regionIds);
+  const regions = concreteRegions.length
+    ? concreteRegions
+    : indexedRegions.length
+      ? indexedRegions
+      : fallbackRegionIds(world, situation);
+  return uniqueInOrder(regions).slice(0, 4);
+}
+
 function matchingChange(
   situation: SituationState,
   fact: SituationMilestoneFact,
@@ -89,12 +184,11 @@ function milestoneKind(fact: SituationMilestoneFact): QuarterPulseSituationKind 
 }
 
 function milestoneDetail(
-  world: WorldState,
   situation: SituationState,
   fact: SituationMilestoneFact,
   kind: QuarterPulseSituationKind,
+  scene: HistoricalScene | undefined,
 ): string {
-  const scene = projectSituationHistoricalScenes(world, situation, 1, fact.turn)[0];
   if (scene) return `${scene.summary}${scene.result ? ` ${scene.result}` : ''}`;
   if (kind === 'born') {
     const phase = fact.payload.toPhase ?? situation.phase;
@@ -120,7 +214,8 @@ function milestoneChange(
   const kind = milestoneKind(fact);
   if (!kind) return null;
   const snapshot = projectSituationSnapshotItem(situation, world);
-  const scene = projectSituationHistoricalScenes(world, situation, 1, fact.turn)[0];
+  const scene = currentSituationScene(world, situation, fact.turn);
+  const sourceFactIds = currentSituationFactIds(world, situation, fact.turn, [fact.id]);
   return {
     id: situation.id,
     title: snapshot.title,
@@ -131,9 +226,12 @@ function milestoneChange(
     basis: kind === 'born' || kind === 'resolved' ? 'lifecycle' : 'phase',
     tension: rounded(fact.payload.tension),
     delta: rounded(fact.payload.momentum),
-    detail: milestoneDetail(world, situation, fact, kind),
+    detail: milestoneDetail(situation, fact, kind, scene),
     importance: situation.importance,
     milestoneFactId: fact.id,
+    sourceFactIds,
+    historyEventIds: currentHistoryEventIds(world, fact.turn, sourceFactIds),
+    regionIds: currentRegionIds(world, situation, sourceFactIds),
   };
 }
 
@@ -155,7 +253,8 @@ function trendChange(world: WorldState, situation: SituationState, turn: number)
   const signalLabel = leadingSignal
     ? snapshot.evidence.find((evidence) => evidence.key === leadingSignal.key)?.label
     : null;
-  const scene = projectSituationHistoricalScenes(world, situation, 1, turn)[0];
+  const scene = currentSituationScene(world, situation, turn);
+  const sourceFactIds = currentSituationFactIds(world, situation, turn, scene?.sourceFactIds ?? []);
   return {
     id: situation.id,
     title: snapshot.title,
@@ -171,6 +270,9 @@ function trendChange(world: WorldState, situation: SituationState, turn: number)
       : `张力 ${rounded(previousTension)}→${rounded(situation.tension)}（${signed(situation.momentum)}）${signalLabel ? ` · ${signalLabel}` : ''}`,
     importance: situation.importance,
     milestoneFactId: null,
+    sourceFactIds,
+    historyEventIds: currentHistoryEventIds(world, turn, sourceFactIds),
+    regionIds: currentRegionIds(world, situation, sourceFactIds),
   };
 }
 
@@ -182,9 +284,11 @@ function trendChange(world: WorldState, situation: SituationState, turn: number)
  * - 非阶段性升降只读 Situation 当季持久化的 tension + momentum；前季值可由
  *   tension - momentum 精确还原。小于 8 点的普通抖动保持沉默，且这种走势
  *   不会伪装成 milestone，也不会展开或重复底层普通 Facts。
- * - 结果稳定排序并限制为四条，不写 WorldState、Fact、Chronicle 或 hash。
+ * - 结果稳定排序且不预先截断，最终限额由与普通史事共用的季报投影决定。
+ * - 纯走势只借用同季的具体场景，不把旧事重讲成本季新闻。
+ * - 不写 WorldState、Fact、Chronicle 或 hash。
  */
-export function projectQuarterPulseSituations(world: WorldState): QuarterPulseSituationChange[] {
+export function projectQuarterPulseSituationCandidates(world: WorldState): QuarterPulseSituationChange[] {
   const report = world.lastTurn;
   if (!report || world.situationSystem.lastReducedTurn !== report.turn) return [];
 
@@ -222,6 +326,10 @@ export function projectQuarterPulseSituations(world: WorldState): QuarterPulseSi
       || right.importance - left.importance
       || Math.abs(right.delta) - Math.abs(left.delta)
       || stableCompare(left.id, right.id)
-    ))
-    .slice(0, MAX_QUARTER_PULSE_SITUATIONS);
+    ));
+}
+
+/** Legacy bounded projection for consumers that do not join ordinary stories. */
+export function projectQuarterPulseSituations(world: WorldState): QuarterPulseSituationChange[] {
+  return projectQuarterPulseSituationCandidates(world).slice(0, MAX_QUARTER_PULSE_SITUATIONS);
 }

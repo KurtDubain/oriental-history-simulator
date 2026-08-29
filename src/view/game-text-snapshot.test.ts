@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MAP_PROFILE_ID, getMapProfile } from '../maps';
-import { createWorld, serializeWorld } from '../sim';
+import { advanceWorld, createWorld, serializeWorld } from '../sim';
 import { DEFAULT_MAP_CAMERA } from './map-scene-geometry';
 import { makeTextSnapshot } from './game-text-snapshot';
 import { createObserverInterfaceSettings } from './observer-interface-settings';
@@ -99,6 +99,28 @@ describe('render_game_to_text projection boundary', () => {
       regions: world.regions.length,
       seaZones: world.seaZones.length,
     });
+    expect(serializeWorld(world)).toBe(before);
+  });
+
+  it('publishes the same bounded quarterly story projection without changing the world', () => {
+    const world = advanceWorld(createWorld('TRIM01-全文季报', DEFAULT_MAP_PROFILE_ID));
+    const before = serializeWorld(world);
+    const snapshot = JSON.parse(makeTextSnapshot(world, options())) as {
+      interface: {
+        quarterPulse: {
+          turn: number;
+          storyCount: number;
+          stories: Array<{ id: string; kind: string; title: string }>;
+          highlightedRegionIds: string[];
+        };
+      };
+    };
+
+    expect(snapshot.interface.quarterPulse.turn).toBe(world.lastTurn?.turn);
+    expect(snapshot.interface.quarterPulse.storyCount).toBe(snapshot.interface.quarterPulse.stories.length);
+    expect(snapshot.interface.quarterPulse.storyCount).toBeLessThanOrEqual(3);
+    expect(new Set(snapshot.interface.quarterPulse.stories.map((story) => story.id)).size)
+      .toBe(snapshot.interface.quarterPulse.storyCount);
     expect(serializeWorld(world)).toBe(before);
   });
 });

@@ -36,6 +36,7 @@
   align-content: center;
   gap: 2px;
   border-right: 1px solid var(--observer-line, rgb(48 47 40 / 16%));
+  animation: quarter-pulse-date-enter 320ms ease-out both;
 }
 
 .quarter-pulse__kicker {
@@ -109,7 +110,7 @@
 
 .quarter-pulse__ledger:hover,
 .quarter-pulse__ledger:focus-visible,
-.quarter-pulse__event:hover,
+.quarter-pulse__event:not(.quarter-pulse__event--record):hover,
 .quarter-pulse__event:focus-visible {
   background: var(--observer-vermilion-wash, rgb(156 53 43 / 10%));
 }
@@ -185,7 +186,7 @@
   width: 100%;
   height: 100%;
   min-height: 70px;
-  padding: 9px 49px 9px 12px;
+  padding: 9px 12px;
   align-content: center;
   gap: 3px;
   border: 0;
@@ -265,20 +266,6 @@
 }
 
 .quarter-pulse__event-cause {
-  position: absolute;
-  top: 50%;
-  right: 11px;
-  color: var(--observer-ink-faint, #8a8677);
-  font-size: 11px;
-  transform: translateY(-50%);
-}
-
-.quarter-pulse__situation {
-  padding-right: 12px;
-}
-
-.quarter-pulse__situation .quarter-pulse__event-cause {
-  position: static;
   display: flex;
   min-width: 0;
   align-items: baseline;
@@ -290,16 +277,24 @@
   line-height: 1.45;
   text-overflow: ellipsis;
   white-space: nowrap;
-  transform: none;
 }
 
-.quarter-pulse__situation .quarter-pulse__event-cause b {
+.quarter-pulse__event-cause > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.quarter-pulse__event-cause b {
   flex: 0 0 auto;
   margin-left: auto;
   color: var(--observer-vermilion-dark, #79271f);
   font-family: var(--observer-sans, system-ui, sans-serif);
   font-size: 10px;
   font-weight: 700;
+}
+
+.quarter-pulse__event--record {
+  cursor: default;
 }
 
 .quarter-pulse__quiet,
@@ -398,7 +393,7 @@
 @media (max-width: 430px) {
   .quarter-pulse {
     grid-template-columns: 1fr;
-    min-height: 128px;
+    min-height: 0;
   }
 
   .quarter-pulse::before {
@@ -412,7 +407,7 @@
   .quarter-pulse__date {
     display: flex;
     min-width: 0;
-    padding: 9px 10px 6px;
+    padding: 5px 10px 3px;
     align-items: baseline;
     gap: 7px;
     border-right: 0;
@@ -428,12 +423,13 @@
   }
 
   .quarter-pulse__ledgers {
-    min-height: 48px;
+    min-height: 44px;
     border-bottom: 1px solid var(--observer-line, rgb(48 47 40 / 16%));
   }
 
   .quarter-pulse__ledger {
-    padding: 6px 9px;
+    min-height: 44px;
+    padding: 4px 8px;
   }
 
   .quarter-pulse__ledger > strong {
@@ -442,7 +438,27 @@
 
   .quarter-pulse__events {
     grid-column: 1;
+    min-height: 56px;
     border-top: 0;
+  }
+
+  .quarter-pulse__event {
+    min-height: 56px;
+    padding: 4px 10px;
+    gap: 2px;
+  }
+
+  .quarter-pulse__event-meta {
+    font-size: 10px;
+  }
+
+  .quarter-pulse__event strong {
+    font-size: 12px;
+  }
+
+  .quarter-pulse__event-cause {
+    font-size: 9px;
+    line-height: 1.25;
   }
 
   .quarter-pulse--empty {
@@ -456,7 +472,14 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .quarter-pulse__date,
   .quarter-pulse__tooltip {
+    animation: none;
     transition: none;
   }
+}
+
+@keyframes quarter-pulse-date-enter {
+  from { opacity: 0.56; transform: translateY(3px); }
+  to { opacity: 1; transform: translateY(0); }
 }

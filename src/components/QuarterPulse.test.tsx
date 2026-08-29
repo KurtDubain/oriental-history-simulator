@@ -2,7 +2,10 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { TurnReport } from '../sim/types';
-import type { QuarterPulseSituationChange } from '../view/quarter-pulse-situations';
+import type {
+  QuarterPulseEventStory,
+  QuarterPulseSituationStory,
+} from '../view/quarter-pulse-stories';
 import { QuarterPulse } from './QuarterPulse';
 
 const report = {
@@ -41,20 +44,46 @@ const report = {
   factIds: ['fact-situation'],
 } as TurnReport;
 
-function situation(kind: QuarterPulseSituationChange['kind']): QuarterPulseSituationChange {
+function situation(kind: QuarterPulseSituationStory['situationKind']): QuarterPulseSituationStory {
   const labels = { born: '新生', heated: '升温', cooled: '降温', resolved: '结案' } as const;
   return {
-    id: `situation-${kind}`,
+    id: `situation:situation-${kind}`,
+    kind: 'situation',
     title: '燕京军权危机',
+    summary: kind === 'cooled' ? '张力 81→72（−9）' : '张力 62→72（+10）',
+    sourceFactIds: kind === 'born' || kind === 'resolved' ? ['fact-situation'] : [],
+    historyEventIds: [],
+    regionIds: ['r_yanjing'],
+    situationId: `situation-${kind}`,
+    situationKind: kind,
     typeLabel: '军权危机',
-    kind,
     kindLabel: labels[kind],
     basis: kind === 'heated' || kind === 'cooled' ? 'trend' : 'lifecycle',
+    threadTitle: '燕京军权危机',
     tension: 72,
     delta: kind === 'cooled' ? -9 : 10,
-    detail: kind === 'cooled' ? '张力 81→72（−9）' : '张力 62→72（+10）',
     importance: 80,
-    milestoneFactId: kind === 'born' || kind === 'resolved' ? 'fact-situation' : null,
+  };
+}
+
+function event(
+  id: string,
+  title: string,
+  importance: number,
+): QuarterPulseEventStory {
+  return {
+    id,
+    kind: 'event',
+    title,
+    summary: '官档已记下此事的起因与结果。',
+    category: '军事',
+    importance,
+    location: '燕京',
+    eventId: id,
+    source: 'chronicle',
+    sourceFactIds: [],
+    historyEventIds: [id],
+    regionIds: ['r_yanjing'],
   };
 }
 
@@ -62,14 +91,7 @@ describe('QuarterPulse Situation stream', () => {
   it('puts bounded Situation changes before ordinary history and exposes a dossier action', () => {
     const markup = renderToStaticMarkup(createElement(QuarterPulse, {
       report,
-      events: [{
-        id: 'event-ordinary',
-        title: '秋粮入仓',
-        category: '经济',
-        importance: 3,
-        location: '燕京',
-      }],
-      situationChanges: [situation('heated'), situation('resolved')],
+      stories: [situation('heated'), situation('resolved'), event('event-ordinary', '秋粮入仓', 60)],
       onSelectEvent: () => undefined,
       onSelectSituation: () => undefined,
       onSelectLedger: () => undefined,
@@ -83,17 +105,39 @@ describe('QuarterPulse Situation stream', () => {
     expect(markup.indexOf('situation-heated')).toBeLessThan(markup.indexOf('event-ordinary'));
   });
 
+  it('renders the shared ranking order and defensively caps it at three stories', () => {
+    const markup = renderToStaticMarkup(createElement(QuarterPulse, {
+      report,
+      stories: [
+        event('event-major', '燕京易主', 100),
+        situation('resolved'),
+        situation('heated'),
+        event('event-ordinary', '秋粮入仓', 60),
+        event('event-minor', '乡市复开', 20),
+      ],
+      onSelectEvent: () => undefined,
+      onSelectSituation: () => undefined,
+      onSelectLedger: () => undefined,
+    }));
+
+    expect(markup.match(/data-story-kind=/g)).toHaveLength(3);
+    expect(markup).toContain('data-event-id="event-major"');
+    expect(markup).toContain('data-situation-id="situation-resolved"');
+    expect(markup).toContain('data-situation-id="situation-heated"');
+    expect(markup).not.toContain('data-event-id="event-ordinary"');
+    expect(markup.indexOf('event-major')).toBeLessThan(markup.indexOf('situation-resolved'));
+  });
+
   it('keeps the truthful quiet-quarter copy when neither stream has a visible item', () => {
     const markup = renderToStaticMarkup(createElement(QuarterPulse, {
       report,
-      events: [],
-      situationChanges: [],
+      stories: [],
       onSelectEvent: () => undefined,
       onSelectSituation: () => undefined,
       onSelectLedger: () => undefined,
     }));
 
     expect(markup).toContain('data-testid="quarter-pulse-quiet"');
-    expect(markup).toContain('此季没有足以改变天下走向的大事');
+    expect(markup).toContain('本季无大事');
   });
 });

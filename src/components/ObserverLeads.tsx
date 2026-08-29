@@ -153,13 +153,7 @@ export function ObserverLeads({
       </ol>
 
       <footer className="observer-leads__footer">
-        {onOpenSituations && situationCount > 0 ? (
-          <button type="button" data-situation-workbench-trigger="true" onClick={() => onOpenSituations()}>
-            <ScrollText size={13} aria-hidden="true" />
-            <span>展开局势全卷</span>
-            <strong>{situationCount}</strong>
-          </button>
-        ) : <p>选一条关注，推进下一季；有动向时会提醒并停下。</p>}
+        <p>选一条关注，推进下一季；有动向时会提醒并停下。</p>
       </footer>
     </aside>
   );

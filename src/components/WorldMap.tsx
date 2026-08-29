@@ -51,6 +51,7 @@ import {
   terrainLabel,
   type MapCanvasSize,
 } from "../view/map-renderer";
+import { useQuarterHighlightPulse } from "./useQuarterHighlightPulse";
 import {
   DEFAULT_MAP_CAMERA,
   MAP_MAX_ZOOM,
@@ -109,6 +110,7 @@ export interface WorldMapProps {
   flows?: readonly MapFlowView[];
   markers?: readonly MapMarkerView[];
   highlightedRegionIds?: readonly string[];
+  highlightEpoch?: string | number;
   selectedRegionId?: string | null;
   selectedObject?: { kind: string; id: string } | null;
   overlay: MapOverlay;
@@ -123,6 +125,7 @@ export interface WorldMapProps {
   className?: string;
   season?: MapSeason;
   atmosphereEnabled?: boolean;
+  motionReduced?: boolean;
 }
 
 type HoverState =
@@ -201,6 +204,7 @@ export function WorldMap({
   flows = [],
   markers = [],
   highlightedRegionIds = [],
+  highlightEpoch = 'initial',
   selectedRegionId,
   selectedObject = null,
   overlay,
@@ -215,6 +219,7 @@ export function WorldMap({
   className = "",
   season = '春',
   atmosphereEnabled = true,
+  motionReduced = false,
 }: WorldMapProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -280,6 +285,11 @@ export function WorldMap({
       })
       : { ...ZERO_FOCUS_OFFSET }
   ), [quickLookOcclusion, selectedAnchor, size.height, size.width]);
+  const highlightStrength = useQuarterHighlightPulse({
+    epoch: highlightEpoch,
+    regionIds: highlightedRegionIds,
+    motionReduced,
+  });
   focusOffsetRef.current = focusOffset;
 
   const updateLodLevel = useCallback((zoom: number) => {
@@ -457,10 +467,10 @@ export function WorldMap({
       hoveredRegionId,
       camera,
       focusOffset,
-      { season, atmosphere: atmosphereEnabled },
+      { season, atmosphere: atmosphereEnabled, highlightStrength },
     );
     recordRuntimeMetric('canvas.draw', runtimeNow() - drawStartedAt);
-  }, [atmosphereEnabled, camera, focusOffset, highlightedRegionIds, hoveredRegionId, overlay, scene, season, selectedObject, selectedRegionId, size]);
+  }, [atmosphereEnabled, camera, focusOffset, highlightStrength, highlightedRegionIds, hoveredRegionId, overlay, scene, season, selectedObject, selectedRegionId, size]);
 
   const localPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -926,6 +936,12 @@ export function WorldMap({
       data-landmass-count={mapProfile.presentation.landShapes.filter((shape) => shape.role === "mainland").length}
       data-island-shape-count={mapProfile.presentation.landShapes.filter((shape) => shape.role === "island").length}
       data-highlighted-region-count={highlightedRegionIds.length}
+      data-highlighted-region-ids={highlightedRegionIds.join(',') || undefined}
+      data-highlight-epoch={String(highlightEpoch)}
+      data-highlight-active={highlightStrength > 0.015 || undefined}
+      data-highlight-strength={highlightStrength.toFixed(3)}
+      data-quarter-highlight-epoch={String(highlightEpoch)}
+      data-quarter-highlight-active={highlightStrength > 0.015 || undefined}
       data-map-zoom={camera.zoom.toFixed(3)}
       data-map-pan-x={camera.panX.toFixed(1)}
       data-map-pan-y={camera.panY.toFixed(1)}

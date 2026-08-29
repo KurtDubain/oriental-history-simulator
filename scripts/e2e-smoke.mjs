@@ -147,6 +147,13 @@ async function openFreshWorld(page, seed = null) {
   await page.waitForFunction((version) => JSON.parse(window.render_game_to_text()).productVersion === version, PACKAGE_VERSION);
 }
 
+async function dismissAudioInvitationIfVisible(page) {
+  const invitation = page.getByTestId('audio-invitation');
+  if (!(await invitation.count()) || !(await invitation.isVisible())) return;
+  await invitation.getByRole('button', { name: '暂不开启声音' }).click();
+  await invitation.waitFor({ state: 'detached' });
+}
+
 async function exerciseMapPrimer(page) {
   const before = await snapshot(page);
   assert.equal(before.observer.primerOpen, true, '首次新建世界应打开三步读图导览');
@@ -530,7 +537,8 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
 
   await exerciseSituationLeadCards(page, observed);
 
-  const workbenchTrigger = page.locator('.observer-leads__footer button');
+  const workbenchTrigger = page.locator('[data-situation-workbench-trigger="true"]');
+  assert.equal(await workbenchTrigger.count(), 1, '当世三问只应保留一个泛用局势入口');
   await workbenchTrigger.waitFor();
   await workbenchTrigger.click();
   await page.waitForSelector('.situation-workbench[role="dialog"]');
@@ -1295,6 +1303,7 @@ try {
   }, '舆图必须使用北陆半岛体系、岭南陆与六岛形的参考拓扑');
 
   const afterPrimer = await exerciseMapPrimer(page);
+  await dismissAudioInvitationIfVisible(page);
   const situationSample = await exerciseSituationSnapshot(desktopContext, {
     seed: '春战副将',
     turn: 8,

@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.11.0',
+    date: '2026-08-30',
+    title: '一季三事，山河同声',
+    items: [
+      '“本季变化”将史事与持续局势同池排序，每季最多三件，同一件事不再重复占位。',
+      '季报只将当季事实写作新闻，旧事只作前因；无大事时会如实说明，可查事项仍可直达因果或局势卷。',
+      '地图只短暂标出入选事项涉及的州域，390×844 季报不再裁切；世界结果、hash 与存档格式保持不变。',
+    ],
+  },
+  {
     version: '1.10.3',
     date: '2026-08-29',
     title: '一人一席，往来有向',

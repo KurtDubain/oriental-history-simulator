@@ -41,7 +41,6 @@ import { SituationWorkbench } from './components/SituationWorkbench';
 import { SettingsPanel } from './components/SettingsPanel';
 import {
   QuarterPulse,
-  type QuarterPulseEvent,
   type QuarterPulseLedger,
 } from './components/QuarterPulse';
 import {
@@ -126,7 +125,6 @@ import {
   peopleRoster,
   polityRoster,
   toCausalEvent,
-  toChronicleEvent,
   toCountryInspector,
   toCountryArchive,
   toFamilyArchive,
@@ -151,7 +149,7 @@ import {
   type ObserverLead,
 } from './view/observer-leads';
 import { projectSituationWorkbench } from './view/situation-detail';
-import { projectQuarterPulseSituations } from './view/quarter-pulse-situations';
+import { projectQuarterPulse } from './view/quarter-pulse-stories';
 import {
   OBSERVER_DESK_STORAGE_KEY,
   applyObserverEventAlerts,
@@ -1614,45 +1612,12 @@ export function App() {
   const familyItems = useMemo(() => world ? familyRoster(world) : [], [world]);
   const peopleItems = useMemo(() => world ? peopleRoster(world) : [], [world]);
   const militaryItems = useMemo(() => world ? militaryRoster(world) : [], [world]);
-  const quarterSituationChanges = useMemo(() => (
-    world ? projectQuarterPulseSituations(world) : []
+  const quarterPulseProjection = useMemo(() => (
+    world ? projectQuarterPulse(world) : { stories: [], highlightedRegionIds: [] }
   ), [world]);
-  const quarterEvents = useMemo<QuarterPulseEvent[]>(() => {
-    if (!world?.lastTurn) return [];
-    const eventIds = new Set(world.lastTurn.eventIds);
-    return world.history
-      .filter((event) => (
-        eventIds.has(event.id)
-        && event.kind !== 'quarter_summary'
-        && !event.kind.startsWith('situation_')
-      ))
-      .map((event) => {
-        const chronicle = toChronicleEvent(world, event);
-        return {
-          id: event.id,
-          title: chronicle.title,
-          category: chronicle.category,
-          importance: event.importance,
-          location: chronicle.location,
-        };
-      });
-  }, [world]);
-  const quarterHighlightedRegionIds = useMemo(() => {
-    if (!world?.lastTurn || historicalView) return [];
-    const eventIds = new Set(world.lastTurn.eventIds);
-    const importantEvents = world.history
-      .filter((event) => eventIds.has(event.id) && event.kind !== 'quarter_summary')
-      .sort((left, right) => right.importance - left.importance)
-      .slice(0, 3);
-    const regionIds = new Set(world.lastTurn.health.outbreakRegionIds);
-    for (const event of importantEvents) {
-      event.regionIds.forEach((id) => regionIds.add(id));
-      event.stateDeltas
-        .filter((delta) => delta.entityType === 'region')
-        .forEach((delta) => regionIds.add(delta.entityId));
-    }
-    return [...regionIds].filter((id) => world.regions.some((region) => region.id === id)).slice(0, 16);
-  }, [historicalView, world]);
+  const quarterHighlightedRegionIds = historicalView
+    ? []
+    : quarterPulseProjection.highlightedRegionIds;
   const selectedHistoryEvent = useMemo(() => (
     world && selectedEventId ? world.history.find((event) => event.id === selectedEventId) ?? null : null
   ), [selectedEventId, world]);
@@ -2169,6 +2134,7 @@ export function App() {
               flows={mapFlows}
               markers={mapMarkers}
               highlightedRegionIds={quarterHighlightedRegionIds}
+              highlightEpoch={world.lastTurn?.turn ?? -1}
               selectedRegionId={selection?.kind === 'region' ? selection.id : null}
               selectedObject={selection && selection.kind !== 'region' && selection.kind !== 'country' && selection.kind !== 'family' && selection.kind !== 'person' ? selection : null}
               overlay={historicalView ? 'political' : overlay}
@@ -2179,6 +2145,7 @@ export function App() {
               mobileQuickLookOpen={Boolean(inspector) && !mobileInspectorExpanded}
               season={historicalView?.season ?? world.season}
               atmosphereEnabled={interfaceSettings.mapAtmosphere}
+              motionReduced={interfaceSettings.motion === 'reduced'}
               onSelectBlank={closeInspectorToMap}
               onSelectRegion={(id) => {
                 gameAudio.play('select', 0.46);
@@ -2387,9 +2354,9 @@ export function App() {
           {inspector}
 
           <QuarterPulse
+            key={world.lastTurn?.turn ?? 'unwritten'}
             report={world.lastTurn}
-            events={quarterEvents}
-            situationChanges={quarterSituationChanges}
+            stories={quarterPulseProjection.stories}
             onSelectEvent={selectQuarterEvent}
             onSelectSituation={handleOpenSituationWorkbench}
             onSelectLedger={selectQuarterLedger}

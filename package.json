@@ -1,7 +1,7 @@
 {
   "name": "oriental-history-simulator",
   "private": true,
-  "version": "1.10.3",
+  "version": "1.11.0",
   "type": "module",
   "engines": {
     "node": ">=20 <23",
@@ -23,6 +23,7 @@
     "test:e2e": "node scripts/e2e-smoke.mjs",
     "test:e2e:fux01": "node scripts/e2e-fux01-mobile.mjs",
     "test:e2e:fux03": "node scripts/e2e-fux03-settings.mjs",
+    "test:e2e:trim01": "node scripts/e2e-trim01-quarter.mjs",
     "test:e2e:relationships": "node scripts/e2e-person-relationships.mjs",
     "test:e2e:contest": "vite-node scripts/e2e-contest-build.ts",
     "test:e2e:maps": "node scripts/e2e-map-profiles.mjs",
@@ -41,7 +42,7 @@
     "test:audit:local-governance": "vite-node scripts/local-governance-audit.ts",
     "test:audit:maps": "vite-node scripts/map-profile-audit.ts",
     "test:audit:architecture": "vite-node scripts/architecture-baseline.ts",
-    "test:release": "npm run test:run && npm run test:audit:architecture && npm run build && npm run build:contest && npm run test:update && npm run test:e2e && npm run test:e2e:fux01 && npm run test:e2e:fux03 && npm run test:e2e:relationships && npm run test:e2e:maps && npm run test:e2e:contest && npm run test:audit:phase-a && npm run test:audit:phase-b && npm run test:audit:phase-c && npm run test:audit:agency && npm run test:audit:agency-continuity && npm run test:audit:agency-intent && npm run test:audit:power-narrative && npm run test:audit:local-governance && npm run test:audit:maps && npm run test:audit",
+    "test:release": "npm run test:run && npm run test:audit:architecture && npm run build && npm run build:contest && npm run test:update && npm run test:e2e && npm run test:e2e:fux01 && npm run test:e2e:fux03 && npm run test:e2e:trim01 && npm run test:e2e:relationships && npm run test:e2e:maps && npm run test:e2e:contest && npm run test:audit:phase-a && npm run test:audit:phase-b && npm run test:audit:phase-c && npm run test:audit:agency && npm run test:audit:agency-continuity && npm run test:audit:agency-intent && npm run test:audit:power-narrative && npm run test:audit:local-governance && npm run test:audit:maps && npm run test:audit",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
