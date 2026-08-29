@@ -19,6 +19,8 @@ import type {
 } from './v1-observer';
 import type { EmbodiedActionCommand } from '../sim';
 
+export type PowerRosterSection = 'polities' | 'families' | 'military';
+
 /** A selection is observer-only navigation state and never enters WorldState. */
 export type Selection =
   | { kind: 'region'; id: string }
@@ -47,6 +49,7 @@ export interface SnapshotOptions {
   running: boolean;
   speed: PlaybackSpeed;
   view: ObserverView;
+  powerRosterSection: PowerRosterSection;
   overlay: MapOverlay;
   selection: Selection;
   selectedEventId: string | null;

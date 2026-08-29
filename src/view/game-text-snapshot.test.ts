@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MAP_PROFILE_ID, getMapProfile } from '../maps';
 import { advanceWorld, createWorld, serializeWorld } from '../sim';
+import { familyRoster, militaryRoster, polityRoster } from './adapters';
 import { DEFAULT_MAP_CAMERA } from './map-scene-geometry';
 import { makeTextSnapshot } from './game-text-snapshot';
 import { createObserverInterfaceSettings } from './observer-interface-settings';
@@ -14,6 +15,7 @@ function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
     running: false,
     speed: 1,
     view: 'world',
+    powerRosterSection: 'polities',
     overlay: 'political',
     selection: null,
     selectedEventId: null,
@@ -54,6 +56,37 @@ function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
 }
 
 describe('render_game_to_text projection boundary', () => {
+  it.each([
+    ['polities', polityRoster],
+    ['families', familyRoster],
+    ['military', militaryRoster],
+  ] as const)('projects the powers/%s roster without touching the world', (powerRosterSection, projectRoster) => {
+    const world = createWorld(`架构-势力名录-${powerRosterSection}`, DEFAULT_MAP_PROFILE_ID);
+    const before = serializeWorld(world);
+    const expected = projectRoster(world);
+    const snapshot = JSON.parse(makeTextSnapshot(world, options({
+      view: 'powers',
+      powerRosterSection,
+    }))) as {
+      deterministicWorldHash: string;
+      interface: {
+        view: string;
+        powerRosterSection: string;
+        rosterTotal: number;
+        visibleRoster: Array<{ id: string }>;
+      };
+    };
+
+    expect(snapshot.interface).toMatchObject({
+      view: 'powers',
+      powerRosterSection,
+      rosterTotal: expected.length,
+    });
+    expect(snapshot.interface.visibleRoster[0]?.id).toBe(expected[0]?.id);
+    expect(snapshot.deterministicWorldHash).toBe(world.hash);
+    expect(serializeWorld(world)).toBe(before);
+  });
+
   it('projects the start page from observer options without requiring a world', () => {
     const snapshot = JSON.parse(makeTextSnapshot(null, options({ startOpen: true }))) as {
       mode: string;
@@ -100,6 +133,25 @@ describe('render_game_to_text projection boundary', () => {
       seaZones: world.seaZones.length,
     });
     expect(serializeWorld(world)).toBe(before);
+  });
+
+  it('keeps the sound invitation aligned with the unobstructed world surface', () => {
+    const world = advanceWorld(createWorld('架构-声音邀请', DEFAULT_MAP_PROFILE_ID));
+    const visible = JSON.parse(makeTextSnapshot(world, options())) as {
+      interface: { settings: { soundPromptVisible: boolean } };
+    };
+    const behindRoster = JSON.parse(makeTextSnapshot(world, options({ view: 'powers' }))) as typeof visible;
+    const behindInspector = JSON.parse(makeTextSnapshot(world, options({
+      selection: { kind: 'region', id: world.regions[0].id },
+    }))) as typeof visible;
+    const behindHistoricalMap = JSON.parse(makeTextSnapshot(world, options({
+      historicalTurn: 0,
+    }))) as typeof visible;
+
+    expect(visible.interface.settings.soundPromptVisible).toBe(true);
+    expect(behindRoster.interface.settings.soundPromptVisible).toBe(false);
+    expect(behindInspector.interface.settings.soundPromptVisible).toBe(false);
+    expect(behindHistoricalMap.interface.settings.soundPromptVisible).toBe(false);
   });
 
   it('publishes the same bounded quarterly story projection without changing the world', () => {

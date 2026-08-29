@@ -10,6 +10,7 @@ import {
   parseObserverInterfaceSettings,
   saveObserverInterfaceSettings,
   serializeObserverInterfaceSettings,
+  shouldShowObserverSoundInvitation,
   type ObserverInterfaceSettingsStorage,
 } from './observer-interface-settings';
 
@@ -55,6 +56,24 @@ describe('observer interface settings', () => {
       mapAtmosphere: true,
       interfaceDensity: 'comfortable',
     });
+  });
+
+  it('shows the sound invitation only on an unobstructed world map', () => {
+    const settings = createObserverInterfaceSettings();
+    const context = { turn: 1, worldViewActive: true, selectionOpen: false };
+
+    expect(shouldShowObserverSoundInvitation(settings, context)).toBe(true);
+    expect(shouldShowObserverSoundInvitation(settings, { ...context, turn: 0 })).toBe(false);
+    expect(shouldShowObserverSoundInvitation(settings, { ...context, worldViewActive: false })).toBe(false);
+    expect(shouldShowObserverSoundInvitation(settings, { ...context, selectionOpen: true })).toBe(false);
+    expect(shouldShowObserverSoundInvitation({
+      ...settings,
+      sound: { ...settings.sound, enabled: true },
+    }, context)).toBe(false);
+    expect(shouldShowObserverSoundInvitation({
+      ...settings,
+      sound: { ...settings.sound, promptDismissed: true },
+    }, context)).toBe(false);
   });
 
   it('normalizes malformed and older records into the current version', () => {

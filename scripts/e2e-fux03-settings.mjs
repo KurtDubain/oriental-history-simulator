@@ -120,6 +120,19 @@ try {
     await invitation.waitFor();
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-audio-invitation.png`, fullPage: true });
 
+    await page.locator('[data-observer-view="powers"]').click();
+    await page.waitForFunction(() => {
+      const current = JSON.parse(window.render_game_to_text());
+      return current.interface.view === 'powers' && !current.interface.settings.soundPromptVisible;
+    });
+    assert.equal(await invitation.count(), 0, '势力名录后方不应保留声音邀请触点');
+    await page.locator('[data-roster-scope="powers"] .roster-panel__header > button').click();
+    await page.waitForFunction(() => {
+      const current = JSON.parse(window.render_game_to_text());
+      return current.interface.view === 'world' && current.interface.settings.soundPromptVisible;
+    });
+    await invitation.waitFor();
+
     if (scenario.slug === 'desktop') {
       await invitation.getByRole('button', { name: '开启声音', exact: true }).click();
       await page.waitForFunction(() => {
@@ -188,7 +201,7 @@ try {
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-map.png`, fullPage: true });
 
     const beforeNavigation = await audioProbe(page);
-    await page.locator('button[data-observer-view="polities"]').click();
+    await page.locator('button[data-observer-view="powers"]').click();
     await page.waitForTimeout(80);
     const afterNavigation = await audioProbe(page);
     assert.ok(afterNavigation.oscillators > beforeNavigation.oscillators, '主导航切换应有语义提示音');

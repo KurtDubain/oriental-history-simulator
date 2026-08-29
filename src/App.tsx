@@ -1,5 +1,4 @@
 import {
-  Archive,
   Download,
   Eye,
   Library,
@@ -53,7 +52,7 @@ import {
   type MapOverlay,
   type ObserverView,
 } from './components/NavigationRail';
-import { RosterPanel } from './components/RosterPanel';
+import { RosterPanel, type RosterSection } from './components/RosterPanel';
 import { TopBar, type PlaybackSpeed } from './components/TopBar';
 import {
   DEFAULT_MAP_CAMERA,
@@ -212,7 +211,12 @@ import {
   watchItemForSelection,
   watchItemForSituation,
 } from './view/observer-selection';
-import type { Selection, SnapshotOptions } from './view/observer-shell-contract';
+import type {
+  PowerRosterSection,
+  Selection,
+  SnapshotOptions,
+} from './view/observer-shell-contract';
+import { shouldShowObserverSoundInvitation } from './view/observer-interface-settings';
 import { useObserverInterface } from './view/use-observer-interface';
 import './styles/app.css';
 
@@ -296,6 +300,7 @@ export function App() {
   const [running, setRunning] = useState(false);
   const [speed, setSpeed] = useState<PlaybackSpeed>(1);
   const [activeView, setActiveView] = useState<ObserverView>('world');
+  const [powerRosterSection, setPowerRosterSection] = useState<PowerRosterSection>('polities');
   const [overlay, setOverlay] = useState<MapOverlay>('political');
   const [mapCamera, setMapCamera] = useState<MapCamera>(() => ({ ...DEFAULT_MAP_CAMERA }));
   const [mapLod, setMapLod] = useState<MapLodLevel>('overview');
@@ -364,6 +369,11 @@ export function App() {
     dangerFocused: dangerAudioFocused,
     worldWarAmbience,
   });
+  const audioInvitationVisible = shouldShowObserverSoundInvitation(interfaceSettings, {
+    turn: world?.turn,
+    worldViewActive: activeView === 'world' && historicalView === null,
+    selectionOpen: selection !== null,
+  });
 
   const worldRef = useRef<WorldState | null>(null);
   const worldShellRef = useRef<HTMLElement>(null);
@@ -378,6 +388,8 @@ export function App() {
   const observerDeskTriggerRef = useRef<HTMLButtonElement>(null);
   const situationReturnFocusRef = useRef<HTMLElement | null>(null);
   const situationFocusRestoreAllowedRef = useRef(false);
+  const powersTriggerRef = useRef<HTMLButtonElement>(null);
+  const peopleTriggerRef = useRef<HTMLButtonElement>(null);
   const historyTriggerRef = useRef<HTMLButtonElement>(null);
   const collectionTriggerRef = useRef<HTMLButtonElement>(null);
   const primerTriggerRef = useRef<HTMLButtonElement>(null);
@@ -425,6 +437,7 @@ export function App() {
     running,
     speed,
     view: activeView,
+    powerRosterSection,
     overlay,
     selection,
     selectedEventId,
@@ -819,6 +832,7 @@ export function App() {
     setPauseMatch(null);
     setHistoricalView(null);
     setResumeHistoryAfterEvent(false);
+    setPowerRosterSection('polities');
     setActiveView(restoredPersonId ? 'people' : 'world');
     setOverlay('political');
     setMapCamera({ ...DEFAULT_MAP_CAMERA });
@@ -1499,6 +1513,11 @@ export function App() {
     setActiveView(nextView);
   }, []);
 
+  const handleCloseHistoryWorkbench = useCallback(() => {
+    setActiveView('world');
+    window.setTimeout(() => historyTriggerRef.current?.focus(), 0);
+  }, []);
+
   const handleOpenObserverDesk = useCallback(() => {
     runningRef.current = false;
     setRunning(false);
@@ -1612,6 +1631,20 @@ export function App() {
   const familyItems = useMemo(() => world ? familyRoster(world) : [], [world]);
   const peopleItems = useMemo(() => world ? peopleRoster(world) : [], [world]);
   const militaryItems = useMemo(() => world ? militaryRoster(world) : [], [world]);
+  const powerMilitaryAlertCount = useMemo(() => world
+    ? world.wars.filter((item) => item.active).length
+      + world.armies.filter((item) => item.supply < 45 || item.morale < 40).length
+    : 0, [world]);
+  const powerRosterSections = useMemo<readonly RosterSection[]>(() => [
+    { id: 'polities', label: '列国', count: polityItems.length },
+    { id: 'families', label: '世家', count: familyItems.length },
+    {
+      id: 'military',
+      label: '军旅',
+      count: militaryItems.length,
+      alertCount: powerMilitaryAlertCount,
+    },
+  ], [familyItems.length, militaryItems.length, polityItems.length, powerMilitaryAlertCount]);
   const quarterPulseProjection = useMemo(() => (
     world ? projectQuarterPulse(world) : { stories: [], highlightedRegionIds: [] }
   ), [world]);
@@ -1643,20 +1676,37 @@ export function App() {
   }, [agencyShadowBranchId, agencyShadowLedger, selection, world]);
 
   const rosterConfig = useMemo(() => {
-    if (activeView === 'polities') return {
-      title: '天下列国', eyebrow: '政权根基', items: polityItems, emptyMessage: '天下已无成形政权。',
+    if (activeView === 'powers' && powerRosterSection === 'polities') return {
+      title: '天下列国', eyebrow: '势力诸卷 · 政权根基', items: polityItems, emptyMessage: '天下已无成形政权。', searchPlaceholder: '检索国号、君主或都城',
     };
-    if (activeView === 'families') return {
-      title: '天下世家', eyebrow: '门第与传承', items: familyItems, emptyMessage: '尚无被谱牒记名的家族。',
+    if (activeView === 'powers' && powerRosterSection === 'families') return {
+      title: '天下世家', eyebrow: '势力诸卷 · 门第传承', items: familyItems, emptyMessage: '尚无被谱牒记名的家族。', searchPlaceholder: '检索家名、家主或门望',
     };
     if (activeView === 'people') return {
-      title: '时人群像', eyebrow: '声望与所图', items: peopleItems, emptyMessage: '暂无可记名人物。',
+      title: '时人群像', eyebrow: '声望与所图', items: peopleItems, emptyMessage: '暂无可记名人物。', searchPlaceholder: '检索姓名、身份或所图',
     };
-    if (activeView === 'military') return {
-      title: '天下军旅', eyebrow: '兵力与补给', items: militaryItems, emptyMessage: '天下暂无宏观军团。',
+    if (activeView === 'powers' && powerRosterSection === 'military') return {
+      title: '天下军旅', eyebrow: '势力诸卷 · 兵力军需', items: militaryItems, emptyMessage: '天下暂无宏观军团。', searchPlaceholder: '检索军号、主帅或驻地',
     };
     return null;
-  }, [activeView, familyItems, militaryItems, peopleItems, polityItems]);
+  }, [activeView, familyItems, militaryItems, peopleItems, polityItems, powerRosterSection]);
+
+  const handlePowerRosterSectionChange = useCallback((id: string) => {
+    if (id !== 'polities' && id !== 'families' && id !== 'military') return;
+    gameAudio.play('select', 0.42);
+    setPowerRosterSection(id);
+  }, []);
+
+  const handleCloseRoster = useCallback(() => {
+    const returnTarget = activeView === 'powers'
+      ? powersTriggerRef.current
+      : activeView === 'people'
+        ? peopleTriggerRef.current
+        : null;
+    setActiveView('world');
+    gameAudio.play('close', 0.4);
+    window.setTimeout(() => returnTarget?.focus(), 0);
+  }, [activeView]);
 
   const handleRosterSelect = useCallback((id: string) => {
     const current = worldRef.current;
@@ -1665,12 +1715,12 @@ export function App() {
     const closeCompactRoster = () => {
       if (window.matchMedia('(max-width: 780px)').matches) setActiveView('world');
     };
-    if (activeView === 'polities') {
+    if (activeView === 'powers' && powerRosterSection === 'polities') {
       setSelection({ kind: 'country', id });
       closeCompactRoster();
       return;
     }
-    if (activeView === 'families') {
+    if (activeView === 'powers' && powerRosterSection === 'families') {
       setSelection({ kind: 'family', id });
       closeCompactRoster();
       return;
@@ -1680,7 +1730,7 @@ export function App() {
       closeCompactRoster();
       return;
     }
-    if (activeView === 'military') {
+    if (activeView === 'powers' && powerRosterSection === 'military') {
       const army = current.armies.find((item) => item.id === id);
       const fleet = current.fleets.find((item) => item.id === id);
       setFocusedArmyId(id);
@@ -1690,13 +1740,18 @@ export function App() {
       return;
     }
     if (activeView === 'chronicle') setSelectedEventId(id);
-  }, [activeView]);
+  }, [activeView, powerRosterSection]);
 
   const handleSelectArchiveEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
     gameAudio.play('select', 0.44);
     setSelectedEventId(null);
     setSelection({ kind, id });
-    setActiveView(kind === 'country' ? 'polities' : kind === 'family' ? 'families' : kind === 'person' ? 'people' : 'world');
+    if (kind === 'country' || kind === 'family') {
+      setPowerRosterSection(kind === 'country' ? 'polities' : 'families');
+      setActiveView('powers');
+    } else {
+      setActiveView(kind === 'person' ? 'people' : 'world');
+    }
   }, []);
 
   const handleSelectScopedEvent = useCallback((eventId: string) => {
@@ -1954,7 +2009,12 @@ export function App() {
     }
     if (item.kind === 'army' || item.kind === 'fleet') setFocusedArmyId(item.id);
     setSelection(nextSelection);
-    setActiveView(item.kind === 'country' ? 'polities' : item.kind === 'family' ? 'families' : item.kind === 'person' ? 'people' : 'world');
+    if (item.kind === 'country' || item.kind === 'family') {
+      setPowerRosterSection(item.kind === 'country' ? 'polities' : 'families');
+      setActiveView('powers');
+    } else {
+      setActiveView(item.kind === 'person' ? 'people' : 'world');
+    }
     setObserverDeskOpen(false);
     setPauseMatch(null);
   }, [handleOpenSituationWorkbench]);
@@ -2070,13 +2130,13 @@ export function App() {
     ? worldSaves.find((save) => save.status === 'ready' && save.hash === world.hash)?.slot
     : undefined;
   const namedWorldSaveCount = worldSaves.filter((save) => !save.isAutosave).length;
-  const rosterSelectedId = activeView === 'polities' && selection?.kind === 'country'
+  const rosterSelectedId = activeView === 'powers' && powerRosterSection === 'polities' && selection?.kind === 'country'
     ? selection.id
-    : activeView === 'families' && selection?.kind === 'family'
+    : activeView === 'powers' && powerRosterSection === 'families' && selection?.kind === 'family'
       ? selection.id
     : activeView === 'people' && selection?.kind === 'person'
       ? selection.id
-      : activeView === 'military'
+      : activeView === 'powers' && powerRosterSection === 'military'
         ? focusedArmyId
         : activeView === 'chronicle'
           ? selectedEventId
@@ -2090,6 +2150,7 @@ export function App() {
           className="observer-app"
           data-inspector-open={Boolean(inspector)}
           data-mobile-inspector-mode={inspector ? mobileInspectorExpanded ? 'full' : 'quick' : 'closed'}
+          data-audio-invitation-open={audioInvitationVisible || undefined}
           data-map-gesture-active={mapGestureActive || undefined}
           data-focus-open={activeView === 'world' && !historicalView && !inspector || undefined}
           data-motion={interfaceSettings.motion}
@@ -2115,6 +2176,9 @@ export function App() {
             activeView={activeView}
             activeOverlay={overlay}
             militaryAlertCount={activeWarCount + lowSupplyCount}
+            powersTriggerRef={powersTriggerRef}
+            peopleTriggerRef={peopleTriggerRef}
+            historyTriggerRef={historyTriggerRef}
             onViewChange={handleViewChange}
             onOverlayChange={handleOverlayChange}
           />
@@ -2204,19 +2268,6 @@ export function App() {
               >
                 <Eye size={16} aria-hidden="true" />
               </button>
-              <button
-                ref={historyTriggerRef}
-                type="button"
-                data-history-workbench-trigger="true"
-                onClick={() => {
-                  setMobileToolsOpen(false);
-                  handleViewChange('chronicle');
-                }}
-                aria-label="打开历史工作台，快捷键 H"
-                title="历史工作台（H）"
-              >
-                <Archive size={16} aria-hidden="true" />
-              </button>
               <span className="observer-world-tools__rule" aria-hidden="true" />
               <button
                 ref={mandateTriggerRef}
@@ -2291,9 +2342,7 @@ export function App() {
             </div>
 
             <AudioInvitation
-              open={world.turn > 0
-                && !interfaceSettings.sound.enabled
-                && !interfaceSettings.sound.promptDismissed}
+              open={audioInvitationVisible}
               onEnable={enableSound}
               onDismiss={dismissSoundInvitation}
             />
@@ -2326,8 +2375,12 @@ export function App() {
                 items={rosterConfig.items}
                 selectedId={rosterSelectedId}
                 emptyMessage={rosterConfig.emptyMessage}
+                searchPlaceholder={rosterConfig.searchPlaceholder}
                 onSelect={handleRosterSelect}
-                onClose={() => setActiveView('world')}
+                onClose={handleCloseRoster}
+                sections={activeView === 'powers' ? powerRosterSections : undefined}
+                activeSection={activeView === 'powers' ? powerRosterSection : undefined}
+                onSectionChange={activeView === 'powers' ? handlePowerRosterSectionChange : undefined}
               />
             ) : null}
 
@@ -2457,7 +2510,7 @@ export function App() {
             setSelectedEventId(eventId);
           }}
           onTurnChange={handleHistoricalTurnChange}
-          onClose={() => setActiveView('world')}
+          onClose={handleCloseHistoryWorkbench}
           onReset={handleResetHistoricalView}
           returnFocusTo={historyTriggerRef.current}
         />

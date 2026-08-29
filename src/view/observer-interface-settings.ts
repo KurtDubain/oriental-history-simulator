@@ -27,6 +27,12 @@ export interface ObserverInterfaceSettings {
   interfaceDensity: ObserverInterfaceDensity;
 }
 
+export interface ObserverSoundInvitationContext {
+  turn: number | null | undefined;
+  worldViewActive: boolean;
+  selectionOpen: boolean;
+}
+
 /** Minimal localStorage-compatible boundary, kept injectable for SSR and tests. */
 export interface ObserverInterfaceSettingsStorage {
   getItem(key: string): string | null;
@@ -85,6 +91,26 @@ export function createObserverInterfaceSettings(): ObserverInterfaceSettings {
     mapAtmosphere: true,
     interfaceDensity: 'comfortable',
   };
+}
+
+/**
+ * Keeps the one-time sound invitation on the unobstructed world map only.
+ * Roster pages and object quick looks temporarily suppress it; returning to
+ * the map restores the invitation until the observer makes a choice.
+ */
+export function shouldShowObserverSoundInvitation(
+  settings: ObserverInterfaceSettings,
+  context: ObserverSoundInvitationContext,
+): boolean {
+  return Boolean(
+    context.turn !== null
+      && context.turn !== undefined
+      && context.turn > 0
+      && context.worldViewActive
+      && !context.selectionOpen
+      && !settings.sound.enabled
+      && !settings.sound.promptDismissed,
+  );
 }
 
 /** Safely upgrades/repairs unknown records and never retains caller-owned references. */

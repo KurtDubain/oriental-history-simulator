@@ -110,6 +110,7 @@ export function LayerPicker({ value, onChange }: LayerPickerProps) {
         ref={triggerRef}
         type="button"
         className="observer-navigation__item layer-picker__trigger"
+        data-navigation-entry="layers"
         data-active={open || undefined}
         aria-haspopup="dialog"
         aria-expanded={open}

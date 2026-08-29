@@ -25,6 +25,7 @@ import {
   toSystemInspector,
 } from './adapters';
 import { projectEmbodimentTextSnapshot } from './embodiment-view';
+import { shouldShowObserverSoundInvitation } from './observer-interface-settings';
 import { agencyDossierOptions } from './observer-agency-projection';
 import { deriveObserverLeadProjection } from './observer-leads';
 import { selectedEntityLabel } from './observer-selection';
@@ -263,17 +264,17 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     causes: selectedEvent.causes.map((cause) => ({ label: cause.label, role: cause.role, evidence: cause.evidence, refs: cause.refs ?? [] })),
     stateDeltas: selectedEvent.stateDeltas.slice(0, 12),
   } : null;
-  const visibleRoster = options.view === 'polities'
-    ? polityRoster(world)
-    : options.view === 'families'
-      ? familyRoster(world)
-      : options.view === 'people'
-        ? peopleRoster(world)
-        : options.view === 'military'
-          ? militaryRoster(world)
-          : options.view === 'chronicle'
-            ? historyRoster(world)
-            : [];
+  const visibleRoster = options.view === 'powers'
+    ? options.powerRosterSection === 'polities'
+      ? polityRoster(world)
+      : options.powerRosterSection === 'families'
+        ? familyRoster(world)
+        : militaryRoster(world)
+    : options.view === 'people'
+      ? peopleRoster(world)
+      : options.view === 'chronicle'
+        ? historyRoster(world)
+        : [];
   const topFlows = (options.historicalTurn === null ? toMapFlows(world, options.overlay) : []).map((flow) => ({
     id: flow.id,
     kind: flow.kind,
@@ -423,13 +424,16 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     },
     interface: {
       view: options.view,
+      powerRosterSection: options.powerRosterSection,
       overlay: options.overlay,
       settings: {
         open: options.settingsOpen,
         soundEnabled: options.interfaceSettings.sound.enabled,
-        soundPromptVisible: world.turn > 0
-          && !options.interfaceSettings.sound.enabled
-          && !options.interfaceSettings.sound.promptDismissed,
+        soundPromptVisible: shouldShowObserverSoundInvitation(options.interfaceSettings, {
+          turn: world.turn,
+          worldViewActive: options.view === 'world' && options.historicalTurn === null,
+          selectionOpen: options.selection !== null,
+        }),
         motion: options.interfaceSettings.motion,
         mapAtmosphere: options.interfaceSettings.mapAtmosphere,
         density: options.interfaceSettings.interfaceDensity,
@@ -518,7 +522,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       importance: event.importance,
       causes: event.causes.map((cause) => cause.evidence),
     })),
-    visibleFamilies: options.view === 'families' ? families.slice(0, 60).map((item) => ({
+    visibleFamilies: options.view === 'powers' && options.powerRosterSection === 'families' ? families.slice(0, 60).map((item) => ({
       id: item.id,
       name: item.name,
       polity: polityName(item.polityId),

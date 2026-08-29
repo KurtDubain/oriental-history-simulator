@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.12.0',
+    date: '2026-08-30',
+    title: '五门归卷，势力合流',
+    items: [
+      '常驻导航收为世界、势力、人物、史册、叠层五项；列国、世家和军旅合入同一势力卷。',
+      '势力分卷会清除跨卷检索并支持键盘切换，既有档案与深链继续可达，军情统一在势力入口提醒。',
+      '地图工具不再重复放置历史按钮；390/640 移动布局和季度史册裁切已校正，声音邀请也会为名录、速览与历史舆图让位。世界结果、hash 与存档格式保持不变。',
+    ],
+  },
+  {
     version: '1.11.0',
     date: '2026-08-30',
     title: '一季三事，山河同声',

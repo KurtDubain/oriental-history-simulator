@@ -395,6 +395,10 @@
 }
 
 @media (max-width: 760px) {
+  :root {
+    --observer-chronicle-height: calc(146px + var(--observer-safe-bottom));
+  }
+
   .observer-app[data-inspector-open="false"] {
     grid-template-columns: minmax(0, 1fr);
   }

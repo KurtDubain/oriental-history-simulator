@@ -12,6 +12,7 @@ const QUARTERS = 8;
 const SCENARIOS = Object.freeze([
   { slug: 'desktop-1440x900', viewport: { width: 1440, height: 900 } },
   { slug: 'mobile-390x844', viewport: { width: 390, height: 844 } },
+  { slug: 'mobile-wide-640x900', viewport: { width: 640, height: 900 } },
 ]);
 
 function collectBrowserErrors(page, target) {
@@ -172,6 +173,138 @@ async function assertHighlightPulse(page, scenario, reportTurn, projected) {
   );
 }
 
+async function assertPrimaryNavigation(page, scenario, initial) {
+  const entries = page.locator('.observer-navigation [data-navigation-entry]');
+  assert.equal(await entries.count(), 5, `${scenario.slug} 常驻导航必须恰好五项`);
+  assert.deepEqual(
+    await entries.evaluateAll((items) => items.map((item) => ({
+      id: item.getAttribute('data-navigation-entry'),
+      label: item.textContent?.replace(/\s+/g, '').trim(),
+    }))),
+    [
+      { id: 'world', label: '世界' },
+      { id: 'powers', label: '势力' },
+      { id: 'people', label: '人物' },
+      { id: 'chronicle', label: '史册' },
+      { id: 'layers', label: '叠层' },
+    ],
+    `${scenario.slug} 五项导航顺序必须稳定`,
+  );
+  assert.equal(
+    await page.locator('[data-observer-view="polities"], [data-observer-view="families"], [data-observer-view="military"]').count(),
+    0,
+    `${scenario.slug} 列国、世家、军旅不得继续占用一级入口`,
+  );
+
+  for (let index = 0; index < await entries.count(); index += 1) {
+    const bounds = await entries.nth(index).boundingBox();
+    assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, `${scenario.slug} 第 ${index + 1} 个导航入口至少应为44px`);
+  }
+  if (scenario.viewport.width <= 760) {
+    const dock = await page.locator('.observer-navigation').evaluate((element) => ({
+      scrollWidth: element.scrollWidth,
+      clientWidth: element.clientWidth,
+    }));
+    assert.ok(dock.scrollWidth <= dock.clientWidth + 1, `${scenario.slug} 五项导航无需横向滚动：${JSON.stringify(dock)}`);
+  }
+
+  const historyTriggers = page.locator('[data-history-workbench-trigger="true"]');
+  assert.equal(await historyTriggers.count(), 1, `${scenario.slug} 全局只能有一个史册入口`);
+  assert.equal(
+    await historyTriggers.first().evaluate((element) => Boolean(element.closest('.observer-navigation'))),
+    true,
+    `${scenario.slug} 唯一史册入口必须归入主导航`,
+  );
+  assert.equal(
+    await page.locator('.observer-world-tools [data-history-workbench-trigger="true"]').count(),
+    0,
+    `${scenario.slug} 地图工具不得重复放置历史工作台`,
+  );
+  await historyTriggers.first().click();
+  const history = page.locator('.history-workbench');
+  await history.waitFor();
+  const historyOpened = await snapshot(page);
+  assert.equal(historyOpened.interface.view, 'chronicle', `${scenario.slug} 史册入口必须打开长期史册`);
+  assert.equal(historyOpened.deterministicWorldHash, initial.deterministicWorldHash, `${scenario.slug} 打开史册不得改变世界`);
+  await page.keyboard.press('Escape');
+  await history.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-history-workbench-trigger') === 'true');
+
+  await page.locator('[data-observer-view="powers"]').click();
+  const panel = page.locator('.roster-panel[data-roster-scope="powers"]');
+  await panel.waitFor();
+  const tabs = panel.locator('[role="tab"][data-roster-section]');
+  assert.equal(await tabs.count(), 3, `${scenario.slug} 势力卷必须只有列国、世家、军旅三页`);
+  assert.deepEqual(
+    await tabs.evaluateAll((items) => items.map((item) => item.getAttribute('data-roster-section'))),
+    ['polities', 'families', 'military'],
+  );
+  for (let index = 0; index < await tabs.count(); index += 1) {
+    const bounds = await tabs.nth(index).boundingBox();
+    assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, `${scenario.slug} 势力页签至少应为44px`);
+  }
+
+  const sectionTitles = {
+    polities: '天下列国',
+    families: '天下世家',
+    military: '天下军旅',
+  };
+  for (const section of ['polities', 'families', 'military']) {
+    const tab = panel.locator(`[data-roster-section="${section}"]`);
+    if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
+    await page.waitForFunction(
+      (expected) => JSON.parse(window.render_game_to_text()).interface.powerRosterSection === expected,
+      section,
+    );
+    const current = await snapshot(page);
+    assert.equal(current.interface.view, 'powers', `${scenario.slug} 势力页签必须留在同一一级页面`);
+    assert.equal(current.interface.powerRosterSection, section);
+    assert.ok(current.interface.rosterTotal > 0, `${scenario.slug} ${sectionTitles[section]}必须有可读条目`);
+    assert.equal(await panel.getAttribute('data-roster-title'), sectionTitles[section]);
+    assert.equal(current.time.turn, initial.time.turn, `${scenario.slug} 浏览势力不得推进季度`);
+    assert.equal(current.deterministicWorldHash, initial.deterministicWorldHash, `${scenario.slug} 浏览势力不得改写世界`);
+  }
+
+  const search = panel.locator('.roster-panel__search input');
+  await panel.locator('[data-roster-section="polities"]').click();
+  await search.fill('不会跨卷保留');
+  await panel.locator('[data-roster-section="families"]').click();
+  await page.waitForFunction(() => document.querySelector('.roster-panel__search input')?.value === '');
+
+  const familyTab = panel.locator('[data-roster-section="families"]');
+  await familyTab.focus();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(() => document.querySelector('.roster-panel')?.getAttribute('data-active-section') === 'military');
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.getAttribute('data-roster-section')),
+    'military',
+    `${scenario.slug} 方向键应切页并把焦点留在当前页签`,
+  );
+
+  if (scenario.viewport.width <= 760) {
+    const list = panel.locator('.roster-panel__list');
+    await list.evaluate((element) => { element.scrollTop = element.scrollHeight; });
+    const clearance = await page.evaluate(() => {
+      const lastRow = document.querySelector('.roster-panel__list li:last-child');
+      const dock = document.querySelector('.observer-navigation');
+      if (!lastRow || !dock) return null;
+      return {
+        lastBottom: lastRow.getBoundingClientRect().bottom,
+        dockTop: dock.getBoundingClientRect().top,
+      };
+    });
+    assert.ok(clearance && clearance.lastBottom <= clearance.dockTop + 1, `${scenario.slug} 势力名录尾项不得藏在底部导航后：${JSON.stringify(clearance)}`);
+  }
+
+  await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-powers.png`, fullPage: false });
+  await page.keyboard.press('Escape');
+  await panel.waitFor({ state: 'detached' });
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-observer-view') === 'powers');
+  const closed = await snapshot(page);
+  assert.equal(closed.interface.view, 'world', `${scenario.slug} 关闭势力卷应回到世界`);
+  assert.equal(closed.deterministicWorldHash, initial.deterministicWorldHash, `${scenario.slug} 完整导航浏览不得改写世界`);
+}
+
 async function createWorld(page, scenario) {
   await page.addInitScript(() => {
     localStorage.setItem('canghai-map-primer-complete-v1', '1');
@@ -207,7 +340,8 @@ async function verifyScenario(browser, scenario) {
   collectBrowserErrors(page, browserErrors);
 
   try {
-    await createWorld(page, scenario);
+    const initial = await createWorld(page, scenario);
+    await assertPrimaryNavigation(page, scenario, initial);
     let previousDate = '';
     for (let turn = 1; turn <= QUARTERS; turn += 1) {
       await page.getByRole('button', { name: '推进至下一季', exact: true }).click();

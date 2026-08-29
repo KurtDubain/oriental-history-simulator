@@ -296,6 +296,10 @@
   transition: color 150ms ease, background 150ms ease;
 }
 
+.observer-navigation .layer-picker__trigger {
+  width: 100%;
+}
+
 .observer-navigation__item::before {
   position: absolute;
   top: 10px;
@@ -2885,7 +2889,7 @@ button.observer-causal-chain__evidence:hover {
     width: auto;
     height: 58px;
     min-height: 0;
-    overflow-x: auto;
+    overflow-x: hidden;
     overflow-y: hidden;
     flex-direction: row;
     align-items: stretch;
@@ -2895,7 +2899,6 @@ button.observer-causal-chain__evidence:hover {
     background: rgb(232 224 204 / 92%);
     box-shadow: 0 10px 30px rgb(38 35 29 / 16%);
     overscroll-behavior-x: contain;
-    scroll-snap-type: x proximity;
   }
 
   .observer-app[data-inspector-open="true"] .observer-navigation {
@@ -2904,19 +2907,19 @@ button.observer-causal-chain__evidence:hover {
 
   .observer-navigation__views {
     display: grid;
-    grid-auto-flow: column;
-    grid-auto-columns: 48px;
-    flex: 0 0 auto;
+    min-width: 0;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    flex: 4 1 0;
     gap: 1px;
   }
 
   .observer-navigation__item {
-    flex: 0 0 48px;
+    width: 100%;
+    min-width: 0;
     min-height: 48px;
     padding: 4px 2px 3px;
     gap: 1px;
     font-size: 9px;
-    scroll-snap-align: start;
   }
 
   .observer-navigation__item::before {
@@ -2929,15 +2932,13 @@ button.observer-causal-chain__evidence:hover {
   }
 
   .observer-navigation__rule {
-    flex: 0 0 1px;
-    width: 1px;
-    height: 30px;
-    margin: 9px 5px;
+    display: none;
   }
 
   .observer-navigation .layer-picker {
-    width: 48px;
-    flex: 0 0 48px;
+    width: auto;
+    min-width: 0;
+    flex: 1 1 0;
     margin: 0;
   }
 

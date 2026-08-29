@@ -55,6 +55,21 @@ async function snapshot(page) {
   return JSON.parse(await snapshotText(page));
 }
 
+async function openPowerRoster(page, section) {
+  const panel = page.locator('.roster-panel[data-roster-scope="powers"]');
+  if (!(await panel.isVisible().catch(() => false))) {
+    await page.locator('button[data-observer-view="powers"]').click();
+    await panel.waitFor();
+  }
+  const tab = panel.locator(`[data-roster-section="${section}"]`);
+  if ((await tab.getAttribute('aria-selected')) !== 'true') await tab.click();
+  await page.waitForFunction(
+    (expected) => document.querySelector('.roster-panel')?.getAttribute('data-active-section') === expected,
+    section,
+  );
+  return panel;
+}
+
 async function selectPersonWithCommandRequest(page, rows, maximum = 120) {
   const current = await snapshot(page);
   const candidates = current.observer.commandCandidates ?? [];
@@ -889,7 +904,7 @@ async function exerciseMapViewportTouch(context, page) {
     '舆图缩放控件必须位于底部观察坞上方',
   );
   const worldTools = page.locator('.observer-world-tools > button:visible');
-  assert.equal(await worldTools.count(), 5, '移动端常驻工具只保留观察、史册、天意、设置和更多');
+  assert.equal(await worldTools.count(), 4, '移动端地图工具只保留观察、天意、设置和更多；史册归入主导航');
   for (let index = 0; index < await worldTools.count(); index += 1) {
     const bounds = await worldTools.nth(index).boundingBox();
     assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, '移动端世界工具至少应为44px');
@@ -1344,16 +1359,13 @@ try {
   await page.waitForFunction(() => document.querySelector('.world-map')?.getAttribute('data-map-lod') === 'regional');
   await selectFirstMapObject(page, 'seaZone', '海域档案');
 
-  await page.click('button[data-observer-view="military"]');
-  const militaryRoster = page.locator('.roster-panel[data-roster-title="天下军旅"]');
-  await militaryRoster.waitFor();
+  const militaryRoster = await openPowerRoster(page, 'military');
   const fleetId = initial.mapObjects.fleets[0].id;
   await militaryRoster.locator(`[data-roster-id="${fleetId}"]`).click();
   await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.selectedDetail?.kind === 'fleet');
   assert.equal((await page.locator('.observer-inspector__kind').textContent())?.trim(), '舰队档案');
 
-  await page.click('button[data-observer-view="polities"]');
-  await page.waitForSelector('.roster-panel[data-roster-title="天下列国"]');
+  await openPowerRoster(page, 'polities');
   await page.locator('.roster-panel button[data-roster-id]').first().click();
   const beforeIntervention = await snapshot(page);
   const legitimacyBefore = beforeIntervention.interface.selectedDetail.legitimacy;
@@ -1469,8 +1481,7 @@ try {
   const causalTarget = await snapshot(page);
   assert.ok(['region', 'country', 'family', 'person', 'seaZone', 'fleet', 'tradeCorridor', 'practice', 'outbreak', 'migration'].includes(causalTarget.interface.selectedDetail.kind));
 
-  await page.click('button[data-observer-view="polities"]');
-  await page.waitForSelector('.roster-panel[data-roster-title="天下列国"]');
+  await openPowerRoster(page, 'polities');
   await page.locator('.roster-panel button[data-roster-id]').first().click();
   await page.getByRole('tab', { name: '朝局' }).click();
   const selectedCountry = await snapshot(page);
@@ -1492,8 +1503,7 @@ try {
   assert.equal(typeof selectedCountry.interface.selectedDetail.tradeRevenue, 'number');
   assert.ok(Array.isArray(selectedCountry.interface.selectedDetail.maritimeAssets.fleets));
 
-  await page.click('button[data-observer-view="families"]');
-  await page.waitForSelector('.roster-panel[data-roster-title="天下世家"]');
+  await openPowerRoster(page, 'families');
   await page.locator('.roster-panel button[data-roster-id]').first().click();
   const selectedFamily = await snapshot(page);
   assert.equal(selectedFamily.interface.selectedDetail.kind, 'family');
