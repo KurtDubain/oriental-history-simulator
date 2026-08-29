@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.6.2',
+    date: '2026-08-29',
+    title: '舆图的眼与手，看向同一处',
+    items: [
+      '军团、港城、州域、水师和流线的绘制位置与点击位置现在共用同一套舆图几何，缩放或拖动后也不会各算各的。',
+      '双指缩放、触控拖动与轻点判定收进独立手势边界，保留原有移动端容错和防抖距离。',
+      '地图绘制、世界投影与地图对象速览不再挤在一个大组件或总档案适配器中；本版不改变世界规则、平衡与 schema 4 存档。',
+    ],
+  },
+  {
     version: '1.6.1',
     date: '2026-08-29',
     title: '同一件事，只留一份说法',
