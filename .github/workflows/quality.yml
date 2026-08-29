@@ -1,0 +1,71 @@
+name: Quality Gate
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: quality-${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  quality:
+    name: Unit, build, and browser checks
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    env:
+      OHS_RELEASE_BASE: ${{ github.event.pull_request.base.sha || github.event.before }}
+      RELEASE_REQUIRE_VERSION_BUMP: '1'
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Use project Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies from lockfile
+        run: npm ci
+
+      - name: Run unit tests
+        run: npm run test:run
+
+      - name: Check architecture boundaries
+        run: npm run test:audit:architecture
+
+      - name: Build full atlas and enforce bundle budgets
+        run: npm run build
+
+      - name: Build contest atlas and enforce bundle budgets
+        run: npm run build:contest
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Verify safe application updates
+        run: npm run test:update
+
+      - name: Run primary browser flow
+        run: npm run test:e2e
+
+      - name: Run settings and audio browser flow
+        run: npm run test:e2e:fux03
+
+      - name: Upload browser artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: quality-browser-artifacts-${{ github.run_id }}
+          path: output/
+          if-no-files-found: ignore
+          retention-days: 7

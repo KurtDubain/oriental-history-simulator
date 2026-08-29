@@ -1,5 +1,5 @@
-import { computeWorldHash } from './engine';
 import { stableHash, stableStringify } from './random';
+import { computeWorldHash } from './world-hash';
 import type { WorldState } from './types';
 import { validateWorld } from './invariants';
 import { migrateV01SocialState } from './v02';

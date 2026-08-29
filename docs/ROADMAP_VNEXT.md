@@ -2,7 +2,7 @@
 
 > 对应设计：[NEXT_SYSTEM_DESIGN.md](./NEXT_SYSTEM_DESIGN.md)
 > 性能依据：[SIMULATION_PERFORMANCE_AUDIT.md](./SIMULATION_PERFORMANCE_AUDIT.md)
-> 任务状态：Phase A 已完成；Phase B 已交付三类权威 Situation、事实型结案层与 B10 局势全卷，B09 数值化起止快照因权威字段缺失继续保留；Phase C 的 C01～C13 已完成 Situation-first 观察循环、人物记忆、跨季盘算与副将军权链。v1.6.0 已完成地方长官“压力 → 赈济/减赋 → 粮财与动荡变化 → 史事/传记/记忆”的第二条入世纵切；v1.6.1～v1.6.3 完成 ARC03～ARC06 的职责边界；v1.7.0～v1.8.0 已完成 MAP01～MAP05，两张固定地图共用同一模拟、存档与展示契约；v1.9.0 已完成 FUX01；v1.10.0 已完成 FUX03 声音系统与 FUX04.3 季节地图气氛，并先交付 FUX02.1 的地图按下/选中子集。下一开发入口为 FUX02 剩余反馈闭环；EMB06 通用行动统一仍待后续。
+> 任务状态：Phase A 已完成；Phase B 已交付三类权威 Situation、事实型结案层与 B10 局势全卷，B09 数值化起止快照因权威字段缺失继续保留；Phase C 的 C01～C13 已完成 Situation-first 观察循环、人物记忆、跨季盘算与副将军权链。v1.6.0 已完成地方长官“压力 → 赈济/减赋 → 粮财与动荡变化 → 史事/传记/记忆”的第二条入世纵切；v1.6.1～v1.6.3 完成 ARC03～ARC06 的职责边界；v1.7.0～v1.8.0 已完成 MAP01～MAP05，两张固定地图共用同一模拟、存档与展示契约；v1.9.0 已完成 FUX01；v1.10.0 已完成 FUX03 声音系统与 FUX04.3 季节地图气氛，并先交付 FUX02.1 的地图按下/选中子集。v1.10.1 完成 App 纯投影拆分、纪年/哈希脱离季度引擎、runtime/type-only 依赖门、产物体积预算与 GitHub CI。产品下一入口仍为 FUX02 剩余反馈闭环；架构下一入口为 Agency validator 与页面播放/导航/存档 controller，EMB06 通用行动统一仍待后续。
 
 ## 1. 路线总览
 
@@ -351,14 +351,18 @@ LOOP01 不是新的玩法系统，而是所有任务共同遵守的产品管理�
 
 ### Tasks：架构优化（伴随纵切执行）
 
-- [x] **ARC01 — 架构基线与增长门禁**：`test:audit:architecture` 记录生产代码、热点文件、相对依赖与已知 type-only 环；先以报告告警，不以机械行数拆文件。基线见 [ARCHITECTURE_BASELINE.md](./ARCHITECTURE_BASELINE.md)。
-- [ ] **ARC02 — Turn Pipeline 编排层拆分**：首段已抽出无 `WorldState` 依赖的阶段顺序/计时 runner；后续让 `engine.ts` 只保留季度阶段排序、上下文组装和结果提交，Agency、政治、经济、军事、社会等阶段使用独立领域模块与 typed artifacts。拆分不得改变同 seed 的 Fact、Chronicle、hash 或阶段顺序。
-- [ ] **ARC03 — App Shell 状态边界**：v1.5.0 首段已把入世人物、待结算行动、世界锚点和离场收束收入独立纯 controller，并把副将入世适配拆出总决策文件；v1.6.1 再把人物档案与 `render_game_to_text` 的重复入世解释收为同一纯 view projection，`App.tsx` 不再拥有该领域 view model。后续继续把时间控制、观察台、存档、工作台、对象选择和弹层路由拆为明确 controller/hook。`WorldState` 仍只有一个 owner，React 状态不得成为第二条模拟真相来源。
+- [x] **ARC01 — 架构基线与增长门禁**：`test:audit:architecture` 已使用 TypeScript AST 区分 236 条 runtime 与 164 条 type-only 边，以 SCC 检查运行时环，并对跨层依赖、热点上限和 12 模块类型环债务设置硬门。基线见 [ARCHITECTURE_BASELINE.md](./ARCHITECTURE_BASELINE.md)。
+- [ ] **ARC02 — Turn Pipeline 编排层拆分**：首段已抽出无 `WorldState` 依赖的阶段顺序/计时 runner；v1.10.1 再把纪年和世界哈希收为纯模块，`invariants`、干预与存档不再为此经过整季引擎。下一步先拆 world factory，再以单独纵切拆军队维持/战争/会战域；`engine.ts` 最终只保留季度顺序、上下文和结果提交，不改变同 seed 的 Fact、Chronicle、hash 或阶段顺序。
+- [ ] **ARC03 — App Shell 状态边界**：v1.5.0/v1.6.1 已拆入世 controller 和档案投影；v1.10.1 将 Selection 契约、关注转换、Agency 跟踪/档案适配与 `render_game_to_text` 快照移入独立纯模块，`App.tsx` 从约 3,301 行降至约 2,525 行。剩余优先级固定为时间播放、页内导航/弹层调度与存档打开/恢复 controller；`WorldState` 仍只有一个 owner，React 状态不得成为第二条模拟真相来源。
 - [x] **ARC04 — WorldMap 四层分离**：v1.6.2 已让地图数据投影、Canvas 绘制、对象布局/命中和鼠标/触控手势分别拥有纯接口；军团与城港的绘制/命中继续共享同一几何结果，悬停与点按共用按绘制层级排序的 Scene Hit，缩放、拖动和移动端抖动契约保持不变。
-- [ ] **ARC05 — Validation 按领域拆分**：v1.6.1 首段已将入世提交、结果配对及领域 Fact 链接核对移入独立 validation owner，并保持原错误码与有界季度输入；后续继续把 runtime/full 校验按 Fact、Appointment、Agency、Situation、经济、战争、海洋等领域分组，共用一次索引构建；保持错误可定位、历史前缀有界与完整校验线性扫描目标。
+- [ ] **ARC05 — Validation 按领域拆分**：v1.6.1 首段已将入世提交、结果配对及领域 Fact 链接核对移入独立 validation owner。下一刀已限定为 Agency Intent 交易链：将 `invariants.ts` 中的提交/裁决/任免/史册配对收入 `validation/agency-intent.ts`，复用同一次 Fact/Event 索引并保持违例顺序与错误码。之后再按 Situation、战争、经济/海洋分组，保持运行时前缀有界与完整校验线性扫描目标。
 - [x] **ARC06 — View Adapter 与档案拆分**：v1.6.2 抽出地图对象投影，以及地区、军团、水师、商路、疫病和技艺速览；v1.6.3 继续按人物、家族、国家、历史因果与名册拆出独立玩家投影，公共 barrel 保持兼容。组件只消费有界 view model，不重新解释 Fact，也不从 Chronicle 文案推导权威状态；独立模块与旧入口逐项相等且投影不修改世界。
-- [ ] **ARC07 — 行为保持回归门**：每次架构拆分必须通过旧档迁移、固定 seed hash、存档续推、桌面/390×844 E2E、长期审计与前后投影对照；架构提交不得顺带修改平衡参数或玩家规则。
+- [x] **ARC07 — 行为保持回归门**：每次架构拆分都必须通过旧档迁移、固定 seed hash、存档续推、桌面/390×844 E2E、长期审计与前后投影对照；v1.10.1 已将这套契约接入 PR/main Quality Gate 和每周完整发布审计。它是持续门禁，架构提交仍不得顺带修改平衡参数或玩家规则。
 - [ ] **ARC08 — Worker-ready 边界而非提前 Worker 化**：模拟核心维持无 DOM 依赖与可序列化命令/结果协议；只有移动端季度 P95 超出预算并经 profiling 证明主线程是瓶颈时，才单独立项 Worker。
+- [ ] **ARC09 — 纯 DTO 契约与 type-only SCC 收缩**：当前 12 模块 SCC 已锁定不增长预算且不是运行时问题。只在 Agency/Situation/Facts 对应纵切中拆持久化 state DTO 和可执行实现，每次减少一条反向合约；不单独发起 `WorldState` 全量搬家。
+- [ ] **ARC10 — 可证明的 lazy boundary**：已建立 framework/simulation/maps/app 构建分组与双产物体积预算。只对具备独立打开边界、不参与首屏和有明确体积收益的二级工具试点动态加载；不为懒加载引入顶层 router，不让加载失败破坏当前世界。
+
+v1.10.1 完成证据：架构 AST 报告为 119 个生产文件 / 50,583 行 / 400 条相对依赖，runtime cycle 与跨层违例均为 0，type-only SCC 为 12 模块且未超预算。App 纯投影、纪年/哈希拆分均通过聚焦单测、固定 seed/digest、存档续推与严格 TypeScript；个人/参赛当前产物通过单 JS 560 KiB raw、JS 410 KiB gzip 总量与 CSS 40 KiB gzip 总量门。GitHub Quality Gate 在 PR / `main` 执行锁文件安装、单测、架构、双构建和关键浏览器验收。
 
 ### 架构优化验收门
 
@@ -711,7 +715,7 @@ LOOP01 不是新的玩法系统，而是所有任务共同遵守的产品管理�
 20. [x] 当前总门禁基线：LOOP01 已为现有玩家可见功能标注三主循环归属；后续任务按完整纵切验收，不再按独立系统或页面数量验收。统一人物权力纵切交付后再关闭 LOOP01 总任务。
 21. [x] 发布基础设施：INF01 已以 v1.0.1 交付；从这一阶段起，每个 Vercel 生产更新都有递增的游戏版本、唯一构建标识、游戏内手动检查入口与安全刷新路径。
 22. [x] 统一人物权力纵切：C12/C13、NAR01～NAR04、POL01 与 EMB01～EMB04 已连通人物观察、入世提交、季度裁决、具体场面和权势结果账；玩家通用行动已进入同一 Agency 阶段，AI 同类行动共用低层裁决仍由 EMB06 收口。
-23. [ ] 架构前置门：ARC01 已完成；ARC02 已抽出季度阶段顺序/计时 runner，后续领域模块继续按 typed artifacts 收口。不得扩大 `engine.ts` 单体，不沿用不可解释的派系总值，也不为 NAR/POL/EMB 各造一条状态链。
+23. [ ] 架构前置门：ARC01 已从报告升级为 runtime/type-only、跨层、热点与产物预算硬门；ARC02/ARC03 已交付 runner、纪年/哈希和 App 纯投影拆分。剩余顺序固定为 Agency validator → App 播放/导航/存档 controller → engine world factory/军事域 → type-only DTO 收缩 → 有证据的 lazy boundary。
 24. [x] 人物入世闭环：EMB01～EMB04 已允许自由代入/离开并提交每季一次决定；结果回到权势账、Fact、具体史事、PersonalMemory 与传记，不停留在独立角色面板。
 25. [ ] 政治可见性纵切：完成 POL02～POL05，交付稳定派系、朝堂席位图、首都政治脉搏与有证据的地图权力根基；POL06～POL08 随 B05 和后续政治行为持续接入。
 26. [x] 入世身份扩展：地方官“赈济或减赋”小纵切已交付，复用地方粮财压力、官职权限、国家财政、民怨后果与具体史事；AI/玩家共用裁决且无隐藏加成。
@@ -720,6 +724,7 @@ LOOP01 不是新的玩法系统，而是所有任务共同遵守的产品管理�
 29. [x] 多地图基础边界：v1.7.0 已交付 MAP01/MAP02；地图、海洋、开局和展示常量归入 profile，私人地图旧档与两个固定种子的前十二季指纹保持不变。
 30. [x] 参赛固定地图与开局选择：v1.8.0 已交付 MAP03～MAP05；开篇提供私人地图/参赛地图两项选择，创建后按同一模拟流程推进，存档精确绑定 profile，不支持进行中世界换图，并通过双地图长期审计与参赛构建隔离。
 31. [ ] 体验层模块化打磨：v1.9.0 已交付 FUX01；v1.10.0 已交付 FUX03、FUX04.3 与 FUX02.1 的地图子集。下一项收口 FUX02.1～FUX02.4 的季度/行动/无障碍反馈，再推进 FUX04.1、FUX04.2、FUX04.4、FUX04.5；全部继续按 observer-only、世界 hash 不变和独立移动端试玩验收。
+32. [x] v1.10.1 工程收口：App 纯投影、calendar/world-hash 边界、AST 依赖门、热点/类型环预算、双构建产物预算、Node/lockfile 约束与 GitHub Quality Gate 已交付；没有改动存档 schema、世界 hash 或模拟平衡。
 
 这一 Sprint 的 B 阶段演示目标已经达成：
 
@@ -777,6 +782,7 @@ v1.6.0 的地方施政目标已经达成：地方官只看到经营关系、表�
 - 不先让所有 200 名人物运行完整 Goal/Plan。
 - 不先接入 LLM 叙事或 NPC 决策。
 - 不在完成性能复测前引入 Worker。
+- 不为了拆分 `App.tsx` 或实现 lazy loading 提前引入顶层 Router；当前地图主页与受控卷页仍是清晰的产品边界。
 - 不做一次性全仓重写、为了行数机械拆文件或提前迁移完整 ECS；架构优化必须与一个可验收纵切绑定，并保持世界结果不变。
 - 不把派系 `power` 直接涂成地图领土，也不在常态地图同时显示所有人物、家族和派系；政治可视化必须区分朝堂影响与空间资产。
 - 不把人物入世扩张成背包、技能树、手动走格、即时战斗、自由对话或全角色逐季微操；换人不得刷新本季决定次数。

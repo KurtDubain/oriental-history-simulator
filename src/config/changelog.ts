@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.10.1',
+    date: '2026-08-29',
+    title: '骨架收束，山河照旧',
+    items: [
+      '观察台的全文快照、对象选择与关注投影各归其位，界面不再把测试、导航和世界推进混在同一份大文件里。',
+      '世界日期与哈希改由无副作用的基础模块持有；校验、干预和存档不再为读取两项纯函数而连入整套季度引擎。',
+      '构建新增稳定分包、体积预算和自动质量门；这是一轮工程收口，玩法、平衡、地图与 schema 4 存档保持不变。',
+    ],
+  },
+  {
     version: '1.10.0',
     date: '2026-08-29',
     title: '山河有声，观览归于一处',

@@ -96,6 +96,27 @@ export default defineConfig({
     __APP_BUILD_ID__: JSON.stringify(buildId),
   },
   plugins: [contestIsolation(contestBuild), appVersionAsset(packageJson.version, buildId), react()],
+  build: {
+    // Keep stable domain boundaries cacheable without changing when modules execute.
+    // These are all static chunks: cold-start bytes stay effectively unchanged, while
+    // ordinary UI releases no longer invalidate the framework, map, or simulation payloads.
+    chunkSizeWarningLimit: 550,
+    rollupOptions: {
+      output: {
+        manualChunks(moduleId) {
+          const normalized = moduleId.replaceAll('\\', '/');
+          if (
+            normalized.includes('/node_modules/react/')
+            || normalized.includes('/node_modules/react-dom/')
+            || normalized.includes('/node_modules/scheduler/')
+          ) return 'framework';
+          if (normalized.includes('/src/maps/')) return 'maps';
+          if (normalized.includes('/src/sim/')) return 'simulation';
+          return undefined;
+        },
+      },
+    },
+  },
   server: {
     port: 5173,
     strictPort: true,

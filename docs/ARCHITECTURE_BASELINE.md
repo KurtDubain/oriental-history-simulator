@@ -1,19 +1,23 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.10.1 更新于 2026-08-29，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
-- `src` 下生产 TypeScript / TSX：69 个文件，约 41,899 行（测试排除）。
-- 相对模块依赖：229 条。
-- 当前热点：`engine.ts` 3,191 行、`App.tsx` 2,817 行、`WorldMap.tsx` 2,734 行、`invariants.ts` 2,649 行。
-- 其次为 `v02.ts` 1,976 行、`v03-ocean.ts` 1,945 行、`view/adapters.ts` 1,712 行、`agency/decision.ts` 1,580 行。
+- `src` 下生产 TypeScript / TSX：119 个文件，50,583 行（测试排除）。
+- 相对模块依赖：400 条，其中 236 条 runtime、164 条 type-only。
+- 当前热点：`engine.ts` 约 3,098 行（门禁计数 3,099）、`invariants.ts` 约 2,664 行（门禁计数 2,665）、`App.tsx` 约 2,525 行（门禁计数 2,527）。
+- 其次为 `v02.ts` 1,984 行、`v03-ocean.ts` 1,945 行、`agency/decision.ts` 1,861 行、`v1-agency-shadow.ts` 1,479 行。`WorldMap.tsx` 约 1,051 行，仍由已拆分的 Scene / renderer / gesture 契约支撑。
 
 行数是增长预警，不是机械拆文件指标。新增领域规则不得再默认进入四个最高热点；只有形成稳定输入、输出和所有权后才拆分。
 
 ## 已知依赖风险
 
-扫描会报告由 `WorldState` 汇总类型形成的 type-only 环：`types.ts` 与 Facts、Agency、Situation 类型彼此引用。它们目前不会产生浏览器运行时循环，但说明总状态类型已经承担过多聚合职责。后续拆分优先把纯 DTO 放入无实现依赖的契约模块；在完成固定 seed 行为对照前，不为“消除图上的线”一次性移动全部类型。
+v1.10.1 的扫描已从正则匹配改为 TypeScript AST 与 Tarjan SCC，能区分编译后真实存在的边与被擦除的 `import type`。当前：
+
+- runtime 依赖图没有循环，也没有 `sim/maps → App/components/view/audio/infra` 的跨层回写。
+- 类型总图仅有一个 12 模块 SCC：`types.ts` 汇总 `WorldState`，Facts、Agency 和 Situation 合约又以 type-only 方式反向参照总状态。相关 import 不进入浏览器 JavaScript，所以这是契约所有权债务，不是初始化顺序或 `undefined` 风险。
+- 门禁将 runtime cycle 与跨层依赖视为硬失败；type-only SCC 先锁定为 12 模块的不增长预算。后续只在对应领域纵切中把持久化 DTO 与可执行实现分开，不为消除图上的线一次性搬动存档契约。
 
 ## 本纵切的所有权
 
@@ -32,10 +36,11 @@ engine.ts（季度顺序与提交）
 
 ## 后续收缩顺序
 
-1. C14/C15 前把 Agency 与战争相关校验从 `invariants.ts` 移到领域校验模块，共用一次索引。
-2. 人物入世前把时间、对象选择和弹层路由从 `App.tsx` 收到 controller/hook，保持单一 `WorldState` owner。
-3. 政治地图进入实现前拆分 `WorldMap` 的投影、绘制、命中和手势，继续共用同一几何结果。
-4. 档案继续增长前按人物、国家、家族、军团和 Situation 拆分玩家投影，不允许组件解释原始 Fact。
+1. 先把 Agency Intent 交易链校验从 `invariants.ts` 移到 `validation/agency-intent.ts`，共用已有 Fact/Event 索引并保持违例顺序与错误码。
+2. `App.tsx` 下一刀只收时间播放、页内导航/弹层调度与存档恢复 controller；`WorldState` 继续只有一个 React owner。
+3. `engine.ts` 先拆新世界初始化 `world factory`，再在独立纵切中收军团补给/战争/会战域；不同时改变季度顺序或数值。
+4. 上述边界稳定后，再将 Facts、Agency、Situation 的持久化纯 DTO 从实现模块拆出，逐步压低 12 模块 type-only SCC。
+5. 延迟加载只针对经 bundle/profile 证明能独立且有体积收益的二级工具；不为此引入顶层路由器。Web Worker、ECS 和多页路由继续暂缓，分别等待主线程性能、数据布局或真实导航需求证据。
 
 每次架构提交必须通过旧档迁移、固定 seed、存档续推、Facts/Chronicle 对照、桌面与 390×844 浏览器验收；不得顺带改平衡或用重写制造不可审查差异。
 
@@ -75,3 +80,11 @@ engine.ts（季度顺序与提交）
 - `build:contest` 使用独立 TypeScript 配置，并在 Rollup 模块图中拒绝私人地图、完整 catalog 与个人更新记录。最终产物还必须匹配 v1.8.0 的 `contest-profile.json`，并通过从私人 profile 自动派生的 328 项名称/ID 扫描。
 - 390×844 与 640×900 世界外壳使用不可编程横滚的 `overflow: clip`；季报账本说明在 760px 内向内收边，弹页焦点恢复使用 `preventScroll`，避免隐藏 tooltip 将整张地图横向推移。
 - 当前架构检查为 105 个生产 TS/TSX 文件、47,987 行、365 条相对依赖；既有 8 条 `WorldState` type-only 聚合环未增加新的运行时内容环。`engine.ts`、`App.tsx` 与 `invariants.ts` 仍是下一轮纵切必须收缩的三个热点。
+
+## v1.10.1 工程边界与持续门禁
+
+- `App.tsx` 从 v1.10.0 的约 3,301 行降至约 2,525 行。对象标签/关注转换、Agency 跟踪/档案投影、`render_game_to_text` 快照和它们的 observer-only 合约已有独立 owner；纯投影回归同时核对输出和世界不变性。页面壳仍是权威世界唯一 React owner，拆分模块不保存第二份模拟状态。
+- `calendar.ts` 和 `world-hash.ts` 成为纪年/权威摘要的纯 owner，`engine.ts` 只保留兼容 re-export。`invariants.ts`、`v03-intervention.ts` 和 `persistence.ts` 改为直接依赖纯模块；运行时闭包分别从 33 降至 21、32 降至 4 与 34 降至 32。`engine.ts` 从 3,210 行降至约 3,098 行，哈希构造顺序、保留窗口、schema 和存档均未改变。
+- 架构门直接拒绝 runtime SCC、禁止的跨层依赖、type-only 债务增长和热点预算超标。当前预算为 `App.tsx` 2,600、`engine.ts` 3,120、`invariants.ts` 2,665、`WorldMap.tsx` 1,100、`view/adapters.ts` 100 行；这些是防反弹上限，不是为了凑行数填满的目标。
+- Vite 将 framework、simulation、maps 和应用入口分为稳定产物边界。个人版/参赛版的产物上限统一为：单 JS raw 560 KiB、JS gzip 总量 410 KiB、CSS gzip 总量 40 KiB。当前本地产物的 JS gzip 总量为 383,937 / 372,200 bytes，CSS gzip 均为 34,346 bytes，最大单 JS 为 534,468 raw bytes，两个构建均无超额。
+- `.github/workflows/quality.yml` 在 Pull Request 和 `main` 推送上使用 `.nvmrc` 固定 Node 22，以 `npm ci` 从锁文件安装，依次执行单测、架构门、两种构建/产物预算、安全更新与关键浏览器链；失败时上传 `output/` 以便复现。发布检查同时约束 `package.json` / lockfile / 个人版更新记录 / 参赛版更新记录一致，并在生产变更时要求版本递增。

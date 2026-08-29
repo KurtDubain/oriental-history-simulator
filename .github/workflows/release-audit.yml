@@ -1,0 +1,47 @@
+name: Full Release Audit
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 20 * * 0'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-release-audit
+  cancel-in-progress: true
+
+jobs:
+  release-audit:
+    name: Complete deterministic release gate
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Use project Node version
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies from lockfile
+        run: npm ci
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run complete release audit
+        run: npm run test:release
+
+      - name: Upload audit artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-audit-artifacts-${{ github.run_id }}
+          path: output/
+          if-no-files-found: ignore
+          retention-days: 7

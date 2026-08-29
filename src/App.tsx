@@ -22,10 +22,7 @@ import {
 } from 'react';
 import { CausalDrawer, type CausalFactor, type CausalReference } from './components/CausalDrawer';
 import { HistoryWorkbench } from './components/HistoryWorkbench';
-import {
-  Inspector,
-  type PersonAgencyQuarterChoiceView,
-} from './components/Inspector';
+import { Inspector } from './components/Inspector';
 import { MandatePanel, type MandateMessage, type MandateTarget } from './components/MandatePanel';
 import {
   MapPrimer,
@@ -54,7 +51,7 @@ import {
   type MapOverlay,
   type ObserverView,
 } from './components/NavigationRail';
-import { RosterPanel, type RosterItem } from './components/RosterPanel';
+import { RosterPanel } from './components/RosterPanel';
 import { TopBar, type PlaybackSpeed } from './components/TopBar';
 import {
   DEFAULT_MAP_CAMERA,
@@ -79,7 +76,6 @@ import {
   type AutosaveCoordinator,
 } from './persistence/autosave-coordinator';
 import {
-  getRuntimePerformanceSnapshot,
   measureRuntimePhaseAsync,
   measureRuntimePhase,
   recordRuntimeMetric,
@@ -113,16 +109,12 @@ import {
   projectCharacterEmbodiedActions,
   SIMULATION_SYSTEM_PHASES,
   validateWorld,
-  type EmbodiedActionCommand,
   type V03InterventionAction,
   type WorldState,
 } from './sim';
-import { APP_VERSION } from './version';
 import {
   DEFAULT_MAP_PROFILE_ID,
-  getMapProfile,
   getMapProfileForContentVersion,
-  listMapProfiles,
   type MapProfileId,
 } from './maps';
 import {
@@ -147,7 +139,6 @@ import {
   toPersonArchive,
   toRegionInspector,
   toSystemInspector,
-  type PersonAgencyDossierOptions,
 } from './view/adapters';
 import {
   type HistoricalTerritoryView,
@@ -155,14 +146,9 @@ import {
 import {
   deriveObserverLeadProjection,
   type ObserverLead,
-  type ObserverLeadProjection,
 } from './view/observer-leads';
 import { projectSituationWorkbench } from './view/situation-detail';
 import { projectQuarterPulseSituations } from './view/quarter-pulse-situations';
-import {
-  projectSituationSnapshotItem,
-  toSituationSnapshot,
-} from './view/situation-snapshot';
 import {
   OBSERVER_DESK_STORAGE_KEY,
   applyObserverEventAlerts,
@@ -185,7 +171,6 @@ import {
 } from './view/v1-observer';
 import {
   AGENCY_SHADOW_STORAGE_KEY,
-  MAX_AGENCY_SHADOW_CHARACTERS,
   advanceAgencyShadowBranch,
   attachAgencyShadowBranch,
   bindAgencyShadowRestorePoint,
@@ -197,9 +182,7 @@ import {
   parseAgencyShadowLedger,
   removeAgencyShadowRestorePoint,
   serializeAgencyShadowLedger,
-  toAgencyShadowPlayerEntries,
   type AgencyShadowLedger,
-  type AgencyShadowPlayerEntry,
 } from './view/v1-agency-shadow';
 import {
   advanceEmbodimentObserverState,
@@ -213,34 +196,24 @@ import {
   reanchorEmbodimentObserverState,
   restoreEmbodimentObserverState,
   serializeEmbodimentObserverState,
-  type EmbodimentClosure,
   type EmbodimentObserverState,
 } from './view/embodiment-observer';
+import { projectPersonEmbodimentView } from './view/embodiment-view';
+import { makeTextSnapshot } from './view/game-text-snapshot';
 import {
-  projectEmbodimentTextSnapshot,
-  projectPersonEmbodimentView,
-} from './view/embodiment-view';
+  agencyDossierOptions,
+  agencyShadowRestoreToken,
+  agencyTrackedCharacterIds,
+} from './view/observer-agency-projection';
 import { shouldCloseMapSelectionForOverlay } from './view/map-selection-policy';
-import type {
-  ObserverAudioState,
-  ObserverInterfaceSettings,
-} from './view/observer-interface-settings';
+import {
+  selectedEntityLabel,
+  watchItemForSelection,
+  watchItemForSituation,
+} from './view/observer-selection';
+import type { Selection, SnapshotOptions } from './view/observer-shell-contract';
 import { useObserverInterface } from './view/use-observer-interface';
 import './styles/app.css';
-
-type Selection =
-  | { kind: 'region'; id: string }
-  | { kind: 'country'; id: string }
-  | { kind: 'family'; id: string }
-  | { kind: 'person'; id: string }
-  | { kind: 'seaZone'; id: string }
-  | { kind: 'army'; id: string }
-  | { kind: 'fleet'; id: string }
-  | { kind: 'tradeCorridor'; id: string }
-  | { kind: 'practice'; id: string }
-  | { kind: 'outbreak'; id: string }
-  | { kind: 'migration'; id: string }
-  | null;
 
 type AdvanceSource = 'manual' | 'auto';
 type OpenWorldSource = 'create' | 'continue' | 'import' | 'collection';
@@ -267,33 +240,6 @@ const compact = new Intl.NumberFormat('zh-CN', {
   maximumFractionDigits: 1,
 });
 
-const HISTORY_COLORS: Record<string, string> = {
-  世界: '#777267',
-  人口: '#6b765f',
-  经济: '#8b743f',
-  政治: '#8f3d33',
-  军事: '#6e4741',
-  外交: '#556f70',
-  海洋: '#526e75',
-  疾病: '#9b3c31',
-  知识: '#697255',
-  迁徙: '#796953',
-};
-
-function historyRoster(world: WorldState): RosterItem[] {
-  return world.history
-    .slice(-72)
-    .reverse()
-    .map((event) => ({
-      id: event.id,
-      title: event.title,
-      subtitle: `第 ${event.year} 年·${event.season} · ${event.category}`,
-      meta: `${event.causes.length} 条因由`,
-      accent: HISTORY_COLORS[event.category],
-      alert: event.importance >= 4,
-    }));
-}
-
 function assertValidWorld(candidate: WorldState): WorldState {
   const violations = measureRuntimePhase(
     'validation.full',
@@ -315,20 +261,6 @@ function assertValidRuntimeTurn(previous: WorldState, candidate: WorldState): Wo
   return candidate;
 }
 
-function selectedEntityLabel(world: WorldState, selection: Selection): string | null {
-  if (!selection) return null;
-  if (selection.kind === 'region') return world.regions.find((item) => item.id === selection.id)?.name ?? null;
-  if (selection.kind === 'country') return world.polities.find((item) => item.id === selection.id)?.name ?? null;
-  if (selection.kind === 'family') return world.families?.find((item) => item.id === selection.id)?.name ?? null;
-  if (selection.kind === 'person') return world.characters.find((item) => item.id === selection.id)?.name ?? null;
-  if (selection.kind === 'seaZone') return world.seaZones.find((item) => item.id === selection.id)?.name ?? null;
-  if (selection.kind === 'army') return world.armies.find((item) => item.id === selection.id)?.name ?? null;
-  if (selection.kind === 'fleet') return world.fleets.find((item) => item.id === selection.id)?.name ?? null;
-  if (selection.kind === 'practice') return world.practices.find((item) => item.id === selection.id)?.name ?? null;
-  const system = toSystemInspector(world, selection.kind, selection.id);
-  return system?.name ?? null;
-}
-
 function observerStorageKey(seed: string, mapContentVersion?: string): string {
   const worldKey = mapContentVersion
     ? `${encodeURIComponent(mapContentVersion)}:${encodeURIComponent(seed)}`
@@ -341,89 +273,6 @@ function supportsLegacyObserverStorage(mapContentVersion: string): boolean {
     .compatibility.legacyPartialRegionVersions.length > 0;
 }
 
-function agencyShadowRestoreToken(slot: string): string {
-  return slot === 'autosave' ? 'autosave' : `collection:${slot}`;
-}
-
-function agencyPeriodLabel(turn: number): string {
-  const seasons = ['春', '夏', '秋', '冬'] as const;
-  const safeTurn = Math.max(0, Math.floor(turn));
-  return `第 ${Math.floor(safeTurn / 4) + 1} 年${seasons[safeTurn % 4]}`;
-}
-
-function agencyTrackedCharacterIds(
-  world: WorldState,
-  selection: Selection,
-  watchlist: readonly ObserverWatchItem[],
-): string[] {
-  const ids: string[] = [];
-  const seen = new Set<string>();
-  const add = (id: string | null | undefined) => {
-    if (!id || seen.has(id) || !world.characters.some((character) => character.id === id)) return;
-    seen.add(id);
-    ids.push(id);
-  };
-  if (selection?.kind === 'person') add(selection.id);
-  watchlist.filter((item) => item.kind === 'person').forEach((item) => add(item.id));
-  [...world.armies].sort((left, right) => left.id.localeCompare(right.id)).forEach((army) => add(army.deputyCommanderId));
-  [...world.fleets].sort((left, right) => left.id.localeCompare(right.id)).forEach((fleet) => add(fleet.deputyCommanderId));
-  [...world.situationSystem.situations]
-    .filter((situation) => situation.status === 'open')
-    .sort((left, right) => right.tension - left.tension || left.id.localeCompare(right.id))
-    .forEach((situation) => {
-      situation.executableActorIds.forEach(add);
-      situation.participants.coreCharacterIds.forEach(add);
-    });
-  [...world.polities]
-    .filter((polity) => polity.alive)
-    .sort((left, right) => left.id.localeCompare(right.id))
-    .forEach((polity) => add(polity.rulerId));
-  [...world.armies].sort((left, right) => left.id.localeCompare(right.id)).forEach((army) => add(army.commanderId));
-  [...world.characters]
-    .filter((character) => character.alive)
-    .sort((left, right) => right.influence - left.influence || right.renown - left.renown || left.id.localeCompare(right.id))
-    .forEach((character) => add(character.id));
-  return ids.slice(0, MAX_AGENCY_SHADOW_CHARACTERS);
-}
-
-function quarterChoiceFromAgencyEntry(entry: AgencyShadowPlayerEntry): PersonAgencyQuarterChoiceView {
-  const outcome = entry.conclusion === '相合'
-    ? 'aligned'
-    : entry.conclusion === '仅见盘算'
-      ? 'unobserved'
-      : entry.conclusion === '仅见旧制'
-        ? 'not_applicable'
-        : 'diverged';
-  return {
-    periodLabel: agencyPeriodLabel(entry.turn),
-    intended: entry.intended ?? '季初没有留下可与此事核对的明确打算',
-    actual: entry.actual ?? '本季没有出现与这项盘算相应的主帅任命',
-    outcome,
-    reason: entry.reason,
-    sourceEventId: entry.sourceEventId,
-  };
-}
-
-function agencyDossierOptions(
-  ledger: AgencyShadowLedger,
-  branchId: string | null,
-  characterId: string,
-): PersonAgencyDossierOptions {
-  if (!branchId) return {};
-  const projection = getAgencyShadowProjection(ledger, branchId, characterId);
-  const branch = ledger.branches.find((item) => item.id === branchId);
-  const comparison = branch
-    ? toAgencyShadowPlayerEntries(
-        branch.comparisons.filter((item) => item.actorId === characterId),
-        1,
-      )[0]
-    : undefined;
-  return {
-    projection,
-    quarterChoice: comparison ? quarterChoiceFromAgencyEntry(comparison) : null,
-  };
-}
-
 function availableCollectionSlot(prefix: string, saves: WorldSaveSummary[]): string {
   const occupied = new Set(saves.filter((save) => !save.isAutosave).map((save) => save.slot));
   for (let index = 1; index <= 99; index += 1) {
@@ -431,593 +280,6 @@ function availableCollectionSlot(prefix: string, saves: WorldSaveSummary[]): str
     if (!occupied.has(candidate)) return candidate;
   }
   throw new Error('无法分配新的世界收藏槽位。');
-}
-
-function watchItemForSelection(world: WorldState, selection: Exclude<Selection, null>): ObserverWatchItem | null {
-  const label = selectedEntityLabel(world, selection);
-  if (!label) return null;
-  let detail = '等待下一条相关史事';
-  if (selection.kind === 'country') {
-    const item = world.polities.find((candidate) => candidate.id === selection.id);
-    if (item) detail = `${item.alive ? item.governmentForm : '已亡政权'} · ${item.controlledRegionIds.length}州域`;
-  } else if (selection.kind === 'family') {
-    const item = world.families.find((candidate) => candidate.id === selection.id);
-    if (item) detail = `${item.memberIds.length}名成员 · 声望${Math.round(item.prestige)}`;
-  } else if (selection.kind === 'person') {
-    const item = world.characters.find((candidate) => candidate.id === selection.id);
-    if (item) detail = `${item.alive ? item.role : '已故'} · ${item.age}岁 · 影响${Math.round(item.influence)}`;
-  } else if (selection.kind === 'region') {
-    const item = world.regions.find((candidate) => candidate.id === selection.id);
-    const owner = item ? world.polities.find((candidate) => candidate.id === item.controllerId) : null;
-    if (item) detail = `${owner?.name ?? '无主'} · 人口${compact.format(item.population)} · 动荡${Math.round(item.unrest)}`;
-  } else {
-    const system = toSystemInspector(world, selection.kind, selection.id);
-    if (system) detail = system.subtitle;
-  }
-  return { kind: selection.kind, id: selection.id, label, detail, alert: false };
-}
-
-function watchItemForSituation(world: WorldState, situationId: string): ObserverWatchItem | null {
-  const situation = world.situationSystem.situations.find((item) => item.id === situationId);
-  if (!situation) return null;
-  const snapshot = projectSituationSnapshotItem(situation, world);
-  return {
-    kind: 'situation',
-    id: situation.id,
-    label: snapshot.title,
-    detail: `${snapshot.statusLabel} · ${snapshot.phaseLabel} · 张力${Math.round(snapshot.tension)}`,
-    alert: false,
-  };
-}
-
-interface SnapshotOptions {
-  startOpen: boolean;
-  selectedMapProfileId: MapProfileId;
-  running: boolean;
-  speed: PlaybackSpeed;
-  view: ObserverView;
-  overlay: MapOverlay;
-  selection: Selection;
-  selectedEventId: string | null;
-  archiveOpen: boolean;
-  mandateOpen: boolean;
-  observerDeskOpen: boolean;
-  settingsOpen: boolean;
-  interfaceSettings: ObserverInterfaceSettings;
-  audioState: ObserverAudioState;
-  fullscreen: boolean;
-  historyWorkbenchOpen: boolean;
-  situationWorkbenchOpen: boolean;
-  selectedSituationId: string | null;
-  observerLeadProjection: ObserverLeadProjection | null;
-  historicalTurn: number | null;
-  watchedCount: number;
-  watchlist: ObserverWatchItem[];
-  guideCompleted: number;
-  pauseReason: string | null;
-  pauseRule: string | null;
-  pauseSituationId: string | null;
-  pauseSituationTrigger: string | null;
-  collectionOpen: boolean;
-  worldSaveCount: number;
-  primerOpen: boolean;
-  primerStep: MapPrimerStep;
-  mapCamera: MapCamera;
-  mapLod: MapLodLevel;
-  mobileInspectorExpanded: boolean;
-  mapGestureActive: boolean;
-  agencyShadowLedger: AgencyShadowLedger;
-  agencyShadowBranchId: string | null;
-  embodiedCharacterId: string | null;
-  pendingEmbodiedAction: EmbodiedActionCommand | null;
-  embodimentClosure: EmbodimentClosure | null;
-}
-
-function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
-  if (!world) {
-    const mapProfile = getMapProfile(options.selectedMapProfileId);
-    return JSON.stringify({
-      mode: 'start',
-      productVersion: APP_VERSION,
-      appUpdate: getAppUpdateState(),
-      title: '沧衡纪',
-      mapProfile: { id: mapProfile.id, revision: mapProfile.revision, name: mapProfile.name },
-      availableMapProfiles: listMapProfiles().map((profile) => ({
-        id: profile.id,
-        revision: profile.revision,
-        name: profile.name,
-        regions: profile.simulation.regions.length,
-        seaZones: profile.simulation.seaZones.length,
-        polities: profile.simulation.polities.length,
-      })),
-      seedInputVisible: options.startOpen,
-      collectionOpen: options.collectionOpen,
-      settings: {
-        open: options.settingsOpen,
-        soundEnabled: options.interfaceSettings.sound.enabled,
-        motion: options.interfaceSettings.motion,
-        mapAtmosphere: options.interfaceSettings.mapAtmosphere,
-        density: options.interfaceSettings.interfaceDensity,
-        audioState: options.audioState,
-      },
-      worldSaveCount: options.worldSaveCount,
-      primerOpen: options.primerOpen,
-      primerStep: options.primerStep,
-      actions: ['开启新纪', '续读旧史', '世界收藏', '导入史册'],
-    });
-  }
-  const mapProfile = getMapProfileForContentVersion(world.mapContentVersion);
-
-  const selected = options.selection ? { ...options.selection, label: selectedEntityLabel(world, options.selection) } : null;
-  const polityName = (id: string) => world.polities.find((item) => item.id === id)?.name ?? id;
-  const regionName = (id: string | null) => world.regions.find((item) => item.id === id)?.name ?? id;
-  const characterName = (id: string) => world.characters.find((item) => item.id === id)?.name ?? id;
-  const families = Array.isArray(world.families) ? world.families : [];
-  const relationships = Array.isArray(world.relationships) ? world.relationships : [];
-  const diplomacy = Array.isArray(world.diplomacy) ? world.diplomacy : [];
-  const familyName = (id: string | null | undefined) => families.find((item) => item.id === id)?.name ?? id ?? null;
-  let selectedDetail: object | null = null;
-  if (options.selection?.kind === 'region') {
-    const item = world.regions.find((region) => region.id === options.selection?.id);
-    if (item) selectedDetail = {
-      kind: 'region',
-      id: item.id,
-      name: item.name,
-      terrain: item.terrain,
-      climate: item.climate,
-      controller: polityName(item.controllerId),
-      population: item.population,
-      food: item.food,
-      foodSeasons: Number((item.food / Math.max(1, item.population)).toFixed(2)),
-      wealth: item.wealth,
-      cityLevel: item.cityLevel,
-      defense: item.defense,
-      unrest: item.unrest,
-      devastation: item.devastation,
-    };
-  } else if (options.selection?.kind === 'country') {
-    const item = world.polities.find((polity) => polity.id === options.selection?.id);
-    if (item) {
-      const countryDossier = toCountryInspector(world, item);
-      selectedDetail = {
-      kind: 'country',
-      id: item.id,
-      name: item.name,
-      alive: item.alive,
-      dynasty: item.dynastyName,
-      ruler: characterName(item.rulerId),
-      capital: regionName(item.capitalRegionId),
-      regions: item.controlledRegionIds.map((id) => regionName(id)),
-      treasury: item.treasury,
-      legitimacy: item.legitimacy,
-      authority: item.authority,
-      administration: item.administration,
-      warWeariness: item.warWeariness,
-      governmentForm: item.governmentForm,
-      rulingFamily: familyName(item.rulingFamilyId),
-      courtInfluence: item.courtInfluence,
-      tradeRevenue: item.tradeRevenue,
-      navalBudget: item.navalBudget,
-      maritimeOrientation: item.maritimeOrientation,
-      maritimeAssets: {
-        fleets: world.fleets.filter((fleet) => fleet.polityId === item.id).map((fleet) => fleet.id),
-        ports: world.ports
-          .filter((port) => world.regions.find((region) => region.id === port.regionId)?.controllerId === item.id)
-          .map((port) => port.id),
-      },
-      factions: countryDossier.factions?.map((entry) => ({
-        id: entry.id,
-        name: entry.name,
-        kind: entry.kind,
-        leader: entry.leader,
-        power: entry.power,
-        cohesion: entry.cohesion,
-        agenda: entry.agenda,
-        categories: entry.categories,
-        resources: entry.resources,
-        recentMovement: entry.recentMovement,
-      })) ?? [],
-      powerholders: countryDossier.powerholders ?? [],
-      courtScenes: countryDossier.courtScenes ?? [],
-      diplomacy: diplomacy.filter((entry) => entry.polityAId === item.id || entry.polityBId === item.id).map((entry) => ({
-        with: polityName(entry.polityAId === item.id ? entry.polityBId : entry.polityAId),
-        status: entry.status,
-        trust: entry.trust,
-        grievance: entry.grievance,
-        tradeDependency: entry.tradeDependency,
-      })),
-      };
-    }
-  } else if (options.selection?.kind === 'family') {
-    const item = families.find((candidate) => candidate.id === options.selection?.id);
-    if (item) selectedDetail = {
-      kind: 'family',
-      id: item.id,
-      name: item.name,
-      polity: polityName(item.polityId),
-      founder: characterName(item.founderId),
-      head: characterName(item.headId),
-      branch: item.branchName,
-      members: item.memberIds.map(characterName),
-      prestige: item.prestige,
-      wealth: item.wealth,
-      politicalInfluence: item.politicalInfluence,
-      traditions: item.traditions,
-      marriageAlliances: item.marriageAllianceFamilyIds.map(familyName),
-      historyEventIds: world.history
-        .filter((event) => event.actorIds.some((id) => item.memberIds.includes(id))
-          || event.stateDeltas.some((delta) => delta.entityType === 'family' && delta.entityId === item.id))
-        .map((event) => event.id),
-    };
-  } else if (options.selection?.kind === 'person') {
-    const item = world.characters.find((character) => character.id === options.selection?.id);
-    if (item) {
-      const personDossier = toPersonInspector(
-        world,
-        item,
-        agencyDossierOptions(options.agencyShadowLedger, options.agencyShadowBranchId, item.id),
-      );
-      selectedDetail = {
-        kind: 'person',
-        id: item.id,
-        name: item.name,
-        alive: item.alive,
-        age: item.age,
-        sex: item.sex,
-        polity: polityName(item.polityId),
-        role: item.role,
-        location: regionName(item.locationRegionId),
-        governedRegion: regionName(item.governedRegionId),
-        commandingArmyId: item.commandingArmyId,
-        abilities: { leadership: item.leadership, governance: item.governance, cunning: item.cunning },
-        personality: { ambition: item.ambition, loyalty: item.loyalty, caution: item.caution },
-        renown: item.renown,
-        lifeStage: item.lifeStage,
-        politicalClass: item.politicalClass,
-        tier: item.tier,
-        family: familyName(item.familyId),
-        parents: (item.parentIds ?? []).map(characterName),
-        spouses: (item.spouseIds ?? []).map(characterName),
-        influence: item.influence,
-        personalWealth: item.personalWealth,
-        merit: item.merit,
-        deputyExperience: item.deputyExperience,
-        insubordination: item.insubordination,
-        agency: personDossier.agency,
-        biography: Array.isArray(item.biography) ? item.biography.slice(-20) : [],
-        relationships: relationships
-          .filter((entry) => entry.sourceId === item.id || entry.targetId === item.id)
-          .slice(0, 10)
-          .map((entry) => ({
-            with: characterName(entry.sourceId === item.id ? entry.targetId : entry.sourceId),
-            kinship: entry.kinship,
-            affinity: entry.affinity,
-            trust: entry.trust,
-            fear: entry.fear,
-            grievance: entry.grievance,
-            gratitude: entry.gratitude,
-            memories: entry.memories,
-          })),
-      };
-    }
-  } else if (options.selection) {
-    const system = toSystemInspector(world, options.selection.kind, options.selection.id);
-    if (system) selectedDetail = system;
-  }
-  const selectedEvent = options.selectedEventId
-    ? world.history.find((event) => event.id === options.selectedEventId)
-    : undefined;
-  const selectedEventDetail = selectedEvent ? {
-    id: selectedEvent.id,
-    date: `${selectedEvent.year}年${selectedEvent.season}`,
-    category: selectedEvent.category,
-    kind: selectedEvent.kind,
-    title: selectedEvent.title,
-    summary: selectedEvent.summary,
-    importance: selectedEvent.importance,
-    actors: selectedEvent.actorIds.map(characterName),
-    polities: selectedEvent.polityIds.map(polityName),
-    regions: selectedEvent.regionIds.map((id) => regionName(id)),
-    causes: selectedEvent.causes.map((cause) => ({ label: cause.label, role: cause.role, evidence: cause.evidence, refs: cause.refs ?? [] })),
-    stateDeltas: selectedEvent.stateDeltas.slice(0, 12),
-  } : null;
-  const visibleRoster = options.view === 'polities'
-    ? polityRoster(world)
-    : options.view === 'families'
-      ? familyRoster(world)
-      : options.view === 'people'
-        ? peopleRoster(world)
-        : options.view === 'military'
-          ? militaryRoster(world)
-          : options.view === 'chronicle'
-            ? historyRoster(world)
-            : [];
-  const topFlows = (options.historicalTurn === null ? toMapFlows(world, options.overlay) : []).map((flow) => ({
-    id: flow.id,
-    kind: flow.kind,
-    from: [flow.from.x, flow.from.y],
-    to: [flow.to.x, flow.to.y],
-    magnitude: flow.magnitude,
-    label: flow.label,
-    target: { kind: flow.selectedKind, id: flow.selectedId },
-  }));
-  const importantRegions = world.regions
-    .slice()
-    .sort((left, right) => Number(left.id === options.selection?.id) - Number(right.id === options.selection?.id)
-      || right.strategicValue - left.strategicValue)
-    .slice(0, 40);
-  const report = world.lastTurn;
-  const interventionHistory = world.history.filter(isV03InterventionEvent);
-  const latestIntervention = interventionHistory.at(-1);
-  const focusLeadProjection = options.observerLeadProjection
-    ?? deriveObserverLeadProjection(world);
-  const focusLeads = focusLeadProjection.leads;
-  const situationWorkbench = options.situationWorkbenchOpen
-    ? projectSituationWorkbench(world, options.selectedSituationId)
-    : null;
-  const selectedCreationProfile = getMapProfile(options.selectedMapProfileId);
-  return JSON.stringify({
-    mode: options.startOpen ? 'world-menu' : 'observing',
-    productVersion: APP_VERSION,
-    appUpdate: getAppUpdateState(),
-    worldSchemaVersion: world.schemaVersion,
-    mapContentVersion: world.mapContentVersion,
-    mapProfile: { id: mapProfile.id, revision: mapProfile.revision, name: mapProfile.name },
-    worldCreation: options.startOpen ? {
-      selectedMapProfile: {
-        id: selectedCreationProfile.id,
-        revision: selectedCreationProfile.revision,
-        name: selectedCreationProfile.name,
-      },
-      availableMapProfiles: listMapProfiles().map((profile) => ({
-        id: profile.id,
-        revision: profile.revision,
-        name: profile.name,
-      })),
-    } : null,
-    coordinates: `map world coordinates use origin top-left, x rightward, y downward, range ${mapProfile.presentation.width}x${mapProfile.presentation.height}`,
-    time: { turn: world.turn, year: world.year, season: world.season },
-    deterministicWorldHash: world.hash,
-    runtimePerformance: getRuntimePerformanceSnapshot(),
-    seed: world.seed,
-    playback: { running: options.running, speed: options.speed },
-    observer: {
-      deskOpen: options.observerDeskOpen,
-      historyWorkbenchOpen: options.historyWorkbenchOpen,
-      situationWorkbenchOpen: options.situationWorkbenchOpen,
-      selectedSituationId: situationWorkbench?.selectedId ?? options.selectedSituationId,
-      selectedSituation: situationWorkbench?.selected ? {
-        id: situationWorkbench.selected.id,
-        type: situationWorkbench.selected.type,
-        title: situationWorkbench.selected.title,
-        status: situationWorkbench.selected.status,
-        phase: situationWorkbench.selected.phase,
-        playerSummary: situationWorkbench.selected.playerSummary,
-        currentChange: situationWorkbench.selected.currentChange,
-        nextWatch: situationWorkbench.selected.nextWatch,
-        outcome: situationWorkbench.selected.outcome,
-        timeline: situationWorkbench.selected.timeline.map((item) => ({
-          turn: item.turn,
-          kind: item.kind,
-          label: item.label,
-          milestoneFactId: item.milestoneFactId,
-          historyEventIds: item.historyEventIds,
-        })),
-        evidenceFactIds: situationWorkbench.selected.evidence.map((fact) => fact.id),
-        consequenceCount: situationWorkbench.selected.consequences.length,
-      } : null,
-      historicalTurn: options.historicalTurn,
-      watchedCount: options.watchedCount,
-      watchlist: options.watchlist.map((item) => ({
-        kind: item.kind,
-        id: item.id,
-        label: item.label,
-        detail: item.detail,
-        alert: item.alert,
-      })),
-      watchedSituationIds: options.watchlist
-        .filter((item) => item.kind === 'situation')
-        .map((item) => item.id),
-      guideCompleted: options.guideCompleted,
-      lastPauseReason: options.pauseReason,
-      lastPauseRule: options.pauseRule,
-      lastPauseSituationId: options.pauseSituationId,
-      lastPauseSituationTrigger: options.pauseSituationTrigger,
-      collectionOpen: options.collectionOpen,
-      worldSaveCount: options.worldSaveCount,
-      primerOpen: options.primerOpen,
-      primerStep: options.primerStep,
-      focusLeads: focusLeads.map((lead) => ({
-        id: lead.id,
-        slot: lead.slot,
-        source: lead.source ?? 'fallback',
-        situationId: lead.situationId ?? null,
-        situationType: lead.situationType ?? null,
-        displayMode: lead.displayMode ?? 'fallback',
-        selectedSinceTurn: lead.selectedSinceTurn ?? world.turn,
-        retainThroughTurn: lead.retainThroughTurn ?? world.turn,
-        trackingTurns: lead.trackingTurns ?? 1,
-        recentChange: lead.recentChange ?? null,
-        arbitrationReason: lead.arbitrationReason ?? 'legacy_fallback',
-        question: lead.question,
-        stage: lead.stage,
-        tension: lead.tension,
-        evidence: lead.evidence,
-        nextSignal: lead.nextSignal,
-        target: lead.target,
-        overlay: lead.overlay,
-      })),
-      leadArbitration: {
-        version: focusLeadProjection.continuity.version,
-        lastArbitratedTurn: focusLeadProjection.continuity.lastTurn,
-        slots: focusLeadProjection.continuity.slots.map((entry) => ({ ...entry })),
-      },
-      situations: toSituationSnapshot(world),
-      agencyContinuity: (() => {
-        const branch = options.agencyShadowBranchId
-          ? options.agencyShadowLedger.branches.find((item) => item.id === options.agencyShadowBranchId)
-          : null;
-        return branch ? {
-          trackedCharacters: branch.projections.length,
-          recordedComparisons: branch.comparisons.length,
-          throughTurn: branch.head.turn,
-          matchesWorld: branch.head.seed === world.seed
-            && branch.head.turn === world.turn
-            && branch.head.hash === world.hash,
-        } : null;
-      })(),
-      embodiment: projectEmbodimentTextSnapshot(
-        world,
-        options.embodiedCharacterId,
-        options.pendingEmbodiedAction,
-        options.embodimentClosure,
-      ),
-      commandCandidates: world.agencyDecisionSystem.actors.map((actor) => ({
-        characterId: actor.characterId,
-        name: characterName(actor.characterId),
-        status: actor.goal.status,
-      })),
-    },
-    interface: {
-      view: options.view,
-      overlay: options.overlay,
-      settings: {
-        open: options.settingsOpen,
-        soundEnabled: options.interfaceSettings.sound.enabled,
-        motion: options.interfaceSettings.motion,
-        mapAtmosphere: options.interfaceSettings.mapAtmosphere,
-        density: options.interfaceSettings.interfaceDensity,
-        audioState: options.audioState,
-        fullscreen: options.fullscreen,
-      },
-      mapViewport: {
-        zoom: Number(options.mapCamera.zoom.toFixed(3)),
-        panX: Number(options.mapCamera.panX.toFixed(1)),
-        panY: Number(options.mapCamera.panY.toFixed(1)),
-        lod: options.mapLod,
-      },
-      mobileInspectorMode: options.selection
-        ? options.mobileInspectorExpanded ? 'full' : 'quick'
-        : 'closed',
-      mapGestureActive: options.mapGestureActive,
-      selected,
-      selectedEventId: options.selectedEventId,
-      archiveOpen: options.archiveOpen,
-      mandateOpen: options.mandateOpen,
-      primerOpen: options.primerOpen,
-      primerStep: options.primerStep,
-      selectedDetail,
-      selectedEvent: selectedEventDetail,
-      visibleRoster: visibleRoster.slice(0, 60),
-      rosterTotal: visibleRoster.length,
-      topFlows,
-    },
-    mandate: {
-      available: availableMandate(world),
-      cadence: 'once_per_quarter',
-      usedThisTurn: latestIntervention?.turn === world.turn,
-      recentIntervention: latestIntervention ? {
-        id: latestIntervention.id,
-        kind: latestIntervention.kind,
-        turn: latestIntervention.turn,
-        date: `${latestIntervention.year}年${latestIntervention.season}`,
-        title: latestIntervention.title,
-        summary: latestIntervention.summary,
-        costEvidence: latestIntervention.causes.find((cause) => cause.label === '天命消耗')?.evidence ?? null,
-        stateDeltas: latestIntervention.stateDeltas.slice(0, 8),
-      } : null,
-    },
-    totals: {
-      regions: world.regions.length,
-      livingPolities: world.polities.filter((item) => item.alive).length,
-      livingCharacters: world.characters.filter((item) => item.alive).length,
-      families: families.length,
-      armies: world.armies.length,
-      fleets: world.fleets.length,
-      seaZones: world.seaZones.length,
-      ports: world.ports.length,
-      activeTradeCorridors: world.tradeCorridors.filter((item) => item.active).length,
-      activeOutbreaks: world.infections.filter((item) => item.infectious > 0).length,
-      infectious: world.infections.reduce((sum, item) => sum + item.infectious, 0),
-      knownPractices: new Set(world.practiceStates.filter((item) => item.mastery > 0 && item.lostTurn === null).map((item) => item.practiceId)).size,
-      migrationsThisTurn: report?.trade.shipments.filter((item) => item.kind === '迁徙').length ?? 0,
-      activeWars: world.wars.filter((item) => item.active).length,
-      population: world.regions.reduce((sum, item) => sum + item.population, 0)
-        + world.armies.reduce((sum, item) => sum + item.soldiers, 0),
-    },
-    recentHistory: world.history.slice(-8).map((event) => ({
-      id: event.id,
-      date: `${event.year}年${event.season}`,
-      title: event.title,
-      importance: event.importance,
-      causes: event.causes.map((cause) => cause.evidence),
-    })),
-    visibleFamilies: options.view === 'families' ? families.slice(0, 60).map((item) => ({
-      id: item.id,
-      name: item.name,
-      polity: polityName(item.polityId),
-      head: characterName(item.headId),
-      members: item.memberIds.length,
-      prestige: item.prestige,
-      influence: item.politicalInfluence,
-    })) : [],
-    lastTurnLedger: report ? {
-      turn: report.turn,
-      year: report.year,
-      season: report.season,
-      eventIds: report.eventIds,
-      population: report.population,
-      food: report.food,
-      wealth: report.wealth,
-      trade: {
-        shipments: report.trade.shipments.length,
-        deliveredValue: report.trade.valueTransferred,
-        tariffs: report.trade.tariffsTransferred,
-        produced: report.trade.produced,
-        consumed: report.trade.consumed,
-        lost: report.trade.lost,
-      },
-      migration: report.migration,
-      health: report.health,
-      knowledge: report.knowledge,
-      maritime: report.maritime,
-      logistics: { routeUsage: report.logistics.routeUsage.length, seaUsage: report.logistics.seaUsage.length },
-    } : null,
-    polities: world.polities.filter((item) => item.alive).slice(0, 16).map((item) => ({
-      id: item.id,
-      name: item.name,
-      ruler: characterName(item.rulerId),
-      capital: regionName(item.capitalRegionId),
-      regions: item.controlledRegionIds.length,
-      treasury: item.treasury,
-      legitimacy: item.legitimacy,
-      authority: item.authority,
-      administration: item.administration,
-      atWar: world.wars.some((war) => war.active && (war.attackerId === item.id || war.defenderId === item.id)),
-    })),
-    mapObjects: {
-      regions: importantRegions.map((region) => ({
-      id: region.id,
-      name: region.name,
-      center: [region.x, region.y],
-      controllerId: region.controllerId,
-      population: region.population,
-      foodSeasons: Number((region.food / Math.max(1, region.population)).toFixed(2)),
-      unrest: region.unrest,
-      })),
-      seaZones: world.seaZones.map((zone) => ({ id: zone.id, name: zone.name, center: [zone.x, zone.y], controllerId: zone.controllerId, contested: zone.contested, traffic: zone.traffic })),
-      fleets: world.fleets.slice(0, 24).map((fleet) => ({ id: fleet.id, name: fleet.name, polityId: fleet.polityId, seaZoneId: fleet.seaZoneId, portRegionId: fleet.portRegionId, mission: fleet.mission, readiness: fleet.readiness })),
-      armies: world.armies.slice(0, 24).map((army) => ({
-      id: army.id,
-      name: army.name,
-      polityId: army.polityId,
-      regionId: army.regionId,
-      soldiers: army.soldiers,
-      morale: army.morale,
-      supply: army.supply,
-      })),
-    },
-  });
 }
 
 export function App() {
@@ -1040,7 +302,6 @@ export function App() {
   const [mapGestureActive, setMapGestureActive] = useState(false);
   const [mapCameraKey, setMapCameraKey] = useState(0);
   const [selection, setSelection] = useState<Selection>(null);
-  const [followed, setFollowed] = useState<Set<string>>(() => new Set());
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [focusedArmyId, setFocusedArmyId] = useState<string | null>(null);
   const [primerOpen, setPrimerOpen] = useState(false);
@@ -1055,6 +316,10 @@ export function App() {
   const [selectedSituationId, setSelectedSituationId] = useState<string | null>(null);
   const [resumeSituationAfterEvent, setResumeSituationAfterEvent] = useState(false);
   const [observerSettings, setObserverSettings] = useState<ObserverDeskSettings>(() => createObserverDeskSettings());
+  const followed = useMemo(
+    () => new Set(observerSettings.watchlist.map((item) => observerWatchKey(item.kind, item.id))),
+    [observerSettings.watchlist],
+  );
   const [pauseMatch, setPauseMatch] = useState<ObserverPauseMatch | null>(null);
   const [historicalView, setHistoricalView] = useState<HistoricalTerritoryView | null>(null);
   const [resumeHistoryAfterEvent, setResumeHistoryAfterEvent] = useState(false);
@@ -1150,7 +415,7 @@ export function App() {
   const observerLeadProjection = useMemo(() => (
     world ? deriveObserverLeadProjection(world, observerSettings.leadContinuity) : null
   ), [observerSettings.leadContinuity, world]);
-  const snapshotOptionsRef = useRef<SnapshotOptions>({
+  const currentSnapshotOptions: SnapshotOptions = {
     startOpen,
     selectedMapProfileId,
     running,
@@ -1191,7 +456,12 @@ export function App() {
     embodiedCharacterId,
     pendingEmbodiedAction,
     embodimentClosure: embodimentObserver.closure,
-  });
+  };
+  const snapshotOptionsRef = useRef<SnapshotOptions>(currentSnapshotOptions);
+  // Keep render_game_to_text current on every render. commitWorld and
+  // commitObserverSettings still patch this ref synchronously before React's
+  // next commit, preserving the existing immediate snapshot semantics.
+  snapshotOptionsRef.current = currentSnapshotOptions;
 
   const commitAgencyShadow = useCallback((nextLedger: AgencyShadowLedger, nextBranchId: string | null) => {
     agencyShadowLedgerRef.current = nextLedger;
@@ -1349,7 +619,6 @@ export function App() {
 
   useEffect(() => {
     observerSettingsRef.current = observerSettings;
-    setFollowed(new Set(observerSettings.watchlist.map((item) => observerWatchKey(item.kind, item.id))));
     if (!world) return;
     try {
       localStorage.setItem(
@@ -1543,7 +812,6 @@ export function App() {
     setResumeArchiveAfterEvent(false);
     archiveFocusRestoreAllowedRef.current = false;
     setFocusedArmyId(null);
-    setFollowed(new Set(restoredObserver.watchlist.map((item) => observerWatchKey(item.kind, item.id))));
     setPauseMatch(null);
     setHistoricalView(null);
     setResumeHistoryAfterEvent(false);
@@ -2089,48 +1357,6 @@ export function App() {
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
-  snapshotOptionsRef.current = {
-    startOpen,
-    selectedMapProfileId,
-    running,
-    speed,
-    view: activeView,
-    overlay,
-    selection,
-    selectedEventId,
-    archiveOpen,
-    mandateOpen,
-    observerDeskOpen,
-    settingsOpen,
-    interfaceSettings,
-    audioState: settingsAudioState,
-    fullscreen,
-    historyWorkbenchOpen: activeView === 'chronicle',
-    situationWorkbenchOpen,
-    selectedSituationId,
-    observerLeadProjection,
-    historicalTurn: historicalView?.turn ?? null,
-    watchedCount: observerSettings.watchlist.length,
-    watchlist: observerSettings.watchlist.map((item) => ({ ...item })),
-    guideCompleted: observerGuideProgress(observerSettings).completed,
-    pauseReason: pauseMatch?.reason ?? null,
-    pauseRule: pauseMatch?.rule ?? null,
-    pauseSituationId: pauseMatch?.situationId ?? null,
-    pauseSituationTrigger: pauseMatch?.situationTrigger ?? null,
-    collectionOpen,
-    worldSaveCount: worldSaves.length,
-    primerOpen,
-    primerStep,
-    mapCamera,
-    mapLod,
-    mobileInspectorExpanded,
-    mapGestureActive,
-    agencyShadowLedger,
-    agencyShadowBranchId,
-    embodiedCharacterId,
-    pendingEmbodiedAction,
-    embodimentClosure: embodimentObserver.closure,
-  };
   useEffect(() => {
     window.render_game_to_text = () => makeTextSnapshot(worldRef.current, snapshotOptionsRef.current);
     window.advanceTime = (milliseconds: number) => {

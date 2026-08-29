@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.10.1',
+    date: '2026-08-29',
+    title: '骨架收束，山河照旧',
+    items: [
+      '观察台的全文快照、对象选择与关注投影各归其位，界面内部职责更清楚。',
+      '世界日期与哈希改由无副作用的基础模块持有，校验与存档不再绕行整套季度引擎。',
+      '构建新增稳定分包、体积预算和自动质量门；玩法、平衡、地图与 schema 4 存档保持不变。',
+    ],
+  },
+  {
     version: '1.10.0',
     date: '2026-08-29',
     title: '山河有声，观览归于一处',

@@ -1,5 +1,6 @@
-import { computeWorldHash, getDateForTurn } from './engine';
+import { getDateForTurn } from './calendar';
 import { stableCompare, stableHash } from './random';
+import { computeWorldHash } from './world-hash';
 import { validateSituationSystemState } from './situations/reducer';
 import { reducePersonalMemorySystem, validateAgencySystemState } from './agency/memory';
 import {

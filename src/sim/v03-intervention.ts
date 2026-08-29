@@ -1,5 +1,6 @@
-import { computeWorldHash, getDateForTurn } from './engine';
+import { getDateForTurn } from './calendar';
 import { keyedInt, stableCompare, stableHash } from './random';
+import { computeWorldHash } from './world-hash';
 import type {
   CharacterState,
   EventCause,

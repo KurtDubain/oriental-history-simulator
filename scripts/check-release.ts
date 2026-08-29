@@ -3,17 +3,26 @@ import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { APP_RELEASES } from '../src/config/changelog';
+import { APP_RELEASES as CONTEST_APP_RELEASES } from '../src/config/changelog.contest';
 
 interface PackageMetadata {
   version?: string;
+}
+
+interface PackageLockMetadata extends PackageMetadata {
+  packages?: Record<string, PackageMetadata>;
 }
 
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const packageMetadata = JSON.parse(
   readFileSync(resolve(root, 'package.json'), 'utf8'),
 ) as PackageMetadata;
+const packageLockMetadata = JSON.parse(
+  readFileSync(resolve(root, 'package-lock.json'), 'utf8'),
+) as PackageLockMetadata;
 const currentVersion = packageMetadata.version;
 const latestRelease = APP_RELEASES[0];
+const latestContestRelease = CONTEST_APP_RELEASES[0];
 
 if (!currentVersion || !/^\d+\.\d+\.\d+$/.test(currentVersion)) {
   throw new Error('package.json 必须提供有效的 SemVer 版本号。');
@@ -22,6 +31,17 @@ if (!latestRelease || latestRelease.version !== currentVersion) {
   throw new Error(
     `发布记录与包版本不一致：release=${latestRelease?.version ?? 'missing'} package=${currentVersion}`,
   );
+}
+if (!latestContestRelease || latestContestRelease.version !== currentVersion) {
+  throw new Error(
+    `参赛版发布记录与包版本不一致：release=${latestContestRelease?.version ?? 'missing'} package=${currentVersion}`,
+  );
+}
+if (
+  packageLockMetadata.version !== currentVersion
+  || packageLockMetadata.packages?.['']?.version !== currentVersion
+) {
+  throw new Error('package-lock.json 根版本必须与 package.json 保持一致。');
 }
 if (!/^\d{4}-\d{2}-\d{2}$/.test(latestRelease.date) || latestRelease.items.length === 0) {
   throw new Error('最新发布记录必须包含 YYYY-MM-DD 日期和至少一条更新内容。');
@@ -35,20 +55,40 @@ function git(args: string[]): string | null {
   }
 }
 
-const workingChanges = git(['diff', '--name-only', 'HEAD'])?.split('\n').filter(Boolean) ?? [];
-const productionFilesChanged = workingChanges.some((file) => (
-  file === 'package.json'
-  || file === 'vite.config.ts'
-  || file === 'vercel.json'
-  || file === 'index.html'
-  || file.startsWith('src/')
-  || file.startsWith('public/')
-));
+function lines(value: string | null): string[] {
+  return value?.split('\n').map((item) => item.trim()).filter(Boolean) ?? [];
+}
+
+function affectsRelease(file: string): boolean {
+  return (
+    file === 'package.json'
+    || file === 'package-lock.json'
+    || file === '.npmrc'
+    || file === 'vite.config.ts'
+    || file === 'vercel.json'
+    || file === 'index.html'
+    || file.startsWith('tsconfig')
+    || file.startsWith('scripts/')
+    || file.startsWith('src/')
+    || file.startsWith('public/')
+    || file.startsWith('.github/workflows/')
+  );
+}
+
+const requestedBase = process.env.OHS_RELEASE_BASE?.trim() || null;
+const workingChanges = [
+  ...lines(git(['diff', '--name-only', 'HEAD'])),
+  ...lines(git(['ls-files', '--others', '--exclude-standard'])),
+];
+const committedChanges = requestedBase
+  ? lines(git(['diff', '--name-only', `${requestedBase}...HEAD`]))
+  : [];
+const productionFilesChanged = [...workingChanges, ...committedChanges].some(affectsRelease);
 const productionDeployment = process.env.VERCEL_GIT_COMMIT_REF === 'main'
   || process.env.RELEASE_REQUIRE_VERSION_BUMP === '1';
 
 let comparisonRef: string | null = null;
-if (productionDeployment) comparisonRef = process.env.OHS_RELEASE_BASE?.trim() || 'HEAD^';
+if (productionDeployment && (productionFilesChanged || !requestedBase)) comparisonRef = requestedBase || 'HEAD^';
 else if (productionFilesChanged) comparisonRef = 'HEAD';
 
 if (comparisonRef) {
