@@ -13,6 +13,8 @@ import {
 
 import "../styles/world-map.css";
 import { recordRuntimeMetric, runtimeNow } from "../performance/runtime-profiler";
+import { DEFAULT_MAP_PROFILE_ID, getMapProfile } from "../maps";
+import type { MapProfileId } from "../maps/types";
 import type {
   MapArmyView,
   MapCamera,
@@ -89,6 +91,7 @@ export {
 } from "../view/map-scene-geometry";
 
 export interface WorldMapProps {
+  mapProfileId?: MapProfileId;
   regions: readonly MapRegionView[];
   routes: readonly MapRouteView[];
   armies: readonly MapArmyView[];
@@ -122,6 +125,7 @@ interface TapFeedback {
 }
 
 export function WorldMap({
+  mapProfileId = DEFAULT_MAP_PROFILE_ID,
   regions,
   routes,
   armies,
@@ -154,9 +158,19 @@ export function WorldMap({
   const gestureRef = useRef<MapGestureState | null>(null);
   const tapSequenceRef = useRef(0);
   const tapTimerRef = useRef<number | null>(null);
+  const mapProfile = useMemo(() => getMapProfile(mapProfileId), [mapProfileId]);
   const presentation = useMemo(
-    () => buildMapPresentation(regions, routes, armies, seaZones, fleets, flows, markers),
-    [armies, fleets, flows, markers, regions, routes, seaZones],
+    () => buildMapPresentation(
+      regions,
+      routes,
+      armies,
+      seaZones,
+      fleets,
+      flows,
+      markers,
+      mapProfile.presentation,
+    ),
+    [armies, fleets, flows, mapProfile, markers, regions, routes, seaZones],
   );
   const hoveredRegionId = hover?.kind === "region" || hover?.kind === "regionNode"
     ? hover.region.id
@@ -262,6 +276,7 @@ export function WorldMap({
       selectedObject,
       hoveredRegionId,
       camera,
+      presentation.profile,
     );
     recordRuntimeMetric('canvas.draw', runtimeNow() - drawStartedAt);
   }, [camera, highlightedRegionIds, hoveredRegionId, overlay, presentation, selectedObject, selectedRegionId, size]);

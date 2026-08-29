@@ -129,6 +129,7 @@ export interface MapViewportTransform {
 }
 
 export interface MapPresentationView {
+  profile: MapPresentationDefinition;
   regions: MapRegionView[];
   routes: MapRouteView[];
   armies: MapArmyView[];
@@ -137,3 +138,4 @@ export interface MapPresentationView {
   flows: MapFlowView[];
   markers: MapMarkerView[];
 }
+import type { MapPresentationDefinition } from '../maps/types';

@@ -1,8 +1,5 @@
-import {
-  MAP_TERRITORY_SHAPES,
-  getRegionDisplaySite,
-  getSeaZoneDisplayCenter,
-} from './map-geography';
+import { getMapProfile } from '../maps';
+import type { MapPresentationDefinition } from '../maps/types';
 import { buildTerritoryCells } from './map-territories';
 import type {
   MapArmyView,
@@ -31,19 +28,20 @@ export function buildMapPresentation(
   fleets: readonly MapFleetView[],
   flows: readonly MapFlowView[],
   markers: readonly MapMarkerView[],
+  profile: MapPresentationDefinition = getMapProfile().presentation,
 ): MapPresentationView {
   const knownSites = regions.flatMap((region) => {
-    const site = getRegionDisplaySite(region.id);
+    const site = profile.regionDisplaySites[region.id];
     return site ? [site] : [];
   });
   const cellByRegionId = new Map(
-    buildTerritoryCells(MAP_TERRITORY_SHAPES, knownSites)
+    buildTerritoryCells(profile.territoryShapes, knownSites)
       .map((cell) => [cell.siteId, cell] as const),
   );
   const projectedPointByRawPoint = new Map<string, MapPoint>();
 
   const presentedRegions = regions.map((region) => {
-    const site = getRegionDisplaySite(region.id);
+    const site = profile.regionDisplaySites[region.id];
     const cell = cellByRegionId.get(region.id);
     if (!site || !cell) return { ...region, center: { ...region.center }, polygon: [...region.polygon] };
     const center = { x: site.x, y: site.y };
@@ -56,7 +54,7 @@ export function buildMapPresentation(
   });
 
   const presentedSeaZones = seaZones.map((zone) => {
-    const center = getSeaZoneDisplayCenter(zone.id) ?? zone.center;
+    const center = profile.seaZoneDisplayCenters[zone.id] ?? zone.center;
     projectedPointByRawPoint.set(pointKey(zone.center), center);
     return { ...zone, center: { ...center } };
   });
@@ -68,6 +66,7 @@ export function buildMapPresentation(
   };
 
   return {
+    profile,
     regions: presentedRegions,
     routes: routes.map((route) => ({
       ...route,

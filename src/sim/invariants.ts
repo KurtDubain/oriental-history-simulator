@@ -13,6 +13,7 @@ import {
 import type { SituationRecentChange } from './situations/types';
 import type { HistoryEvent, InvariantViolation, SimulationFact, WorldState } from './types';
 import { validateRuntimeEmbodiedActions } from './validation/embodiment';
+import { findMapProfileForContentVersion } from '../maps';
 
 export type RuntimeEntityKind =
   | 'region'
@@ -1569,11 +1570,23 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     }
   }
 
-  if (world.mapContentVersion === 'v03-82' && (world.regions.length !== 82 || world.seaZones.length !== 10)) {
-    push(violations, 'map.v03-size', `V0.3新世界应有82陆区与10海域，实际${world.regions.length}/${world.seaZones.length}`);
-  }
-  if (world.mapContentVersion === 'legacy-v02-48' && (world.regions.length > 48 || world.seaZones.length !== 10)) {
-    push(violations, 'map.legacy-size', `旧世界不得扩充陆区且应挂接10海域，实际${world.regions.length}/${world.seaZones.length}`);
+  const mapProfile = findMapProfileForContentVersion(world.mapContentVersion);
+  if (!mapProfile) {
+    push(violations, 'map.profile', `无法识别地图内容版本${world.mapContentVersion}`);
+  } else {
+    const isLegacyPartial = mapProfile.compatibility.legacyPartialRegionVersions.includes(world.mapContentVersion);
+    const regionLimit = mapProfile.compatibility.regionLimitByContentVersion[world.mapContentVersion]
+      ?? mapProfile.simulation.regions.length;
+    const regionCountInvalid = isLegacyPartial
+      ? world.regions.length > regionLimit
+      : world.regions.length !== mapProfile.simulation.regions.length;
+    if (regionCountInvalid || world.seaZones.length !== mapProfile.simulation.seaZones.length) {
+      push(
+        violations,
+        isLegacyPartial ? 'map.legacy-size' : 'map.profile-size',
+        `${mapProfile.name}应有${isLegacyPartial ? `至多${regionLimit}` : mapProfile.simulation.regions.length}陆区与${mapProfile.simulation.seaZones.length}海域，实际${world.regions.length}/${world.seaZones.length}`,
+      );
+    }
   }
 
   for (const region of world.regions) {

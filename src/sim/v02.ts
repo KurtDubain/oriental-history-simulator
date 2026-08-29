@@ -1,4 +1,5 @@
-import { FAMILY_NAMES, GIVEN_NAMES } from './data';
+import { FAMILY_NAMES, GIVEN_NAMES } from './names';
+import { findMapProfileForContentVersion } from '../maps';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
 import { emitSimulationFact, projectFactLinks } from './facts';
 import { refreshFactionPowerLedgers } from './politics/power-ledger';
@@ -1946,7 +1947,9 @@ export function migrateV01SocialState(world: WorldState): void {
   }
   for (const polity of world.polities) {
     polity.rulingFamilyId = null;
-    polity.governmentForm = polity.id === 'p_canghai' ? '盟约' : polity.id.startsWith('p_rebel_') ? '军府' : '王朝';
+    const openingDefinition = findMapProfileForContentVersion(world.mapContentVersion)
+      ?.simulation.polities.find((definition) => definition.id === polity.id);
+    polity.governmentForm = openingDefinition?.governmentForm ?? (polity.id.startsWith('p_rebel_') ? '军府' : '王朝');
     polity.courtInfluence = 50;
     polity.lastCourtCrisisTurn = -100;
   }

@@ -110,6 +110,7 @@ import {
   type WorldState,
 } from './sim';
 import { APP_VERSION } from './version';
+import { getMapProfile, getMapProfileForContentVersion, mapProfileIdForContentVersion } from './maps';
 import {
   familyRoster,
   militaryRoster,
@@ -464,11 +465,13 @@ interface SnapshotOptions {
 
 function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
   if (!world) {
+    const mapProfile = getMapProfile();
     return JSON.stringify({
       mode: 'start',
       productVersion: APP_VERSION,
       appUpdate: getAppUpdateState(),
       title: '沧衡纪',
+      mapProfile: { id: mapProfile.id, revision: mapProfile.revision, name: mapProfile.name },
       seedInputVisible: options.startOpen,
       collectionOpen: options.collectionOpen,
       worldSaveCount: options.worldSaveCount,
@@ -477,6 +480,7 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
       actions: ['开启新纪', '续读旧史', '世界收藏', '导入史册'],
     });
   }
+  const mapProfile = getMapProfileForContentVersion(world.mapContentVersion);
 
   const selected = options.selection ? { ...options.selection, label: selectedEntityLabel(world, options.selection) } : null;
   const polityName = (id: string) => world.polities.find((item) => item.id === id)?.name ?? id;
@@ -691,7 +695,8 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
     appUpdate: getAppUpdateState(),
     worldSchemaVersion: world.schemaVersion,
     mapContentVersion: world.mapContentVersion,
-    coordinates: 'map world coordinates use origin top-left, x rightward, y downward, range 1000x700',
+    mapProfile: { id: mapProfile.id, revision: mapProfile.revision, name: mapProfile.name },
+    coordinates: `map world coordinates use origin top-left, x rightward, y downward, range ${mapProfile.presentation.width}x${mapProfile.presentation.height}`,
     time: { turn: world.turn, year: world.year, season: world.season },
     deterministicWorldHash: world.hash,
     runtimePerformance: getRuntimePerformanceSnapshot(),
@@ -2664,6 +2669,7 @@ export function App() {
             data-historical-turn={historicalView?.turn ?? undefined}
           >
             <WorldMap
+              mapProfileId={mapProfileIdForContentVersion(world.mapContentVersion)}
               regions={mapRegions}
               routes={mapRoutes}
               armies={mapArmies}

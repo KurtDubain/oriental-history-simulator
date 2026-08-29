@@ -1,8 +1,5 @@
-import {
-  PORT_LINK_DEFINITIONS,
-  SEA_LANE_DEFINITIONS,
-  SEA_ZONE_DEFINITIONS,
-} from './data';
+import { getMapProfileForContentVersion } from '../maps';
+import type { MapProfile } from '../maps/types';
 import { keyedInt, keyedRandom, stableCompare } from './random';
 import { emitSimulationFact, projectFactLinks, type BattleFact, type SimulationFact } from './facts';
 import { practiceEffect } from './v03-life';
@@ -46,6 +43,7 @@ const MAX_TRADE_CORRIDORS = 160;
 
 export interface CreateV03OceanOptions {
   legacy: boolean;
+  profile?: MapProfile;
 }
 
 interface TransportEdge {
@@ -144,15 +142,15 @@ function rebuildLandAdjacency(world: WorldState): void {
   }
 }
 
-function createSeaZones(world: WorldState): SeaZoneState[] {
+function createSeaZones(world: WorldState, profile: MapProfile): SeaZoneState[] {
   const regionIds = new Set(world.regions.map((region) => region.id));
-  return SEA_ZONE_DEFINITIONS.map((definition) => ({
+  return profile.simulation.seaZones.map((definition) => ({
     ...definition,
-    adjacentSeaZoneIds: SEA_LANE_DEFINITIONS
+    adjacentSeaZoneIds: profile.simulation.seaLanes
       .filter((lane) => lane.fromSeaZoneId === definition.id || lane.toSeaZoneId === definition.id)
       .map((lane) => lane.fromSeaZoneId === definition.id ? lane.toSeaZoneId : lane.fromSeaZoneId)
       .sort(stableCompare),
-    portRegionIds: PORT_LINK_DEFINITIONS
+    portRegionIds: profile.simulation.portLinks
       .filter((link) => link.seaZoneId === definition.id && regionIds.has(link.regionId))
       .map((link) => link.regionId)
       .sort(stableCompare),
@@ -163,13 +161,13 @@ function createSeaZones(world: WorldState): SeaZoneState[] {
   }));
 }
 
-function createSeaLanes(): SeaLaneState[] {
-  return SEA_LANE_DEFINITIONS.map((lane) => ({ ...lane }));
+function createSeaLanes(profile: MapProfile): SeaLaneState[] {
+  return profile.simulation.seaLanes.map((lane) => ({ ...lane }));
 }
 
-function createPortLinks(world: WorldState): PortLinkState[] {
+function createPortLinks(world: WorldState, profile: MapProfile): PortLinkState[] {
   const ports = new Set(world.regions.filter((region) => region.port).map((region) => region.id));
-  return PORT_LINK_DEFINITIONS.filter((link) => ports.has(link.regionId)).map((link) => ({ ...link }));
+  return profile.simulation.portLinks.filter((link) => ports.has(link.regionId)).map((link) => ({ ...link }));
 }
 
 function createPorts(world: WorldState): PortState[] {
@@ -273,7 +271,8 @@ function createFleetAtPort(
  * sea zones and every compatible existing port, but never receive a free fleet.
  */
 export function createV03OceanSystems(world: WorldState, options: CreateV03OceanOptions): void {
-  world.mapContentVersion = options.legacy ? 'legacy-v02-48' : 'v03-82';
+  const profile = options.profile ?? getMapProfileForContentVersion(world.mapContentVersion);
+  world.mapContentVersion = options.legacy ? 'legacy-v02-48' : profile.contentVersion;
   world.counters.fleet ??= 0;
   world.counters.tradeCorridor ??= 0;
   world.counters.navalOperation ??= 0;
@@ -322,9 +321,9 @@ export function createV03OceanSystems(world: WorldState, options: CreateV03Ocean
   }
 
   rebuildLandAdjacency(world);
-  world.seaLanes = createSeaLanes();
-  world.portLinks = createPortLinks(world);
-  world.seaZones = createSeaZones(world);
+  world.seaLanes = createSeaLanes(profile);
+  world.portLinks = createPortLinks(world, profile);
+  world.seaZones = createSeaZones(world, profile);
   world.ports = createPorts(world);
 
   if (!options.legacy && world.fleets.length === 0) {
@@ -1395,8 +1394,9 @@ function maintainFleets(world: WorldState, context: V03TurnContext, emit: V03Emi
 }
 
 function updateSeaPower(world: WorldState, context: V03TurnContext): void {
+  const profile = getMapProfileForContentVersion(world.mapContentVersion);
   for (const zone of world.seaZones) {
-    const definition = SEA_ZONE_DEFINITIONS.find((item) => item.id === zone.id);
+    const definition = profile.simulation.seaZones.find((item) => item.id === zone.id);
     const seasonal = context.season === '夏' && zone.climate === '季风海' ? 10
       : context.season === '冬' && zone.climate === '北方海' ? 7
         : context.season === '秋' && zone.climate === '外洋' ? 8 : 0;

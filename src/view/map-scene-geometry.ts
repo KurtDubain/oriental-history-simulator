@@ -1,9 +1,9 @@
 import {
-  MAP_LAND_SHAPES,
   MAP_PRESENTATION_HEIGHT,
   MAP_PRESENTATION_WIDTH,
-  getRegionDisplaySite,
 } from './map-geography';
+import { getMapProfile } from '../maps';
+import type { MapPresentationDefinition } from '../maps/types';
 import type {
   MapArmyView,
   MapCamera,
@@ -214,16 +214,17 @@ export function regionAtScreenPoint(
   height: number,
   padding = MAP_PADDING,
   camera: MapCamera = DEFAULT_MAP_CAMERA,
+  profile: MapPresentationDefinition = getMapProfile().presentation,
 ): MapRegionView | null {
   const worldPoint = screenToWorldPoint(point, width, height, padding, camera);
   const containingShapeIds = new Set(
-    MAP_LAND_SHAPES
+    profile.landShapes
       .filter((shape) => isPointInPolygon(worldPoint, shape.polygon))
       .map((shape) => shape.id),
   );
   const geographicCandidates = regions
     .filter((region) => {
-      const site = getRegionDisplaySite(region.id);
+      const site = profile.regionDisplaySites[region.id];
       return site ? containingShapeIds.has(site.shapeId) : false;
     })
     .sort((left, right) => {
@@ -235,7 +236,7 @@ export function regionAtScreenPoint(
 
   for (let index = regions.length - 1; index >= 0; index -= 1) {
     const region = regions[index];
-    if (!getRegionDisplaySite(region.id)
+    if (!profile.regionDisplaySites[region.id]
       && region.polygon.length >= 3
       && isPointInPolygon(worldPoint, region.polygon)) {
       return region;
@@ -401,8 +402,9 @@ function regionNearScreenPoint(
   padding: number,
   camera: MapCamera,
   tolerance: number,
+  profile: MapPresentationDefinition,
 ) {
-  const direct = regionAtScreenPoint(regions, point, width, height, padding, camera);
+  const direct = regionAtScreenPoint(regions, point, width, height, padding, camera, profile);
   if (direct || tolerance <= 0) return direct;
   for (const radius of [tolerance * 0.55, tolerance]) {
     for (let index = 0; index < 8; index += 1) {
@@ -414,6 +416,7 @@ function regionNearScreenPoint(
         height,
         padding,
         camera,
+        profile,
       );
       if (candidate) return candidate;
     }
@@ -475,6 +478,7 @@ export function resolveMapSceneHit(
     MAP_PADDING,
     camera,
     0,
+    presentation.profile,
   );
   const regionNode = regionNodeAtScreenPoint(
     presentation.regions,
@@ -514,6 +518,7 @@ export function resolveMapSceneHit(
     MAP_PADDING,
     camera,
     options.tolerateRegionEdge && coarse ? 8 : 0,
+    presentation.profile,
   );
   if (region) return { kind: 'region', region };
 

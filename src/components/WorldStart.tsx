@@ -1,7 +1,10 @@
 import { BookOpen, FileUp, Library, Sparkles, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { APP_VERSION } from '../version';
+import { getMapProfile } from '../maps';
 import '../styles/world-start.css';
+
+const DEFAULT_MAP_PROFILE = getMapProfile();
 
 const PLAYTEST_SEEDS = [
   { seed: '沧衡-甲子', label: '山河初醒', detail: '均衡开局，适合第一次观察' },
@@ -171,7 +174,7 @@ export function WorldStart({
 
       <footer className="world-start__footer">
         <span>一回合 · 三个月</span>
-        <span>82 陆区 · 10 海域 · 全域流变</span>
+        <span>{DEFAULT_MAP_PROFILE.name} · {DEFAULT_MAP_PROFILE.simulation.regions.length} 陆区 · {DEFAULT_MAP_PROFILE.simulation.seaZones.length} 海域</span>
         <span>v{APP_VERSION} · 按 F 全屏</span>
       </footer>
     </div>

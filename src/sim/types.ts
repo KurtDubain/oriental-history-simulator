@@ -2,25 +2,18 @@ import type { LegacyArchiveBoundary, SimulationFact } from './facts/types';
 import type { SituationSystemState } from './situations/types';
 import type { AgencySystemState } from './agency/memory';
 import type { AgencyDecisionSystemState } from './agency/decision';
+import type {
+  Climate,
+  MapContentVersion,
+  RouteKind,
+  Terrain,
+} from '../maps/types';
 export type { LegacyArchiveBoundary, SimulationFact } from './facts/types';
+export type { Climate, MapContentVersion, RouteKind, Terrain } from '../maps/types';
 
 export const SEASONS = ['春', '夏', '秋', '冬'] as const;
 
 export type Season = (typeof SEASONS)[number];
-
-export type Terrain =
-  | '平原'
-  | '丘陵'
-  | '山地'
-  | '高原'
-  | '海岸'
-  | '岛屿';
-
-export type Climate = '温带' | '寒温带' | '暖温带' | '湿热' | '干旱';
-
-export type RouteKind = '道路' | '河道' | '山道' | '海峡';
-
-export type MapContentVersion = 'v03-82' | 'legacy-v02-48';
 
 export const COMMODITIES = ['粮食', '木材', '铁器', '马匹', '盐', '纺织品', '奢侈品'] as const;
 export type CommodityKind = (typeof COMMODITIES)[number];

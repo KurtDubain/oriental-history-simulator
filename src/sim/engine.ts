@@ -1,11 +1,11 @@
 import {
-  FAMILY_NAMES,
-  GIVEN_NAMES,
-  POLITY_DEFINITIONS,
-  REGION_DEFINITIONS,
-  ROUTE_DEFINITIONS,
   type PolityDefinition,
+  type RegionDefinition,
+  type RouteDefinition,
 } from './data';
+import { FAMILY_NAMES, GIVEN_NAMES } from './names';
+import { DEFAULT_MAP_PROFILE_ID, getMapProfile } from '../maps';
+import type { MapProfile, MapProfileId } from '../maps/types';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
 import {
   emitSimulationFact,
@@ -162,8 +162,8 @@ function routeDistance(from: RegionState, to: RegionState): number {
   return Math.max(1, Math.round(Math.hypot(from.x - to.x, from.y - to.y)));
 }
 
-function createRegions(seed: string): RegionState[] {
-  return REGION_DEFINITIONS.map((definition) => {
+function createRegions(seed: string, definitions: readonly RegionDefinition[]): RegionState[] {
+  return definitions.map((definition) => {
     const populationVariance = 0.9 + keyedRandom(seed, 'initial', 'population', definition.id) * 0.2;
     const population = integer(definition.populationBase * populationVariance);
     const reserveVariance = 2.15 + keyedRandom(seed, 'initial', 'food', definition.id) * 0.75;
@@ -201,9 +201,9 @@ function createRegions(seed: string): RegionState[] {
   });
 }
 
-function createRoutes(regions: RegionState[]): RouteState[] {
+function createRoutes(regions: RegionState[], definitions: readonly RouteDefinition[]): RouteState[] {
   const regionById = new Map(regions.map((region) => [region.id, region]));
-  const routes = ROUTE_DEFINITIONS.map((definition, index) => {
+  const routes = definitions.map((definition, index) => {
     const from = regionById.get(definition.fromRegionId);
     const to = regionById.get(definition.toRegionId);
     if (!from || !to) throw new Error('Map route references an unknown region');
@@ -374,12 +374,12 @@ function createPolity(seed: string, definition: PolityDefinition, ruler: Charact
     lastWarTurn: -20,
     lastRebellionTurn: -100,
     rulingFamilyId: null,
-    governmentForm: definition.id === 'p_canghai' ? '盟约' : '王朝',
+    governmentForm: definition.governmentForm,
     courtInfluence: 50,
     lastCourtCrisisTurn: -100,
     tradeRevenue: 0,
     navalBudget: 0,
-    maritimeOrientation: definition.id === 'p_canghai' ? 72 : definition.capitalRegionId === 'r_qizhou' ? 42 : 24,
+    maritimeOrientation: definition.maritimeOrientation,
     diplomaticReputation: 60,
   };
 }
@@ -560,26 +560,30 @@ export function computeWorldHash(world: WorldState): string {
   });
 }
 
-export function createWorld(seed: string): WorldState {
+export function createWorld(
+  seed: string,
+  profileId: MapProfileId = DEFAULT_MAP_PROFILE_ID,
+): WorldState {
   if (typeof seed !== 'string' || seed.length === 0) {
     throw new Error('World seed must be a non-empty string');
   }
-  const regions = createRegions(seed);
-  const routes = createRoutes(regions);
+  const profile: MapProfile = getMapProfile(profileId);
+  const regions = createRegions(seed, profile.simulation.regions);
+  const routes = createRoutes(regions, profile.simulation.routes);
   const characters: CharacterState[] = [];
   const usedNames = new Set<string>();
-  for (const definition of POLITY_DEFINITIONS) {
+  for (const definition of profile.simulation.polities) {
     const polityRegions = regions.filter((region) => region.controllerId === definition.id);
     characters.push(...createInitialCharacters(seed, definition, polityRegions, characters.length, usedNames));
   }
-  const polities = POLITY_DEFINITIONS.map((definition) => {
+  const polities = profile.simulation.polities.map((definition) => {
     const ruler = characters.find((character) => character.polityId === definition.id && character.role === '君主');
     if (!ruler) throw new Error(`Missing initial ruler for ${definition.id}`);
     return createPolity(seed, definition, ruler, regions);
   });
   const world: WorldState = {
     schemaVersion: 4,
-    mapContentVersion: 'v03-82',
+    mapContentVersion: profile.contentVersion,
     seed,
     turn: 0,
     year: 1,
@@ -625,7 +629,7 @@ export function createWorld(seed: string): WorldState {
   const foundingEvent = initialHistoryEvent(world);
   world.history.push(foundingEvent);
   createV02WorldSystems(world, foundingEvent.id);
-  createV03OceanSystems(world, { legacy: false });
+  createV03OceanSystems(world, { legacy: false, profile });
   createV03LifeSystems(world, { legacy: false });
   foundingEvent.summary = `${world.regions.length}处州域、${world.seaZones.length}片海域、${world.polities.length}方政权与${world.characters.length}名核心人物进入同一条可推演的历史。`;
   foundingEvent.evidence = [`固定地图含${world.regions.length}个区域与${world.seaZones.length}片海域`, `初始政权${world.polities.length}个`, `初始核心人物${world.characters.length}名`];
