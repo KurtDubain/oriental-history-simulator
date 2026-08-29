@@ -24,6 +24,7 @@
     inset 0 0 42px rgb(53 63 59 / 6%);
   content: "";
   pointer-events: none;
+  transition: background-color 480ms ease, box-shadow 480ms ease;
 }
 
 .world-map::after {
@@ -236,6 +237,22 @@
   animation: world-map-tap 400ms ease-out both;
 }
 
+.world-map__press-feedback {
+  position: absolute;
+  z-index: 4;
+  width: 26px;
+  height: 26px;
+  border: 0;
+  border-radius: 50%;
+  background: rgb(59 59 52 / 15%);
+  box-shadow:
+    0 0 0 3px rgb(242 235 216 / 28%),
+    inset 0 0 8px rgb(50 50 44 / 8%);
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  animation: world-map-press 90ms ease-out both;
+}
+
 .world-map__tooltip dl {
   display: grid;
   gap: 3px;
@@ -336,6 +353,11 @@
   to { opacity: 0; transform: translate(-50%, -50%) scale(2.25); }
 }
 
+@keyframes world-map-press {
+  from { opacity: 0.68; transform: translate(-50%, -50%) scale(0.76); }
+  to { opacity: 0.38; transform: translate(-50%, -50%) scale(.96); }
+}
+
 @media (max-width: 680px) {
   .world-map {
     min-height: 320px;
@@ -380,10 +402,11 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-.world-map__canvas,
+  .world-map__canvas,
   .world-map__tooltip,
   .world-map__gesture-hint,
-  .world-map__tap-feedback {
+  .world-map__tap-feedback,
+  .world-map__press-feedback {
     animation: none;
   }
 }

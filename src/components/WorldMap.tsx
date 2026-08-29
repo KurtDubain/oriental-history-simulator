@@ -27,6 +27,7 @@ import type {
   MapObjectKind,
   MapOverlay,
   MapPoint,
+  MapSeason,
   MapRegionView,
   MapRouteView,
   MapSeaZoneView,
@@ -120,6 +121,8 @@ export interface WorldMapProps {
   cameraKey?: string | number;
   onCameraChange?: (camera: MapCamera) => void;
   className?: string;
+  season?: MapSeason;
+  atmosphereEnabled?: boolean;
 }
 
 type HoverState =
@@ -210,6 +213,8 @@ export function WorldMap({
   cameraKey,
   onCameraChange,
   className = "",
+  season = '春',
+  atmosphereEnabled = true,
 }: WorldMapProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -220,6 +225,7 @@ export function WorldMap({
   const [dragging, setDragging] = useState(false);
   const [hasInteracted, setHasInteracted] = useState(false);
   const [tapFeedback, setTapFeedback] = useState<TapFeedback | null>(null);
+  const [pressedFeedback, setPressedFeedback] = useState<TapFeedback | null>(null);
   const [quickLookOcclusion, setQuickLookOcclusion] = useState<MapFocusOcclusion | null>(null);
   const cameraRef = useRef<MapCamera>({ ...DEFAULT_MAP_CAMERA });
   const lodLevelRef = useRef<MapLodLevel>("overview");
@@ -319,6 +325,7 @@ export function WorldMap({
     setCameraState({ ...DEFAULT_MAP_CAMERA });
     setHover(null);
     setTapFeedback(null);
+    setPressedFeedback(null);
     setDragging(false);
     setHasInteracted(false);
     commitCamera(DEFAULT_MAP_CAMERA);
@@ -450,9 +457,10 @@ export function WorldMap({
       hoveredRegionId,
       camera,
       focusOffset,
+      { season, atmosphere: atmosphereEnabled },
     );
     recordRuntimeMetric('canvas.draw', runtimeNow() - drawStartedAt);
-  }, [camera, focusOffset, highlightedRegionIds, hoveredRegionId, overlay, scene, selectedObject, selectedRegionId, size]);
+  }, [atmosphereEnabled, camera, focusOffset, highlightedRegionIds, hoveredRegionId, overlay, scene, season, selectedObject, selectedRegionId, size]);
 
   const localPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -566,6 +574,7 @@ export function WorldMap({
           if (gesture.pinch) applyCamera(cameraForPinch(gesture.pinch, focusedContacts, size.width, size.height));
           gesture.moved = true;
           gesture.hadMultiple = true;
+          setPressedFeedback(null);
           setDragging(true);
           setHasInteracted(true);
           setHover(null);
@@ -590,6 +599,7 @@ export function WorldMap({
           }
           if (cancelTap) setDragging(true);
           if (cancelTap) setHover(null);
+          if (cancelTap) setPressedFeedback(null);
         }
         gesture.lastPoint = point;
         return;
@@ -642,6 +652,8 @@ export function WorldMap({
       const active = [...pointersRef.current.values()];
       if (active.length === 1) {
         gestureRef.current = createSinglePointerGesture(event.pointerType, point);
+        tapSequenceRef.current += 1;
+        setPressedFeedback({ id: tapSequenceRef.current, x: point.x, y: point.y });
       } else {
         const focus = focusOffsetRef.current;
         const focusedContacts = active.map((entry) => ({
@@ -660,6 +672,7 @@ export function WorldMap({
         );
         setDragging(true);
         setHasInteracted(true);
+        setPressedFeedback(null);
       }
       setHover(null);
     },
@@ -677,6 +690,7 @@ export function WorldMap({
       && !gesture?.moved
       && !gesture?.hadMultiple;
     const selectionPoint = shouldSelect && gesture ? gesture.startPoint : point;
+    setPressedFeedback(null);
     pointersRef.current.delete(event.pointerId);
     try {
       if (event.currentTarget.hasPointerCapture(event.pointerId)) {
@@ -931,6 +945,8 @@ export function WorldMap({
       data-pannable={camera.zoom > MAP_MIN_ZOOM + 0.0001 || undefined}
       data-dragging={dragging || undefined}
       data-hover-object={Boolean(hover) || undefined}
+      data-season={season}
+      data-atmosphere={atmosphereEnabled || undefined}
     >
       <canvas
         ref={canvasRef}
@@ -997,6 +1013,14 @@ export function WorldMap({
           key={tapFeedback.id}
           className="world-map__tap-feedback"
           style={{ left: tapFeedback.x, top: tapFeedback.y }}
+          aria-hidden="true"
+        />
+      ) : null}
+      {pressedFeedback ? (
+        <span
+          key={pressedFeedback.id}
+          className="world-map__press-feedback"
+          style={{ left: pressedFeedback.x, top: pressedFeedback.y }}
           aria-hidden="true"
         />
       ) : null}

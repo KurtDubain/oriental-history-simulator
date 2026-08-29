@@ -2,12 +2,12 @@ import {
   Archive,
   Download,
   Eye,
-  Expand,
   Library,
   Map as MapIcon,
   MoreHorizontal,
   RotateCcw,
   Save,
+  Settings2,
   Sparkles,
 } from 'lucide-react';
 import {
@@ -38,6 +38,7 @@ import {
   observerLeadWatchKey,
 } from './components/ObserverLeads';
 import { SituationWorkbench } from './components/SituationWorkbench';
+import { SettingsPanel } from './components/SettingsPanel';
 import {
   QuarterPulse,
   type QuarterPulseEvent,
@@ -63,6 +64,10 @@ import {
 } from './components/WorldMap';
 import { WorldCollectionPanel } from './components/WorldCollectionPanel';
 import { WorldStart } from './components/WorldStart';
+import {
+  gameAudio,
+  type AudioCue,
+} from './audio';
 import {
   checkForAppUpdate,
   getAppUpdateState,
@@ -216,6 +221,11 @@ import {
   projectPersonEmbodimentView,
 } from './view/embodiment-view';
 import { shouldCloseMapSelectionForOverlay } from './view/map-selection-policy';
+import type {
+  ObserverAudioState,
+  ObserverInterfaceSettings,
+} from './view/observer-interface-settings';
+import { useObserverInterface } from './view/use-observer-interface';
 import './styles/app.css';
 
 type Selection =
@@ -238,6 +248,20 @@ type OpenWorldSource = 'create' | 'continue' | 'import' | 'collection';
 const DEFAULT_SEED = '沧衡-甲子';
 const BASE_AUTOPLAY_INTERVAL = 1_800;
 const MAP_PRIMER_STORAGE_KEY = 'canghai-map-primer-complete-v1';
+
+function quarterHistoryCue(events: ReadonlyArray<WorldState['history'][number]>): AudioCue | null {
+  if (events.some((event) => (
+    event.kind === 'succession'
+    || event.kind === 'war_declared'
+    || event.kind === 'war_started'
+    || event.kind === 'war_ended'
+  ))) return 'turning_point';
+  if (events.some((event) => event.kind === 'battle_victory' || event.kind === 'battle')) return 'battle';
+  if (events.some((event) => event.kind === 'territory_control_changed')) return 'territory';
+  if (events.some((event) => event.kind === 'character_death' && event.importance >= 4)) return 'death';
+  if (events.some((event) => event.importance >= 5)) return 'turning_point';
+  return null;
+}
 const compact = new Intl.NumberFormat('zh-CN', {
   notation: 'compact',
   maximumFractionDigits: 1,
@@ -458,6 +482,10 @@ interface SnapshotOptions {
   archiveOpen: boolean;
   mandateOpen: boolean;
   observerDeskOpen: boolean;
+  settingsOpen: boolean;
+  interfaceSettings: ObserverInterfaceSettings;
+  audioState: ObserverAudioState;
+  fullscreen: boolean;
   historyWorkbenchOpen: boolean;
   situationWorkbenchOpen: boolean;
   selectedSituationId: string | null;
@@ -504,6 +532,14 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
       })),
       seedInputVisible: options.startOpen,
       collectionOpen: options.collectionOpen,
+      settings: {
+        open: options.settingsOpen,
+        soundEnabled: options.interfaceSettings.sound.enabled,
+        motion: options.interfaceSettings.motion,
+        mapAtmosphere: options.interfaceSettings.mapAtmosphere,
+        density: options.interfaceSettings.interfaceDensity,
+        audioState: options.audioState,
+      },
       worldSaveCount: options.worldSaveCount,
       primerOpen: options.primerOpen,
       primerStep: options.primerStep,
@@ -845,6 +881,15 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
     interface: {
       view: options.view,
       overlay: options.overlay,
+      settings: {
+        open: options.settingsOpen,
+        soundEnabled: options.interfaceSettings.sound.enabled,
+        motion: options.interfaceSettings.motion,
+        mapAtmosphere: options.interfaceSettings.mapAtmosphere,
+        density: options.interfaceSettings.interfaceDensity,
+        audioState: options.audioState,
+        fullscreen: options.fullscreen,
+      },
       mapViewport: {
         zoom: Number(options.mapCamera.zoom.toFixed(3)),
         panX: Number(options.mapCamera.panX.toFixed(1)),
@@ -1017,6 +1062,7 @@ export function App() {
   const [collectionBusy, setCollectionBusy] = useState(false);
   const [worldSaves, setWorldSaves] = useState<WorldSaveSummary[]>([]);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
+  const [settingsOpen, setSettingsOpen] = useState(false);
   const [agencyShadowLedger, setAgencyShadowLedger] = useState<AgencyShadowLedger>(() => createAgencyShadowLedger());
   const [agencyShadowBranchId, setAgencyShadowBranchId] = useState<string | null>(null);
   const [embodimentObserver, setEmbodimentObserver] = useState<EmbodimentObserverState>(() => createEmbodimentObserverState());
@@ -1027,6 +1073,28 @@ export function App() {
     getAppUpdateState,
     getAppUpdateState,
   );
+  const seaAudioFocused = overlay === 'naval'
+    || overlay === 'trade'
+    || selection?.kind === 'fleet'
+    || selection?.kind === 'seaZone'
+    || selection?.kind === 'tradeCorridor';
+  const dangerAudioFocused = overlay === 'war'
+    || overlay === 'conflict'
+    || overlay === 'disease'
+    || selection?.kind === 'army'
+    || selection?.kind === 'outbreak';
+  const worldWarAmbience = world?.wars.some((war) => war.active) ?? false;
+  const {
+    settings: interfaceSettings,
+    audioState: settingsAudioState,
+    fullscreen,
+    commitSettings: commitInterfaceSettings,
+    toggleFullscreen: handleFullscreen,
+  } = useObserverInterface({
+    seaFocused: seaAudioFocused,
+    dangerFocused: dangerAudioFocused,
+    worldWarAmbience,
+  });
 
   const worldRef = useRef<WorldState | null>(null);
   const worldShellRef = useRef<HTMLElement>(null);
@@ -1046,6 +1114,7 @@ export function App() {
   const primerTriggerRef = useRef<HTMLButtonElement>(null);
   const mobileToolsRef = useRef<HTMLDivElement>(null);
   const mobileToolsTriggerRef = useRef<HTMLButtonElement>(null);
+  const settingsTriggerRef = useRef<HTMLButtonElement>(null);
   const collectionReturnFocusRef = useRef<HTMLElement | null>(null);
   const observerSettingsRef = useRef(observerSettings);
   const advanceRef = useRef<(source: AdvanceSource) => boolean>(() => false);
@@ -1058,6 +1127,7 @@ export function App() {
   const embodimentObserverRef = useRef<EmbodimentObserverState>(embodimentObserver);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
   useEffect(() => startAppUpdateMonitor(), []);
+
   useEffect(() => {
     if (!mobileToolsOpen) return undefined;
     const closeFromOutside = (event: PointerEvent) => {
@@ -1092,6 +1162,10 @@ export function App() {
     archiveOpen,
     mandateOpen,
     observerDeskOpen,
+    settingsOpen,
+    interfaceSettings,
+    audioState: settingsAudioState,
+    fullscreen,
     historyWorkbenchOpen: activeView === 'chronicle',
     situationWorkbenchOpen,
     selectedSituationId,
@@ -1364,8 +1438,8 @@ export function App() {
 
   useEffect(() => {
     if (!worldShellRef.current) return;
-    worldShellRef.current.inert = startOpen || archiveOpen || mandateOpen || observerDeskOpen || situationWorkbenchOpen || collectionOpen || primerOpen || activeView === 'chronicle';
-  }, [activeView, archiveOpen, collectionOpen, mandateOpen, observerDeskOpen, primerOpen, situationWorkbenchOpen, startOpen, world]);
+    worldShellRef.current.inert = startOpen || archiveOpen || mandateOpen || observerDeskOpen || settingsOpen || situationWorkbenchOpen || collectionOpen || primerOpen || activeView === 'chronicle';
+  }, [activeView, archiveOpen, collectionOpen, mandateOpen, observerDeskOpen, primerOpen, settingsOpen, situationWorkbenchOpen, startOpen, world]);
 
   const openWorld = useCallback((
     nextWorld: WorldState,
@@ -1460,6 +1534,7 @@ export function App() {
     setArchiveOpen(false);
     setMandateOpen(false);
     setObserverDeskOpen(false);
+    setSettingsOpen(false);
     setSituationWorkbenchOpen(false);
     setSelectedSituationId(null);
     setResumeSituationAfterEvent(false);
@@ -1585,10 +1660,12 @@ export function App() {
     setSelectedEventId(null);
     setMandateMessage(null);
     setMandateOpen(true);
+    gameAudio.play('open', 0.58);
   }, []);
 
   const handleCloseMandate = useCallback(() => {
     setMandateOpen(false);
+    gameAudio.play('close', 0.48);
     window.setTimeout(() => mandateTriggerRef.current?.focus(), 0);
   }, []);
 
@@ -1672,6 +1749,7 @@ export function App() {
       ? document.activeElement
       : null;
     setCollectionOpen(true);
+    gameAudio.play('open', 0.58);
     setCollectionBusy(true);
     try {
       await refreshWorldSaves();
@@ -1684,6 +1762,7 @@ export function App() {
 
   const handleCloseCollection = useCallback(() => {
     setCollectionOpen(false);
+    gameAudio.play('close', 0.48);
     requestAnimationFrame(() => {
       const trigger = collectionTriggerRef.current
         ?? document.querySelector<HTMLElement>('#open-world-collection');
@@ -1820,6 +1899,7 @@ export function App() {
         // The in-memory world remains intact and can still be exported.
       }
     }
+    setSettingsOpen(false);
     setStartOpen(true);
     setStartError(null);
   }, []);
@@ -1878,6 +1958,7 @@ export function App() {
         next,
       );
       commitEmbodiedObserver(nextEmbodiment);
+      let embodiedActionResolved = false;
       if (queuedEmbodiedAction) {
         const resolution = [...next.facts].reverse().find((fact) => (
           fact.kind === 'embodied_action_resolved'
@@ -1885,6 +1966,7 @@ export function App() {
         ));
         if (resolution?.kind === 'embodied_action_resolved') {
           setToast(resolution.payload.resultSummary);
+          embodiedActionResolved = true;
         }
       }
       if (nextEmbodiment.closure && nextEmbodiment.closure !== embodimentBeforeAdvance.closure) {
@@ -1895,6 +1977,11 @@ export function App() {
         }
       }
       const newEvents = next.history.slice(oldHistoryLength);
+      const historyCue = quarterHistoryCue(newEvents);
+      const turnCue: AudioCue | null = embodiedActionResolved
+        ? 'action_resolve'
+        : historyCue ?? (source === 'manual' ? 'quarter' : null);
+      if (turnCue) gameAudio.play(turnCue, source === 'manual' ? 0.76 : 0.5);
       const pauseCandidates = [
         ...worldToSituationPauseCandidates(next),
         ...newEvents.map(historyEventToPauseCandidate),
@@ -1972,6 +2059,7 @@ export function App() {
         || options.archiveOpen
         || options.mandateOpen
         || options.observerDeskOpen
+        || options.settingsOpen
         || options.situationWorkbenchOpen
         || options.collectionOpen
         || options.historyWorkbenchOpen
@@ -2013,6 +2101,10 @@ export function App() {
     archiveOpen,
     mandateOpen,
     observerDeskOpen,
+    settingsOpen,
+    interfaceSettings,
+    audioState: settingsAudioState,
+    fullscreen,
     historyWorkbenchOpen: activeView === 'chronicle',
     situationWorkbenchOpen,
     selectedSituationId,
@@ -2165,6 +2257,7 @@ export function App() {
       setRunning(false);
       clockAccumulatorRef.current = 0;
       setSelectedEventId(null);
+      gameAudio.play('open', 0.54);
     }
     setActiveView(nextView);
   }, []);
@@ -2175,11 +2268,29 @@ export function App() {
     clockAccumulatorRef.current = 0;
     setSelectedEventId(null);
     setObserverDeskOpen(true);
+    gameAudio.play('open', 0.58);
   }, []);
 
   const handleCloseObserverDesk = useCallback(() => {
     setObserverDeskOpen(false);
+    gameAudio.play('close', 0.48);
     window.setTimeout(() => observerDeskTriggerRef.current?.focus(), 0);
+  }, []);
+
+  const handleOpenSettings = useCallback(() => {
+    runningRef.current = false;
+    setRunning(false);
+    clockAccumulatorRef.current = 0;
+    setSelectedEventId(null);
+    setMobileToolsOpen(false);
+    setSettingsOpen(true);
+    gameAudio.play('open', 0.58);
+  }, []);
+
+  const handleCloseSettings = useCallback(() => {
+    setSettingsOpen(false);
+    gameAudio.play('close', 0.48);
+    window.setTimeout(() => settingsTriggerRef.current?.focus(), 0);
   }, []);
 
   const handleApplyAppUpdate = useCallback(async () => {
@@ -2209,11 +2320,6 @@ export function App() {
 
   const handleResetHistoricalView = useCallback(() => {
     setHistoricalView(null);
-  }, []);
-
-  const handleFullscreen = useCallback(() => {
-    if (document.fullscreenElement) void document.exitFullscreen();
-    else void document.documentElement.requestFullscreen();
   }, []);
 
   const mapRegions = useMemo(() => {
@@ -2345,6 +2451,7 @@ export function App() {
   const handleRosterSelect = useCallback((id: string) => {
     const current = worldRef.current;
     if (!current) return;
+    gameAudio.play('select', 0.48);
     const closeCompactRoster = () => {
       if (window.matchMedia('(max-width: 780px)').matches) setActiveView('world');
     };
@@ -2449,6 +2556,7 @@ export function App() {
       return;
     }
     commitEmbodiedObserver(nextState);
+    gameAudio.play('open', 0.48);
   }, [commitEmbodiedObserver]);
 
   const handleLeaveEmbodiment = useCallback(() => {
@@ -2477,6 +2585,7 @@ export function App() {
       return;
     }
     commitEmbodiedObserver(nextState);
+    gameAudio.play('action_submit', 0.72);
   }, [commitEmbodiedObserver]);
 
   const handleCancelEmbodiedAction = useCallback(() => {
@@ -2736,6 +2845,7 @@ export function App() {
   const activeWarCount = world?.wars.filter((item) => item.active).length ?? 0;
   const livingPolityCount = world?.polities.filter((item) => item.alive).length ?? 0;
   const lowSupplyCount = world?.armies.filter((item) => item.supply < 45 || item.morale < 40).length ?? 0;
+  const guideProgress = observerGuideProgress(observerSettings);
   const currentCollectionSlot = world
     ? worldSaves.find((save) => save.status === 'ready' && save.hash === world.hash)?.slot
     : undefined;
@@ -2762,7 +2872,10 @@ export function App() {
           data-mobile-inspector-mode={inspector ? mobileInspectorExpanded ? 'full' : 'quick' : 'closed'}
           data-map-gesture-active={mapGestureActive || undefined}
           data-focus-open={activeView === 'world' && !historicalView && !inspector || undefined}
-          aria-hidden={startOpen || archiveOpen || mandateOpen || observerDeskOpen || situationWorkbenchOpen || collectionOpen || primerOpen || activeView === 'chronicle' || undefined}
+          data-motion={interfaceSettings.motion}
+          data-interface-density={interfaceSettings.interfaceDensity}
+          data-map-atmosphere={interfaceSettings.mapAtmosphere || undefined}
+          aria-hidden={startOpen || archiveOpen || mandateOpen || observerDeskOpen || settingsOpen || situationWorkbenchOpen || collectionOpen || primerOpen || activeView === 'chronicle' || undefined}
         >
           <TopBar
             title="沧衡纪"
@@ -2809,14 +2922,18 @@ export function App() {
               onLodChange={setMapLod}
               onGestureActivityChange={setMapGestureActive}
               mobileQuickLookOpen={Boolean(inspector) && !mobileInspectorExpanded}
+              season={historicalView?.season ?? world.season}
+              atmosphereEnabled={interfaceSettings.mapAtmosphere}
               onSelectBlank={closeInspectorToMap}
               onSelectRegion={(id) => {
+                gameAudio.play('select', 0.46);
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
                 setSelection({ kind: 'region', id });
                 setActiveView('world');
               }}
               onSelectObject={(kind, id) => {
+                gameAudio.play('select', 0.52);
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
                 if (kind === 'army' || kind === 'fleet') setFocusedArmyId(id);
@@ -2831,18 +2948,20 @@ export function App() {
               <span data-alert={activeWarCount > 0 || undefined}><small>进行中战事</small><strong>{activeWarCount}</strong></span>
             </div>
 
-            <button
-              ref={primerTriggerRef}
-              type="button"
-              className="observer-map-primer-trigger"
-              data-map-primer-trigger="true"
-              onClick={handleOpenMapPrimer}
-              aria-label="打开三步读图导览"
-              title="三步读图"
-            >
-              <MapIcon size={14} strokeWidth={1.6} aria-hidden="true" />
-              <span>读图</span>
-            </button>
+            {guideProgress.completed < guideProgress.total ? (
+              <button
+                ref={primerTriggerRef}
+                type="button"
+                className="observer-map-primer-trigger"
+                data-map-primer-trigger="true"
+                onClick={handleOpenMapPrimer}
+                aria-label="打开三步读图导览"
+                title="三步读图"
+              >
+                <MapIcon size={14} strokeWidth={1.6} aria-hidden="true" />
+                <span>读图</span>
+              </button>
+            ) : null}
 
             <div ref={mobileToolsRef} className="observer-world-tools" data-mobile-more-open={mobileToolsOpen || undefined} aria-label="世界与存档工具">
               <button
@@ -2892,6 +3011,16 @@ export function App() {
                 <Sparkles size={16} aria-hidden="true" />
               </button>
               <button
+                ref={settingsTriggerRef}
+                type="button"
+                data-settings-trigger="true"
+                onClick={handleOpenSettings}
+                aria-label="打开设置"
+                title="设置"
+              >
+                <Settings2 size={16} aria-hidden="true" />
+              </button>
+              <button
                 ref={mobileToolsTriggerRef}
                 type="button"
                 className="observer-world-tools__more"
@@ -2924,9 +3053,6 @@ export function App() {
                   <Download size={16} aria-hidden="true" />
                 </button>
                 <span className="observer-world-tools__rule" aria-hidden="true" />
-                <button type="button" onClick={() => { setMobileToolsOpen(false); handleFullscreen(); }} aria-label="切换全屏，快捷键 F" title="全屏（F）">
-                  <Expand size={16} aria-hidden="true" />
-                </button>
                 <button type="button" onClick={() => { setMobileToolsOpen(false); handleNewWorldMenu(); }} aria-label="返回世界书页" title="新纪、续读或导入">
                   <RotateCcw size={16} aria-hidden="true" />
                 </button>
@@ -3122,6 +3248,17 @@ export function App() {
         appUpdate={appUpdate}
         onCheckUpdate={() => checkForAppUpdate(true)}
         onApplyUpdate={handleApplyAppUpdate}
+      />
+
+      <SettingsPanel
+        open={settingsOpen && Boolean(world)}
+        settings={interfaceSettings}
+        audioState={settingsAudioState}
+        fullscreen={fullscreen}
+        onSettingsChange={commitInterfaceSettings}
+        onToggleFullscreen={handleFullscreen}
+        onClose={handleCloseSettings}
+        returnFocusTo={settingsTriggerRef.current}
       />
 
       <WorldCollectionPanel

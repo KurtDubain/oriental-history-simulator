@@ -881,14 +881,14 @@ async function exerciseMapViewportTouch(context, page) {
     '舆图缩放控件必须位于底部观察坞上方',
   );
   const worldTools = page.locator('.observer-world-tools > button:visible');
-  assert.equal(await worldTools.count(), 4, '移动端常驻工具只保留观察、史册、天意和更多');
+  assert.equal(await worldTools.count(), 5, '移动端常驻工具只保留观察、史册、天意、设置和更多');
   for (let index = 0; index < await worldTools.count(); index += 1) {
     const bounds = await worldTools.nth(index).boundingBox();
     assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, '移动端世界工具至少应为44px');
   }
   await page.locator('.observer-world-tools__more').click();
   const secondaryTools = page.locator('.observer-world-tools__secondary button:visible');
-  assert.equal(await secondaryTools.count(), 5, '更多工具应展开五项低频操作');
+  assert.equal(await secondaryTools.count(), 4, '更多工具应展开四项低频操作，全屏统一归入设置');
   for (let index = 0; index < await secondaryTools.count(); index += 1) {
     const bounds = await secondaryTools.nth(index).boundingBox();
     assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, '展开后的移动端世界工具至少应为44px');

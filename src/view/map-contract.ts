@@ -3,6 +3,13 @@ export interface MapPoint {
   y: number;
 }
 
+export type MapSeason = '春' | '夏' | '秋' | '冬';
+
+export interface MapVisualSettings {
+  season: MapSeason;
+  atmosphere: boolean;
+}
+
 export interface MapRegionView {
   id: string;
   name: string;

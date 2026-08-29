@@ -12,6 +12,7 @@ import type {
   MapRouteView,
   MapSeaZoneView,
   MapSelectedObject,
+  MapVisualSettings,
   MapViewportTransform,
 } from './map-contract';
 import {
@@ -36,6 +37,37 @@ const INK_SOFT = "#5f5b50";
 const VERMILION = "#a33a2e";
 const RIVER = "#65757a";
 const OLIVE = "#66705b";
+
+const DEFAULT_VISUAL_SETTINGS: Readonly<MapVisualSettings> = Object.freeze({
+  season: '春',
+  atmosphere: false,
+});
+
+const SEASON_PALETTE: Readonly<Record<MapVisualSettings['season'], {
+  paperLight: string;
+  paper: string;
+  paperDeep: string;
+  seaLight: string;
+  seaMid: string;
+  seaDeep: string;
+}>> = {
+  春: {
+    paperLight: '#f2eddb', paper: '#e5dfca', paperDeep: '#d3cbb2',
+    seaLight: 'rgba(124, 154, 148, 0.28)', seaMid: 'rgba(103, 140, 140, 0.36)', seaDeep: 'rgba(76, 116, 125, 0.43)',
+  },
+  夏: {
+    paperLight: '#f2ead2', paper: '#e4d9bd', paperDeep: '#d1c3a5',
+    seaLight: 'rgba(111, 148, 146, 0.31)', seaMid: 'rgba(83, 132, 139, 0.40)', seaDeep: 'rgba(58, 104, 119, 0.48)',
+  },
+  秋: {
+    paperLight: '#f3e7cf', paper: '#e6d7b9', paperDeep: '#d2bd98',
+    seaLight: 'rgba(128, 149, 143, 0.28)', seaMid: 'rgba(103, 132, 134, 0.37)', seaDeep: 'rgba(76, 108, 117, 0.44)',
+  },
+  冬: {
+    paperLight: '#efede2', paper: '#dfe0d5', paperDeep: '#c9cec8',
+    seaLight: 'rgba(127, 151, 153, 0.28)', seaMid: 'rgba(100, 133, 141, 0.37)', seaDeep: 'rgba(69, 105, 121, 0.46)',
+  },
+};
 
 interface GeographicLink {
   from: MapRegionView;
@@ -266,7 +298,17 @@ function applySmoothOpenPath(
   context.lineTo(last.x, last.y);
 }
 
-function drawPaper(context: CanvasRenderingContext2D, width: number, height: number) {
+function drawPaper(
+  context: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  visuals: MapVisualSettings,
+) {
+  const palette = visuals.atmosphere ? SEASON_PALETTE[visuals.season] : {
+    paperLight: PAPER_LIGHT,
+    paper: PAPER,
+    paperDeep: '#d7cdb6',
+  };
   const glow = context.createRadialGradient(
     width * 0.48,
     height * 0.42,
@@ -275,9 +317,9 @@ function drawPaper(context: CanvasRenderingContext2D, width: number, height: num
     height * 0.42,
     Math.max(width, height) * 0.72,
   );
-  glow.addColorStop(0, PAPER_LIGHT);
-  glow.addColorStop(0.64, PAPER);
-  glow.addColorStop(1, "#d7cdb6");
+  glow.addColorStop(0, palette.paperLight);
+  glow.addColorStop(0.64, palette.paper);
+  glow.addColorStop(1, palette.paperDeep);
   context.fillStyle = glow;
   context.fillRect(0, 0, width, height);
 
@@ -298,11 +340,17 @@ function drawSeaField(
   width: number,
   height: number,
   _transform: MapViewportTransform,
+  visuals: MapVisualSettings,
 ) {
+  const palette = visuals.atmosphere ? SEASON_PALETTE[visuals.season] : {
+    seaLight: 'rgba(126, 151, 151, 0.28)',
+    seaMid: 'rgba(105, 139, 143, 0.35)',
+    seaDeep: 'rgba(76, 117, 128, 0.43)',
+  };
   const sea = context.createLinearGradient(0, 0, width, height);
-  sea.addColorStop(0, "rgba(126, 151, 151, 0.28)");
-  sea.addColorStop(0.48, "rgba(105, 139, 143, 0.35)");
-  sea.addColorStop(1, "rgba(76, 117, 128, 0.43)");
+  sea.addColorStop(0, palette.seaLight);
+  sea.addColorStop(0.48, palette.seaMid);
+  sea.addColorStop(1, palette.seaDeep);
   context.save();
   context.fillStyle = sea;
   context.fillRect(0, 0, width, height);
@@ -329,15 +377,21 @@ function drawSeaMarks(
   _transform: MapViewportTransform,
 ) {
   context.save();
-  context.strokeStyle = "rgba(235, 239, 224, 0.2)";
-  context.lineWidth = 0.75;
-  const spacing = Math.max(43, Math.min(width, height) * 0.095);
-  for (let y = spacing * 0.55; y < height; y += spacing) {
-    for (let x = spacing * 0.35; x < width; x += spacing) {
-      const shift = ((Math.round(y) * 7 + Math.round(x)) % 19) - 9;
+  context.lineWidth = 0.7;
+  const spacing = Math.max(51, Math.min(width, height) * 0.112);
+  let row = 0;
+  for (let y = spacing * 0.48; y < height; y += spacing, row += 1) {
+    let column = 0;
+    for (let x = spacing * 0.32; x < width; x += spacing, column += 1) {
+      const pattern = hashString(`${row}:${column}`);
+      if (pattern % 100 >= 58) continue;
+      const shift = ((pattern >>> 8) % 23) - 11;
+      const lift = ((pattern >>> 14) % 11) - 5;
+      const radius = 5.5 + ((pattern >>> 19) % 5);
+      context.strokeStyle = `rgba(235, 239, 224, ${0.12 + ((pattern >>> 23) % 8) / 100})`;
       context.beginPath();
-      context.arc(x + shift, y, 7, Math.PI * 1.06, Math.PI * 1.93);
-      context.arc(x + shift + 13, y, 7, Math.PI * 1.06, Math.PI * 1.93);
+      context.arc(x + shift, y + lift, radius, Math.PI * 1.08, Math.PI * 1.9);
+      context.arc(x + shift + radius * 1.72, y + lift, radius, Math.PI * 1.08, Math.PI * 1.9);
       context.stroke();
     }
   }
@@ -351,8 +405,8 @@ function drawLandFoundation(
 ) {
   context.save();
   context.lineJoin = "round";
-  context.shadowColor = "rgba(28, 47, 49, 0.2)";
-  context.shadowBlur = Math.min(12, Math.max(3, 8 * transform.scale));
+  context.shadowColor = "rgba(28, 47, 49, 0.14)";
+  context.shadowBlur = Math.min(7, Math.max(2, 4.5 * transform.scale));
   for (const shape of [...profile.landShapes, ...profile.decorativeIslets]) {
     context.beginPath();
     applyLinePath(context, shape.polygon, transform);
@@ -360,7 +414,7 @@ function drawLandFoundation(
     context.fillStyle = "role" in shape && shape.role === "mainland" ? "#d8d0b4" : "#d4ccb0";
     context.fill();
     context.strokeStyle = "rgba(242, 235, 214, 0.95)";
-    context.lineWidth = Math.min(9, Math.max(2.6, 9 * transform.scale));
+    context.lineWidth = Math.min(5.8, Math.max(2.2, 5.4 * transform.scale));
     context.stroke();
   }
   context.restore();
@@ -379,10 +433,10 @@ function drawGeographicContours(
     applyLinePath(context, shape.polygon, transform);
     context.closePath();
     context.strokeStyle = "rgba(249, 243, 224, 0.78)";
-    context.lineWidth = Math.min(4.5, Math.max(2.2, 4.5 * transform.scale));
+    context.lineWidth = Math.min(3, Math.max(1.8, 2.8 * transform.scale));
     context.stroke();
     context.strokeStyle = "rgba(36, 48, 45, 0.72)";
-    context.lineWidth = Math.min(1.8, Math.max(0.85, 1.5 * transform.scale));
+    context.lineWidth = Math.min(1.25, Math.max(0.75, 1.08 * transform.scale));
     context.stroke();
   }
 
@@ -602,6 +656,7 @@ function drawFleets(
     const selected = selectedObject?.kind === "fleet" && selectedObject.id === fleet.id;
     context.save();
     context.translate(point.x, point.y);
+    if (selected) drawSelectionHalo(context, 11);
     context.fillStyle = PAPER_LIGHT;
     context.strokeStyle = selected ? VERMILION : fleet.polityColor ?? RIVER;
     context.lineWidth = selected ? 2.1 : 1.4;
@@ -635,6 +690,7 @@ function drawMarkers(
     const radius = selected ? 8 : 5 + clamp(marker.magnitude / 100) * 3;
     context.save();
     context.translate(point.x, point.y);
+    if (selected) drawSelectionHalo(context, radius + 3);
     context.strokeStyle = marker.kind === "outbreak" ? VERMILION : OLIVE;
     context.fillStyle = marker.kind === "outbreak" ? "rgba(163, 58, 46, 0.12)" : "rgba(102, 112, 91, 0.13)";
     context.lineWidth = selected ? 2.1 : 1.2;
@@ -654,55 +710,14 @@ function drawMarkers(
   }
 }
 
-function nearestRiverCourse(
-  candidates: readonly MapRegionView[],
-  waypoints: readonly MapPoint[],
-) {
-  const used = new Set<string>();
-  const result: MapPoint[] = [];
-  let lastX = -Infinity;
-  for (const waypoint of waypoints) {
-    const nearest = candidates
-      .filter((region) => (
-        !used.has(region.id)
-        && region.center.x > lastX + 12
-        && Math.abs(region.center.x - waypoint.x) <= 105
-        && Math.abs(region.center.y - waypoint.y) <= 92
-      ))
-      .map((region) => ({
-        region,
-        distance: Math.hypot(
-          (region.center.x - waypoint.x) * 1.1,
-          (region.center.y - waypoint.y) * 1.45,
-        ),
-      }))
-      .filter((entry) => entry.distance < 150)
-      .sort((left, right) => left.distance - right.distance)[0]?.region;
-    if (!nearest) continue;
-    used.add(nearest.id);
-    result.push(nearest.center);
-    lastX = nearest.center.x;
-  }
-  return result;
-}
-
 function drawMajorRiverSystems(
   context: CanvasRenderingContext2D,
-  regions: readonly MapRegionView[],
-  routes: readonly MapRouteView[],
   transform: MapViewportTransform,
   compactMap: boolean,
   profile: MapPresentationDefinition,
 ) {
-  const candidateIds = new Set<string>();
-  routes.forEach((route) => {
-    if (route.type.toLowerCase() !== "river") return;
-    candidateIds.add(route.from);
-    candidateIds.add(route.to);
-  });
-  const candidates = regions.filter((region) => candidateIds.has(region.id));
   const courses = profile.riverGuides
-    .map((guide) => ({ points: nearestRiverCourse(candidates, guide.waypoints), label: guide.label }))
+    .map((guide) => ({ points: [...guide.waypoints], label: guide.label }))
     .filter((course) => course.points.length >= 4);
   for (const course of courses) {
     context.save();
@@ -716,14 +731,21 @@ function drawMajorRiverSystems(
     context.lineJoin = "round";
     context.beginPath();
     applySmoothOpenPath(context, course.points, transform);
-    context.strokeStyle = "rgba(47, 87, 96, 0.17)";
-    context.lineWidth = compactMap ? 2.2 : 3.2;
+    context.strokeStyle = "rgba(239, 233, 216, 0.72)";
+    context.lineWidth = compactMap ? 2.2 : 3;
     context.stroke();
     context.beginPath();
     applySmoothOpenPath(context, course.points, transform);
-    context.strokeStyle = "rgba(66, 110, 119, 0.78)";
-    context.lineWidth = compactMap ? 0.8 : 1.25;
+    context.strokeStyle = "rgba(61, 105, 114, 0.82)";
+    context.lineWidth = compactMap ? 0.78 : 1.18;
     context.stroke();
+    if (!compactMap) {
+      context.beginPath();
+      applySmoothOpenPath(context, course.points, transform);
+      context.strokeStyle = "rgba(218, 235, 228, 0.68)";
+      context.lineWidth = 0.42;
+      context.stroke();
+    }
     context.restore();
 
     if (compactMap) continue;
@@ -737,6 +759,23 @@ function drawMajorRiverSystems(
     context.fillText(course.label, labelPoint.x, labelPoint.y - 5);
     context.restore();
   }
+}
+
+function drawSelectionHalo(context: CanvasRenderingContext2D, radius: number) {
+  context.save();
+  context.beginPath();
+  context.arc(0, 0, radius + 2.6, 0, Math.PI * 2);
+  context.strokeStyle = 'rgba(247, 241, 224, 0.92)';
+  context.lineWidth = 3.4;
+  context.stroke();
+  context.beginPath();
+  context.arc(0, 0, radius + 1.5, 0, Math.PI * 2);
+  context.strokeStyle = VERMILION;
+  context.lineWidth = 1.7;
+  context.shadowColor = 'rgba(163, 58, 46, 0.25)';
+  context.shadowBlur = 5;
+  context.stroke();
+  context.restore();
 }
 
 function clusterMountainRegions(regions: readonly MapRegionView[]) {
@@ -1075,6 +1114,7 @@ export function drawWorldMap(
   hoveredRegionId: string | undefined,
   camera: MapCamera,
   focusOffset: MapPoint = { x: 0, y: 0 },
+  visualSettings: MapVisualSettings = DEFAULT_VISUAL_SETTINGS,
 ) {
   const {
     regions,
@@ -1112,8 +1152,8 @@ export function drawWorldMap(
   const maxPopulation = Math.max(1, ...regions.map((region) => region.population));
   const geography = deriveGeography(regions, routes, profile);
 
-  drawPaper(context, width, height);
-  drawSeaField(context, width, height, transform);
+  drawPaper(context, width, height, visualSettings);
+  drawSeaField(context, width, height, transform, visualSettings);
   drawSeaMarks(context, width, height, transform);
   drawSeaZones(context, renderedSeaZones, transform, overlay, selectedObject);
   drawLandFoundation(context, transform, profile);
@@ -1133,7 +1173,7 @@ export function drawWorldMap(
     context.fill(path);
     context.globalAlpha = 1;
     context.strokeStyle = "rgba(41, 43, 39, 0.34)";
-    context.lineWidth = 0.65;
+    context.lineWidth = scene.level === 'overview' ? 0.38 : scene.level === 'regional' ? 0.55 : 0.7;
     context.stroke(path);
     context.restore();
   });
@@ -1174,7 +1214,7 @@ export function drawWorldMap(
     context.globalAlpha = 1;
   });
 
-  drawMajorRiverSystems(context, regions, routes, transform, compactMap, profile);
+  drawMajorRiverSystems(context, transform, compactMap, profile);
   drawSeaGeography(context, renderedSeaZones, routes, regions, transform, compactMap);
 
   drawFlows(context, flows, transform, selectedObject);
@@ -1209,10 +1249,17 @@ export function drawWorldMap(
       const path = makeRegionPath(region, transform);
       context.save();
       clipToRegionCoast(context, region, transform, profile);
-      context.strokeStyle = VERMILION;
-      context.lineWidth = selected ? 2.2 : 1.35;
-      context.shadowColor = "rgba(163, 58, 46, 0.34)";
-      context.shadowBlur = selected ? 8 : 4;
+      if (selected) {
+        context.fillStyle = 'rgba(163, 58, 46, 0.055)';
+        context.fill(path);
+        context.strokeStyle = 'rgba(247, 241, 224, 0.94)';
+        context.lineWidth = 4.2;
+        context.stroke(path);
+      }
+      context.strokeStyle = selected ? VERMILION : 'rgba(43, 48, 43, 0.72)';
+      context.lineWidth = selected ? 2 : 1.2;
+      context.shadowColor = selected ? "rgba(163, 58, 46, 0.28)" : 'rgba(244, 238, 223, 0.42)';
+      context.shadowBlur = selected ? 6 : 3;
       context.stroke(path);
       context.restore();
     }
@@ -1241,6 +1288,12 @@ export function drawWorldMap(
     const selected = selectedObject?.kind === "army" && selectedObject.id === army.id;
 
     context.save();
+    if (selected) {
+      context.save();
+      context.translate(x, y);
+      drawSelectionHalo(context, radius + 2);
+      context.restore();
+    }
     if (compactMap) {
       context.fillStyle = PAPER_LIGHT;
       context.beginPath();
@@ -1279,6 +1332,6 @@ export function drawWorldMap(
   drawFleets(context, fleets, transform, selectedObject);
 
   context.restore();
-  drawLegend(context, width, height, overlay, regions);
-  drawCompass(context, width);
+  if (width >= 720) drawLegend(context, width, height, overlay, regions);
+  if (width >= 1080) drawCompass(context, width);
 }
