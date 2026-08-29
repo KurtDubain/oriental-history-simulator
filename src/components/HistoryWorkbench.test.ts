@@ -17,10 +17,14 @@ describe('HistoryWorkbench shell', () => {
 
     const openMarkup = renderToStaticMarkup(createElement(HistoryWorkbench, { ...props, open: true }));
     expect(openMarkup).toContain('role="dialog"');
-    expect(openMarkup).toContain('历史工作台');
+    expect(openMarkup).toContain('data-history-layer="chronicle"');
+    expect(openMarkup).toContain('长期史册');
+    expect(openMarkup).toContain('天下史册');
     expect(openMarkup).toContain('type="search"');
     expect(openMarkup).toContain('type="range"');
     expect(openMarkup).toContain('历史事件检索结果');
+    expect(openMarkup).toContain('为何如此');
+    expect(openMarkup).not.toContain('查明因果');
 
     const closedMarkup = renderToStaticMarkup(createElement(HistoryWorkbench, { ...props, open: false }));
     expect(closedMarkup).toBe('');

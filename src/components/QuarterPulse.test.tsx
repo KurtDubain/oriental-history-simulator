@@ -98,10 +98,13 @@ describe('QuarterPulse Situation stream', () => {
     }));
 
     expect(markup.match(/data-testid="quarter-pulse-situation"/g)).toHaveLength(2);
+    expect(markup).toContain('data-history-layer="quarter"');
     expect(markup).toContain('data-situation-id="situation-heated"');
     expect(markup).toContain('data-kind="resolved"');
-    expect(markup).toContain('打开局势全卷');
+    expect(markup).toContain('打开持续局势');
     expect(markup).toContain('data-event-id="event-ordinary"');
+    expect(markup).toContain('为何如此');
+    expect(markup).not.toContain('何故 ›');
     expect(markup.indexOf('situation-heated')).toBeLessThan(markup.indexOf('event-ordinary'));
   });
 
@@ -138,6 +141,7 @@ describe('QuarterPulse Situation stream', () => {
     }));
 
     expect(markup).toContain('data-testid="quarter-pulse-quiet"');
+    expect(markup).toContain('data-history-layer="quarter"');
     expect(markup).toContain('本季无大事');
   });
 });

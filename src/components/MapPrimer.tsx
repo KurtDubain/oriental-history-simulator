@@ -56,8 +56,8 @@ export const MAP_PRIMER_STEPS: readonly PrimerStepDefinition[] = [
     id: 'history',
     eyebrow: '第三眼 · 因果',
     title: '让世界走过一季',
-    description: '推进后，底部史册会记下本季变化。不要只看结果，打开“为什么”追到粮食、人物与旧事。',
-    reading: '地图回答“哪里变了”，史册回答“发生什么”，因果链回答“为何如此”。',
+    description: '推进后，底部史册会记下本季变化。不要只看结果，打开“为何如此”追到粮食、人物与旧事。',
+    reading: '地图回答“哪里变了”，史册回答“发生什么”，何故与证据回答“为何如此”。',
     action: '推进一季',
   },
 ] as const;
@@ -118,7 +118,7 @@ function PrimerMapDiagram({ step }: { step: MapPrimerStep }) {
           <circle cx="362" cy="206" r="8" />
           <text x="83" y="233">地图异动</text>
           <text x="211" y="233">季度史事</text>
-          <text x="347" y="233">为什么</text>
+          <text x="341" y="233">为何如此</text>
         </g>
       </svg>
       <figcaption>{step === 'terrain' ? '地势底图' : step === 'situation' ? '疆界与节点' : '变化的阅读顺序'}</figcaption>
@@ -211,7 +211,7 @@ export function MapPrimer({
   };
 
   const primaryLabel = currentStep === 'history' && historyAdvanced
-    ? (onOpenWhy ? '打开“为什么”' : '完成导览')
+    ? (onOpenWhy ? '打开“为何如此”' : '完成导览')
     : step.action;
 
   return (
@@ -270,7 +270,7 @@ export function MapPrimer({
           <p className="map-primer__reading"><Eye size={14} strokeWidth={1.6} aria-hidden="true" />{step.reading}</p>
           {currentStep === 'history' && historyAdvanced ? (
             <p className="map-primer__advanced" role="status">
-              <ScrollText size={15} aria-hidden="true" />一季已过。现在沿底部史册打开一条记载，查看它的“为什么”。
+              <ScrollText size={15} aria-hidden="true" />一季已过。现在沿底部史册打开一条记载，查看它“为何如此”。
             </p>
           ) : null}
         </section>

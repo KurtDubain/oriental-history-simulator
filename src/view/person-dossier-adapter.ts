@@ -83,25 +83,6 @@ function biographySource(
     : null;
 }
 
-function coActorNames(world: WorldState, item: CharacterState, event: HistoryEvent): string | null {
-  const names = event.actorIds
-    .filter((actorId) => actorId !== item.id)
-    .map((actorId) => character(world, actorId)?.name)
-    .filter((name): name is string => Boolean(name));
-  if (!names.length) return null;
-  return `${names.slice(0, 3).join('、')}${names.length > 3 ? '等人' : ''}`;
-}
-
-function biographySummary(world: WorldState, item: CharacterState, fact: BiographyFact, event: HistoryEvent): string {
-  const others = coActorNames(world, item, event);
-  return `${item.name}卷中记为「${fact.kind}」，见于「${event.title}」${others ? `；同卷人物还有${others}` : ''}。`;
-}
-
-function relatedEventSummary(world: WorldState, item: CharacterState, event: HistoryEvent): string {
-  const others = coActorNames(world, item, event);
-  return `${item.name}直接卷入「${event.title}」${others ? `；同卷人物还有${others}` : ''}。`;
-}
-
 function appointmentSummary(world: WorldState, item: CharacterState, fact: Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }>): string {
   const owner = polity(world, fact.payload.polityId)?.name ?? '所属政权';
   const scope = fact.payload.armyId
@@ -142,14 +123,18 @@ export function toPersonExperienceRecords(world: WorldState, item: CharacterStat
     entries.push({
       turn: fact.turn,
       record: {
+        ...(source.event ? eventArchiveRecord(source.event) : {
+          id: fact.id,
+          date: turnLabel(fact.turn),
+          title: fact.kind,
+          summary: fact.summary,
+          eventId: null,
+          importance: fact.importance,
+        }),
+        // Biography rows are the person's index into a canonical event, not a
+        // second account of that event. Keep the biography identity for stable
+        // dossier ordering while reusing the event title and summary verbatim.
         id: fact.id,
-        date: turnLabel(fact.turn),
-        title: fact.kind,
-        summary: source.event
-          ? biographySummary(world, item, fact, source.event)
-          : fact.summary,
-        eventId: fact.eventId,
-        importance: fact.importance,
       },
     });
   }
@@ -158,10 +143,7 @@ export function toPersonExperienceRecords(world: WorldState, item: CharacterStat
     if (!event.actorIds.includes(item.id) || knownEventIds.has(event.id)) continue;
     entries.push({
       turn: event.turn,
-      record: {
-        ...eventArchiveRecord(event),
-        summary: relatedEventSummary(world, item, event),
-      },
+      record: eventArchiveRecord(event),
     });
     knownEventIds.add(event.id);
     for (const sourceFactId of event.sourceFactIds) knownFactIds.add(sourceFactId);

@@ -151,11 +151,16 @@ export function HistoricalArchive({
   const KindIcon = KIND_ICON[dossier.kind];
 
   return (
-    <div className="history-archive-layer">
+    <div
+      className="history-archive-layer"
+      data-history-layer="entity"
+      data-history-scope={dossier.kind}
+      data-history-scope-id={dossier.id}
+    >
       <button
         type="button"
         className="history-archive-layer__backdrop"
-        aria-label="合上史卷"
+        aria-label="关闭当前史卷"
         tabIndex={-1}
         onClick={onClose}
       />
@@ -173,7 +178,7 @@ export function HistoricalArchive({
             <h2 id={titleId}>{dossier.title}</h2>
             <p>{dossier.subtitle}</p>
           </div>
-          <button ref={closeRef} type="button" onClick={onClose} aria-label={`合上${dossier.title}史卷`}>
+          <button ref={closeRef} type="button" onClick={onClose} aria-label={`关闭${dossier.title}`}>
             <X size={20} aria-hidden="true" />
           </button>
         </header>
@@ -189,36 +194,20 @@ export function HistoricalArchive({
 
         <div className="history-archive__scroll">
           <main className="history-archive__article">
-            <p className="history-archive__lead">{dossier.lead}</p>
-
-            {dossier.chapters.map((chapter, index) => (
-              <section key={chapter.id} aria-labelledby={`archive-chapter-${chapter.id}`}>
-                <div className="history-archive__chapter-mark" aria-hidden="true">
-                  {String(index + 1).padStart(2, '0')}
-                </div>
-                <div>
-                  <h3 id={`archive-chapter-${chapter.id}`}>{chapter.title}</h3>
-                  {chapter.paragraphs.map((paragraph, paragraphIndex) => (
-                    <p key={`${chapter.id}-${paragraphIndex}`}>{paragraph}</p>
-                  ))}
-                </div>
-              </section>
-            ))}
-
             <section className="history-archive__chronology" aria-labelledby="archive-chronology-title">
               <div className="history-archive__chapter-mark" aria-hidden="true"><ScrollText size={15} /></div>
               <div>
-                <h3 id="archive-chronology-title">纪年</h3>
+                <h3 id="archive-chronology-title">纪年 · 截至本季</h3>
                 {dossier.records.length ? (
                   <ol>
                     {dossier.records.map((record) => (
-                      <li key={record.id} data-major={record.importance >= 4 || undefined}>
+                      <li key={record.id} data-major={record.importance >= 4 || undefined} data-history-entry-id={record.id}>
                         <span>{record.date}</span>
                         {record.eventId && onSelectEvent ? (
-                          <button type="button" onClick={() => onSelectEvent(record.eventId!)}>
+                          <button type="button" data-event-id={record.eventId} onClick={() => onSelectEvent(record.eventId!)}>
                             <strong>{record.title}</strong>
                             <small>{record.summary}</small>
-                            <span className="history-archive__cause"><GitBranch size={12} aria-hidden="true" />查明因果</span>
+                            <span className="history-archive__cause"><GitBranch size={12} aria-hidden="true" />为何如此</span>
                           </button>
                         ) : (
                           <div>
@@ -234,6 +223,22 @@ export function HistoricalArchive({
                 )}
               </div>
             </section>
+
+            <p className="history-archive__lead">{dossier.lead}</p>
+
+            {dossier.chapters.map((chapter, index) => (
+              <section key={chapter.id} aria-labelledby={`archive-chapter-${chapter.id}`}>
+                <div className="history-archive__chapter-mark" aria-hidden="true">
+                  {String(index + 1).padStart(2, '0')}
+                </div>
+                <div>
+                  <h3 id={`archive-chapter-${chapter.id}`}>{chapter.title}</h3>
+                  {chapter.paragraphs.map((paragraph, paragraphIndex) => (
+                    <p key={`${chapter.id}-${paragraphIndex}`}>{paragraph}</p>
+                  ))}
+                </div>
+              </section>
+            ))}
           </main>
 
           <aside className="history-archive__index" aria-label="相关人物与势力">
@@ -242,7 +247,12 @@ export function HistoricalArchive({
               <ul>
                 {dossier.links.map((link) => (
                   <li key={`${link.kind}-${link.id}`}>
-                    <button type="button" onClick={() => onSelectEntity?.(link.kind, link.id)}>
+                    <button
+                      type="button"
+                      data-entity-kind={link.kind}
+                      data-entity-id={link.id}
+                      onClick={() => onSelectEntity?.(link.kind, link.id)}
+                    >
                       <strong>{link.label}</strong>
                       <small>{link.detail}</small>
                       <ChevronRight size={14} aria-hidden="true" />

@@ -128,12 +128,16 @@ export function SituationWorkbench({
   const directoryItems = [...projection.open, ...projection.recentResolved];
 
   return (
-    <div className="situation-workbench-layer">
+    <div
+      className="situation-workbench-layer"
+      data-history-layer="situation"
+      data-situation-id={detail.id}
+    >
       <button
         type="button"
         className="situation-workbench-layer__backdrop"
         tabIndex={-1}
-        aria-label="关闭局势全卷"
+        aria-label="关闭持续局势"
         onClick={onClose}
       />
       <section
@@ -149,9 +153,9 @@ export function SituationWorkbench({
         <header className="situation-workbench__masthead">
           <span className="situation-workbench__seal" aria-hidden="true"><ScrollText size={20} /></span>
           <div>
-            <span>当世局势 · 事实卷宗</span>
-            <strong>局势全卷</strong>
-            <small id={descriptionId}>读势、查证，再展开推演审计。</small>
+            <span>跨季追踪 · 事实卷宗</span>
+            <strong>持续局势</strong>
+            <small id={descriptionId}>先看眼下局面，再沿着转折查清前因后果。</small>
           </div>
           <button
             type="button"
@@ -161,7 +165,7 @@ export function SituationWorkbench({
           >
             <ListTree size={16} aria-hidden="true" />切换局势<ChevronDown size={14} aria-hidden="true" />
           </button>
-          <button type="button" className="situation-workbench__close" onClick={onClose} aria-label="关闭局势全卷">
+          <button type="button" className="situation-workbench__close" onClick={onClose} aria-label="关闭持续局势">
             <X size={20} aria-hidden="true" />
           </button>
         </header>
@@ -182,6 +186,7 @@ export function SituationWorkbench({
                   ) : null}
                   <button
                     type="button"
+                    data-situation-id={item.id}
                     data-selected={item.id === projection.selectedId || undefined}
                     aria-current={item.id === projection.selectedId ? 'true' : undefined}
                     onClick={() => onSelectSituation(item.id)}
@@ -275,19 +280,19 @@ export function SituationWorkbench({
             <section className="situation-workbench__timeline" aria-labelledby={`${titleId}-timeline`}>
               <div className="situation-workbench__section-heading">
                 <FileClock size={15} aria-hidden="true" />
-                <h3 id={`${titleId}-timeline`}>历史转折</h3>
+                <h3 id={`${titleId}-timeline`}>局势沿革</h3>
                 <span>保留 {detail.timeline.length} 条</span>
               </div>
               <ol>
                 {detail.timeline.map((entry) => (
-                  <li key={entry.id} data-kind={entry.kind}>
+                  <li key={entry.id} data-kind={entry.kind} data-history-entry-id={entry.id}>
                     <time>{entry.dateLabel}</time>
                     <div>
                       <strong>{entry.label}{entry.phaseLabel ? ` · ${entry.phaseLabel}` : ''}</strong>
                       <p>{entry.summary}</p>
                       {entry.historyEventIds[0] ? (
-                        <button type="button" onClick={() => onSelectHistoryEvent(entry.historyEventIds[0])}>
-                          <GitBranch size={13} aria-hidden="true" />查明因果
+                        <button type="button" data-event-id={entry.historyEventIds[0]} onClick={() => onSelectHistoryEvent(entry.historyEventIds[0])}>
+                          <GitBranch size={13} aria-hidden="true" />为何如此
                         </button>
                       ) : <small>只有事实凭证，尚无独立史册条目</small>}
                     </div>
@@ -317,7 +322,7 @@ export function SituationWorkbench({
             ) : null}
 
             <details className="situation-workbench__evidence">
-              <summary><GitBranch size={15} aria-hidden="true" /><span>历史凭证</span><small>{detail.evidence.length} 条事实</small></summary>
+              <summary><GitBranch size={15} aria-hidden="true" /><span>所据史实</span><small>{detail.evidence.length} 条记录</small></summary>
               <div className="situation-workbench__drivers">
                 {detail.publicDrivers.map((driver) => (
                   <p key={driver.key} data-direction={driver.direction}>
@@ -328,7 +333,7 @@ export function SituationWorkbench({
               </div>
               <ol className="situation-workbench__fact-list">
                 {detail.evidence.map((fact) => (
-                  <li key={fact.id}>
+                  <li key={fact.id} data-history-entry-id={fact.id}>
                     <time>{fact.dateLabel}</time>
                     <div>
                       <span>{fact.kindLabel}</span>
@@ -345,8 +350,8 @@ export function SituationWorkbench({
                         </dl>
                       ) : null}
                       {fact.historyEventIds[0] ? (
-                        <button type="button" onClick={() => onSelectHistoryEvent(fact.historyEventIds[0])}>
-                          <GitBranch size={13} aria-hidden="true" />打开相关史事
+                        <button type="button" data-event-id={fact.historyEventIds[0]} onClick={() => onSelectHistoryEvent(fact.historyEventIds[0])}>
+                          <GitBranch size={13} aria-hidden="true" />为何如此
                         </button>
                       ) : null}
                     </div>
@@ -356,7 +361,7 @@ export function SituationWorkbench({
             </details>
 
             <details className="situation-workbench__audit">
-              <summary><ListTree size={15} aria-hidden="true" /><span>推演底账</span><small>详细数据 · 默认折叠</small></summary>
+              <summary><ListTree size={15} aria-hidden="true" /><span>推演底账</span><small>演化依据 · 默认收起</small></summary>
               <div>
                 <p>{detail.audit.randomness}</p>
                 <dl>

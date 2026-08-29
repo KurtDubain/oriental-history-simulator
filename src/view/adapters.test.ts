@@ -612,7 +612,7 @@ describe('person Agency dossier', () => {
 });
 
 describe('person experience attribution', () => {
-  it('drops a biography row linked to somebody else and makes shared-event attribution explicit', () => {
+  it('drops a biography row linked to somebody else and reuses the canonical shared event account', () => {
     const world = advanceWorldBy(createWorld('人物经历归属'), 8);
     const sourceEvent = world.history.find((event) => (
       event.actorIds.length > 0 && event.actorIds.length < world.characters.length
@@ -664,8 +664,11 @@ describe('person experience attribution', () => {
     };
     participant.biography.push(sharedBiography);
     const projected = toPersonExperienceRecords(world, participant).find((record) => record.id === sharedBiography.id);
-    expect(projected?.summary).toBe(`${participant.name}卷中记为「${sharedBiography.kind}」，见于「${sharedEvent.title}」；同卷人物还有${stranger.name}。`);
-    expect(projected?.summary.startsWith(stranger.name)).toBe(false);
+    expect(projected).toMatchObject({
+      title: sharedEvent.title,
+      summary: sharedEvent.summary,
+      eventId: sharedEvent.id,
+    });
 
     const misleadingPrimaryEvent = {
       ...sharedEvent,
@@ -686,8 +689,8 @@ describe('person experience attribution', () => {
     };
     participant.biography.push(misleadingPrimaryBiography);
     const safePrimary = toPersonExperienceRecords(world, participant).find((record) => record.id === misleadingPrimaryBiography.id);
-    expect(safePrimary?.summary.startsWith(participant.name)).toBe(true);
-    expect(safePrimary?.summary).not.toBe(misleadingPrimaryEvent.summary);
+    expect(safePrimary?.title).toBe(misleadingPrimaryEvent.title);
+    expect(safePrimary?.summary).toBe(misleadingPrimaryEvent.summary);
 
     const eventOnly = {
       ...sharedEvent,
@@ -696,7 +699,8 @@ describe('person experience attribution', () => {
     };
     world.history.push(eventOnly);
     const eventOnlyRecord = toPersonExperienceRecords(world, participant).find((record) => record.id === eventOnly.id);
-    expect(eventOnlyRecord?.summary).toBe(`${participant.name}直接卷入「${eventOnly.title}」；同卷人物还有${stranger.name}。`);
+    expect(eventOnlyRecord?.title).toBe(eventOnly.title);
+    expect(eventOnlyRecord?.summary).toBe(eventOnly.summary);
   });
 
   it('keeps genuine deputy, appointment and marriage records from a fixed natural world', () => {

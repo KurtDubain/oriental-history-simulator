@@ -47,7 +47,7 @@ export function ObserverLeads({
       <header className="observer-leads__header">
         <span className="observer-leads__seal" aria-hidden="true"><ScrollText size={16} strokeWidth={1.6} /></span>
         <div>
-          <span>现在看什么</span>
+          <span>观察线索 · 现在看什么</span>
           <h2 id="observer-leads-title">当世三问</h2>
           <small>一人 · 一国 · 一条矛盾</small>
         </div>
@@ -56,7 +56,8 @@ export function ObserverLeads({
             type="button"
             className="observer-leads__situation-shortcut"
             data-situation-workbench-trigger="true"
-            aria-label={`展开局势全卷，共${situationCount}条可阅局势`}
+            data-history-destination="situation"
+            aria-label={`查看持续局势，共${situationCount}条可阅局势`}
             onClick={() => onOpenSituations()}
           >
             {situationCount} 条局势

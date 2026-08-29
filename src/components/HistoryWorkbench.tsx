@@ -55,7 +55,7 @@ export interface HistoryWorkbenchProps {
   onSelectEvent: (eventId: string) => void;
   onTurnChange: (turn: number, view: HistoricalTerritoryView) => void;
   onClose: () => void;
-  /** Called by “归还当下”; the parent can clear its map territory overlay. */
+  /** Called by “回到当下”; the parent can clear its map territory overlay. */
   onReset: () => void;
   returnFocusTo?: HTMLElement | null;
 }
@@ -226,12 +226,17 @@ export function HistoryWorkbench({
   const isHistorical = selectedTurn !== world.turn;
 
   return (
-    <div className="history-workbench-layer">
+    <div
+      className="history-workbench-layer"
+      data-history-layer="chronicle"
+      data-history-scope="world"
+      data-selected-turn={selectedTurn}
+    >
       <button
         type="button"
         className="history-workbench-layer__backdrop"
         tabIndex={-1}
-        aria-label="关闭历史工作台"
+        aria-label="关闭天下史册"
         onClick={onClose}
       />
       <section
@@ -246,11 +251,11 @@ export function HistoryWorkbench({
         <header className="history-workbench__masthead">
           <div className="history-workbench__seal" aria-hidden="true"><Archive size={21} /></div>
           <div>
-            <span>v{APP_VERSION} · 可检索世界史</span>
-            <h2 id={titleId}>历史工作台</h2>
-            <p id={descriptionId}>检索史事、核验因果，并把舆图回拨到任一已记录季度。</p>
+            <span>v{APP_VERSION} · 长期史册</span>
+            <h2 id={titleId}>天下史册</h2>
+            <p id={descriptionId}>按年代翻检天下旧事；点开一则，可继续追问为何如此。</p>
           </div>
-          <button type="button" className="history-workbench__close" onClick={onClose} aria-label="关闭历史工作台">
+          <button type="button" className="history-workbench__close" onClick={onClose} aria-label="关闭天下史册">
             <X size={20} aria-hidden="true" />
           </button>
         </header>
@@ -276,7 +281,7 @@ export function HistoryWorkbench({
             <span>{historyTurnDate(world.turn).label}</span>
           </div>
           <button type="button" disabled={!isHistorical} onClick={resetToPresent}>
-            <RotateCcw size={13} aria-hidden="true" />归还当下
+            <RotateCcw size={13} aria-hidden="true" />回到当下
           </button>
         </div>
 
@@ -363,13 +368,14 @@ export function HistoryWorkbench({
                 {visibleEvents.map((event, index) => {
                   const names = subjectNamesByEvent.get(event.id) ?? [];
                   return (
-                    <li key={event.id} data-major={event.importance >= 4 || undefined}>
+                    <li key={event.id} data-major={event.importance >= 4 || undefined} data-history-entry-id={event.id}>
                       <button
                         ref={(node) => { eventButtonRefs.current[index] = node; }}
                         type="button"
+                        data-event-id={event.id}
                         tabIndex={index === activeEventIndex ? 0 : -1}
                         aria-haspopup="dialog"
-                        aria-label={`${event.year}年${event.season}季，${event.title}，查看因果`}
+                        aria-label={`${event.year}年${event.season}季，${event.title}，为何如此`}
                         onFocus={() => setActiveEventIndex(index)}
                         onKeyDown={(keyboardEvent) => handleEventKeyDown(keyboardEvent, index)}
                         onClick={() => onSelectEvent(event.id)}
@@ -386,7 +392,7 @@ export function HistoryWorkbench({
                           {names.length ? <em>{names.slice(0, 4).join(' · ')}</em> : null}
                         </span>
                         <span className="history-workbench__event-action" aria-hidden="true">
-                          <GitBranch size={13} />查明因果<ChevronRight size={13} />
+                          <GitBranch size={13} />为何如此<ChevronRight size={13} />
                         </span>
                       </button>
                     </li>

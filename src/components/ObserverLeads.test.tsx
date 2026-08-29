@@ -17,12 +17,16 @@ describe('ObserverLeads', () => {
       onOpenSituations: vi.fn(),
     }));
 
-    expect(markup).toContain('现在看什么');
+    expect(markup).toContain('观察线索 · 现在看什么');
+    expect(markup).not.toContain('持续局势 · 现在看什么');
+    expect(markup).toContain('持续局势');
+    expect(markup).toContain('data-history-destination="situation"');
+    expect(markup).not.toContain('data-history-layer="situation"');
     expect(markup).toContain('当世三问');
     expect(markup.match(/data-testid="observer-lead"/g)).toHaveLength(3);
     expect(markup).toContain('接着看');
     expect(markup).toContain('aria-pressed="true"');
-    expect(markup).toContain('展开局势全卷');
+    expect(markup).toContain('查看持续局势');
     expect(markup).toContain('7 条局势');
     expect(markup.match(/data-situation-workbench-trigger/g)).toHaveLength(1);
   });

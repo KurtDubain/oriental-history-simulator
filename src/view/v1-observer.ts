@@ -111,7 +111,7 @@ export const OBSERVER_GUIDE_STEPS: ReadonlyArray<{
   { id: 'world-opened', label: '开启一个世界', detail: '输入种子，让第一卷历史落笔。' },
   { id: 'quarter-advanced', label: '推进一个季度', detail: '观察人口、财政与人物选择如何共同结算。' },
   { id: 'overlay-switched', label: '切换舆图叠层', detail: '从疆界转到粮情、商路、疾疫或海权。' },
-  { id: 'cause-traced', label: '追溯一次因果', detail: '在史册中打开“为什么”，核对证据与状态差量。' },
+  { id: 'cause-traced', label: '追溯一次因果', detail: '在史册中打开“为何如此”，查看所据史实与直接变化。' },
   { id: 'entity-watched', label: '关注一个对象', detail: '把人物、家族、政权或地区留在观察台。' },
 ] as const;
 

@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.12.1',
+    date: '2026-08-30',
+    title: '四层读史，一事一源',
+    items: [
+      '史事阅读收为本季变化、持续局势、天下史册、何故与证据四层，同一去处使用同一套说法。',
+      '本纪、世录和人物传收入各自历史页签；人物页改为其人、所图、关系、生平，完整传记先列具体纪年。',
+      '同一史事在人物生平与天下史册复用同一标题和正文；移动端已验证 44px 触控与返回原卷/对象上下文，世界结果、hash 与存档格式保持不变。',
+    ],
+  },
+  {
     version: '1.12.0',
     date: '2026-08-30',
     title: '五门归卷，势力合流',

@@ -50,6 +50,7 @@ export function QuarterPulse({
     return (
       <section
         className="quarter-pulse quarter-pulse--empty"
+        data-history-layer="quarter"
         data-compact={compact || undefined}
         data-testid="quarter-pulse"
         aria-label="季报尚未生成"
@@ -90,6 +91,7 @@ export function QuarterPulse({
   return (
     <section
       className="quarter-pulse"
+      data-history-layer="quarter"
       data-compact={compact || undefined}
       data-testid="quarter-pulse"
       data-turn={report.turn}
@@ -139,7 +141,7 @@ export function QuarterPulse({
                     data-situation-id={story.situationId}
                     data-kind={story.situationKind}
                     data-basis={story.basis}
-                    aria-label={`${story.kindLabel}：${story.title}。${story.summary}。打开局势全卷`}
+                    aria-label={`${story.kindLabel}：${story.title}。${story.summary}。打开持续局势`}
                     onClick={() => onSelectSituation(story.situationId)}
                   >
                     <span className="quarter-pulse__event-meta">
@@ -159,7 +161,7 @@ export function QuarterPulse({
                 <strong>{story.title}</strong>
                 <span className="quarter-pulse__event-cause">
                   <span>{story.summary || (story.eventId ? '史页载有此事，可继续查明前因。' : '此项仅见于官档，尚无独立史事页。')}</span>
-                  <b aria-hidden="true">{story.eventId ? '何故 ›' : '官档'}</b>
+                  <b aria-hidden="true">{story.eventId ? '为何如此 ›' : '官档'}</b>
                 </span>
               </>;
               const eventId = story.eventId;
@@ -172,7 +174,7 @@ export function QuarterPulse({
                     data-event-id={eventId}
                     data-source={story.source}
                     data-importance={story.importance}
-                    aria-label={`${story.category}：${story.title}${story.location ? `，发生于${story.location}` : ''}。${story.summary}。查看因果`}
+                    aria-label={`${story.category}：${story.title}${story.location ? `，发生于${story.location}` : ''}。${story.summary}。为何如此`}
                     onClick={() => onSelectEvent(eventId)}
                   >{content}</button> : <article
                     className="quarter-pulse__event quarter-pulse__event--record"

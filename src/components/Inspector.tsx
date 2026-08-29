@@ -1,7 +1,6 @@
 import {
   Activity,
   Anchor,
-  BookOpenText,
   Castle,
   ChevronDown,
   ChevronUp,
@@ -416,10 +415,9 @@ function Fact({ label, value }: { label: string; value?: DisplayValue }) {
   return <div className="observer-fact"><dt>{label}</dt><dd>{display(value)}</dd></div>;
 }
 
-function InspectorActions({ label, isFollowing, onToggleFollow, onOpenArchive, onClose }: InspectorSharedProps & { label: string }) {
+function InspectorActions({ label, isFollowing, onToggleFollow, onClose }: InspectorSharedProps & { label: string }) {
   return (
     <div className="observer-inspector__actions">
-      {onOpenArchive ? <button type="button" className="observer-icon-button" aria-label={`展开${label}史卷`} onClick={onOpenArchive}><BookOpenText size={17} aria-hidden="true" /></button> : null}
       {onToggleFollow ? (
         <button type="button" className="observer-icon-button" data-active={isFollowing || undefined} aria-label={isFollowing ? `取消关注${label}` : `关注${label}`} aria-pressed={isFollowing} onClick={onToggleFollow}>
           <Star size={17} fill={isFollowing ? 'currentColor' : 'none'} aria-hidden="true" />
@@ -450,7 +448,7 @@ function InspectorTabs<T extends string>({ value, items, onChange, idPrefix }: {
   return (
     <div ref={tabsRef} className="observer-inspector-tabs" role="tablist" aria-label="档案分页" onKeyDown={moveFocus}>
       {items.map((item) => (
-        <button key={item.id} id={`${id}-tab-${item.id}`} type="button" role="tab" aria-selected={value === item.id} aria-controls={idPrefix ? `${id}-panel-${item.id}` : undefined} tabIndex={value === item.id ? 0 : -1} onClick={() => { gameAudio.play('select', 0.4); onChange(item.id); }}>
+        <button key={item.id} id={`${id}-tab-${item.id}`} type="button" role="tab" data-inspector-tab={item.id} aria-selected={value === item.id} aria-controls={idPrefix ? `${id}-panel-${item.id}` : undefined} tabIndex={value === item.id ? 0 : -1} onClick={() => { gameAudio.play('select', 0.4); onChange(item.id); }}>
           {item.label}
         </button>
       ))}
@@ -471,11 +469,33 @@ function RecordList({ records, onSelectEvent }: { records: InspectorRecord[]; on
         <li key={record.id} data-major={(record.importance ?? 0) >= 4 || undefined}>
           <span>{record.date}</span>
           {record.eventId && onSelectEvent ? (
-            <button type="button" onClick={() => onSelectEvent(record.eventId!)}><strong>{record.title}</strong><small>{record.summary}</small></button>
+            <button type="button" onClick={() => onSelectEvent(record.eventId!)}><strong>{record.title}</strong><small>{record.summary}</small><em>为何如此</em></button>
           ) : <div><strong>{record.title}</strong><small>{record.summary}</small></div>}
         </li>
       ))}
     </ol>
+  );
+}
+
+export function EntityHistoryGateway({
+  kind,
+  label,
+  onOpen,
+}: {
+  kind: 'country' | 'family' | 'person';
+  label: string;
+  onOpen: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      className="observer-entity-history-gateway"
+      data-entity-history-gateway={kind}
+      data-testid="entity-history-gateway"
+      onClick={onOpen}
+    >
+      {label}
+    </button>
   );
 }
 
@@ -495,7 +515,7 @@ function HistoricalSceneList({
           <p>{scene.summary}</p>
           {scene.result ? <small>{scene.result}</small> : null}
           {scene.sourceEventId && onSelectEvent ? (
-            <button type="button" onClick={() => onSelectEvent(scene.sourceEventId!)}>查原事</button>
+            <button type="button" onClick={() => onSelectEvent(scene.sourceEventId!)}>为何如此</button>
           ) : null}
         </li>
       ))}
@@ -631,7 +651,7 @@ function CountryInspector({ data, ...actions }: Extract<InspectorProps, { kind: 
                   <p className="observer-faction__movement" data-direction={faction.recentMovement.direction}>
                     <span>{faction.recentMovement.periodLabel} · {faction.recentMovement.label}</span>
                     <strong>{faction.recentMovement.detail}</strong>
-                    {faction.recentMovement.sourceEventId && actions.onSelectEvent ? <button type="button" onClick={() => actions.onSelectEvent?.(faction.recentMovement!.sourceEventId!)}>查原事</button> : null}
+                    {faction.recentMovement.sourceEventId && actions.onSelectEvent ? <button type="button" onClick={() => actions.onSelectEvent?.(faction.recentMovement!.sourceEventId!)}>为何如此</button> : null}
                   </p>
                 ) : null}
                 {faction.resources?.length ? (
@@ -655,7 +675,7 @@ function CountryInspector({ data, ...actions }: Extract<InspectorProps, { kind: 
           {data.diplomacy?.length ? <ul className="observer-diplomacy-list">{data.diplomacy.map((relation) => <li key={relation.polityId} data-status={relation.status}><button type="button" onClick={() => actions.onSelectEntity?.('country', relation.polityId)}><span><strong>{relation.polity}</strong><small>{relation.status} · 信任 {Math.round(relation.trust)}</small></span><span><b>威胁 {Math.round(relation.threat)}</b><small>宿怨 {Math.round(relation.grievance)} · 商贸 {Math.round(relation.tradeDependency)}</small></span></button></li>)}</ul> : <p className="observer-inspector__empty">暂无可考的邦交往来。</p>}
         </section></div>
       ) : null}
-      {tab === 'history' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="country-history-heading"><h3 id="country-history-heading"><ScrollText size={14} aria-hidden="true" />国史摘录</h3><RecordList records={data.history ?? []} onSelectEvent={actions.onSelectEvent} /></section></div> : null}
+      {tab === 'history' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="country-history-heading"><h3 id="country-history-heading"><ScrollText size={14} aria-hidden="true" />国史近录</h3><RecordList records={data.history ?? []} onSelectEvent={actions.onSelectEvent} />{actions.onOpenArchive ? <EntityHistoryGateway kind="country" label="读完整本纪" onOpen={actions.onOpenArchive} /> : null}</section></div> : null}
     </>
   );
 }
@@ -677,7 +697,7 @@ function FamilyInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
         {data.alliances?.length ? <section className="observer-inspector__section" aria-labelledby="family-alliance-heading"><h3 id="family-alliance-heading"><Handshake size={14} aria-hidden="true" />婚姻盟族</h3><ul className="observer-entity-list">{data.alliances.map((alliance) => <li key={alliance.id}><button type="button" onClick={() => actions.onSelectEntity?.('family', alliance.id)}><span><strong>{alliance.name}</strong><small>{alliance.detail}</small></span></button></li>)}</ul></section> : null}
       </div> : null}
       {tab === 'members' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="family-members-heading"><h3 id="family-members-heading"><UsersRound size={14} aria-hidden="true" />族中人物</h3>{data.members?.length ? <ul className="observer-entity-list">{data.members.map((member) => <li key={member.id} data-muted={!member.alive || undefined}><button type="button" onClick={() => actions.onSelectEntity?.('person', member.id)}><span><strong>{member.name}</strong><small>{member.alive ? `${member.age}岁 · ${member.role}` : '已故 · 载于族谱'}</small></span><b>{Math.round(member.influence)}</b></button></li>)}</ul> : <p className="observer-inspector__empty">族谱中尚无可展开的人物。</p>}</section></div> : null}
-      {tab === 'history' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="family-history-heading"><h3 id="family-history-heading"><ScrollText size={14} aria-hidden="true" />家史摘录</h3><RecordList records={data.history ?? []} onSelectEvent={actions.onSelectEvent} /></section></div> : null}
+      {tab === 'history' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="family-history-heading"><h3 id="family-history-heading"><ScrollText size={14} aria-hidden="true" />家史近录</h3><RecordList records={data.history ?? []} onSelectEvent={actions.onSelectEvent} />{actions.onOpenArchive ? <EntityHistoryGateway kind="family" label="读完整世录" onOpen={actions.onOpenArchive} /> : null}</section></div> : null}
     </>
   );
 }
@@ -796,7 +816,7 @@ export function PersonAgencySections({
               <p>{embodiment.lastResult.summary}</p>
               <small>接着看：{embodiment.lastResult.nextSignal}</small>
               {embodiment.lastResult.sourceEventId && onSelectEvent ? (
-                <button type="button" onClick={() => onSelectEvent(embodiment.lastResult!.sourceEventId!)}>查这件事</button>
+                <button type="button" onClick={() => onSelectEvent(embodiment.lastResult!.sourceEventId!)}>为何如此</button>
               ) : null}
             </div>
           ) : null}
@@ -830,7 +850,7 @@ export function PersonAgencySections({
                 <li key={resource.id}>
                   <span><strong>{resource.label}</strong><small>{resource.detail}</small></span>
                   <b>+{Math.round(resource.value)}</b>
-                  {resource.sourceEventId && onSelectEvent ? <button type="button" onClick={() => onSelectEvent(resource.sourceEventId!)}>查原事</button> : null}
+                  {resource.sourceEventId && onSelectEvent ? <button type="button" onClick={() => onSelectEvent(resource.sourceEventId!)}>为何如此</button> : null}
                 </li>
               ))}
             </ol>
@@ -872,13 +892,13 @@ export function PersonAgencySections({
                 <strong>{memory.title}</strong>
                 <p>{memory.interpretation}</p>
                 {memory.sourceEventId && onSelectEvent ? (
-                  <button type="button" className="observer-agency-memory__source" onClick={() => onSelectEvent(memory.sourceEventId!)}>查原事</button>
+                  <button type="button" className="observer-agency-memory__source" onClick={() => onSelectEvent(memory.sourceEventId!)}>为何如此</button>
                 ) : null}
               </li>
             ))}
           </ol>
         ) : <p className="observer-inspector__empty">眼下没有哪桩旧事格外牵动此人。</p>}
-        <p className="observer-agency-memory__note">这里只记此人仍放在心上的事，完整生平见“经历”。</p>
+        <p className="observer-agency-memory__note">这里只记此人仍放在心上的事，完整纪年见“生平”。</p>
       </section>
 
       <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-goal-heading">
@@ -953,23 +973,7 @@ export function PersonAgencySections({
                 type="button"
                 className="observer-agency-command__source"
                 onClick={() => onSelectEvent(commandSourceEventId)}
-              >
-                {commandRequest.stage === 'submitted'
-                  ? '查请令原事'
-                  : commandRequest.stage === 'approved'
-                    ? '查授令原事'
-                    : commandRequest.stage === 'blocked'
-                      ? commandRequest.statusLabel === '请令作罢'
-                        ? '查作罢原事'
-                        : commandRequest.statusLabel === '已遭削权'
-                          ? '查削权原事'
-                          : commandRequest.statusLabel === '另受安抚'
-                            ? '查安抚原事'
-                        : commandRequest.statusLabel === '暂缓授令'
-                          ? '查暂缓原事'
-                          : '查未准原事'
-                      : '查本季原事'}
-              </button>
+              >为何如此</button>
             ) : null}
           </div>
         </section>
@@ -986,7 +990,7 @@ export function PersonAgencySections({
             </dl>
             <p><b>{choiceReasonLabel}</b>{quarterChoice.reason}</p>
             {quarterChoice.sourceEventId && onSelectEvent ? (
-              <button type="button" className="observer-agency-choice__source" onClick={() => onSelectEvent(quarterChoice.sourceEventId!)}>查本季原事</button>
+              <button type="button" className="observer-agency-choice__source" onClick={() => onSelectEvent(quarterChoice.sourceEventId!)}>为何如此</button>
             ) : null}
           </div>
         ) : <p className="observer-inspector__empty">本季尚无可核对的盘算与行动。</p>}
@@ -1023,7 +1027,7 @@ export function PersonEmbodimentClosureNotice({
       ) : null}
       <div>
         {closure.sourceEventId && onSelectEvent
-          ? <button type="button" onClick={() => onSelectEvent(closure.sourceEventId!)}>查最后一页</button>
+          ? <button type="button" onClick={() => onSelectEvent(closure.sourceEventId!)}>为何如此</button>
           : null}
         {onDismiss ? <button type="button" onClick={onDismiss}>收起</button> : null}
       </div>
@@ -1076,14 +1080,14 @@ function PersonInspector({ data, onOpenMind, mobileMindRequest = 0, ...actions }
         <span><strong>看所图</strong><small>旧事、盘算与本季所行</small></span>
         <ChevronUp size={16} aria-hidden="true" />
       </button>
-      <InspectorTabs value={tab} onChange={setTab} idPrefix={tabsId} items={[{ id: 'life', label: '生平' }, { id: 'mind', label: '所图' }, { id: 'relations', label: '关系' }, { id: 'history', label: '经历' }]} />
+      <InspectorTabs value={tab} onChange={setTab} idPrefix={tabsId} items={[{ id: 'life', label: '其人' }, { id: 'mind', label: '所图' }, { id: 'relations', label: '关系' }, { id: 'history', label: '生平' }]} />
       {tab === 'life' ? <div id={`${tabsId}-panel-life`} role="tabpanel" aria-labelledby={`${tabsId}-tab-life`}>
         <section className="observer-inspector__section" aria-labelledby="person-origin-heading"><h3 id="person-origin-heading">身世与处境</h3><dl className="observer-facts"><Fact label="性别" value={data.gender} /><Fact label="出身" value={data.origin} /><Fact label="阶层" value={data.politicalClass} /><Fact label="家族" value={data.family} /><Fact label="影响" value={data.influence} /><Fact label="私产" value={data.personalWealth} /></dl>{data.family ? <p className="observer-inspector__jump"><Network size={13} aria-hidden="true" /><LinkedName kind="family" id={data.familyId} onSelect={actions.onSelectEntity}>{data.family}</LinkedName></p> : null}{data.health !== undefined ? <div className="observer-health"><HeartPulse size={14} aria-hidden="true" /><Meter label="健康" value={data.health} /></div> : null}</section>
         <section className="observer-inspector__section" aria-labelledby="person-ability-heading"><h3 id="person-ability-heading">才能</h3><div className="observer-ability-grid">{abilities.map(([label, value]) => <div className="observer-ability" key={label}><span>{label}</span><strong>{Math.round(value)}</strong></div>)}</div><dl className="observer-facts observer-facts--after-grid"><Fact label="功绩" value={data.merit} /><Fact label="副将历练" value={data.deputyExperience} /></dl></section>
       </div> : null}
       {tab === 'mind' ? <div id={`${tabsId}-panel-mind`} role="tabpanel" aria-labelledby={`${tabsId}-tab-mind`}>{data.agency ? <PersonAgencySections key={data.id} agency={data.agency} onSelectEvent={actions.onSelectEvent} embodiment={actions.embodiment} onChooseEmbodiedAction={actions.onChooseEmbodiedAction} onCancelEmbodiedAction={actions.onCancelEmbodiedAction} /> : <section className="observer-inspector__section" aria-labelledby="person-motive-heading"><h3 id="person-motive-heading">心志与打算</h3><p className="observer-inspector__empty">现有记载不足以判断此人的打算。</p></section>}</div> : null}
       {tab === 'relations' ? <div id={`${tabsId}-panel-relations`} role="tabpanel" aria-labelledby={`${tabsId}-tab-relations`}><section className="observer-inspector__section" aria-labelledby="person-relation-heading"><h3 id="person-relation-heading"><Network size={14} aria-hidden="true" />关系与记忆</h3>{data.relationships?.length ? <><RelationshipConstellation name={data.name} relationships={data.relationships} onSelect={actions.onSelectEntity} /><ul className="observer-relation-list">{data.relationships.map((relation) => <li key={relation.id}><button type="button" onClick={() => actions.onSelectEntity?.('person', relation.targetId)}><span><strong>{relation.name}</strong><small>{relation.relation} · {relation.sentiment}</small></span></button>{relation.detail || relation.memories?.length ? <p>{[relation.detail, ...(relation.memories ?? [])].filter(Boolean).join('；')}</p> : null}</li>)}</ul></> : <p className="observer-inspector__empty">此人尚无足以入档的人际记忆。</p>}</section></div> : null}
-      {tab === 'history' ? <div id={`${tabsId}-panel-history`} role="tabpanel" aria-labelledby={`${tabsId}-tab-history`}><section className="observer-inspector__section" aria-labelledby="person-history-heading"><h3 id="person-history-heading"><ScrollText size={14} aria-hidden="true" />人生经历</h3><RecordList records={data.experiences ?? []} onSelectEvent={actions.onSelectEvent} /></section></div> : null}
+      {tab === 'history' ? <div id={`${tabsId}-panel-history`} role="tabpanel" aria-labelledby={`${tabsId}-tab-history`}><section className="observer-inspector__section" aria-labelledby="person-history-heading"><h3 id="person-history-heading"><ScrollText size={14} aria-hidden="true" />生平纪年</h3><RecordList records={data.experiences ?? []} onSelectEvent={actions.onSelectEvent} />{actions.onOpenArchive ? <EntityHistoryGateway kind="person" label="读完整人物传" onOpen={actions.onOpenArchive} /> : null}</section></div> : null}
     </>
   );
 }
@@ -1152,7 +1156,7 @@ function mobileQuickLookFor(props: InspectorProps): MobileQuickLookView {
     ownerLabel: '中枢',
     owner: [props.data.government, `都于${props.data.capital}`].filter(Boolean).join(' · '),
     current: props.data.status ?? `治下${props.data.regionCount}郡，君主${props.data.ruler}。`,
-    destination: '国计、朝局、海贸与邦交',
+    destination: '国势、朝局、邦交与国史',
   };
   if (props.kind === 'family') return {
     eyebrow: '门第速览',
@@ -1168,7 +1172,7 @@ function mobileQuickLookFor(props: InspectorProps): MobileQuickLookView {
     ownerLabel: '身份',
     owner: [props.data.polity, props.data.role, props.data.family].filter(Boolean).join(' · ') || '在野之人',
     current: props.data.summary ?? `${props.data.age}岁，眼下以${props.data.role}身份行事。`,
-    destination: '生平、所图、关系与经历',
+    destination: '其人、所图、关系与生平',
   };
   const meta = SYSTEM_META[props.data.kind];
   const fact = (label: string) => props.data.facts.find((item) => item.label === label)?.value;
@@ -1248,6 +1252,7 @@ export function Inspector(props: InspectorProps) {
     <aside
       id={inspectorId}
       className="observer-inspector"
+      tabIndex={-1}
       aria-label="对象档案"
       data-kind={props.kind}
       data-mobile-expanded={mobileExpanded}

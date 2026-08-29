@@ -721,9 +721,14 @@
   }
 
   .history-workbench__masthead {
-    grid-template-columns: 36px minmax(0, 1fr) 34px;
+    grid-template-columns: 36px minmax(0, 1fr) 44px;
     gap: 10px;
     padding: 11px 12px 10px;
+  }
+
+  .history-workbench__close {
+    width: 44px;
+    height: 44px;
   }
 
   .history-workbench__seal {
@@ -753,6 +758,7 @@
   .history-workbench__timeline > button {
     grid-column: 2;
     grid-row: 1;
+    min-height: 44px;
   }
 
   .history-workbench__timeline-heading {
@@ -797,6 +803,13 @@
 
   .history-workbench__clear {
     margin-top: 0;
+    min-height: 44px;
+  }
+
+  .history-workbench__filters select,
+  .history-workbench__search > span:last-child,
+  .history-workbench__pagination button {
+    min-height: 44px;
   }
 
   .history-workbench__records {
@@ -819,7 +832,13 @@
   }
 
   .history-workbench__event-action {
-    display: none;
+    display: inline-flex;
+    grid-column: 3;
+    grid-row: 2;
+    justify-self: start;
+    font-size: 10px;
+    opacity: 1;
+    transform: none;
   }
 
   .history-workbench__snapshot {

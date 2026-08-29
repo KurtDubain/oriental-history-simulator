@@ -2,6 +2,8 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import {
+  EntityHistoryGateway,
+  Inspector,
   PersonAgencySections,
   PersonEmbodimentClosureNotice,
   type PersonAgencyCommandRequestStage,
@@ -78,7 +80,7 @@ describe('person command request reading flow', () => {
     expect(markup).not.toMatch(/Intent|Resolver|request_independent_command|threshold|score/i);
   });
 
-  it('links only a submitted or resolved request to its exact original event', () => {
+  it('links only a submitted or resolved request to its exact original event with one causal label', () => {
     const planned = renderToStaticMarkup(createElement(PersonAgencySections, {
       agency: agency('planned'),
       onSelectEvent: () => undefined,
@@ -96,11 +98,10 @@ describe('person command request reading flow', () => {
       onSelectEvent: () => undefined,
     }));
 
-    expect(planned).not.toContain('查本季原事');
-    expect(planned).not.toContain('查请令原事');
-    expect(submitted).toContain('查请令原事');
-    expect(approved).toContain('查授令原事');
-    expect(blocked).toContain('查未准原事');
+    expect(planned).not.toContain('为何如此');
+    expect(submitted.match(/为何如此/g)).toHaveLength(1);
+    expect(approved.match(/为何如此/g)).toHaveLength(1);
+    expect(blocked.match(/为何如此/g)).toHaveLength(1);
   });
 });
 
@@ -223,8 +224,53 @@ describe('embodied character action reading flow', () => {
     expect(markup).toContain('人物离世 · 已回到观察');
     expect(markup).toContain('一生至此');
     expect(markup).toContain('雁门击退来敌');
-    expect(markup).toContain('查最后一页');
+    expect(markup).toContain('为何如此');
     expect(markup).toContain('收起');
     expect(markup).not.toMatch(/observer metadata|activeActor|worldHash|Fact ID/i);
+  });
+});
+
+describe('entity history gateways', () => {
+  it.each([
+    ['country', '读完整本纪'],
+    ['family', '读完整世录'],
+    ['person', '读完整人物传'],
+  ] as const)('renders the %s archive as an explicit text gateway', (kind, label) => {
+    const markup = renderToStaticMarkup(createElement(EntityHistoryGateway, {
+      kind,
+      label,
+      onOpen: () => undefined,
+    }));
+
+    expect(markup).toContain('data-testid="entity-history-gateway"');
+    expect(markup).toContain(`data-entity-history-gateway="${kind}"`);
+    expect(markup).toContain(label);
+  });
+
+  it('uses the person reading tabs without restoring the competing header archive icon', () => {
+    const markup = renderToStaticMarkup(createElement(Inspector, {
+      kind: 'person',
+      data: {
+        id: 'person-gu',
+        name: '顾庭芳',
+        age: 41,
+        gender: '女',
+        role: '副将',
+        ambition: 72,
+        loyalty: 61,
+        caution: 55,
+        abilities: { command: 68, martial: 57, governance: 49, strategy: 63, charisma: 58, scholarship: 52 },
+      },
+      onOpenArchive: () => undefined,
+    }));
+
+    expect(markup).toContain('data-inspector-tab="life"');
+    expect(markup).toContain('data-inspector-tab="history"');
+    expect(markup).toContain('>其人<');
+    expect(markup).toContain('>所图<');
+    expect(markup).toContain('>关系<');
+    expect(markup).toContain('>生平<');
+    expect(markup).not.toContain('展开顾庭芳史卷');
+    expect(markup).not.toContain('data-testid="entity-history-gateway"');
   });
 });

@@ -47,6 +47,19 @@ const HISTORY_COLORS: Record<string, string> = {
   迁徙: '#796953',
 };
 
+export type HistoryReadingLayer = 'evidence' | 'entity' | 'situation' | 'chronicle' | 'quarter';
+
+export function deriveHistoryReadingLayer(options: Pick<
+  SnapshotOptions,
+  'selectedEventId' | 'archiveOpen' | 'situationWorkbenchOpen' | 'historyWorkbenchOpen'
+>): HistoryReadingLayer {
+  if (options.selectedEventId) return 'evidence';
+  if (options.archiveOpen) return 'entity';
+  if (options.situationWorkbenchOpen) return 'situation';
+  if (options.historyWorkbenchOpen) return 'chronicle';
+  return 'quarter';
+}
+
 function historyRoster(world: WorldState): RosterItem[] {
   return world.history
     .slice(-72)
@@ -423,6 +436,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       })),
     },
     interface: {
+      historyReadingLayer: deriveHistoryReadingLayer(options),
       view: options.view,
       powerRosterSection: options.powerRosterSection,
       overlay: options.overlay,

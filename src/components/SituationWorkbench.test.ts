@@ -21,10 +21,14 @@ describe('SituationWorkbench', () => {
     }));
 
     expect(markup).toContain('role="dialog"');
+    expect(markup).toContain('data-history-layer="situation"');
+    expect(markup).toContain('持续局势');
     expect(markup).toContain('眼下局面');
     expect(markup).toContain('后续看点');
-    expect(markup).toContain('历史转折');
-    expect(markup).toContain('历史凭证');
+    expect(markup).toContain('局势沿革');
+    expect(markup).toContain('所据史实');
+    expect(markup).toContain('为何如此');
+    expect(markup).not.toContain('查明因果');
     expect(markup).toContain('推演底账');
     expect(markup).toContain(projection.selected?.title ?? '');
     expect(markup).toMatch(/<details class="situation-workbench__audit">/);

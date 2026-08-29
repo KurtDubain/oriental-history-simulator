@@ -137,6 +137,251 @@ async function assertQuarterProjection(page, scenario, current) {
   );
 }
 
+const HISTORY_LAYER_SELECTORS = Object.freeze({
+  quarter: '[data-testid="quarter-pulse"][data-history-layer="quarter"]',
+  situation: '.situation-workbench-layer[data-history-layer="situation"]',
+  chronicle: '.history-workbench-layer[data-history-layer="chronicle"]',
+  entity: '.history-archive-layer[data-history-layer="entity"]',
+  evidence: '.observer-causal-layer[data-history-layer="evidence"]',
+});
+
+async function assertHistoryLayer(page, scenario, expected, baseline, detail) {
+  const layer = page.locator(HISTORY_LAYER_SELECTORS[expected]);
+  await layer.waitFor({ state: 'visible' });
+  const current = await snapshot(page);
+  assert.equal(
+    current.interface?.historyReadingLayer,
+    expected,
+    `${scenario.slug} ${detail}的 DOM 与文本快照必须指向同一阅读层`,
+  );
+  assert.equal(current.time.turn, baseline.time.turn, `${scenario.slug} ${detail}不得推进季度`);
+  assert.equal(
+    current.deterministicWorldHash,
+    baseline.deterministicWorldHash,
+    `${scenario.slug} ${detail}不得改写世界哈希`,
+  );
+  return current;
+}
+
+async function assertTouchTarget(locator, scenario, detail) {
+  if (scenario.viewport.width !== 390) return;
+  await locator.scrollIntoViewIfNeeded();
+  await locator.evaluate(async (element) => {
+    const layer = element.closest('[data-history-layer]') ?? element;
+    await Promise.all(layer.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
+  });
+  const bounds = await locator.boundingBox();
+  assert.ok(
+    bounds && bounds.width >= 44 && bounds.height >= 44,
+    `${scenario.slug} ${detail}的触控区至少应为 44px，实际 ${JSON.stringify(bounds)}`,
+  );
+  const hittable = await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    const hit = document.elementFromPoint(x, y);
+    return rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight
+      && Boolean(hit && (hit === element || element.contains(hit)));
+  });
+  assert.equal(hittable, true, `${scenario.slug} ${detail}必须位于视口内且中心点可命中`);
+}
+
+async function assertEvidenceIdentity(page, scenario, sourceEventId, evidenceState, detail) {
+  assert.ok(sourceEventId, `${scenario.slug} ${detail}的来源入口必须携带史事 ID`);
+  const layerEventId = await page.locator(HISTORY_LAYER_SELECTORS.evidence).getAttribute('data-event-id');
+  assert.equal(layerEventId, sourceEventId, `${scenario.slug} ${detail}打开的何故层必须是同一史事`);
+  assert.equal(evidenceState.interface.selectedEventId, sourceEventId, `${scenario.slug} ${detail}的全文快照必须保留同一史事`);
+}
+
+async function exerciseQuarterSituationHistoryPath(page, scenario, baseline) {
+  const situationStory = page.locator(
+    '[data-testid="quarter-pulse"][data-history-layer="quarter"] [data-testid="quarter-pulse-situation"]',
+  ).first();
+  if (!(await situationStory.count())) return false;
+
+  await assertHistoryLayer(page, scenario, 'quarter', baseline, '从本季变化出发');
+  await assertTouchTarget(situationStory, scenario, '本季局势入口');
+  const situationId = await situationStory.getAttribute('data-situation-id');
+  assert.ok(situationId, `${scenario.slug} 本季局势必须携带稳定身份`);
+  await situationStory.click();
+
+  const situationState = await assertHistoryLayer(page, scenario, 'situation', baseline, '打开持续局势');
+  assert.equal(situationState.observer.selectedSituationId, situationId, `${scenario.slug} 季报必须直达同一局势`);
+
+  const workbench = page.locator(HISTORY_LAYER_SELECTORS.situation);
+  let causalEntry = workbench.locator('.situation-workbench__timeline button').first();
+  if (!(await causalEntry.count())) {
+    const evidenceDisclosure = workbench.locator('.situation-workbench__evidence > summary');
+    if (await evidenceDisclosure.count()) {
+      await assertTouchTarget(evidenceDisclosure, scenario, '局势历史凭证入口');
+      await evidenceDisclosure.click();
+      causalEntry = workbench.locator('.situation-workbench__evidence button').first();
+    }
+  }
+  if (!(await causalEntry.count())) {
+    await workbench.locator('.situation-workbench__close').click();
+    await assertHistoryLayer(page, scenario, 'quarter', baseline, '返回本季变化');
+    return false;
+  }
+
+  await assertTouchTarget(causalEntry, scenario, '局势转折的何故入口');
+  const sourceEventId = await causalEntry.getAttribute('data-event-id');
+  await causalEntry.click();
+  const evidenceState = await assertHistoryLayer(page, scenario, 'evidence', baseline, '从局势查看何故与证据');
+  await assertEvidenceIdentity(page, scenario, sourceEventId, evidenceState, '局势转折');
+
+  const evidenceClose = page.locator(`${HISTORY_LAYER_SELECTORS.evidence} .observer-causal-drawer__header button`);
+  await assertTouchTarget(evidenceClose, scenario, '何故与证据返回入口');
+  await evidenceClose.click();
+  const resumed = await assertHistoryLayer(page, scenario, 'situation', baseline, '因果阅读后返回局势');
+  assert.equal(resumed.observer.selectedSituationId, situationId, `${scenario.slug} 返回后必须保留原局势上下文`);
+
+  const situationClose = workbench.locator('.situation-workbench__close');
+  await assertTouchTarget(situationClose, scenario, '持续局势关闭入口');
+  await situationClose.click();
+  await assertHistoryLayer(page, scenario, 'quarter', baseline, '局势阅读后返回季报');
+  await page.waitForFunction((id) => document.activeElement?.getAttribute('data-situation-id') === id, situationId);
+  return true;
+}
+
+async function exerciseChronicleHistoryPath(page, scenario, baseline) {
+  const trigger = page.locator('[data-history-workbench-trigger="true"]');
+  assert.equal(await trigger.count(), 1, `${scenario.slug} 长期史册只能有一个全局入口`);
+  await assertTouchTarget(trigger, scenario, '长期史册入口');
+  await trigger.click();
+  await assertHistoryLayer(page, scenario, 'chronicle', baseline, '打开长期史册');
+
+  const workbench = page.locator(HISTORY_LAYER_SELECTORS.chronicle);
+  const eventEntry = workbench.locator('.history-workbench__event-list > li > button').first();
+  assert.ok(await eventEntry.count(), `${scenario.slug} 长期史册必须提供可追溯史事`);
+  if (scenario.viewport.width <= 760) {
+    const mobileAction = eventEntry.locator('.history-workbench__event-action');
+    assert.equal(await mobileAction.textContent(), '为何如此', `${scenario.slug} 移动端必须明示因果入口`);
+    assert.equal(
+      await mobileAction.evaluate((element) => getComputedStyle(element).opacity),
+      '1',
+      `${scenario.slug} 移动端因果入口不能继承桌面端的隐藏样式`,
+    );
+  }
+  await assertTouchTarget(eventEntry, scenario, '史册史事入口');
+  const sourceEventId = await eventEntry.getAttribute('data-event-id');
+  await eventEntry.click();
+  const evidenceState = await assertHistoryLayer(page, scenario, 'evidence', baseline, '从长期史册查看何故与证据');
+  await assertEvidenceIdentity(page, scenario, sourceEventId, evidenceState, '天下史册史事');
+
+  const evidenceClose = page.locator(`${HISTORY_LAYER_SELECTORS.evidence} .observer-causal-drawer__header button`);
+  await assertTouchTarget(evidenceClose, scenario, '史册因果返回入口');
+  await evidenceClose.click();
+  await assertHistoryLayer(page, scenario, 'chronicle', baseline, '因果阅读后返回长期史册');
+  assert.equal(
+    await workbench.evaluate((element) => element.contains(document.activeElement)),
+    true,
+    `${scenario.slug} 返回长期史册后焦点必须留在卷内`,
+  );
+
+  const chronicleClose = workbench.locator('.history-workbench__close');
+  await assertTouchTarget(chronicleClose, scenario, '天下史册关闭入口');
+  await chronicleClose.click();
+  await assertHistoryLayer(page, scenario, 'quarter', baseline, '长期史册关闭后返回本季变化');
+}
+
+async function exercisePersonHistoryPath(page, scenario, baseline) {
+  const peopleTrigger = page.locator('[data-observer-view="people"]');
+  await assertTouchTarget(peopleTrigger, scenario, '人物名录入口');
+  await peopleTrigger.click();
+  const roster = page.locator('.roster-panel[data-roster-scope="people"]');
+  await roster.waitFor();
+  const personEntry = roster.locator('[data-roster-id]').first();
+  assert.ok(await personEntry.count(), `${scenario.slug} 人物名录必须有可读人物`);
+  await assertTouchTarget(personEntry, scenario, '人物名录条目');
+  const personId = await personEntry.getAttribute('data-roster-id');
+  await personEntry.click();
+
+  const inspector = page.locator('.observer-inspector[data-kind="person"]');
+  await inspector.waitFor();
+  if (scenario.viewport.width <= 760) {
+    const mobileHandle = inspector.locator('.observer-inspector__mobile-handle');
+    await assertTouchTarget(mobileHandle, scenario, '人物完整档案展开入口');
+    await mobileHandle.click();
+    await page.waitForFunction(() => document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true');
+  }
+
+  const historyTab = inspector.locator('[data-inspector-tab="history"]');
+  await assertTouchTarget(historyTab, scenario, '人物生平页签');
+  await historyTab.click();
+  assert.equal(await historyTab.getAttribute('aria-selected'), 'true', `${scenario.slug} 人物生平页签必须成为当前页`);
+
+  const archiveEntry = inspector.locator('[data-entity-history-gateway="person"]');
+  assert.equal(await archiveEntry.count(), 1, `${scenario.slug} 人物生平页只能有一个完整人物传入口`);
+  await assertTouchTarget(archiveEntry, scenario, '完整人物传入口');
+  await archiveEntry.click();
+  const archiveState = await assertHistoryLayer(page, scenario, 'entity', baseline, '打开完整人物传');
+  assert.equal(archiveState.interface.selected?.kind, 'person');
+  assert.equal(archiveState.interface.selected?.id, personId, `${scenario.slug} 完整人物传必须属于当前人物`);
+
+  const archive = page.locator(HISTORY_LAYER_SELECTORS.entity);
+  assert.equal(await archive.getAttribute('data-history-scope'), 'person', `${scenario.slug} 对象史卷必须声明人物 scope`);
+  assert.equal(await archive.getAttribute('data-history-scope-id'), personId, `${scenario.slug} 对象史卷必须声明当前人物 ID`);
+  const archiveEvent = archive.locator('.history-archive__chronology li button').first();
+  assert.ok(await archiveEvent.count(), `${scenario.slug} 固定世界的首位人物传必须至少有一条可追溯史事`);
+  await assertTouchTarget(archiveEvent, scenario, '人物传史事入口');
+  const sourceEventId = await archiveEvent.getAttribute('data-event-id');
+  await archiveEvent.click();
+  const evidenceState = await assertHistoryLayer(page, scenario, 'evidence', baseline, '从人物传查看何故与证据');
+  await assertEvidenceIdentity(page, scenario, sourceEventId, evidenceState, '人物传史事');
+
+  const evidenceClose = page.locator(`${HISTORY_LAYER_SELECTORS.evidence} .observer-causal-drawer__header button`);
+  await assertTouchTarget(evidenceClose, scenario, '人物传因果返回入口');
+  await evidenceClose.click();
+  const resumedArchive = await assertHistoryLayer(page, scenario, 'entity', baseline, '因果阅读后返回完整人物传');
+  assert.equal(resumedArchive.interface.selected?.id, personId, `${scenario.slug} 返回后必须保留人物上下文`);
+
+  const archiveClose = archive.locator('.history-archive__masthead > button');
+  await assertTouchTarget(archiveClose, scenario, '完整人物传关闭入口');
+  await archiveClose.click();
+  await archive.waitFor({ state: 'detached' });
+  await inspector.waitFor();
+  assert.equal(await historyTab.getAttribute('aria-selected'), 'true', `${scenario.slug} 关闭人物传后必须返回同一生平页签`);
+  assert.equal(
+    await page.evaluate(() => document.activeElement?.getAttribute('data-entity-history-gateway')),
+    'person',
+    `${scenario.slug} 关闭人物传后必须返回原入口`,
+  );
+  const returned = await snapshot(page);
+  assert.equal(returned.time.turn, baseline.time.turn);
+  assert.equal(returned.deterministicWorldHash, baseline.deterministicWorldHash);
+
+  await archiveEntry.click();
+  await assertHistoryLayer(page, scenario, 'entity', baseline, '重新打开人物传查看卷中人事');
+  const relatedEntity = page.locator(`${HISTORY_LAYER_SELECTORS.entity} .history-archive__index button`).first();
+  assert.ok(await relatedEntity.count(), `${scenario.slug} 人物传必须有可到达的卷中人事`);
+  const relatedKind = await relatedEntity.getAttribute('data-entity-kind');
+  const relatedId = await relatedEntity.getAttribute('data-entity-id');
+  assert.ok(relatedKind && relatedId, `${scenario.slug} 卷中人事必须携带对象身份`);
+  await assertTouchTarget(relatedEntity, scenario, '卷中人事入口');
+  await relatedEntity.click();
+  await page.locator(HISTORY_LAYER_SELECTORS.entity).waitFor({ state: 'detached' });
+  const linkedInspector = page.locator(`.observer-inspector[data-kind="${relatedKind}"]`);
+  await linkedInspector.waitFor();
+  const linkedState = await snapshot(page);
+  assert.equal(linkedState.interface.selected?.kind, relatedKind, `${scenario.slug} 卷中链接必须打开同类对象档案`);
+  assert.equal(linkedState.interface.selected?.id, relatedId, `${scenario.slug} 卷中链接必须打开同一对象档案`);
+  assert.equal(await linkedInspector.evaluate((element) => document.activeElement === element), true, `${scenario.slug} 跨对象后焦点必须落在新档案`);
+
+  if (scenario.viewport.width <= 760) {
+    await linkedInspector.getByRole('button', { name: '收起', exact: true }).click();
+  } else {
+    await linkedInspector.locator('button[aria-label="关闭档案"]').click();
+  }
+  await linkedInspector.waitFor({ state: 'detached' });
+  const openRoster = page.locator('.roster-panel');
+  if (await openRoster.count()) {
+    await openRoster.locator('.roster-panel__header > button').click();
+    await openRoster.waitFor({ state: 'detached' });
+  }
+  await assertHistoryLayer(page, scenario, 'quarter', baseline, '人物生平阅读后返回季报');
+}
+
 async function assertHighlightPulse(page, scenario, reportTurn, projected) {
   const map = page.locator('.world-map');
   if (projected.highlightedRegionIds.length === 0) {
@@ -324,7 +569,7 @@ async function createWorld(page, scenario) {
   });
   await page.goto(APP_URL, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => typeof window.render_game_to_text === 'function');
-  await page.getByLabel('世界种子').fill('沧衡-甲子');
+  await page.getByLabel('世界种子').fill('春战副将');
   await page.locator('#start-world').click();
   await page.waitForSelector('.world-map__canvas');
   const initial = await snapshot(page);
@@ -334,7 +579,10 @@ async function createWorld(page, scenario) {
 }
 
 async function verifyScenario(browser, scenario) {
-  const context = await browser.newContext({ viewport: scenario.viewport });
+  const context = await browser.newContext({
+    viewport: scenario.viewport,
+    hasTouch: scenario.viewport.width === 390,
+  });
   const page = await context.newPage();
   const browserErrors = [];
   collectBrowserErrors(page, browserErrors);
@@ -343,6 +591,7 @@ async function verifyScenario(browser, scenario) {
     const initial = await createWorld(page, scenario);
     await assertPrimaryNavigation(page, scenario, initial);
     let previousDate = '';
+    let situationHistoryPathCovered = false;
     for (let turn = 1; turn <= QUARTERS; turn += 1) {
       await page.getByRole('button', { name: '推进至下一季', exact: true }).click();
       const current = await waitForTurn(page, turn);
@@ -353,7 +602,16 @@ async function verifyScenario(browser, scenario) {
       await assertQuarterProjection(page, scenario, current);
       await assertHighlightPulse(page, scenario, turn - 1, current.interface.quarterPulse);
       await assertNoPageOverflow(page, scenario);
+      if (!situationHistoryPathCovered) {
+        situationHistoryPathCovered = await exerciseQuarterSituationHistoryPath(page, scenario, current);
+      }
     }
+
+    assert.equal(situationHistoryPathCovered, true, `${scenario.slug} 八季内必须走通季报→局势→因果→返回`);
+
+    const browsingBaseline = await snapshot(page);
+    await exerciseChronicleHistoryPath(page, scenario, browsingBaseline);
+    await exercisePersonHistoryPath(page, scenario, browsingBaseline);
 
     const situationTriggers = page.locator('[data-situation-workbench-trigger="true"]');
     assert.equal(

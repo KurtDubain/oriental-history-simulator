@@ -207,7 +207,7 @@ async function exerciseMapPrimer(page) {
   const traced = await snapshot(page);
   assert.equal(traced.observer.primerOpen, false);
   assert.ok(traced.interface.selectedEventId, '导览应打开刚过去一季的可追溯史事');
-  await page.locator('#observer-causal-drawer button[aria-label="关闭因果链"]').click();
+  await page.locator('#observer-causal-drawer button[aria-label="关闭何故与证据"]').click();
   await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
   assert.equal(
     await page.evaluate(() => localStorage.getItem('canghai-map-primer-complete-v1')),
@@ -558,10 +558,10 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   await workbenchTrigger.click();
   await page.waitForSelector('.situation-workbench[role="dialog"]');
   let workbenchState = await snapshot(page);
-  assert.equal(workbenchState.observer.situationWorkbenchOpen, true, '局势全卷必须拥有独立只读打开态');
-  assert.ok(workbenchState.observer.selectedSituationId, '局势全卷必须选中一条稳定 Situation');
+  assert.equal(workbenchState.observer.situationWorkbenchOpen, true, '持续局势必须拥有独立只读打开态');
+  assert.ok(workbenchState.observer.selectedSituationId, '持续局势必须选中一条稳定 Situation');
   assert.ok(workbenchState.observer.selectedSituation?.playerSummary.length >= 2, '默认读势层必须提供玩家语言摘要');
-  assert.equal(workbenchState.deterministicWorldHash, situationHash, '打开局势全卷不得改变世界哈希');
+  assert.equal(workbenchState.deterministicWorldHash, situationHash, '打开持续局势不得改变世界哈希');
   const workbench = page.locator('.situation-workbench');
   const auditDetails = workbench.locator('.situation-workbench__audit');
   assert.equal(await auditDetails.getAttribute('open'), null, 'Simulation Audit 默认必须折叠');
@@ -583,20 +583,20 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   assert.equal((await snapshot(page)).deterministicWorldHash, situationHash, '展开审计不得改变世界哈希');
   await auditDetails.locator('summary').click();
 
-  const causalButton = workbench.getByRole('button', { name: '查明因果' }).first();
+  const causalButton = workbench.getByRole('button', { name: '为何如此' }).first();
   if (await causalButton.count()) {
     await causalButton.click();
     await page.waitForSelector('.observer-causal-drawer');
     const causalState = await snapshot(page);
-    assert.equal(causalState.observer.situationWorkbenchOpen, false, '查明因果时应暂收卷宗，避免双层焦点陷阱');
+    assert.equal(causalState.observer.situationWorkbenchOpen, false, '查看何故与证据时应暂收卷宗，避免双层焦点陷阱');
     assert.ok(causalState.interface.selectedEventId, '里程碑因果入口必须精确指向史事');
-    await page.locator('.observer-causal-drawer button[aria-label="关闭因果链"]').click();
+    await page.locator('#observer-causal-drawer button[aria-label="关闭何故与证据"]').click();
     await page.waitForSelector('.situation-workbench[role="dialog"]');
-    assert.equal((await snapshot(page)).observer.situationWorkbenchOpen, true, '关闭因果链后应回到原局势卷宗');
+    assert.equal((await snapshot(page)).observer.situationWorkbenchOpen, true, '关闭何故与证据后应回到原持续局势');
   }
   await page.locator('.situation-workbench__close').click();
   await page.waitForSelector('.situation-workbench', { state: 'detached' });
-  assert.equal((await snapshot(page)).deterministicWorldHash, situationHash, '关闭局势全卷不得改变世界哈希');
+  assert.equal((await snapshot(page)).deterministicWorldHash, situationHash, '关闭持续局势不得改变世界哈希');
 
   await page.click('button[aria-label="保存当前世界"]');
   await page.waitForTimeout(500);
@@ -1053,7 +1053,7 @@ async function findThreeClickCausalPath(page) {
       await page.waitForSelector('#observer-causal-drawer');
       const references = await expandAnyStructuredReference(page);
       if (references) return references;
-      await page.click('#observer-causal-drawer button[aria-label="关闭因果链"]');
+      await page.click('#observer-causal-drawer button[aria-label="关闭何故与证据"]');
       if (returnsToHistory) await page.waitForSelector('.history-workbench');
     }
     return null;
@@ -1157,7 +1157,7 @@ async function exerciseHistoryWorkbench(page, current) {
   assert.equal(opened.observer.historicalTurn, null);
 
   const eventButtons = workbench.locator('.history-workbench__event-list > li > button');
-  assert.ok(await eventButtons.count(), '历史工作台应列出已发生史事');
+  assert.ok(await eventButtons.count(), '天下史册应列出已发生史事');
   const firstTitle = (await eventButtons.first().locator('strong').textContent()).trim();
   const search = workbench.locator('input[type="search"]');
   await search.fill(firstTitle);
@@ -1191,7 +1191,7 @@ async function exerciseHistoryWorkbench(page, current) {
   assert.equal(await page.getByRole('button', { name: '推进至下一季' }).isDisabled(), true);
   assert.equal((await snapshot(page)).time.turn, current.time.turn);
   assert.equal((await snapshot(page)).deterministicWorldHash, hashBefore);
-  await page.locator('.observer-history-lens').getByRole('button', { name: '归还当下' }).click();
+  await page.locator('.observer-history-lens').getByRole('button', { name: '回到当下' }).click();
   await page.waitForSelector('.observer-history-lens', { state: 'detached' });
   const restored = await waitForSnapshot(page, (state) => state.observer.historicalTurn === null);
   assert.equal(restored.deterministicWorldHash, hashBefore);
@@ -1442,7 +1442,7 @@ try {
   await quarterPulse.locator('[data-testid="quarter-pulse-ledger-population"]').click();
   await page.waitForSelector('#observer-causal-drawer');
   assert.equal((await snapshot(page)).interface.overlay, 'population');
-  await page.locator('#observer-causal-drawer button[aria-label="关闭因果链"]').click();
+  await page.locator('#observer-causal-drawer button[aria-label="关闭何故与证据"]').click();
   await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
   let hashBeforeBrowsing = afterManual.deterministicWorldHash;
 
@@ -1570,7 +1570,7 @@ try {
     await source.click();
     await page.waitForSelector('#observer-causal-drawer');
     assert.equal((await snapshot(page)).interface.selectedEventId, personAgency.commandRequest.sourceEventId);
-    await page.locator('#observer-causal-drawer button[aria-label="关闭因果链"]').click();
+    await page.locator('#observer-causal-drawer button[aria-label="关闭何故与证据"]').click();
     await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
   }
   await agencyPanel.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();
@@ -1748,7 +1748,7 @@ try {
     assert.ok(bounds && bounds.height >= 44, '移动端生平收束按钮触控高度不得小于44px');
   }
   await closurePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-life-closure-390x844.png`, fullPage: true });
-  await closureNotice.getByRole('button', { name: '查最后一页' }).click();
+  await closureNotice.getByRole('button', { name: '为何如此' }).click();
   const closureHistory = await waitForSnapshot(closurePage, (state) => Boolean(state.interface.selectedEventId));
   assert.match(closureHistory.interface.selectedEvent.title, /卒|离世|逝/);
   assert.deepEqual(closureErrors, []);
@@ -1801,7 +1801,7 @@ try {
   await identityResult.waitFor();
   assert.match(await identityResult.textContent(), /上次结果.*(军|帅|君|将校)/s);
   assert.ok(identitySettled.interface.selectedDetail.biography.length > identityBeforeQueue.interface.selectedDetail.biography.length, '身份行动领域结果必须进入人物传记');
-  const identityHistoryButton = identityResult.getByRole('button', { name: '查这件事' });
+  const identityHistoryButton = identityResult.getByRole('button', { name: '为何如此' });
   await identityHistoryButton.waitFor();
   await identityResult.scrollIntoViewIfNeeded();
   await identityPage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-identity-result.png`, fullPage: true });
@@ -1864,7 +1864,7 @@ try {
     governanceSettled.interface.selectedDetail.biography.length > governanceSelected.interface.selectedDetail.biography.length,
     '地方施政领域结果必须进入人物传记',
   );
-  const governanceHistoryButton = governanceResult.getByRole('button', { name: '查这件事' });
+  const governanceHistoryButton = governanceResult.getByRole('button', { name: '为何如此' });
   await governanceHistoryButton.waitFor();
   await governanceResult.scrollIntoViewIfNeeded();
   await governancePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-local-governance-result-390x844.png`, fullPage: true });
@@ -2069,8 +2069,8 @@ try {
   assert.equal(mobileLeadOpened.observer.selectedSituationId, mobileLead.situationId, '移动端局势卡片应直达对应卷宗');
   assert.equal(mobileLeadOpened.observer.selectedSituation?.id, mobileLead.situationId, '移动端卷宗正文应保留稳定 Situation ID');
   assert.equal(mobileLeadOpened.deterministicWorldHash, mobileSituationState.deterministicWorldHash, '移动端从卡片阅卷不得改变世界哈希');
-  await assertWithinViewport(mobilePage, '.situation-workbench', '移动端局势全卷不可横向溢出');
-  assert.equal(await mobileSituation.evaluate((element) => Math.round(element.getBoundingClientRect().height)), 844, '移动端局势全卷应占满100dvh');
+  await assertWithinViewport(mobilePage, '.situation-workbench', '移动端持续局势不可横向溢出');
+  assert.equal(await mobileSituation.evaluate((element) => Math.round(element.getBoundingClientRect().height)), 844, '移动端持续局势应占满100dvh');
   await waitForVisualSettled(mobileSituation);
   for (const locator of [
     mobileSituation.locator('.situation-workbench__close'),
@@ -2134,7 +2134,7 @@ try {
   await mobilePage.locator('button[data-history-workbench-trigger="true"]').click();
   const mobileHistory = mobilePage.locator('.history-workbench');
   await mobileHistory.waitFor();
-  await assertWithinViewport(mobilePage, '.history-workbench', '移动端历史工作台不可横向溢出');
+  await assertWithinViewport(mobilePage, '.history-workbench', '移动端天下史册不可横向溢出');
   await waitForVisualSettled(mobileHistory);
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-history-390x844.png`, fullPage: true });
   await mobilePage.keyboard.press('Escape');

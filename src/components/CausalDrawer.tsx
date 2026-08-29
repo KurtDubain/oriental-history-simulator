@@ -116,11 +116,11 @@ export function CausalDrawer({
   if (!open || !event) return null;
 
   return (
-    <div className="observer-causal-layer">
+    <div className="observer-causal-layer" data-history-layer="evidence" data-event-id={event.id}>
       <button
         type="button"
         className="observer-causal-layer__backdrop"
-        aria-label="关闭因果链"
+        aria-label="关闭何故与证据"
         tabIndex={-1}
         onClick={onClose}
       />
@@ -134,11 +134,11 @@ export function CausalDrawer({
       >
         <header className="observer-causal-drawer__header">
           <div>
-            <span className="observer-causal-drawer__kicker"><GitBranch size={14} aria-hidden="true" />史事溯因</span>
+            <span className="observer-causal-drawer__kicker"><GitBranch size={14} aria-hidden="true" />何故与证据</span>
             <h2 id={titleId}>{event.title}</h2>
             <p>{event.date}{event.summary ? ` · ${event.summary}` : ''}</p>
           </div>
-          <button ref={closeRef} type="button" className="observer-icon-button" aria-label="关闭因果链" onClick={onClose}>
+          <button ref={closeRef} type="button" className="observer-icon-button" aria-label="关闭何故与证据" onClick={onClose}>
             <X size={19} aria-hidden="true" />
           </button>
         </header>
@@ -156,7 +156,7 @@ export function CausalDrawer({
               </div>
             </section>
           ) : null}
-          <p className="observer-causal-drawer__question">为什么会发生？</p>
+          <p className="observer-causal-drawer__question">此事为何发生？</p>
           {event.factors.length ? (
             <ol className="observer-causal-chain">
               {event.factors.map((factor, index) => (

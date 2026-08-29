@@ -1389,7 +1389,7 @@ export function App() {
 
   const handleToggleRunning = useCallback(() => {
     if (historicalView) {
-      setToast('正在回望旧季；请先“归还当下”再继续推演。');
+      setToast('正在回望旧季；请先“回到当下”再继续推演。');
       return;
     }
     setPauseMatch(null);
@@ -1753,6 +1753,12 @@ export function App() {
       setActiveView(kind === 'person' ? 'people' : 'world');
     }
   }, []);
+
+  const handleSelectArchiveLink = useCallback((kind: ArchiveEntityKind, id: string) => {
+    archiveFocusRestoreAllowedRef.current = false; setArchiveOpen(false); setResumeArchiveAfterEvent(false);
+    handleSelectArchiveEntity(kind, id);
+    window.setTimeout(() => document.querySelector<HTMLElement>('.observer-inspector')?.focus({ preventScroll: true }), 0);
+  }, [handleSelectArchiveEntity]);
 
   const handleSelectScopedEvent = useCallback((eventId: string) => {
     gameAudio.play('open', 0.58);
@@ -2363,7 +2369,7 @@ export function App() {
                   </small>
                 </div>
                 <button type="button" onClick={() => handleViewChange('chronicle')}>查阅史册</button>
-                <button type="button" onClick={handleResetHistoricalView}>归还当下</button>
+                <button type="button" onClick={handleResetHistoricalView}>回到当下</button>
               </aside>
             ) : null}
 
@@ -2475,7 +2481,7 @@ export function App() {
           setArchiveOpen(false);
           setResumeArchiveAfterEvent(false);
         }}
-        onSelectEntity={handleSelectArchiveEntity}
+        onSelectEntity={handleSelectArchiveLink}
         onSelectEvent={handleSelectScopedEvent}
         returnFocusTo={archiveReturnFocusRef.current}
         shouldRestoreFocus={shouldRestoreArchiveFocus}

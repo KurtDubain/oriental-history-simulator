@@ -3,7 +3,10 @@ import { DEFAULT_MAP_PROFILE_ID, getMapProfile } from '../maps';
 import { advanceWorld, createWorld, serializeWorld } from '../sim';
 import { familyRoster, militaryRoster, polityRoster } from './adapters';
 import { DEFAULT_MAP_CAMERA } from './map-scene-geometry';
-import { makeTextSnapshot } from './game-text-snapshot';
+import {
+  deriveHistoryReadingLayer,
+  makeTextSnapshot,
+} from './game-text-snapshot';
 import { createObserverInterfaceSettings } from './observer-interface-settings';
 import type { SnapshotOptions } from './observer-shell-contract';
 import { createAgencyShadowLedger } from './v1-agency-shadow';
@@ -56,6 +59,74 @@ function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
 }
 
 describe('render_game_to_text projection boundary', () => {
+  it.each([
+    [
+      'evidence',
+      {
+        selectedEventId: 'event-1',
+        archiveOpen: true,
+        situationWorkbenchOpen: true,
+        historyWorkbenchOpen: true,
+      },
+    ],
+    [
+      'entity',
+      {
+        selectedEventId: null,
+        archiveOpen: true,
+        situationWorkbenchOpen: true,
+        historyWorkbenchOpen: true,
+      },
+    ],
+    [
+      'situation',
+      {
+        selectedEventId: null,
+        archiveOpen: false,
+        situationWorkbenchOpen: true,
+        historyWorkbenchOpen: true,
+      },
+    ],
+    [
+      'chronicle',
+      {
+        selectedEventId: null,
+        archiveOpen: false,
+        situationWorkbenchOpen: false,
+        historyWorkbenchOpen: true,
+      },
+    ],
+    [
+      'quarter',
+      {
+        selectedEventId: null,
+        archiveOpen: false,
+        situationWorkbenchOpen: false,
+        historyWorkbenchOpen: false,
+      },
+    ],
+  ] as const)('derives the %s history-reading layer without adding observer state', (expected, inputs) => {
+    const before = JSON.stringify(inputs);
+
+    expect(deriveHistoryReadingLayer(inputs)).toBe(expected);
+    expect(JSON.stringify(inputs)).toBe(before);
+  });
+
+  it('publishes the active history-reading layer without mutating the world', () => {
+    const world = createWorld('TRIM01-四层阅读', DEFAULT_MAP_PROFILE_ID);
+    const before = serializeWorld(world);
+    const snapshot = JSON.parse(makeTextSnapshot(world, options({
+      archiveOpen: true,
+      situationWorkbenchOpen: true,
+      historyWorkbenchOpen: true,
+    }))) as {
+      interface: { historyReadingLayer: string };
+    };
+
+    expect(snapshot.interface.historyReadingLayer).toBe('entity');
+    expect(serializeWorld(world)).toBe(before);
+  });
+
   it.each([
     ['polities', polityRoster],
     ['families', familyRoster],
