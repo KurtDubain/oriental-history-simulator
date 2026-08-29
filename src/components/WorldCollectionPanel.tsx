@@ -148,7 +148,7 @@ export function WorldCollectionPanel({
     return () => {
       cancelAnimationFrame(frame);
       document.removeEventListener('keydown', handleKeyDown);
-      queueMicrotask(() => previouslyFocused?.focus());
+      queueMicrotask(() => previouslyFocused?.focus({ preventScroll: true }));
     };
   }, [open, returnFocusTo]);
 
@@ -259,6 +259,8 @@ export function WorldCollectionPanel({
               {orderedSaves.map((save) => {
                 const isCurrent = currentSlot === save.slot;
                 const isCorrupt = save.status === 'corrupt';
+                const isIncompatible = save.status === 'incompatible';
+                const isReadable = save.status === 'ready';
                 const isEditing = editing?.slot === save.slot;
                 const isDeleting = deletingSlot === save.slot;
                 const rowPending = pendingAction?.endsWith(`:${save.slot}`) ?? false;
@@ -268,10 +270,11 @@ export function WorldCollectionPanel({
                     className="world-collection__row"
                     data-current={isCurrent || undefined}
                     data-corrupt={isCorrupt || undefined}
+                    data-incompatible={isIncompatible || undefined}
                   >
                     <div className="world-collection__identity">
                       <span className="world-collection__mark" aria-hidden="true">
-                        {isCorrupt ? <AlertTriangle size={16} /> : save.isAutosave ? <Database size={16} /> : <BookCopy size={16} />}
+                        {isCorrupt || isIncompatible ? <AlertTriangle size={16} /> : save.isAutosave ? <Database size={16} /> : <BookCopy size={16} />}
                       </span>
                       <div>
                         {isEditing ? (
@@ -300,12 +303,19 @@ export function WorldCollectionPanel({
                             {save.isAutosave ? <span>自动</span> : null}
                             {isCurrent ? <span>当前</span> : null}
                             {isCorrupt ? <span>损坏</span> : null}
+                            {isIncompatible ? <span>地图未安装</span> : null}
                           </div>
                         )}
                         {isCorrupt ? (
                           <p>{save.error ?? '此槽位无法解析，但其他收藏不受影响。'}</p>
+                        ) : isIncompatible ? (
+                          <p>
+                            <span>{save.error}</span>
+                            <span>可先复制留底，补回地图后即可读取。</span>
+                          </p>
                         ) : (
                           <p>
+                            <span>{save.mapName} · 第 {save.mapRevision} 版</span>
                             <span title={save.seed ?? undefined}>种子 {save.seed}</span>
                             <span>第 {save.year} 年 · {save.season}</span>
                             <span>回合 {save.turn}</span>
@@ -319,7 +329,7 @@ export function WorldCollectionPanel({
                     <span className="world-collection__size">{formatBytes(save.payloadBytes)}</span>
 
                     <div className="world-collection__actions" aria-label={`${save.label}存档操作`}>
-                      {!isCorrupt ? (
+                      {isReadable ? (
                         <button
                           type="button"
                           disabled={unavailable || isCurrent}

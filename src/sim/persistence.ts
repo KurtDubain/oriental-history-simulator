@@ -9,6 +9,7 @@ import type { LegacyArchiveBoundary, SimulationFact } from './facts';
 import { createSituationSystemState } from './situations';
 import { createAgencySystemState } from './agency/memory';
 import { createAgencyDecisionSystemState } from './agency/decision';
+import { findMapProfileForContentVersion } from '../maps';
 
 function migrateV02Systems(world: WorldState): void {
   (world as unknown as { schemaVersion: number }).schemaVersion = 3;
@@ -128,6 +129,16 @@ export function deserializeWorld(serialized: string): WorldState {
     if (!Array.isArray(world.facts) || world.factDigest !== factDigestOf(world.facts)) {
       throw new Error('事实档案摘要校验失败，内容可能已损坏或被篡改');
     }
+  }
+  const authenticatedMapContentVersion = typeof world.mapContentVersion === 'string'
+    ? world.mapContentVersion
+    : originalVersion < 3
+      ? 'legacy-v02-48'
+      : null;
+  if (!authenticatedMapContentVersion || !findMapProfileForContentVersion(authenticatedMapContentVersion)) {
+    throw new Error(
+      `存档需要地图内容“${authenticatedMapContentVersion ?? '未标注'}”，当前版本未包含；原存档未被修改。`,
+    );
   }
   const legacyBoundary: LegacyArchiveBoundary | null = originalVersion < 4
     ? {

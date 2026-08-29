@@ -6,9 +6,9 @@ export type RouteKind = '道路' | '河道' | '山道' | '海峡';
 
 export type SeaClimate = '北方海' | '季风海' | '内海' | '外洋';
 
-export type MapContentVersion = 'v03-82' | 'legacy-v02-48';
+export type MapContentVersion = 'v03-82' | 'legacy-v02-48' | 'contest-v01-68';
 
-export type MapProfileId = 'private-v03';
+export type MapProfileId = 'private-v03' | 'contest-v01';
 
 export interface RegionDefinition {
   readonly id: string;

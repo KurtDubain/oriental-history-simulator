@@ -1,7 +1,3 @@
-import {
-  MAP_PRESENTATION_HEIGHT,
-  MAP_PRESENTATION_WIDTH,
-} from './map-geography';
 import { getMapProfile } from '../maps';
 import type { MapPresentationDefinition } from '../maps/types';
 import type {
@@ -17,15 +13,18 @@ import type {
   MapViewportTransform,
 } from './map-contract';
 
-export const MAP_WORLD_WIDTH = MAP_PRESENTATION_WIDTH;
-export const MAP_WORLD_HEIGHT = MAP_PRESENTATION_HEIGHT;
+// Every current MapProfile uses this stable scene-space contract. Individual
+// coastlines and display sites stay inside the selected profile; camera math
+// must not import a particular content package.
+export const MAP_WORLD_WIDTH = 1_000;
+export const MAP_WORLD_HEIGHT = 700;
 export const MAP_MIN_ZOOM = 1;
 export const MAP_MAX_ZOOM = 3.6;
 export const MAP_PADDING = 8;
 export const DEFAULT_MAP_CAMERA: MapCamera = { zoom: MAP_MIN_ZOOM, panX: 0, panY: 0 };
 
-const MAP_DESKTOP_RENDER_HEIGHT = MAP_PRESENTATION_HEIGHT;
-const MAP_COMPACT_RENDER_HEIGHT = MAP_PRESENTATION_HEIGHT;
+const MAP_DESKTOP_RENDER_HEIGHT = MAP_WORLD_HEIGHT;
+const MAP_COMPACT_RENDER_HEIGHT = MAP_WORLD_HEIGHT;
 
 const clamp = (value: number, min = 0, max = 1) =>
   Math.min(max, Math.max(min, value));

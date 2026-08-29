@@ -11,7 +11,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
-import { LATEST_APP_RELEASE } from '../config/changelog';
+import { LATEST_APP_RELEASE } from '@app-changelog';
 import { appUpdateStatusText, type AppUpdateState } from '../infra/app-update';
 import { APP_VERSION } from '../version';
 import {

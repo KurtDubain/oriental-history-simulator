@@ -140,8 +140,11 @@ function closureFor(
   };
 }
 
-export function embodimentObserverStorageKey(seed: string): string {
-  return `${EMBODIMENT_OBSERVER_STORAGE_PREFIX}:${encodeURIComponent(seed)}`;
+export function embodimentObserverStorageKey(seed: string, mapContentVersion?: string): string {
+  const worldKey = mapContentVersion
+    ? `${encodeURIComponent(mapContentVersion)}:${encodeURIComponent(seed)}`
+    : encodeURIComponent(seed);
+  return `${EMBODIMENT_OBSERVER_STORAGE_PREFIX}:${worldKey}`;
 }
 
 export function createEmbodimentObserverState(world: WorldState | null = null): EmbodimentObserverState {

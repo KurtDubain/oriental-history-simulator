@@ -1,0 +1,15 @@
+{
+  "extends": "./tsconfig.app.json",
+  "compilerOptions": {
+    "paths": {
+      "@app-changelog": ["src/config/changelog.contest.ts"],
+      "@map-profile-catalog": ["src/maps/catalog.contest.ts"]
+    }
+  },
+  "exclude": [
+    "src/**/*.test.ts",
+    "src/**/*.test.tsx",
+    "src/maps/catalog.ts",
+    "src/maps/private-v03"
+  ]
+}

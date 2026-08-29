@@ -4,6 +4,7 @@ import {
   DEFAULT_MAP_PROFILE_ID,
   findMapProfileForContentVersion,
   getMapProfile,
+  getMapProfileRevision,
   listMapProfiles,
   validateMapProfile,
 } from '.';
@@ -45,7 +46,7 @@ const V163_BASELINES = {
 describe('MAP01/MAP02 map profile boundary', () => {
   it('registers the complete private atlas and maps both current and legacy content to it', () => {
     expect(DEFAULT_MAP_PROFILE_ID).toBe('private-v03');
-    expect(listMapProfiles()).toHaveLength(1);
+    expect(listMapProfiles()).toHaveLength(2);
     const profile = getMapProfile();
     expect(profile).toMatchObject({
       id: 'private-v03',
@@ -59,6 +60,9 @@ describe('MAP01/MAP02 map profile boundary', () => {
     expect(Object.keys(profile.presentation.regionDisplaySites)).toHaveLength(82);
     expect(findMapProfileForContentVersion('v03-82')).toBe(profile);
     expect(findMapProfileForContentVersion('legacy-v02-48')).toBe(profile);
+    expect(getMapProfileRevision('private-v03', 1)).toBe(profile);
+    expect(getMapProfileRevision('contest-v01', 1)).toBe(getMapProfile('contest-v01'));
+    expect(() => getMapProfileRevision('private-v03', 2)).toThrow('private-v03@2');
     expect(findMapProfileForContentVersion('unknown')).toBeUndefined();
     expect(Object.isFrozen(listMapProfiles())).toBe(true);
   });
@@ -109,4 +113,3 @@ describe('MAP01/MAP02 map profile boundary', () => {
     },
   );
 });
-

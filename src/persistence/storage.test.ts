@@ -61,6 +61,10 @@ describe('V1 multi-world collection pure boundaries', () => {
       season: world.season,
       turn: world.turn,
       hash: world.hash,
+      mapContentVersion: 'v03-82',
+      mapProfileId: 'private-v03',
+      mapRevision: 1,
+      mapName: '心中山河',
       error: null,
     });
     expect(summary.payloadBytes).toBeGreaterThan(1_000);
@@ -100,5 +104,38 @@ describe('V1 multi-world collection pure boundaries', () => {
       seed: world.seed,
       hash: world.hash,
     });
+  });
+
+  it('shows the exact contest map revision in a collection summary', () => {
+    const world = createWorld('参赛存档', 'contest-v01', 1);
+    const summary = summarizeWorldSave(
+      'contest_branch',
+      createSaveEnvelope(serializeWorld(world), '云海线'),
+    );
+    expect(summary).toMatchObject({
+      status: 'ready',
+      mapContentVersion: 'contest-v01-68',
+      mapProfileId: 'contest-v01',
+      mapRevision: 1,
+      mapName: '云海八荒',
+    });
+  });
+
+  it('keeps an unavailable-map save visible and distinguishable from damage', () => {
+    const raw = JSON.parse(serializeWorld(createWorld('缺图留底'))) as Record<string, unknown>;
+    raw.mapContentVersion = 'retired-map-r1';
+    const payload = JSON.stringify(raw);
+    const summary = summarizeWorldSave('recovery', createSaveEnvelope(payload, '原档'));
+
+    expect(summary).toMatchObject({
+      status: 'incompatible',
+      label: '原档',
+      mapContentVersion: 'retired-map-r1',
+      mapProfileId: null,
+      mapRevision: null,
+      mapName: null,
+    });
+    expect(summary.error).toMatch(/当前版本未包含对应地图/);
+    expect(summary.payloadBytes).toBeGreaterThan(1_000);
   });
 });

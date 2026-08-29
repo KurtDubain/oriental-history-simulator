@@ -1,10 +1,11 @@
 import { BookOpen, FileUp, Library, Sparkles, X } from 'lucide-react';
 import { useEffect, useRef } from 'react';
 import { APP_VERSION } from '../version';
-import { getMapProfile } from '../maps';
+import { listMapProfiles } from '../maps';
+import type { MapProfile, MapProfileId, MapPoint } from '../maps';
 import '../styles/world-start.css';
 
-const DEFAULT_MAP_PROFILE = getMapProfile();
+const AVAILABLE_MAP_PROFILES = listMapProfiles();
 
 const PLAYTEST_SEEDS = [
   { seed: '沧衡-甲子', label: '山河初醒', detail: '均衡开局，适合第一次观察' },
@@ -12,9 +13,11 @@ const PLAYTEST_SEEDS = [
   { seed: '孤城疫年', label: '孤城疫年', detail: '迁徙、卫生与地方韧性的考验' },
 ] as const;
 
-interface WorldStartProps {
+export interface WorldStartProps {
   open: boolean;
   seed: string;
+  selectedMapProfileId: MapProfileId;
+  onSelectMapProfile: (profileId: MapProfileId) => void;
   hasSave: boolean;
   busy?: boolean;
   error?: string | null;
@@ -25,11 +28,55 @@ interface WorldStartProps {
   collectionCount?: number;
   onImport: (file: File) => void;
   onCancel?: () => void;
+  mapProfiles?: readonly MapProfile[];
+}
+
+function polygonPoints(points: readonly MapPoint[]): string {
+  return points.map((point) => `${point.x},${point.y}`).join(' ');
+}
+
+function MapProfilePreview({ profile }: { profile: MapProfile }) {
+  const { presentation } = profile;
+  return (
+    <svg
+      className="world-start__map-svg"
+      viewBox={`0 0 ${presentation.width} ${presentation.height}`}
+      preserveAspectRatio="xMidYMid meet"
+      aria-hidden="true"
+    >
+      <rect className="world-start__map-sea" width={presentation.width} height={presentation.height} />
+      <g className="world-start__map-land">
+        {presentation.landShapes.map((shape) => (
+          <polygon key={shape.id} points={polygonPoints(shape.polygon)} />
+        ))}
+      </g>
+      <g className="world-start__map-islets">
+        {presentation.decorativeIslets.map((islet) => (
+          <polygon key={islet.id} points={polygonPoints(islet.polygon)} />
+        ))}
+      </g>
+    </svg>
+  );
+}
+
+function mapPlaystyle(profile: MapProfile): string {
+  if (profile.compatibility.legacyPartialRegionVersions.length > 0) {
+    return '陆海跨度开阔，适合久看王朝、家族与边境的兴替。';
+  }
+  return profile.simulation.portLinks.length >= 16
+    ? '关隘与港路相扣，一处争衡更容易牵动全局。'
+    : '陆路相连，关隘、粮道与地方势力更值得留意。';
+}
+
+function mapEditionLabel(profile: MapProfile): string {
+  return profile.compatibility.legacyPartialRegionVersions.length > 0 ? '私人舆图' : '架空舆图';
 }
 
 export function WorldStart({
   open,
   seed,
+  selectedMapProfileId,
+  onSelectMapProfile,
   hasSave,
   busy = false,
   error,
@@ -40,6 +87,7 @@ export function WorldStart({
   collectionCount = 0,
   onImport,
   onCancel,
+  mapProfiles = AVAILABLE_MAP_PROFILES,
 }: WorldStartProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -78,11 +126,14 @@ export function WorldStart({
     return () => {
       cancelAnimationFrame(focusFrame);
       document.removeEventListener('keydown', handleKeyDown);
-      if (previouslyFocused) requestAnimationFrame(() => previouslyFocused.focus());
+      if (previouslyFocused) requestAnimationFrame(() => previouslyFocused.focus({ preventScroll: true }));
     };
   }, [open]);
 
   if (!open) return null;
+
+  const selectedMapProfile = mapProfiles.find((profile) => profile.id === selectedMapProfileId)
+    ?? mapProfiles[0];
 
   return (
     <div ref={dialogRef} className="world-start" role="dialog" aria-modal="true" aria-labelledby="world-start-title">
@@ -96,6 +147,53 @@ export function WorldStart({
         <p className="world-start__kicker">架空东方历史演化观察台 · v{APP_VERSION}</p>
         <h1 id="world-start-title">沧衡纪</h1>
         <p className="world-start__lede">不统治天下，只见证它如何成为历史。</p>
+
+        <section className="world-start__maps" aria-labelledby="world-start-map-title">
+          <div className="world-start__section-heading">
+            <h2 id="world-start-map-title">选择舆图</h2>
+            <p>只决定山河底板，两张地图共用同一套历史规则</p>
+          </div>
+          <div className="world-start__map-options" role="radiogroup" aria-label="新世界地图">
+            {mapProfiles.map((profile) => {
+              const selected = profile.id === selectedMapProfileId;
+              const detailId = `world-map-${profile.id}-detail`;
+              return (
+                <label
+                  className="world-start__map-choice"
+                  data-selected={selected || undefined}
+                  data-map-profile-id={profile.id}
+                  key={profile.id}
+                >
+                  <input
+                    type="radio"
+                    name="world-map-profile"
+                    value={profile.id}
+                    checked={selected}
+                    onChange={() => onSelectMapProfile(profile.id)}
+                    disabled={busy}
+                    aria-describedby={detailId}
+                  />
+                  <span className="world-start__map-preview">
+                    <MapProfilePreview profile={profile} />
+                    <span className="world-start__map-edition">
+                      {mapEditionLabel(profile)}
+                    </span>
+                    <span className="world-start__map-check" aria-hidden="true">选</span>
+                  </span>
+                  <span className="world-start__map-copy">
+                    <span className="world-start__map-titleline">
+                      <strong>{profile.name}</strong>
+                      <span>{profile.simulation.regions.length}州 · {profile.simulation.seaZones.length}海</span>
+                    </span>
+                    <span className="world-start__map-feature">{profile.subtitle}</span>
+                    <small id={detailId}>{mapPlaystyle(profile)}</small>
+                  </span>
+                </label>
+              );
+            })}
+          </div>
+          <p className="world-start__map-note">选图不会落笔；确认开启后，才会按种子生成这段历史。</p>
+        </section>
 
         <label className="world-start__seed">
           <span>世界种子</span>
@@ -174,7 +272,9 @@ export function WorldStart({
 
       <footer className="world-start__footer">
         <span>一回合 · 三个月</span>
-        <span>{DEFAULT_MAP_PROFILE.name} · {DEFAULT_MAP_PROFILE.simulation.regions.length} 陆区 · {DEFAULT_MAP_PROFILE.simulation.seaZones.length} 海域</span>
+        <span>{selectedMapProfile
+          ? `${selectedMapProfile.name} · ${selectedMapProfile.simulation.regions.length} 陆区 · ${selectedMapProfile.simulation.seaZones.length} 海域`
+          : '请选择一张舆图'}</span>
         <span>v{APP_VERSION} · 按 F 全屏</span>
       </footer>
     </div>

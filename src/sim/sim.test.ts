@@ -368,6 +368,27 @@ describe('V0.3 deterministic history simulation', () => {
     expect(left.hash).toBe(computeWorldHash(left));
   }, 30_000);
 
+  it('binds creation to an exact map profile revision without changing the legacy default', () => {
+    expect(serializeWorld(createWorld('修订绑定'))).toBe(
+      serializeWorld(createWorld('修订绑定', 'private-v03', 1)),
+    );
+    expect(() => createWorld('修订绑定', 'private-v03', 99)).toThrow(/private-v03@99/);
+
+    const left = advanceWorldBy(createWorld('云海同源', 'contest-v01', 1), 12);
+    const right = advanceWorldBy(createWorld('云海同源', 'contest-v01', 1), 12);
+    expect(serializeWorld(left)).toBe(serializeWorld(right));
+    expect(left.mapContentVersion).toBe('contest-v01-68');
+  }, 30_000);
+
+  it('rejects a hash-valid save whose exact map package is unavailable', () => {
+    const unavailable = structuredClone(createWorld('缺图鉴权'));
+    (unavailable as unknown as { mapContentVersion: string }).mapContentVersion = 'retired-map-r1';
+    unavailable.hash = computeWorldHash(unavailable);
+    expect(() => deserializeWorld(JSON.stringify(unavailable))).toThrow(
+      /存档需要地图内容“retired-map-r1”.*原存档未被修改/,
+    );
+  });
+
   it('uses the seed to produce genuinely different histories', () => {
     const left = advanceWorldBy(createWorld('赤潮'), 48);
     const right = advanceWorldBy(createWorld('青岚'), 48);

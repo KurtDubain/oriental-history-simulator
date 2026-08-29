@@ -2,9 +2,9 @@ import {
   type PolityDefinition,
   type RegionDefinition,
   type RouteDefinition,
-} from './data';
+} from '../maps/types';
 import { FAMILY_NAMES, GIVEN_NAMES } from './names';
-import { DEFAULT_MAP_PROFILE_ID, getMapProfile } from '../maps';
+import { DEFAULT_MAP_PROFILE_ID, getMapProfile, getMapProfileRevision } from '../maps';
 import type { MapProfile, MapProfileId } from '../maps/types';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
 import {
@@ -563,11 +563,14 @@ export function computeWorldHash(world: WorldState): string {
 export function createWorld(
   seed: string,
   profileId: MapProfileId = DEFAULT_MAP_PROFILE_ID,
+  profileRevision?: number,
 ): WorldState {
   if (typeof seed !== 'string' || seed.length === 0) {
     throw new Error('World seed must be a non-empty string');
   }
-  const profile: MapProfile = getMapProfile(profileId);
+  const profile: MapProfile = profileRevision === undefined
+    ? getMapProfile(profileId)
+    : getMapProfileRevision(profileId, profileRevision);
   const regions = createRegions(seed, profile.simulation.regions);
   const routes = createRoutes(regions, profile.simulation.routes);
   const characters: CharacterState[] = [];

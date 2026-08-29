@@ -244,6 +244,11 @@
   background: rgb(145 54 45 / 5%);
 }
 
+.world-collection__row[data-incompatible="true"] {
+  color: #765d3f;
+  background: rgb(160 111 45 / 7%);
+}
+
 .world-collection__identity {
   display: flex;
   align-items: center;
@@ -263,7 +268,8 @@
 }
 
 .world-collection__row[data-current="true"] .world-collection__mark,
-.world-collection__row[data-corrupt="true"] .world-collection__mark {
+.world-collection__row[data-corrupt="true"] .world-collection__mark,
+.world-collection__row[data-incompatible="true"] .world-collection__mark {
   color: #963a30;
   border-color: rgb(145 54 45 / 28%);
 }

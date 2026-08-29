@@ -81,6 +81,8 @@ import {
   runtimeNow,
 } from './performance/runtime-profiler';
 import {
+  AUTOSAVE_SLOT,
+  MAX_WORLD_SLOTS,
   deleteWorldSlot,
   downloadWorld,
   duplicateWorldSlot,
@@ -110,7 +112,13 @@ import {
   type WorldState,
 } from './sim';
 import { APP_VERSION } from './version';
-import { getMapProfile, getMapProfileForContentVersion, mapProfileIdForContentVersion } from './maps';
+import {
+  DEFAULT_MAP_PROFILE_ID,
+  getMapProfile,
+  getMapProfileForContentVersion,
+  listMapProfiles,
+  type MapProfileId,
+} from './maps';
 import {
   familyRoster,
   militaryRoster,
@@ -295,8 +303,16 @@ function selectedEntityLabel(world: WorldState, selection: Selection): string | 
   return system?.name ?? null;
 }
 
-function observerStorageKey(seed: string): string {
-  return `${OBSERVER_DESK_STORAGE_KEY}:${encodeURIComponent(seed)}`;
+function observerStorageKey(seed: string, mapContentVersion?: string): string {
+  const worldKey = mapContentVersion
+    ? `${encodeURIComponent(mapContentVersion)}:${encodeURIComponent(seed)}`
+    : encodeURIComponent(seed);
+  return `${OBSERVER_DESK_STORAGE_KEY}:${worldKey}`;
+}
+
+function supportsLegacyObserverStorage(mapContentVersion: string): boolean {
+  return getMapProfileForContentVersion(mapContentVersion)
+    .compatibility.legacyPartialRegionVersions.length > 0;
 }
 
 function agencyShadowRestoreToken(slot: string): string {
@@ -430,6 +446,7 @@ function watchItemForSituation(world: WorldState, situationId: string): Observer
 
 interface SnapshotOptions {
   startOpen: boolean;
+  selectedMapProfileId: MapProfileId;
   running: boolean;
   speed: PlaybackSpeed;
   view: ObserverView;
@@ -465,13 +482,21 @@ interface SnapshotOptions {
 
 function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
   if (!world) {
-    const mapProfile = getMapProfile();
+    const mapProfile = getMapProfile(options.selectedMapProfileId);
     return JSON.stringify({
       mode: 'start',
       productVersion: APP_VERSION,
       appUpdate: getAppUpdateState(),
       title: '沧衡纪',
       mapProfile: { id: mapProfile.id, revision: mapProfile.revision, name: mapProfile.name },
+      availableMapProfiles: listMapProfiles().map((profile) => ({
+        id: profile.id,
+        revision: profile.revision,
+        name: profile.name,
+        regions: profile.simulation.regions.length,
+        seaZones: profile.simulation.seaZones.length,
+        polities: profile.simulation.polities.length,
+      })),
       seedInputVisible: options.startOpen,
       collectionOpen: options.collectionOpen,
       worldSaveCount: options.worldSaveCount,
@@ -689,6 +714,7 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
   const situationWorkbench = options.situationWorkbenchOpen
     ? projectSituationWorkbench(world, options.selectedSituationId)
     : null;
+  const selectedCreationProfile = getMapProfile(options.selectedMapProfileId);
   return JSON.stringify({
     mode: options.startOpen ? 'world-menu' : 'observing',
     productVersion: APP_VERSION,
@@ -696,6 +722,18 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
     worldSchemaVersion: world.schemaVersion,
     mapContentVersion: world.mapContentVersion,
     mapProfile: { id: mapProfile.id, revision: mapProfile.revision, name: mapProfile.name },
+    worldCreation: options.startOpen ? {
+      selectedMapProfile: {
+        id: selectedCreationProfile.id,
+        revision: selectedCreationProfile.revision,
+        name: selectedCreationProfile.name,
+      },
+      availableMapProfiles: listMapProfiles().map((profile) => ({
+        id: profile.id,
+        revision: profile.revision,
+        name: profile.name,
+      })),
+    } : null,
     coordinates: `map world coordinates use origin top-left, x rightward, y downward, range ${mapProfile.presentation.width}x${mapProfile.presentation.height}`,
     time: { turn: world.turn, year: world.year, season: world.season },
     deterministicWorldHash: world.hash,
@@ -930,6 +968,7 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
 export function App() {
   const [world, setWorld] = useState<WorldState | null>(null);
   const [seed, setSeed] = useState(DEFAULT_SEED);
+  const [selectedMapProfileId, setSelectedMapProfileId] = useState<MapProfileId>(DEFAULT_MAP_PROFILE_ID);
   const [startOpen, setStartOpen] = useState(true);
   const [hasSave, setHasSave] = useState(false);
   const [startBusy, setStartBusy] = useState(false);
@@ -1030,6 +1069,7 @@ export function App() {
   ), [observerSettings.leadContinuity, world]);
   const snapshotOptionsRef = useRef<SnapshotOptions>({
     startOpen,
+    selectedMapProfileId,
     running,
     speed,
     view: activeView,
@@ -1207,7 +1247,9 @@ export function App() {
   const refreshWorldSaves = useCallback(async () => {
     const saves = await listWorldSaves();
     setWorldSaves(saves);
-    setHasSave(saves.some((save) => save.isAutosave && save.status === 'ready'));
+    // An unavailable-map autosave must stay discoverable: Continue can then
+    // explain which map package is missing instead of reporting no local save.
+    setHasSave(saves.some((save) => save.isAutosave && save.status !== 'corrupt'));
     return saves;
   }, []);
 
@@ -1220,7 +1262,10 @@ export function App() {
     setFollowed(new Set(observerSettings.watchlist.map((item) => observerWatchKey(item.kind, item.id))));
     if (!world) return;
     try {
-      localStorage.setItem(observerStorageKey(world.seed), serializeObserverDeskSettings(observerSettings));
+      localStorage.setItem(
+        observerStorageKey(world.seed, world.mapContentVersion),
+        serializeObserverDeskSettings(observerSettings),
+      );
     } catch {
       // Observer preferences are non-authoritative; a blocked localStorage must not stop play.
     }
@@ -1234,7 +1279,7 @@ export function App() {
       || embodimentObserver.anchor.hash !== world.hash) return;
     try {
       localStorage.setItem(
-        embodimentObserverStorageKey(world.seed),
+        embodimentObserverStorageKey(world.seed, world.mapContentVersion),
         serializeEmbodimentObserverState(embodimentObserver),
       );
     } catch {
@@ -1278,7 +1323,7 @@ export function App() {
           && currentEmbodiment.anchor.turn === currentWorld.turn
           && currentEmbodiment.anchor.hash === currentWorld.hash) {
           localStorage.setItem(
-            embodimentObserverStorageKey(currentWorld.seed),
+            embodimentObserverStorageKey(currentWorld.seed, currentWorld.mapContentVersion),
             serializeEmbodimentObserverState(currentEmbodiment),
           );
         }
@@ -1319,7 +1364,13 @@ export function App() {
     ))?.id ?? validWorld.regions[0]?.id;
     let restoredObserver = createObserverDeskSettings();
     try {
-      restoredObserver = parseObserverDeskSettings(localStorage.getItem(observerStorageKey(validWorld.seed)));
+      const currentObserver = localStorage.getItem(
+        observerStorageKey(validWorld.seed, validWorld.mapContentVersion),
+      );
+      const legacyObserver = supportsLegacyObserverStorage(validWorld.mapContentVersion)
+        ? localStorage.getItem(observerStorageKey(validWorld.seed))
+        : null;
+      restoredObserver = parseObserverDeskSettings(currentObserver ?? legacyObserver);
     } catch {
       // Continue with safe defaults when localStorage is unavailable.
     }
@@ -1362,7 +1413,13 @@ export function App() {
       try {
         restoredEmbodiment = restoreEmbodimentObserverState(
           validWorld,
-          localStorage.getItem(embodimentObserverStorageKey(validWorld.seed)),
+          localStorage.getItem(
+            embodimentObserverStorageKey(validWorld.seed, validWorld.mapContentVersion),
+          ) ?? (
+            supportsLegacyObserverStorage(validWorld.mapContentVersion)
+              ? localStorage.getItem(embodimentObserverStorageKey(validWorld.seed))
+              : null
+          ),
         );
       } catch {
         restoredEmbodiment = createEmbodimentObserverState(validWorld);
@@ -1371,6 +1428,7 @@ export function App() {
     commitWorld(validWorld, source === 'continue' || source === 'collection' ? 'restore' : 'reset');
     commitEmbodiedObserver(restoredEmbodiment);
     setSeed(validWorld.seed);
+    setSelectedMapProfileId(getMapProfileForContentVersion(validWorld.mapContentVersion).id);
     const compactViewport = window.matchMedia('(max-width: 760px)').matches;
     const restoredPersonId = restoredEmbodiment.activeActor?.id
       ?? (restoredEmbodiment.closure
@@ -1420,17 +1478,37 @@ export function App() {
     clockAccumulatorRef.current = 0;
   }, [commitAgencyShadow, commitEmbodiedObserver, commitWorld, resetAgencyShadowAtWorld, resetAutosaveCoordinator]);
 
-  const handleCreate = useCallback(() => {
+  const handleCreate = useCallback(async () => {
     setStartBusy(true);
     setStartError(null);
     try {
-      openWorld(createWorld(seed.trim()), 'create');
+      const nextWorld = createWorld(seed.trim(), selectedMapProfileId);
+      const saves = await listWorldSaves();
+      const unavailableAutosave = saves.find((save) => save.isAutosave && save.status === 'incompatible');
+      if (unavailableAutosave) {
+        const namedCount = saves.filter((save) => !save.isAutosave).length;
+        if (namedCount >= MAX_WORLD_SLOTS) {
+          throw new Error('自动续写使用了尚未安装的地图，且世界收藏已满。请先在世界收藏中整理一个槽位。');
+        }
+        const recoverySlot = availableCollectionSlot(
+          `recovery_${unavailableAutosave.hash?.slice(0, 8) ?? 'map'}`,
+          saves,
+        );
+        await duplicateWorldSlot(
+          AUTOSAVE_SLOT,
+          recoverySlot,
+          `${unavailableAutosave.label.slice(0, 64)} · 待补地图`,
+        );
+        await refreshWorldSaves();
+        setToast('已先把缺少地图的自动续写收藏留底，原世界没有丢失。');
+      }
+      openWorld(nextWorld, 'create');
     } catch (error) {
       setStartError(error instanceof Error ? error.message : '无法创建世界。');
     } finally {
       setStartBusy(false);
     }
-  }, [openWorld, seed]);
+  }, [openWorld, refreshWorldSaves, seed, selectedMapProfileId]);
 
   const handleContinue = useCallback(async () => {
     setStartBusy(true);
@@ -1593,7 +1671,7 @@ export function App() {
     requestAnimationFrame(() => {
       const trigger = collectionTriggerRef.current
         ?? document.querySelector<HTMLElement>('#open-world-collection');
-      trigger?.focus();
+      trigger?.focus({ preventScroll: true });
     });
   }, []);
 
@@ -1631,11 +1709,18 @@ export function App() {
   const handleLoadCollectionSlot = useCallback(async (slot: string) => {
     setCollectionBusy(true);
     try {
-      const pendingSave = await autosaveCoordinatorRef.current?.flush('pause');
-      if (pendingSave?.status === 'failed') throw pendingSave.error;
       const saved = await loadWorldFromSlot(slot);
       if (!saved) throw new Error('该世界槽位已经不存在。');
-      openWorld(deserializeWorld(saved.payload), 'collection', agencyShadowRestoreToken(slot));
+      // Authenticate the target before touching the current autosave. This is
+      // essential for missing-map saves: a failed load must never overwrite the
+      // only recoverable payload. Loading autosave itself also skips a same-slot
+      // flush, otherwise the selected historical payload would be replaced.
+      const restoredWorld = deserializeWorld(saved.payload);
+      if (slot !== AUTOSAVE_SLOT) {
+        const pendingSave = await autosaveCoordinatorRef.current?.flush('pause');
+        if (pendingSave?.status === 'failed') throw pendingSave.error;
+      }
+      openWorld(restoredWorld, 'collection', agencyShadowRestoreToken(slot));
       setToast(`已读取“${saved.label ?? '世界存档'}”。`);
       await refreshWorldSaves();
     } finally {
@@ -1658,7 +1743,7 @@ export function App() {
     setCollectionBusy(true);
     try {
       const saves = await listWorldSaves();
-      const source = saves.find((save) => save.slot === sourceSlot && save.status === 'ready');
+      const source = saves.find((save) => save.slot === sourceSlot && save.status !== 'corrupt');
       if (!source) throw new Error('找不到要复制的世界。');
       const baseHash = source.hash?.slice(0, 8) ?? 'branch';
       const targetSlot = availableCollectionSlot(`branch_${baseHash}_t${source.turn ?? 0}`, saves);
@@ -1902,6 +1987,7 @@ export function App() {
 
   snapshotOptionsRef.current = {
     startOpen,
+    selectedMapProfileId,
     running,
     speed,
     view: activeView,
@@ -2669,7 +2755,7 @@ export function App() {
             data-historical-turn={historicalView?.turn ?? undefined}
           >
             <WorldMap
-              mapProfileId={mapProfileIdForContentVersion(world.mapContentVersion)}
+              mapContentVersion={world.mapContentVersion}
               regions={mapRegions}
               routes={mapRoutes}
               armies={mapArmies}
@@ -3013,6 +3099,8 @@ export function App() {
       <WorldStart
         open={startOpen && !collectionOpen}
         seed={seed}
+        selectedMapProfileId={selectedMapProfileId}
+        onSelectMapProfile={setSelectedMapProfileId}
         hasSave={hasSave}
         busy={startBusy}
         error={startError}

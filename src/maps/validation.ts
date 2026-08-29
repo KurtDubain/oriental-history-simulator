@@ -84,6 +84,8 @@ export function validateMapProfile(profile: MapProfile): MapProfileIssue[] {
   }
   if (presentation.width <= 0 || presentation.height <= 0) {
     add('presentation.size', 'presentation', '地图展示尺寸必须为正数');
+  } else if (presentation.width !== 1_000 || presentation.height !== 700) {
+    add('presentation.contract', 'presentation', '当前舆图相机契约固定为 1000×700 世界坐标');
   }
 
   for (const polity of simulation.polities) {
@@ -164,4 +166,3 @@ export function assertValidMapProfile(profile: MapProfile): void {
   if (issues.length === 0) return;
   throw new Error(`地图配置 ${profile.id}@${profile.revision} 无效：\n${issues.map((issue) => `- [${issue.code}] ${issue.path}: ${issue.message}`).join('\n')}`);
 }
-

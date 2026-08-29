@@ -33,6 +33,7 @@ const SITUATION_WATCH_TURN = 8;
 const SITUATION_WATCH_SLOT = 'tension';
 const SITUATION_WATCH_EXPECTED_ID = 'situation_000001';
 const SITUATION_WATCH_EXPECTED_PAUSE_TURN = 10;
+const PRIVATE_MAP_CONTENT_VERSION = 'v03-82';
 
 const server = await createServer({
   logLevel: 'error',
@@ -235,11 +236,11 @@ async function waitForVisualSettled(locator) {
   });
 }
 
-async function readObserverDeskSettings(page, seed) {
-  return page.evaluate((worldSeed) => {
-    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(worldSeed)}`);
+async function readObserverDeskSettings(page, seed, mapContentVersion = PRIVATE_MAP_CONTENT_VERSION) {
+  return page.evaluate(({ worldSeed, contentVersion }) => {
+    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(contentVersion)}:${encodeURIComponent(worldSeed)}`);
     return raw ? JSON.parse(raw) : null;
-  }, seed);
+  }, { worldSeed: seed, contentVersion: mapContentVersion });
 }
 
 function situationFromSnapshot(state, situationId) {
@@ -626,13 +627,13 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   assert.equal(watched.deterministicWorldHash, hashBeforeWatch, '关注 Situation 只能改变观察者设置');
   assert.equal(await watchButton.getAttribute('aria-pressed'), 'true');
 
-  await page.waitForFunction(({ seed, situationId }) => {
-    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(seed)}`);
+  await page.waitForFunction(({ seed, situationId, contentVersion }) => {
+    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(contentVersion)}:${encodeURIComponent(seed)}`);
     if (!raw) return false;
     const parsed = JSON.parse(raw);
     return parsed.version === 3
       && parsed.watchlist?.some((item) => item.kind === 'situation' && item.id === situationId);
-  }, { seed: SITUATION_WATCH_SEED, situationId: watchedSituationId });
+  }, { seed: SITUATION_WATCH_SEED, situationId: watchedSituationId, contentVersion: PRIVATE_MAP_CONTENT_VERSION });
   let stored = await readObserverDeskSettings(page, SITUATION_WATCH_SEED);
   assert.equal(stored.version, 3, 'C03 观察台应迁移到 v3');
   assert.equal(stored.watchlist.length, 1);
@@ -662,8 +663,8 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   await page.keyboard.press('Escape');
   await desk.waitFor({ state: 'detached' });
 
-  await page.waitForFunction((seed) => {
-    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(seed)}`);
+  await page.waitForFunction(({ seed, contentVersion }) => {
+    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(contentVersion)}:${encodeURIComponent(seed)}`);
     if (!raw) return false;
     const rules = JSON.parse(raw).pauseRules;
     return rules?.enabled === true
@@ -673,7 +674,7 @@ async function exerciseSituationWatchAndPause(browserInstance) {
       && rules.powerTransfers === false
       && rules.outbreaks === false
       && rules.watchlistHits === false;
-  }, SITUATION_WATCH_SEED);
+  }, { seed: SITUATION_WATCH_SEED, contentVersion: PRIVATE_MAP_CONTENT_VERSION });
 
   await page.click('button[aria-label="保存当前世界"]');
   await waitForLatestAutosave(page, watched);
@@ -1283,7 +1284,7 @@ try {
     islands: element.getAttribute('data-island-shape-count'),
   }));
   assert.deepEqual(mapTopology, {
-    layout: 'reference-topology-v3',
+    layout: 'private-v03-r1',
     landmasses: '2',
     islands: '6',
   }, '舆图必须使用北陆半岛体系、岭南陆与六岛形的参考拓扑');
@@ -1882,7 +1883,7 @@ try {
   });
   assert.ok(mobileMapLayout.stageWidth >= 389 && mobileMapLayout.mapWidth >= 389, '移动端舆图必须使用完整视口宽度');
   assert.ok(mobileMapLayout.dockWidth >= 370, '移动端观察导航应成为全宽底部观察坞');
-  assert.equal(mobileMapLayout.mapLayout, 'reference-topology-v3');
+  assert.equal(mobileMapLayout.mapLayout, 'private-v03-r1');
   const mobileLeads = mobilePage.locator('[data-observer-leads="true"]');
   await mobileLeads.waitFor();
   await assertWithinViewport(mobilePage, '[data-observer-leads="true"]', '移动端史家线索不可横向溢出');
@@ -2025,11 +2026,11 @@ try {
   await mobileWatchButton.click();
   const mobileWatched = await waitForSnapshot(mobilePage, (current) => current.observer.watchedCount === 1);
   assert.equal(mobileWatched.deterministicWorldHash, mobileSituationState.deterministicWorldHash, '移动端关注局势不得改写世界');
-  await mobilePage.waitForFunction(({ seed, situationId }) => {
-    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(seed)}`);
+  await mobilePage.waitForFunction(({ seed, situationId, contentVersion }) => {
+    const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(contentVersion)}:${encodeURIComponent(seed)}`);
     if (!raw) return false;
     return JSON.parse(raw).watchlist?.some((item) => item.kind === 'situation' && item.id === situationId);
-  }, { seed: SITUATION_WATCH_SEED, situationId: mobileLead.situationId });
+  }, { seed: SITUATION_WATCH_SEED, situationId: mobileLead.situationId, contentVersion: PRIVATE_MAP_CONTENT_VERSION });
   await mobileLeadRow.locator('.observer-leads__inspect').click();
   const mobileSituation = mobilePage.locator('.situation-workbench');
   await mobileSituation.waitFor();

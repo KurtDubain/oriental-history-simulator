@@ -65,3 +65,13 @@ engine.ts（季度顺序与提交）
 - `createWorld(seed, profileId)`、海洋初始化、地图投影、Scene Hit、Canvas renderer 与全文快照都从同一 profile 读取。政权制度/海洋倾向、地理分区、视觉排除路线和河流导引不再散落在领域或 renderer 中。
 - 独立 `check:maps` 在生产构建前验证 ID、首都、控制权、路线、海陆运输图、港口、展示位置与陆形；当前架构检查为 99 个生产文件、46,897 行，没有新增依赖环。
 - MAP02 行为门冻结两个世界从 T0 到 T12 的 world hash、Fact digest 与 History digest；默认创建和显式私人 profile 创建逐字节相等，schema 4 与旧档内容版本保持不变。
+
+## v1.8.0 双地图与发布隔离
+
+- `contest-v01@1` 以独立内容包提供 68 州、10 海域、8 政权及全套海陆运输和展示数据；模拟域未增加地图 ID 分支。
+- registry 分别提供“当前最新 profile”与“精确 `id@revision`”查询。创建界面可按 ID 选择当前修订；活跃世界、存档与 renderer 只按已进入 hash 的 `mapContentVersion` 反解精确修订，禁止从旧存档跳到 latest。
+- `WorldSaveSummary` 以 `ready / incompatible / corrupt` 区分可读、缺图与损坏；缺图存档可复制留底，读取失败不会先覆盖 autosave。三问与入世观察状态的本地 key 也升级为 `mapContentVersion + seed`，私人旧 key 仅作一次兼容回退。
+- Vite 通过 `@map-profile-catalog` 与 `@app-changelog` 同时切换完整个人内容和参赛 allowlist；兼容 `sim/data` 与 `view/map-geography` 也从当前 catalog 解析，不再形成私人模块捷径。
+- `build:contest` 使用独立 TypeScript 配置，并在 Rollup 模块图中拒绝私人地图、完整 catalog 与个人更新记录。最终产物还必须匹配 v1.8.0 的 `contest-profile.json`，并通过从私人 profile 自动派生的 328 项名称/ID 扫描。
+- 390×844 与 640×900 世界外壳使用不可编程横滚的 `overflow: clip`；季报账本说明在 760px 内向内收边，弹页焦点恢复使用 `preventScroll`，避免隐藏 tooltip 将整张地图横向推移。
+- 当前架构检查为 105 个生产 TS/TSX 文件、47,987 行、365 条相对依赖；既有 8 条 `WorldState` type-only 聚合环未增加新的运行时内容环。`engine.ts`、`App.tsx` 与 `invariants.ts` 仍是下一轮纵切必须收缩的三个热点。

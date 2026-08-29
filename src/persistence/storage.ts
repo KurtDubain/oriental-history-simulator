@@ -1,3 +1,6 @@
+import { findMapProfileForContentVersion } from '../maps';
+import type { MapProfileId } from '../maps/types';
+
 // Keep the original database and store names so installed V0.1 autosaves remain discoverable.
 const DATABASE_NAME = 'canghai-history-v01';
 const STORE_NAME = 'world-saves';
@@ -27,7 +30,7 @@ export interface WorldSaveSummary {
   slot: string;
   label: string;
   isAutosave: boolean;
-  status: 'ready' | 'corrupt';
+  status: 'ready' | 'incompatible' | 'corrupt';
   savedAt: string | null;
   engineVersion: SaveEngineVersion | null;
   seed: string | null;
@@ -35,6 +38,10 @@ export interface WorldSaveSummary {
   season: string | null;
   turn: number | null;
   hash: string | null;
+  mapContentVersion: string | null;
+  mapProfileId: MapProfileId | null;
+  mapRevision: number | null;
+  mapName: string | null;
   payloadBytes: number;
   error: string | null;
 }
@@ -45,6 +52,11 @@ interface WorldSummaryFields {
   season: string;
   turn: number;
   hash: string;
+  mapContentVersion: string;
+  mapProfileId: MapProfileId | null;
+  mapRevision: number | null;
+  mapName: string | null;
+  mapError: string | null;
 }
 
 function payloadByteLength(payload: string): number {
@@ -105,6 +117,8 @@ function worldFieldsFromPayload(payload: string): WorldSummaryFields {
   const season = 'season' in parsed ? parsed.season : null;
   const turn = 'turn' in parsed ? parsed.turn : null;
   const hash = 'hash' in parsed ? parsed.hash : null;
+  const schemaVersion = 'schemaVersion' in parsed ? parsed.schemaVersion : null;
+  const persistedMapVersion = 'mapContentVersion' in parsed ? parsed.mapContentVersion : null;
   if (
     typeof seed !== 'string'
     || seed.length === 0
@@ -121,7 +135,27 @@ function worldFieldsFromPayload(payload: string): WorldSummaryFields {
   ) {
     throw new Error('世界正文缺少种子、纪年、季度或哈希。');
   }
-  return { seed, year, season, turn, hash };
+  const mapContentVersion = typeof persistedMapVersion === 'string' && persistedMapVersion.length > 0
+    ? persistedMapVersion
+    : (schemaVersion === 1 || schemaVersion === 2)
+      ? 'legacy-v02-48'
+      : null;
+  if (!mapContentVersion) throw new Error('世界正文缺少可识别的地图版本。');
+  const profile = findMapProfileForContentVersion(mapContentVersion);
+  return {
+    seed,
+    year,
+    season,
+    turn,
+    hash,
+    mapContentVersion,
+    mapProfileId: profile?.id ?? null,
+    mapRevision: profile?.revision ?? null,
+    mapName: profile?.name ?? null,
+    mapError: profile
+      ? null
+      : `此存档使用地图内容“${mapContentVersion}”，当前版本未包含对应地图；原存档仍保留。`,
+  };
 }
 
 /**
@@ -176,17 +210,17 @@ export function summarizeWorldSave(
   const fallbackLabel = isAutosave ? '自动续写' : slot;
   try {
     const envelope = envelopeFromUnknown(value);
-    const fields = worldFieldsFromPayload(envelope.payload);
+    const { mapError, ...fields } = worldFieldsFromPayload(envelope.payload);
     return {
       slot,
       label: envelope.label ?? (isAutosave ? fallbackLabel : fields.seed),
       isAutosave,
-      status: 'ready',
+      status: mapError ? 'incompatible' : 'ready',
       savedAt: envelope.savedAt,
       engineVersion: envelope.engineVersion,
       ...fields,
       payloadBytes: payloadByteLength(envelope.payload),
-      error: null,
+      error: mapError,
     };
   } catch (error) {
     return {
@@ -201,6 +235,10 @@ export function summarizeWorldSave(
       season: null,
       turn: null,
       hash: null,
+      mapContentVersion: null,
+      mapProfileId: null,
+      mapRevision: null,
+      mapName: null,
       payloadBytes: 0,
       error: error instanceof Error ? error.message : '未知存档错误。',
     };

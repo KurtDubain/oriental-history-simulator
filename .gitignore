@@ -1,9 +1,12 @@
 node_modules/
 dist/
+dist-contest/
 output/
 test-artifacts/
 coverage/
 .vite/
+.playwright-cli/
+.playwright-mcp/
 .vercel/
 *.tsbuildinfo
 .DS_Store

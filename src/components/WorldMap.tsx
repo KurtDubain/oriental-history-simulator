@@ -13,8 +13,8 @@ import {
 
 import "../styles/world-map.css";
 import { recordRuntimeMetric, runtimeNow } from "../performance/runtime-profiler";
-import { DEFAULT_MAP_PROFILE_ID, getMapProfile } from "../maps";
-import type { MapProfileId } from "../maps/types";
+import { getMapProfileForContentVersion } from "../maps";
+import type { MapContentVersion } from "../maps/types";
 import type {
   MapArmyView,
   MapCamera,
@@ -91,7 +91,7 @@ export {
 } from "../view/map-scene-geometry";
 
 export interface WorldMapProps {
-  mapProfileId?: MapProfileId;
+  mapContentVersion: MapContentVersion;
   regions: readonly MapRegionView[];
   routes: readonly MapRouteView[];
   armies: readonly MapArmyView[];
@@ -125,7 +125,7 @@ interface TapFeedback {
 }
 
 export function WorldMap({
-  mapProfileId = DEFAULT_MAP_PROFILE_ID,
+  mapContentVersion,
   regions,
   routes,
   armies,
@@ -158,7 +158,10 @@ export function WorldMap({
   const gestureRef = useRef<MapGestureState | null>(null);
   const tapSequenceRef = useRef(0);
   const tapTimerRef = useRef<number | null>(null);
-  const mapProfile = useMemo(() => getMapProfile(mapProfileId), [mapProfileId]);
+  const mapProfile = useMemo(
+    () => getMapProfileForContentVersion(mapContentVersion),
+    [mapContentVersion],
+  );
   const presentation = useMemo(
     () => buildMapPresentation(
       regions,
@@ -691,10 +694,12 @@ export function WorldMap({
       ref={hostRef}
       className={`world-map${className ? ` ${className}` : ""}`}
       data-overlay={overlay}
-      data-map-layout="reference-topology-v3"
-      data-major-landform-count="3"
-      data-landmass-count="2"
-      data-island-shape-count="6"
+      data-map-layout={`${mapProfile.id}-r${mapProfile.revision}`}
+      data-map-profile-id={mapProfile.id}
+      data-map-content-version={mapProfile.contentVersion}
+      data-major-landform-count={mapProfile.presentation.landShapes.length}
+      data-landmass-count={mapProfile.presentation.landShapes.filter((shape) => shape.role === "mainland").length}
+      data-island-shape-count={mapProfile.presentation.landShapes.filter((shape) => shape.role === "island").length}
       data-highlighted-region-count={highlightedRegionIds.length}
       data-map-zoom={camera.zoom.toFixed(3)}
       data-map-pan-x={camera.panX.toFixed(1)}

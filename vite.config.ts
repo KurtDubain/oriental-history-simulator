@@ -9,6 +9,56 @@ const runtimeProcess = (globalThis as typeof globalThis & {
 const buildId = runtimeProcess?.env?.VERCEL_GIT_COMMIT_SHA?.trim()
   || runtimeProcess?.env?.GITHUB_SHA?.trim()
   || `local-${packageJson.version}`;
+const mapProfileAllowlist = runtimeProcess?.env?.OHS_MAP_PROFILE_ALLOWLIST?.trim();
+if (mapProfileAllowlist && mapProfileAllowlist !== 'contest-v01') {
+  throw new Error(`Unsupported OHS_MAP_PROFILE_ALLOWLIST: ${mapProfileAllowlist}`);
+}
+const contestBuild = mapProfileAllowlist === 'contest-v01';
+const mapCatalogPath = decodeURIComponent(new URL(
+  contestBuild
+    ? './src/maps/catalog.contest.ts'
+    : './src/maps/catalog.ts',
+  import.meta.url,
+).pathname);
+const changelogPath = decodeURIComponent(new URL(
+  contestBuild
+    ? './src/config/changelog.contest.ts'
+    : './src/config/changelog.ts',
+  import.meta.url,
+).pathname);
+
+function contestIsolation(enabled: boolean): Plugin {
+  return {
+    name: 'canghai-contest-isolation',
+    generateBundle(_options, bundle) {
+      if (!enabled) return;
+      const forbiddenModules = new Set<string>();
+      for (const output of Object.values(bundle)) {
+        if (output.type !== 'chunk') continue;
+        for (const moduleId of Object.keys(output.modules)) {
+          const normalized = moduleId.replaceAll('\\', '/');
+          if (
+            normalized.includes('/src/maps/private-v03/')
+            || normalized.endsWith('/src/maps/catalog.ts')
+            || normalized.endsWith('/src/config/changelog.ts')
+          ) forbiddenModules.add(normalized);
+        }
+      }
+      if (forbiddenModules.size > 0) {
+        this.error(`Contest build imported private modules:\n${[...forbiddenModules].join('\n')}`);
+      }
+      this.emitFile({
+        type: 'asset',
+        fileName: 'contest-profile.json',
+        source: `${JSON.stringify({
+          productVersion: packageJson.version,
+          allowlist: ['contest-v01'],
+          profiles: [{ id: 'contest-v01', revision: 1, contentVersion: 'contest-v01-68' }],
+        })}\n`,
+      });
+    },
+  };
+}
 
 function appVersionAsset(version: string, deploymentId: string): Plugin {
   return {
@@ -35,11 +85,17 @@ function appVersionAsset(version: string, deploymentId: string): Plugin {
 }
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      '@app-changelog': changelogPath,
+      '@map-profile-catalog': mapCatalogPath,
+    },
+  },
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
     __APP_BUILD_ID__: JSON.stringify(buildId),
   },
-  plugins: [appVersionAsset(packageJson.version, buildId), react()],
+  plugins: [contestIsolation(contestBuild), appVersionAsset(packageJson.version, buildId), react()],
   server: {
     port: 5173,
     strictPort: true,

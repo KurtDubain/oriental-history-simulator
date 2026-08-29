@@ -2,6 +2,7 @@ export {
   DEFAULT_MAP_PROFILE_ID,
   findMapProfileForContentVersion,
   getMapProfile,
+  getMapProfileRevision,
   getMapProfileForContentVersion,
   listMapProfiles,
   mapProfileIdForContentVersion,

@@ -29,6 +29,7 @@
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
+  overflow: clip;
   color: var(--observer-ink);
   font-family: var(--observer-sans);
   background:

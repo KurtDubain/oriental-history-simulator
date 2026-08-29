@@ -28,7 +28,6 @@ export type {
 export { createObserverState, focusObserver, toggleFollow } from './observer';
 export { deserializeWorld, serializeWorld } from './persistence';
 export { keyedChance, keyedInt, keyedPick, keyedRandom, stableHash, stableStringify } from './random';
-export { POLITY_DEFINITIONS, REGION_DEFINITIONS, ROUTE_DEFINITIONS } from './data';
 export { processV03Diplomacy, v03DiplomaticPower } from './v03-diplomacy';
 export {
   applyV03Intervention,
