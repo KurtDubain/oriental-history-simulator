@@ -25,7 +25,6 @@ import { HistoryWorkbench } from './components/HistoryWorkbench';
 import {
   Inspector,
   type PersonAgencyQuarterChoiceView,
-  type PersonEmbodimentView,
 } from './components/Inspector';
 import { MandatePanel, type MandateMessage, type MandateTarget } from './components/MandatePanel';
 import {
@@ -202,6 +201,10 @@ import {
   type EmbodimentClosure,
   type EmbodimentObserverState,
 } from './view/embodiment-observer';
+import {
+  projectEmbodimentTextSnapshot,
+  projectPersonEmbodimentView,
+} from './view/embodiment-view';
 import './styles/app.css';
 
 type Selection =
@@ -375,79 +378,6 @@ function agencyDossierOptions(
   return {
     projection,
     quarterChoice: comparison ? quarterChoiceFromAgencyEntry(comparison) : null,
-  };
-}
-
-function personEmbodimentView(
-  world: WorldState,
-  characterId: string,
-  activeCharacterId: string | null,
-  pendingCommand: EmbodiedActionCommand | null,
-  closure: EmbodimentClosure | null,
-): PersonEmbodimentView {
-  const activeCharacter = activeCharacterId
-    ? world.characters.find((item) => item.id === activeCharacterId)
-    : null;
-  const actions = projectCharacterEmbodiedActions(world, characterId);
-  const pendingActions = pendingCommand
-    ? projectCharacterEmbodiedActions(world, pendingCommand.actorId)
-    : [];
-  const pendingOption = pendingCommand
-    ? pendingActions.find((item) => item.command.actionId === pendingCommand.actionId)
-    : null;
-  const pendingActor = pendingCommand
-    ? world.characters.find((item) => item.id === pendingCommand.actorId)
-    : null;
-  const lastResult = [...world.facts].reverse().find((fact): fact is Extract<WorldState['facts'][number], { kind: 'embodied_action_resolved' }> => (
-    fact.kind === 'embodied_action_resolved' && fact.payload.actorId === characterId
-  ));
-  const resultEvent = lastResult
-    ? [...world.history].reverse().find((event) => (
-        event.sourceFactIds.includes(lastResult.id)
-        || (Boolean(lastResult.payload.domainFactId)
-          && event.sourceFactIds.includes(lastResult.payload.domainFactId as string))
-      ))
-    : null;
-  return {
-    active: activeCharacterId === characterId,
-    activeCharacterName: activeCharacter?.name ?? null,
-    pending: pendingCommand ? {
-      actorName: pendingActor?.name ?? '原定人物',
-      label: pendingOption?.label ?? '本季行动',
-      targetLabel: pendingOption?.targetLabel ?? pendingCommand.targetId,
-    } : null,
-    usedThisQuarter: world.facts.some((fact) => (
-      fact.turn === world.turn && fact.kind === 'embodied_action_submitted'
-    )),
-    actions: actions.map((item) => ({
-      actionId: item.command.actionId,
-      identityLabel: ['cultivate_military_support', 'request_backing', 'request_independent_command'].includes(item.command.kind)
-        ? '副将行事'
-        : ['open_granary', 'reduce_levy'].includes(item.command.kind)
-          ? '地方施政'
-          : null,
-      label: item.label,
-      targetLabel: item.targetLabel,
-      intent: item.intent,
-      cost: item.cost,
-      obstacle: item.obstacle,
-      nextSignal: item.nextSignal,
-      available: item.available,
-      unavailableReason: item.unavailableReason,
-    })),
-    lastResult: lastResult?.kind === 'embodied_action_resolved' ? {
-      periodLabel: agencyPeriodLabel(lastResult.turn),
-      outcome: lastResult.payload.outcome,
-      summary: lastResult.payload.resultSummary,
-      nextSignal: lastResult.payload.nextSignal,
-      sourceEventId: resultEvent?.id ?? null,
-    } : null,
-    closure: closure?.actorId === characterId ? {
-      reason: closure.reason,
-      summary: closure.summary,
-      highlights: closure.highlights,
-      sourceEventId: closure.sourceEventId,
-    } : null,
   };
 }
 
@@ -852,45 +782,12 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
             && branch.head.hash === world.hash,
         } : null;
       })(),
-      embodiment: (() => {
-        const actor = options.embodiedCharacterId
-          ? world.characters.find((item) => item.id === options.embodiedCharacterId)
-          : null;
-        const pendingOption = options.pendingEmbodiedAction
-          ? projectCharacterEmbodiedActions(world, options.pendingEmbodiedAction.actorId)
-              .find((item) => item.command.actionId === options.pendingEmbodiedAction?.actionId)
-          : null;
-        return {
-          actorId: actor?.id ?? null,
-          actorName: actor?.name ?? null,
-          usedThisQuarter: world.facts.some((fact) => fact.turn === world.turn && fact.kind === 'embodied_action_submitted'),
-          closure: options.embodimentClosure ? {
-            actorId: options.embodimentClosure.actorId,
-            actorName: options.embodimentClosure.actorName,
-            reason: options.embodimentClosure.reason,
-            summary: options.embodimentClosure.summary,
-            sourceEventId: options.embodimentClosure.sourceEventId,
-          } : null,
-          pending: options.pendingEmbodiedAction ? {
-            actionId: options.pendingEmbodiedAction.actionId,
-            actorId: options.pendingEmbodiedAction.actorId,
-            label: pendingOption?.label ?? options.pendingEmbodiedAction.kind,
-            targetLabel: pendingOption?.targetLabel ?? options.pendingEmbodiedAction.targetId,
-          } : null,
-          actions: actor?.alive ? projectCharacterEmbodiedActions(world, actor.id).map((item) => ({
-            actionId: item.command.actionId,
-            identityLabel: ['cultivate_military_support', 'request_backing', 'request_independent_command'].includes(item.command.kind)
-              ? '副将行事'
-              : ['open_granary', 'reduce_levy'].includes(item.command.kind)
-                ? '地方施政'
-                : null,
-            label: item.label,
-            targetLabel: item.targetLabel,
-            available: item.available,
-            unavailableReason: item.unavailableReason,
-          })) : [],
-        };
-      })(),
+      embodiment: projectEmbodimentTextSnapshot(
+        world,
+        options.embodiedCharacterId,
+        options.pendingEmbodiedAction,
+        options.embodimentClosure,
+      ),
       commandCandidates: world.agencyDecisionSystem.actors.map((actor) => ({
         characterId: actor.characterId,
         name: characterName(actor.characterId),
@@ -2521,7 +2418,7 @@ export function App() {
           item,
           agencyDossierOptions(agencyShadowLedger, agencyShadowBranchId, item.id),
         )}
-        embodiment={personEmbodimentView(
+        embodiment={projectPersonEmbodimentView(
           world,
           item.id,
           embodiedCharacterId,

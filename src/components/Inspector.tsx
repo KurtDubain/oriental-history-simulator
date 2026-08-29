@@ -21,7 +21,10 @@ import {
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
 import type { ArchiveEntityKind } from './HistoricalArchive';
+import type { PersonEmbodimentView } from '../view/embodiment-view';
 import '../styles/observer-ui.css';
+
+export type { PersonEmbodiedActionView, PersonEmbodimentView } from '../view/embodiment-view';
 
 export type DisplayValue = string | number;
 
@@ -261,44 +264,6 @@ export interface PersonAgencyView {
     recentMovements: readonly PoliticalPowerMovementView[];
   } | null;
   recentPowerScenes?: readonly HistoricalSceneView[];
-}
-
-export interface PersonEmbodiedActionView {
-  actionId: string;
-  identityLabel?: string | null;
-  label: string;
-  targetLabel: string;
-  intent: string;
-  cost: string;
-  obstacle: string;
-  nextSignal: string;
-  available: boolean;
-  unavailableReason: string | null;
-}
-
-export interface PersonEmbodimentView {
-  active: boolean;
-  activeCharacterName: string | null;
-  pending: {
-    actorName: string;
-    label: string;
-    targetLabel: string;
-  } | null;
-  usedThisQuarter: boolean;
-  actions: readonly PersonEmbodiedActionView[];
-  lastResult: {
-    periodLabel: string;
-    outcome: 'succeeded' | 'deferred' | 'refused' | 'invalidated';
-    summary: string;
-    nextSignal: string;
-    sourceEventId: string | null;
-  } | null;
-  closure: {
-    reason: 'died' | 'missing';
-    summary: string;
-    highlights: readonly string[];
-    sourceEventId: string | null;
-  } | null;
 }
 
 export interface PersonInspectorData {

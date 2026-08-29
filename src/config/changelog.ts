@@ -7,6 +7,16 @@ export interface AppReleaseNote {
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.6.1',
+    date: '2026-08-29',
+    title: '同一件事，只留一份说法',
+    items: [
+      '人物档案与试玩检查现在共用同一份入世行动说明，身份、对象、难处和可用原因不会再因入口不同而漂移。',
+      '每季入世决定的提交、回应和实际领域结果改由独立边界核对，缺失或错接的历史凭证会被明确拦下。',
+      '本次只收整内部职责，不改变世界规则、平衡参数或 schema 4 存档；相同种子与操作仍产生相同历史。',
+    ],
+  },
+  {
     version: '1.6.0',
     date: '2026-08-28',
     title: '一州饥困，也能成为一段亲历',
