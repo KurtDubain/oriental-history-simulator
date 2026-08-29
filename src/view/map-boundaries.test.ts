@@ -24,11 +24,14 @@ import {
   shouldCancelMapTap,
 } from './map-gestures';
 import { buildMapPresentation } from './map-presentation';
+import { buildMapLodScene } from './map-lod';
 import {
   createMapViewportTransform,
   layoutMapArmyIcons,
+  layoutMapRegionNodes,
   panMapCamera,
   resolveMapSceneHit,
+  worldToScreenPoint,
   zoomMapCameraAtPoint,
 } from './map-scene-geometry';
 
@@ -118,6 +121,119 @@ describe('shared map scene hit boundary', () => {
       camera,
       { coarsePointer: true, includeSeaZones: true, tolerateRegionEdge: true },
     )).toMatchObject({ kind: 'army', army: { id: layout.army.id } });
+  });
+
+  it('uses the same LOD slice for visibility and hit testing', () => {
+    const { presentation } = mapProjection('层级命中边界');
+    const scene = buildMapLodScene(presentation, 'overview');
+    const viewport = { width: 1210, height: 560 };
+    const transform = createMapViewportTransform(viewport.width, viewport.height);
+    const visibleIds = new Set(scene.armies.map((army) => army.id));
+    const hiddenLayout = layoutMapArmyIcons(presentation.armies, presentation.regions, transform)
+      .find((layout) => !visibleIds.has(layout.army.id));
+
+    expect(hiddenLayout).toBeDefined();
+    const hiddenHit = resolveMapSceneHit(
+      scene,
+      hiddenLayout?.point ?? { x: 0, y: 0 },
+      viewport.width,
+      viewport.height,
+    );
+    expect(hiddenHit?.kind === 'army' && hiddenHit.army.id === hiddenLayout?.army.id).toBe(false);
+  });
+
+  it('applies the observer focus offset equally to painting anchors and hits', () => {
+    const { presentation } = mapProjection('避让命中边界');
+    const scene = { ...buildMapLodScene(presentation, 'regional'), fleets: [] };
+    const viewport = { width: 390, height: 644 };
+    const transform = createMapViewportTransform(viewport.width, viewport.height);
+    const [layout] = layoutMapArmyIcons(scene.armies, scene.regions, transform);
+    const focusOffset = { x: 0, y: -84 };
+
+    expect(resolveMapSceneHit(
+      scene,
+      { x: layout.point.x + focusOffset.x, y: layout.point.y + focusOffset.y },
+      viewport.width,
+      viewport.height,
+      undefined,
+      { coarsePointer: true, focusOffset },
+    )).toMatchObject({ kind: 'army', army: { id: layout.army.id } });
+  });
+
+  it('gives a painted city node priority over a marker drawn beneath it', () => {
+    const { presentation } = mapProjection('节点层级边界');
+    const scene = buildMapLodScene(presentation, 'local');
+    const viewport = { width: 1210, height: 560 };
+    const transform = createMapViewportTransform(viewport.width, viewport.height);
+    const [node] = layoutMapRegionNodes(scene.regions, scene.seaZones, transform, {
+      cityRegionIds: scene.cityRegionIds,
+      portRegionIds: scene.portRegionIds,
+    });
+    const layeredScene = {
+      ...scene,
+      armies: [],
+      fleets: [],
+      flows: [],
+      markers: [{
+        id: 'marker-under-node',
+        kind: 'practice' as const,
+        position: node.region.center,
+        magnitude: 80,
+        label: '节点下方标记',
+      }],
+    };
+
+    expect(resolveMapSceneHit(
+      layeredScene,
+      node.point,
+      viewport.width,
+      viewport.height,
+    )).toMatchObject({ kind: 'regionNode', node: { region: { id: node.region.id } } });
+  });
+
+  it('hits the same quadratic flow curve that the renderer paints', () => {
+    const { presentation } = mapProjection('曲线命中边界');
+    const viewport = { width: 1_000, height: 700 };
+    const transform = createMapViewportTransform(viewport.width, viewport.height);
+    const flow = {
+      id: 'curved-flow',
+      kind: 'trade' as const,
+      from: { x: 100, y: 350 },
+      to: { x: 900, y: 350 },
+      magnitude: 100,
+      label: '曲线商路',
+      selectedKind: 'tradeCorridor' as const,
+      selectedId: 'corridor-curved',
+    };
+    const from = worldToScreenPoint(flow.from, transform);
+    const to = worldToScreenPoint(flow.to, transform);
+    const bend = Math.min(24, Math.hypot(to.x - from.x, to.y - from.y) * 0.16);
+    const paintedMidpoint = {
+      x: (from.x + to.x) / 2,
+      y: (from.y + to.y) / 2 - bend / 2,
+    };
+    const scene = {
+      ...buildMapLodScene(presentation, 'local'),
+      regions: [],
+      armies: [],
+      fleets: [],
+      markers: [],
+      seaZones: [],
+      flows: [flow],
+    };
+
+    expect(resolveMapSceneHit(
+      scene,
+      paintedMidpoint,
+      viewport.width,
+      viewport.height,
+    )).toMatchObject({ kind: 'flow', flow: { id: flow.id } });
+    expect(resolveMapSceneHit(
+      scene,
+      { x: paintedMidpoint.x, y: paintedMidpoint.y + bend / 2 },
+      viewport.width,
+      viewport.height,
+    )).toBeNull();
   });
 });
 

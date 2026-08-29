@@ -1,11 +1,11 @@
 import type { MapPresentationDefinition } from '../maps/types';
-import { deriveMapScalePolicy } from '../maps/scale-policy';
 import type {
-  MapArmyView,
   MapCamera,
   MapFleetView,
   MapFlowView,
+  MapLodLevel,
   MapMarkerView,
+  MapLodScene,
   MapOverlay,
   MapPoint,
   MapRegionView,
@@ -917,8 +917,9 @@ function drawPolityLabels(
   transform: MapViewportTransform,
   overlay: MapOverlay,
   compactMap: boolean,
+  lodLevel: MapLodLevel,
 ) {
-  if (overlay !== "political" || compactMap) return;
+  if (overlay !== "political" || (compactMap && lodLevel !== "overview")) return;
   const groups = new Map<string, MapRegionView[]>();
   for (const region of regions) {
     if (!region.polityId || !region.polityName) continue;
@@ -939,12 +940,12 @@ function drawPolityLabels(
     const point = worldToScreen(anchor, transform);
     const label = group[0]?.polityName;
     if (!label) continue;
-    const y = point.y + 18;
-    context.font = '650 12px "Noto Serif SC", "Songti SC", STSong, serif';
-    context.lineWidth = 4;
+    const y = point.y + (compactMap ? 15 : 18);
+    context.font = `${compactMap ? 700 : 650} ${compactMap ? 10 : 12}px "Noto Serif SC", "Songti SC", STSong, serif`;
+    context.lineWidth = compactMap ? 3 : 4;
     context.strokeStyle = "rgba(241, 235, 218, 0.84)";
     context.strokeText(label, point.x, y);
-    context.globalAlpha = 0.72;
+    context.globalAlpha = compactMap ? 0.84 : 0.72;
     context.fillStyle = INK;
     context.fillText(label, point.x, y);
     context.globalAlpha = 1;
@@ -1066,32 +1067,43 @@ function drawCompass(context: CanvasRenderingContext2D, width: number) {
 export function drawWorldMap(
   context: CanvasRenderingContext2D,
   size: MapCanvasSize,
-  regions: readonly MapRegionView[],
-  routes: readonly MapRouteView[],
-  armies: readonly MapArmyView[],
-  seaZones: readonly MapSeaZoneView[],
-  fleets: readonly MapFleetView[],
-  flows: readonly MapFlowView[],
-  markers: readonly MapMarkerView[],
+  scene: MapLodScene,
   overlay: MapOverlay,
   highlightedRegionIds: readonly string[],
   selectedRegionId: string | null | undefined,
   selectedObject: MapSelectedObject,
   hoveredRegionId: string | undefined,
   camera: MapCamera,
-  profile: MapPresentationDefinition,
+  focusOffset: MapPoint = { x: 0, y: 0 },
 ) {
+  const {
+    regions,
+    routes,
+    armies,
+    seaZones,
+    fleets,
+    flows,
+    markers,
+    profile,
+  } = scene;
   const { width, height, dpr } = size;
   context.setTransform(dpr, 0, 0, dpr, 0, 0);
   context.clearRect(0, 0, width, height);
 
-  const transform = createMapViewportTransform(width, height, MAP_PADDING, camera);
+  const baseTransform = createMapViewportTransform(width, height, MAP_PADDING, camera);
+  const transform = {
+    ...baseTransform,
+    offsetX: baseTransform.offsetX + focusOffset.x,
+    offsetY: baseTransform.offsetY + focusOffset.y,
+  };
   const compactMap = transform.scale < 0.42;
-  const polityCount = new Set(regions.map((region) => region.polityId).filter(Boolean)).size;
-  const denseMap = regions.length > deriveMapScalePolicy(regions.length, polityCount).denseRegionThreshold;
+  const renderedSeaZones = seaZones.filter((zone) => scene.interactiveSeaZoneIds.has(zone.id));
   const regionById = new Map(regions.map((region) => [region.id, region]));
   const regionNodesByRegion = new Map<string, MapRegionNodeLayout[]>();
-  for (const node of layoutMapRegionNodes(regions, seaZones, transform)) {
+  for (const node of layoutMapRegionNodes(regions, seaZones, transform, {
+    cityRegionIds: scene.cityRegionIds,
+    portRegionIds: scene.portRegionIds,
+  })) {
     const nodes = regionNodesByRegion.get(node.region.id) ?? [];
     nodes.push(node);
     regionNodesByRegion.set(node.region.id, nodes);
@@ -1103,7 +1115,7 @@ export function drawWorldMap(
   drawPaper(context, width, height);
   drawSeaField(context, width, height, transform);
   drawSeaMarks(context, width, height, transform);
-  drawSeaZones(context, seaZones, transform, overlay, selectedObject);
+  drawSeaZones(context, renderedSeaZones, transform, overlay, selectedObject);
   drawLandFoundation(context, transform, profile);
 
   context.save();
@@ -1130,6 +1142,7 @@ export function drawWorldMap(
   drawMountainRanges(context, geography, transform, compactMap);
 
   routes.forEach((route) => {
+    if (scene.level !== "local") return;
     if (!shouldDrawRoute(route, overlay, profile)) return;
     const from = regionById.get(route.from);
     const to = regionById.get(route.to);
@@ -1162,7 +1175,7 @@ export function drawWorldMap(
   });
 
   drawMajorRiverSystems(context, regions, routes, transform, compactMap, profile);
-  drawSeaGeography(context, seaZones, routes, regions, transform, compactMap);
+  drawSeaGeography(context, renderedSeaZones, routes, regions, transform, compactMap);
 
   drawFlows(context, flows, transform, selectedObject);
   drawMarkers(context, markers, transform, selectedObject);
@@ -1205,8 +1218,7 @@ export function drawWorldMap(
     }
 
     context.save();
-    const showLabel = (!compactMap && (!denseMap || region.capital || (region.strategicValue ?? 0) >= 78))
-      || region.capital || (region.strategicValue ?? 0) >= 88 || selected || hovered;
+    const showLabel = scene.regionLabelIds.has(region.id) || selected || hovered;
     if (showLabel) {
       context.textAlign = "center";
       context.textBaseline = "middle";
@@ -1221,7 +1233,7 @@ export function drawWorldMap(
     context.restore();
   });
 
-  drawPolityLabels(context, regions, transform, overlay, compactMap);
+  drawPolityLabels(context, regions, transform, overlay, compactMap, scene.level);
 
   layoutMapArmyIcons(armies, regions, transform).forEach(({ army, point, radius }) => {
     const { x, y } = point;

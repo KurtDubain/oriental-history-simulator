@@ -19,7 +19,15 @@ import {
   UsersRound,
   X,
 } from 'lucide-react';
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type KeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+} from 'react';
 import type { ArchiveEntityKind } from './HistoricalArchive';
 import type { PersonEmbodimentView } from '../view/embodiment-view';
 import '../styles/observer-ui.css';
@@ -373,6 +381,8 @@ interface InspectorSharedProps {
   onChooseEmbodiedAction?: (actionId: string) => void;
   onCancelEmbodiedAction?: () => void;
   onDismissEmbodimentClosure?: () => void;
+  mobileExpanded?: boolean;
+  onMobileExpandedChange?: (expanded: boolean) => void;
 }
 
 export type InspectorProps =
@@ -1019,10 +1029,13 @@ export function PersonEmbodimentClosureNotice({
   );
 }
 
-function PersonInspector({ data, onOpenMind, ...actions }: Extract<InspectorProps, { kind: 'person' }> & { onOpenMind?: () => void }) {
+function PersonInspector({ data, onOpenMind, mobileMindRequest = 0, ...actions }: Extract<InspectorProps, { kind: 'person' }> & { onOpenMind?: () => void; mobileMindRequest?: number }) {
   const [tab, setTab] = useState<'life' | 'mind' | 'relations' | 'history'>('life');
   const tabsId = useId();
   useEffect(() => setTab('life'), [data.id]);
+  useEffect(() => {
+    if (mobileMindRequest > 0) setTab('mind');
+  }, [mobileMindRequest]);
   const openMind = () => {
     setTab('mind');
     onOpenMind?.();
@@ -1113,17 +1126,122 @@ function SystemInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
   );
 }
 
+interface MobileQuickLookView {
+  eyebrow: string;
+  name: string;
+  ownerLabel: string;
+  owner: string;
+  current: string;
+  destination: string;
+}
+
+function mobileQuickLookFor(props: InspectorProps): MobileQuickLookView {
+  if (props.kind === 'region') return {
+    eyebrow: '州域速览',
+    name: props.data.name,
+    ownerLabel: '辖属',
+    owner: props.data.polityName ?? '无主之地',
+    current: `${props.data.summary ?? `${props.data.terrain}地势。`} 人口${display(props.data.population)}，粮况${display(props.data.food)}，动荡${Math.round(props.data.unrest)}。`,
+    destination: '地方帐簿、局势与往来',
+  };
+  if (props.kind === 'country') return {
+    eyebrow: '国势速览',
+    name: props.data.name,
+    ownerLabel: '中枢',
+    owner: [props.data.government, `都于${props.data.capital}`].filter(Boolean).join(' · '),
+    current: props.data.status ?? `治下${props.data.regionCount}郡，君主${props.data.ruler}。`,
+    destination: '国计、朝局、海贸与邦交',
+  };
+  if (props.kind === 'family') return {
+    eyebrow: '门第速览',
+    name: props.data.name,
+    ownerLabel: '所在',
+    owner: [props.data.polity, props.data.branch].filter(Boolean).join(' · ') || '散居天下',
+    current: props.data.summary ?? `家主${props.data.head}，族中名录${props.data.memberCount}人。`,
+    destination: '门第、谱系与家史',
+  };
+  if (props.kind === 'person') return {
+    eyebrow: '人物速览',
+    name: props.data.name,
+    ownerLabel: '身份',
+    owner: [props.data.polity, props.data.role, props.data.family].filter(Boolean).join(' · ') || '在野之人',
+    current: props.data.summary ?? `${props.data.age}岁，眼下以${props.data.role}身份行事。`,
+    destination: '生平、所图、关系与经历',
+  };
+  const meta = SYSTEM_META[props.data.kind];
+  const fact = (label: string) => props.data.facts.find((item) => item.label === label)?.value;
+  const meter = (label: string) => props.data.meters?.find((item) => item.label === label)?.value;
+  const current = props.data.kind === 'army'
+    ? `兵力${display(fact('兵力') ?? '不详')}，士气${Math.round(meter('士气') ?? 0)}，补给${Math.round(meter('补给') ?? 0)}。${props.data.summary}`
+    : props.data.kind === 'fleet'
+      ? `战船${display(fact('战船') ?? '不详')}，水手${display(fact('水手') ?? '不详')}，战备${Math.round(meter('战备') ?? 0)}。${props.data.summary}`
+      : props.data.summary;
+  return {
+    eyebrow: meta.label.replace('档案', '速览'),
+    name: props.data.name,
+    ownerLabel: '归属',
+    owner: props.data.subtitle || '天下运行中的一环',
+    current,
+    destination: props.data.kind === 'army' || props.data.kind === 'fleet'
+      ? '兵力、战备、关联地点与沿革'
+      : '当季状态、关联对象与沿革',
+  };
+}
+
 export function Inspector(props: InspectorProps) {
-  const [mobileExpanded, setMobileExpanded] = useState(false);
+  const [internalMobileExpanded, setInternalMobileExpanded] = useState(false);
+  const [mobileMindRequest, setMobileMindRequest] = useState(0);
+  const mobileExpanded = props.mobileExpanded ?? internalMobileExpanded;
   const inspectorId = useId();
+  const swipeStartRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
+  const swipeConsumedRef = useRef(false);
   const selectionKey = `${props.kind}:${props.data.id}`;
+  const quickLook = mobileQuickLookFor(props);
   const embodimentClosureKey = props.kind === 'person' && props.embodiment?.closure
     ? `${props.data.id}:${props.embodiment.closure.reason}:${props.embodiment.closure.sourceEventId ?? 'no-event'}`
     : null;
-  useEffect(() => setMobileExpanded(false), [selectionKey]);
+  const setMobileExpanded = useCallback((next: boolean | ((current: boolean) => boolean)) => {
+    const value = typeof next === 'function' ? next(mobileExpanded) : next;
+    if (props.mobileExpanded === undefined) setInternalMobileExpanded(value);
+    props.onMobileExpandedChange?.(value);
+  }, [mobileExpanded, props.mobileExpanded, props.onMobileExpandedChange]);
+  useEffect(() => {
+    setMobileExpanded(false);
+    setMobileMindRequest(0);
+  }, [selectionKey]);
   useEffect(() => {
     if (embodimentClosureKey) setMobileExpanded(true);
   }, [embodimentClosureKey]);
+
+  const startQuickLookSwipe = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    if (event.pointerType === 'mouse') return;
+    swipeConsumedRef.current = false;
+    swipeStartRef.current = { pointerId: event.pointerId, x: event.clientX, y: event.clientY };
+    try {
+      event.currentTarget.setPointerCapture(event.pointerId);
+    } catch {
+      // Some mobile browsers can cancel capture while handing a gesture off.
+    }
+  };
+
+  const finishQuickLookSwipe = (event: ReactPointerEvent<HTMLButtonElement>) => {
+    const start = swipeStartRef.current;
+    swipeStartRef.current = null;
+    if (!start || start.pointerId !== event.pointerId) return;
+    const dx = event.clientX - start.x;
+    const dy = event.clientY - start.y;
+    if (Math.abs(dy) < 42 || Math.abs(dy) < Math.abs(dx) * 1.2) return;
+    swipeConsumedRef.current = true;
+    if (dy < 0) setMobileExpanded(true);
+    else if (mobileExpanded) setMobileExpanded(false);
+    else props.onClose?.();
+  };
+
+  const cancelQuickLookSwipe = () => {
+    swipeStartRef.current = null;
+    swipeConsumedRef.current = false;
+  };
+
   return (
     <aside
       id={inspectorId}
@@ -1131,22 +1249,63 @@ export function Inspector(props: InspectorProps) {
       aria-label="对象档案"
       data-kind={props.kind}
       data-mobile-expanded={mobileExpanded}
+      data-mobile-mode={mobileExpanded ? 'full' : 'quick'}
     >
-      <div className="observer-inspector__mobile-toggle">
-        <span>档案速览</span>
+      <section className="observer-inspector__mobile-toggle" data-testid="map-quick-look" aria-label={`${quickLook.name}地图速览`}>
         <button
           type="button"
+          className="observer-inspector__mobile-handle"
           aria-expanded={mobileExpanded}
-          onClick={() => setMobileExpanded((current) => !current)}
+          aria-label={mobileExpanded ? '下划或点按返回地图速览' : '上划或点按打开完整档案'}
+          onPointerDown={startQuickLookSwipe}
+          onPointerUp={finishQuickLookSwipe}
+          onPointerCancel={cancelQuickLookSwipe}
+          onLostPointerCapture={() => {
+            swipeStartRef.current = null;
+          }}
+          onClick={() => {
+            if (swipeConsumedRef.current) {
+              swipeConsumedRef.current = false;
+              return;
+            }
+            setMobileExpanded((current) => !current);
+          }}
         >
+          <i aria-hidden="true" />
+          <span>{mobileExpanded ? '完整档案' : '地图速览'}</span>
           {mobileExpanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronUp size={16} aria-hidden="true" />}
-          {mobileExpanded ? '收起档案' : '展开档案'}
         </button>
-      </div>
+        {!mobileExpanded ? (
+          <div className="observer-inspector__mobile-quicklook">
+            <header data-testid="map-quick-look-identity">
+              <span>{quickLook.eyebrow}</span>
+              <strong>{quickLook.name}</strong>
+            </header>
+            <dl>
+              <div data-testid="map-quick-look-owner"><dt>{quickLook.ownerLabel}</dt><dd>{quickLook.owner}</dd></div>
+              <div data-testid="map-quick-look-current"><dt>眼下</dt><dd>{quickLook.current}</dd></div>
+            </dl>
+            <footer>
+              <span>可细看 · {quickLook.destination}</span>
+              <div>
+                <button
+                  type="button"
+                  data-testid="map-quick-look-details"
+                  onClick={() => {
+                    setMobileExpanded(true);
+                    if (props.kind === 'person') setMobileMindRequest((current) => current + 1);
+                  }}
+                >{props.kind === 'person' ? '看所图' : '完整档案'}</button>
+                {props.onClose ? <button type="button" onClick={props.onClose}>收起</button> : null}
+              </div>
+            </footer>
+          </div>
+        ) : null}
+      </section>
       {props.kind === 'region' ? <RegionInspector {...props} /> : null}
       {props.kind === 'country' ? <CountryInspector {...props} /> : null}
       {props.kind === 'family' ? <FamilyInspector {...props} /> : null}
-      {props.kind === 'person' ? <PersonInspector {...props} onOpenMind={() => setMobileExpanded(true)} /> : null}
+      {props.kind === 'person' ? <PersonInspector {...props} mobileMindRequest={mobileMindRequest} onOpenMind={() => setMobileExpanded(true)} /> : null}
       {props.kind === 'system' ? <SystemInspector {...props} /> : null}
     </aside>
   );

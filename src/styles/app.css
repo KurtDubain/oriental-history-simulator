@@ -388,6 +388,33 @@
     top: 66px;
     width: calc(100% - 20px);
   }
+
+  .observer-app[data-mobile-inspector-mode="quick"] .world-map__viewport-controls {
+    top: 70px;
+    bottom: auto;
+  }
+
+  .observer-app[data-mobile-inspector-mode="quick"] .world-map__gesture-hint {
+    display: none;
+  }
+
+  .observer-app[data-map-gesture-active="true"] .observer-world-summary,
+  .observer-app[data-map-gesture-active="true"] .observer-world-tools,
+  .observer-app[data-map-gesture-active="true"] .observer-map-primer-trigger,
+  .observer-app[data-map-gesture-active="true"] .observer-leads {
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .observer-app[data-map-gesture-active="true"] .observer-inspector[data-mobile-mode="quick"] {
+    transform: translateY(calc(100% - 76px));
+    transition: transform 130ms ease-out;
+  }
+
+  .observer-app[data-map-gesture-active="true"] .observer-inspector[data-mobile-mode="quick"] .observer-inspector__mobile-quicklook dl,
+  .observer-app[data-map-gesture-active="true"] .observer-inspector[data-mobile-mode="quick"] .observer-inspector__mobile-quicklook footer {
+    opacity: 0;
+  }
 }
 
 @media (max-width: 480px) {

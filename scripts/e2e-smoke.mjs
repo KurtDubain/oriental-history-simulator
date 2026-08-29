@@ -859,7 +859,7 @@ async function exerciseMapViewportDesktop(page) {
   await page.locator('[data-map-reset="true"]').click();
   await page.waitForFunction(() => document.querySelector('.world-map')?.getAttribute('data-map-zoom') === '1.000');
   const reset = await snapshot(page);
-  assert.deepEqual(reset.interface.mapViewport, { zoom: 1, panX: 0, panY: 0 });
+  assert.deepEqual(reset.interface.mapViewport, { zoom: 1, panX: 0, panY: 0, lod: 'overview' });
   assert.equal(reset.deterministicWorldHash, before.deterministicWorldHash);
 }
 
@@ -953,22 +953,27 @@ async function exerciseMapViewportTouch(context, page) {
   await page.locator('[data-map-reset="true"]').click();
   await page.waitForFunction(() => document.querySelector('.world-map')?.getAttribute('data-map-zoom') === '1.000');
   const reset = await snapshot(page);
-  assert.deepEqual(reset.interface.mapViewport, { zoom: 1, panX: 0, panY: 0 });
+  assert.deepEqual(reset.interface.mapViewport, { zoom: 1, panX: 0, panY: 0, lod: 'overview' });
   assert.equal(reset.deterministicWorldHash, before.deterministicWorldHash);
 
+  await page.locator('[data-map-zoom-in="true"]').click();
+  await page.waitForFunction(() => document.querySelector('.world-map')?.getAttribute('data-map-lod') === 'regional');
   const fitScale = Math.min((box.width - 16) / 1000, (box.height - 16) / 700);
+  const currentZoom = Number(await map.getAttribute('data-map-zoom'));
+  const currentPanX = Number(await map.getAttribute('data-map-pan-x'));
+  const currentPanY = Number(await map.getAttribute('data-map-pan-y'));
   const taiwan = {
-    x: box.x + (box.width - 1000 * fitScale) / 2 + 416 * fitScale,
-    y: box.y + (box.height - 700 * fitScale) / 2 + 547 * fitScale,
+    x: box.x + (box.width - 1000 * fitScale) / 2 + currentPanX + 416 * fitScale * currentZoom,
+    y: box.y + (box.height - 700 * fitScale) / 2 + currentPanY + 547 * fitScale * currentZoom,
   };
   await page.locator('.observer-world-tools__more').click();
   assert.equal(await page.locator('.observer-world-tools').getAttribute('data-mobile-more-open'), 'true');
   await dispatch('touchStart', [taiwan]);
-  await dispatch('touchMove', [{ x: taiwan.x + 10, y: taiwan.y + 3 }]);
+  await dispatch('touchMove', [{ x: taiwan.x + 6, y: taiwan.y + 2 }]);
   await dispatch('touchEnd', []);
   await page.waitForTimeout(120);
   const touchSelection = (await snapshot(page)).interface.selected;
-  assert.equal(touchSelection?.kind, 'army', `100%缩放下轻微手抖仍应点中台湾驻军，实际为 ${touchSelection?.kind ?? 'none'}:${touchSelection?.id ?? 'none'}`);
+  assert.equal(touchSelection?.kind, 'army', `区域层轻微手抖仍应点中台湾驻军，实际为 ${touchSelection?.kind ?? 'none'}:${touchSelection?.id ?? 'none'}`);
   assert.equal(touchSelection?.id, 'a_006', `台湾驻军应打开自身档案，而非地域或主帅，实际为 ${touchSelection?.kind ?? 'none'}:${touchSelection?.id ?? 'none'}`);
   assert.equal(await page.locator('.observer-world-tools').getAttribute('data-mobile-more-open'), null, '点选地图对象后应自动收起更多工具');
   const inspectorBounds = await page.locator('.observer-inspector').boundingBox();
@@ -976,10 +981,10 @@ async function exerciseMapViewportTouch(context, page) {
   assert.ok(inspectorBounds && inspectorBounds.height <= 196, '移动端首次点选只应展开地图速览');
   assert.equal(await page.locator('.observer-inspector').getAttribute('data-mobile-expanded'), 'false');
   assert.equal(await page.locator('.observer-navigation').isVisible(), false, '移动端档案打开时应隐藏被遮挡的底部导航');
-  const quickLookToggleBounds = await page.locator('.observer-inspector__mobile-toggle button').boundingBox();
+  const quickLookToggleBounds = await page.locator('.observer-inspector__mobile-handle').boundingBox();
   assert.ok(quickLookToggleBounds && quickLookToggleBounds.width >= 44 && quickLookToggleBounds.height >= 44, '移动端档案展开按钮至少应为44px');
   await page.screenshot({ path: `${ARTIFACT_DIR}/mobile-map-quick-look-390x844.png`, fullPage: true });
-  await page.locator('.observer-inspector__mobile-toggle button').click();
+  await page.locator('.observer-inspector__mobile-handle').click();
   await page.waitForFunction(() => document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true');
   const expandedInspectorBounds = await page.locator('.observer-inspector').boundingBox();
   assert.ok(expandedInspectorBounds && inspectorBounds && expandedInspectorBounds.height > inspectorBounds.height, '点击展开档案后应显示完整移动端卷宗');
@@ -1326,6 +1331,8 @@ try {
   await selectLayer(page, 'naval');
   const navalPixels = await page.locator('.world-map__canvas').evaluate((canvas) => canvas.toDataURL());
   assert.notEqual(politicalPixels, navalPixels, '疆界与海权叠层应绘出不同画面');
+  await page.locator('[data-map-zoom-in="true"]').click();
+  await page.waitForFunction(() => document.querySelector('.world-map')?.getAttribute('data-map-lod') === 'regional');
   await selectFirstMapObject(page, 'seaZone', '海域档案');
 
   await page.click('button[data-observer-view="military"]');
@@ -1421,6 +1428,11 @@ try {
   const afterHistoryBrowse = await exerciseHistoryWorkbench(page, afterManual);
   assert.equal(afterHistoryBrowse.deterministicWorldHash, hashBeforeBrowsing);
 
+  for (let attempt = 0; attempt < 4 && await page.locator('.world-map').getAttribute('data-map-lod') !== 'local'; attempt += 1) {
+    await page.locator('[data-map-zoom-in="true"]').click();
+    await page.waitForTimeout(80);
+  }
+  assert.equal(await page.locator('.world-map').getAttribute('data-map-lod'), 'local', '近观层应开放普通流线');
   await selectLayer(page, 'trade');
   assert.ok((await snapshot(page)).interface.topFlows.length > 0);
   await selectFirstMapObject(page, 'tradeCorridor', '商路档案');
@@ -2060,9 +2072,12 @@ try {
   await mobilePage.keyboard.press('Escape');
   await mobileSituation.waitFor({ state: 'detached' });
   await mobilePage.waitForFunction(() => !document.querySelector('.observer-app')?.inert);
-  const mobileLeadInspectorClose = mobilePage.locator('.observer-inspector button[aria-label="关闭档案"]');
-  if (await mobileLeadInspectorClose.isVisible().catch(() => false)) {
-    await mobileLeadInspectorClose.click();
+  const mobileLeadInspector = mobilePage.locator('.observer-inspector');
+  if (await mobileLeadInspector.count()) {
+    const mobileLeadQuickClose = mobilePage.getByTestId('map-quick-look').getByRole('button', { name: '收起', exact: true });
+    const mobileLeadInspectorClose = mobilePage.locator('.observer-inspector button[aria-label="关闭档案"]');
+    if (await mobileLeadQuickClose.isVisible().catch(() => false)) await mobileLeadQuickClose.click();
+    else await mobileLeadInspectorClose.click();
     await mobilePage.waitForSelector('.observer-inspector', { state: 'detached' });
   }
 

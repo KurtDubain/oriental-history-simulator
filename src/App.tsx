@@ -59,6 +59,7 @@ import {
   DEFAULT_MAP_CAMERA,
   WorldMap,
   type MapCamera,
+  type MapLodLevel,
 } from './components/WorldMap';
 import { WorldCollectionPanel } from './components/WorldCollectionPanel';
 import { WorldStart } from './components/WorldStart';
@@ -214,6 +215,7 @@ import {
   projectEmbodimentTextSnapshot,
   projectPersonEmbodimentView,
 } from './view/embodiment-view';
+import { shouldCloseMapSelectionForOverlay } from './view/map-selection-policy';
 import './styles/app.css';
 
 type Selection =
@@ -473,6 +475,9 @@ interface SnapshotOptions {
   primerOpen: boolean;
   primerStep: MapPrimerStep;
   mapCamera: MapCamera;
+  mapLod: MapLodLevel;
+  mobileInspectorExpanded: boolean;
+  mapGestureActive: boolean;
   agencyShadowLedger: AgencyShadowLedger;
   agencyShadowBranchId: string | null;
   embodiedCharacterId: string | null;
@@ -844,7 +849,12 @@ function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): s
         zoom: Number(options.mapCamera.zoom.toFixed(3)),
         panX: Number(options.mapCamera.panX.toFixed(1)),
         panY: Number(options.mapCamera.panY.toFixed(1)),
+        lod: options.mapLod,
       },
+      mobileInspectorMode: options.selection
+        ? options.mobileInspectorExpanded ? 'full' : 'quick'
+        : 'closed',
+      mapGestureActive: options.mapGestureActive,
       selected,
       selectedEventId: options.selectedEventId,
       archiveOpen: options.archiveOpen,
@@ -980,6 +990,9 @@ export function App() {
   const [activeView, setActiveView] = useState<ObserverView>('world');
   const [overlay, setOverlay] = useState<MapOverlay>('political');
   const [mapCamera, setMapCamera] = useState<MapCamera>(() => ({ ...DEFAULT_MAP_CAMERA }));
+  const [mapLod, setMapLod] = useState<MapLodLevel>('overview');
+  const [mobileInspectorExpanded, setMobileInspectorExpanded] = useState(false);
+  const [mapGestureActive, setMapGestureActive] = useState(false);
   const [mapCameraKey, setMapCameraKey] = useState(0);
   const [selection, setSelection] = useState<Selection>(null);
   const [followed, setFollowed] = useState<Set<string>>(() => new Set());
@@ -1096,6 +1109,9 @@ export function App() {
     primerOpen,
     primerStep,
     mapCamera,
+    mapLod,
+    mobileInspectorExpanded,
+    mapGestureActive,
     agencyShadowLedger,
     agencyShadowBranchId,
     embodiedCharacterId,
@@ -2014,6 +2030,9 @@ export function App() {
     primerOpen,
     primerStep,
     mapCamera,
+    mapLod,
+    mobileInspectorExpanded,
+    mapGestureActive,
     agencyShadowLedger,
     agencyShadowBranchId,
     embodiedCharacterId,
@@ -2068,8 +2087,12 @@ export function App() {
 
   const handleOverlayChange = useCallback((nextOverlay: MapOverlay) => {
     setOverlay(nextOverlay);
+    if (selection && shouldCloseMapSelectionForOverlay(selection.kind, nextOverlay)) {
+      setSelection(null);
+      setMobileInspectorExpanded(false);
+    }
     if (nextOverlay !== 'political') completeGuideStep('overlay-switched');
-  }, [completeGuideStep]);
+  }, [completeGuideStep, selection]);
 
   const handleOpenMapPrimer = useCallback(() => {
     if (!worldRef.current) return;
@@ -2466,6 +2489,14 @@ export function App() {
     commitEmbodiedObserver(dismissEmbodimentClosure(embodimentObserverRef.current));
   }, [commitEmbodiedObserver]);
 
+  const closeInspectorToMap = useCallback(() => {
+    setSelection(null);
+    setMobileInspectorExpanded(false);
+    window.setTimeout(() => {
+      document.querySelector<HTMLCanvasElement>('.world-map__canvas')?.focus({ preventScroll: true });
+    }, 0);
+  }, []);
+
   const inspector = useMemo<ReactNode>(() => {
     if (!world || !selection) return null;
     const followKey = `${selection.kind}:${selection.id}`;
@@ -2479,7 +2510,9 @@ export function App() {
           : upsertObserverWatch(observerSettingsRef.current, item);
         commitObserverSettings(nextSettings);
       },
-      onClose: () => setSelection(null),
+      onClose: closeInspectorToMap,
+      mobileExpanded: mobileInspectorExpanded,
+      onMobileExpandedChange: setMobileInspectorExpanded,
       onOpenArchive: selection.kind === 'country' || selection.kind === 'family' || selection.kind === 'person' ? () => {
         archiveReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         archiveFocusRestoreAllowedRef.current = true;
@@ -2529,6 +2562,7 @@ export function App() {
   }, [
     agencyShadowBranchId,
     agencyShadowLedger,
+    closeInspectorToMap,
     commitObserverSettings,
     embodiedCharacterId,
     embodimentObserver.closure,
@@ -2540,6 +2574,7 @@ export function App() {
     handleLeaveEmbodiment,
     handleSelectArchiveEntity,
     handleSelectScopedEvent,
+    mobileInspectorExpanded,
     pendingEmbodiedAction,
     selection,
     world,
@@ -2724,6 +2759,8 @@ export function App() {
           ref={worldShellRef}
           className="observer-app"
           data-inspector-open={Boolean(inspector)}
+          data-mobile-inspector-mode={inspector ? mobileInspectorExpanded ? 'full' : 'quick' : 'closed'}
+          data-map-gesture-active={mapGestureActive || undefined}
           data-focus-open={activeView === 'world' && !historicalView && !inspector || undefined}
           aria-hidden={startOpen || archiveOpen || mandateOpen || observerDeskOpen || situationWorkbenchOpen || collectionOpen || primerOpen || activeView === 'chronicle' || undefined}
         >
@@ -2769,13 +2806,19 @@ export function App() {
               overlay={historicalView ? 'political' : overlay}
               cameraKey={mapCameraKey}
               onCameraChange={setMapCamera}
+              onLodChange={setMapLod}
+              onGestureActivityChange={setMapGestureActive}
+              mobileQuickLookOpen={Boolean(inspector) && !mobileInspectorExpanded}
+              onSelectBlank={closeInspectorToMap}
               onSelectRegion={(id) => {
                 setMobileToolsOpen(false);
+                setMobileInspectorExpanded(false);
                 setSelection({ kind: 'region', id });
                 setActiveView('world');
               }}
               onSelectObject={(kind, id) => {
                 setMobileToolsOpen(false);
+                setMobileInspectorExpanded(false);
                 if (kind === 'army' || kind === 'fleet') setFocusedArmyId(id);
                 setSelection({ kind, id });
                 setActiveView('world');

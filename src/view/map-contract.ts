@@ -68,6 +68,7 @@ export interface MapFleetView {
   seaZoneId?: string | null;
   regionId?: string | null;
   position: MapPoint;
+  polityId?: string;
   polityColor?: string;
   strength: number;
   readiness: number;
@@ -137,5 +138,20 @@ export interface MapPresentationView {
   fleets: MapFleetView[];
   flows: MapFlowView[];
   markers: MapMarkerView[];
+}
+
+export type MapLodLevel = "overview" | "regional" | "local";
+
+/**
+ * The single visibility contract consumed by map drawing, hit testing and
+ * keyboard navigation. Geographic base data stays complete; interactive and
+ * labelled objects are reduced by LOD before reaching those consumers.
+ */
+export interface MapLodScene extends MapPresentationView {
+  level: MapLodLevel;
+  regionLabelIds: ReadonlySet<string>;
+  cityRegionIds: ReadonlySet<string>;
+  portRegionIds: ReadonlySet<string>;
+  interactiveSeaZoneIds: ReadonlySet<string>;
 }
 import type { MapPresentationDefinition } from '../maps/types';

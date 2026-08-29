@@ -140,6 +140,7 @@ export function toMapFleets(world: WorldState): MapFleetView[] {
       seaZoneId: item.seaZoneId,
       regionId: item.portRegionId,
       position,
+      polityId: item.polityId,
       polityColor: polity(world, item.polityId)?.color,
       strength: item.warships * 3 + item.patrolShips + item.transports * 0.4,
       readiness: item.readiness,

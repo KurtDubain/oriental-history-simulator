@@ -6,6 +6,7 @@ import type {
   MapFleetView,
   MapFlowView,
   MapMarkerView,
+  MapLodScene,
   MapPoint,
   MapPresentationView,
   MapRegionView,
@@ -309,19 +310,27 @@ export interface MapRegionNodeLayout {
   radius: number;
 }
 
+export interface MapRegionNodeVisibility {
+  cityRegionIds?: ReadonlySet<string>;
+  portRegionIds?: ReadonlySet<string>;
+}
+
 /** Shared city/port anchors ensure decorative symbols and their hit areas agree. */
 export function layoutMapRegionNodes(
   regions: readonly MapRegionView[],
   seaZones: readonly MapSeaZoneView[],
   transform: MapViewportTransform,
+  visibility?: MapRegionNodeVisibility,
 ): MapRegionNodeLayout[] {
   const compactMap = transform.scale < 0.42;
   return regions.flatMap((region) => {
     const center = worldToScreenPoint(region.center, transform);
     const layouts: MapRegionNodeLayout[] = [];
-    const showCity = Boolean(region.capital)
-      || (!compactMap && (region.cityLevel ?? 0) >= 3)
-      || (region.cityLevel ?? 0) >= 4;
+    const showCity = visibility?.cityRegionIds
+      ? visibility.cityRegionIds.has(region.id)
+      : Boolean(region.capital)
+        || (!compactMap && (region.cityLevel ?? 0) >= 3)
+        || (region.cityLevel ?? 0) >= 4;
     if (showCity) {
       layouts.push({
         kind: "city",
@@ -330,7 +339,7 @@ export function layoutMapRegionNodes(
         radius: compactMap ? 4 : 7,
       });
     }
-    if (region.port) {
+    if (region.port && (!visibility?.portRegionIds || visibility.portRegionIds.has(region.id))) {
       const nearestSea = seaZones
         .map((zone) => ({ zone, distance: Math.hypot(zone.center.x - region.center.x, zone.center.y - region.center.y) }))
         .sort((left, right) => left.distance - right.distance)[0]?.zone;
@@ -361,9 +370,10 @@ export function regionNodeAtScreenPoint(
   padding = MAP_PADDING,
   camera: MapCamera = DEFAULT_MAP_CAMERA,
   coarsePointer = false,
+  visibility?: MapRegionNodeVisibility,
 ): MapRegionNodeLayout | null {
   const transform = createMapViewportTransform(width, height, padding, camera);
-  return layoutMapRegionNodes(regions, seaZones, transform)
+  return layoutMapRegionNodes(regions, seaZones, transform, visibility)
     .map((layout, index) => ({ layout, index, distance: Math.hypot(layout.point.x - point.x, layout.point.y - point.y) }))
     .filter(({ layout, distance }) => distance <= Math.max(coarsePointer ? 22 : 11, layout.radius + 3))
     .sort((left, right) => left.distance - right.distance || right.index - left.index)[0]?.layout ?? null;
@@ -382,6 +392,7 @@ export interface ResolveMapSceneHitOptions {
   coarsePointer?: boolean;
   includeSeaZones?: boolean;
   tolerateRegionEdge?: boolean;
+  focusOffset?: MapPoint;
 }
 
 function nearestByDistance<T>(
@@ -391,6 +402,46 @@ function nearestByDistance<T>(
   return values
     .map((value) => ({ value, distance: distance(value) }))
     .sort((left, right) => left.distance - right.distance)[0] ?? null;
+}
+
+function distanceToSegment(point: MapPoint, start: MapPoint, end: MapPoint) {
+  const dx = end.x - start.x;
+  const dy = end.y - start.y;
+  const denominator = dx * dx + dy * dy || 1;
+  const ratio = clamp(
+    ((point.x - start.x) * dx + (point.y - start.y) * dy) / denominator,
+  );
+  return Math.hypot(
+    point.x - (start.x + ratio * dx),
+    point.y - (start.y + ratio * dy),
+  );
+}
+
+function distanceToFlowCurve(
+  point: MapPoint,
+  flow: MapFlowView,
+  transform: MapViewportTransform,
+) {
+  const from = worldToScreenPoint(flow.from, transform);
+  const to = worldToScreenPoint(flow.to, transform);
+  const bend = Math.min(24, Math.hypot(to.x - from.x, to.y - from.y) * 0.16);
+  const control = {
+    x: (from.x + to.x) / 2,
+    y: (from.y + to.y) / 2 - bend,
+  };
+  let nearest = Number.POSITIVE_INFINITY;
+  let previous = from;
+  for (let step = 1; step <= 20; step += 1) {
+    const ratio = step / 20;
+    const inverse = 1 - ratio;
+    const current = {
+      x: inverse * inverse * from.x + 2 * inverse * ratio * control.x + ratio * ratio * to.x,
+      y: inverse * inverse * from.y + 2 * inverse * ratio * control.y + ratio * ratio * to.y,
+    };
+    nearest = Math.min(nearest, distanceToSegment(point, previous, current));
+    previous = current;
+  }
+  return nearest;
 }
 
 function regionNearScreenPoint(
@@ -428,7 +479,7 @@ function regionNearScreenPoint(
  * the same army and region-node layouts, avoiding separate invisible targets.
  */
 export function resolveMapSceneHit(
-  presentation: MapPresentationView,
+  presentation: MapPresentationView | MapLodScene,
   point: MapPoint,
   width: number,
   height: number,
@@ -436,8 +487,14 @@ export function resolveMapSceneHit(
   options: ResolveMapSceneHitOptions = {},
 ): MapSceneHit | null {
   const coarse = options.coarsePointer ?? false;
+  const lodScene = 'level' in presentation ? presentation : null;
+  const focusOffset = options.focusOffset ?? { x: 0, y: 0 };
+  const scenePoint = {
+    x: point.x - focusOffset.x,
+    y: point.y - focusOffset.y,
+  };
   const transform = createMapViewportTransform(width, height, MAP_PADDING, camera);
-  const worldPoint = screenToWorldPoint(point, width, height, MAP_PADDING, camera);
+  const worldPoint = screenToWorldPoint(scenePoint, width, height, MAP_PADDING, camera);
   const worldRadius = (screenPixels: number) => screenPixels
     / Math.max(0.001, transform.scale * Math.min(1, transform.yScale));
 
@@ -452,7 +509,7 @@ export function resolveMapSceneHit(
   const army = armyAtScreenPoint(
     presentation.armies,
     presentation.regions,
-    point,
+    scenePoint,
     width,
     height,
     MAP_PADDING,
@@ -461,17 +518,9 @@ export function resolveMapSceneHit(
   );
   if (army) return { kind: 'army', army };
 
-  const nearestMarker = nearestByDistance(
-    presentation.markers,
-    (marker) => Math.hypot(marker.position.x - worldPoint.x, marker.position.y - worldPoint.y),
-  );
-  if (nearestMarker && nearestMarker.distance <= worldRadius(coarse ? 22 : 12)) {
-    return { kind: 'marker', marker: nearestMarker.value };
-  }
-
   const directRegion = regionNearScreenPoint(
     presentation.regions,
-    point,
+    scenePoint,
     width,
     height,
     MAP_PADDING,
@@ -482,36 +531,40 @@ export function resolveMapSceneHit(
   const regionNode = regionNodeAtScreenPoint(
     presentation.regions,
     presentation.seaZones,
-    point,
+    scenePoint,
     width,
     height,
     MAP_PADDING,
     camera,
     coarse,
+    lodScene ? {
+      cityRegionIds: lodScene.cityRegionIds,
+      portRegionIds: lodScene.portRegionIds,
+    } : undefined,
   );
   if (regionNode && (!directRegion || regionNode.region.id === directRegion.id)) {
     return { kind: 'regionNode', node: regionNode };
   }
 
-  const nearestFlow = nearestByDistance(presentation.flows, (flow) => {
-    const dx = flow.to.x - flow.from.x;
-    const dy = flow.to.y - flow.from.y;
-    const denominator = dx * dx + dy * dy || 1;
-    const ratio = clamp(
-      ((worldPoint.x - flow.from.x) * dx + (worldPoint.y - flow.from.y) * dy) / denominator,
-    );
-    return Math.hypot(
-      worldPoint.x - (flow.from.x + ratio * dx),
-      worldPoint.y - (flow.from.y + ratio * dy),
-    );
-  });
-  if (nearestFlow && nearestFlow.distance <= worldRadius(coarse ? 18 : 9)) {
+  const nearestMarker = nearestByDistance(
+    presentation.markers,
+    (marker) => Math.hypot(marker.position.x - worldPoint.x, marker.position.y - worldPoint.y),
+  );
+  if (nearestMarker && nearestMarker.distance <= worldRadius(coarse ? 22 : 12)) {
+    return { kind: 'marker', marker: nearestMarker.value };
+  }
+
+  const nearestFlow = nearestByDistance(
+    presentation.flows,
+    (flow) => distanceToFlowCurve(scenePoint, flow, transform),
+  );
+  if (nearestFlow && nearestFlow.distance <= (coarse ? 22 : 9)) {
     return { kind: 'flow', flow: nearestFlow.value };
   }
 
   const region = directRegion ?? regionNearScreenPoint(
     presentation.regions,
-    point,
+    scenePoint,
     width,
     height,
     MAP_PADDING,
@@ -523,7 +576,9 @@ export function resolveMapSceneHit(
 
   if (!options.includeSeaZones) return null;
   const nearestSea = nearestByDistance(
-    presentation.seaZones,
+    lodScene
+      ? presentation.seaZones.filter((zone) => lodScene.interactiveSeaZoneIds.has(zone.id))
+      : presentation.seaZones,
     (zone) => Math.hypot(zone.center.x - worldPoint.x, zone.center.y - worldPoint.y),
   );
   if (nearestSea && nearestSea.distance <= worldRadius(coarse ? 30 : 24)) {
