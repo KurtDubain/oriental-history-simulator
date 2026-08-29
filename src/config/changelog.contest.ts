@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.10.3',
+    date: '2026-08-29',
+    title: '一人一席，往来有向',
+    items: [
+      '人物关系图与名录按人物合并，同一个人不再因双向关系重复出现。',
+      '星图表示当前人物的态度，名录分别说明双方态度；亲子称谓和记忆均按人物视角表达。',
+      '桌面与移动端已验证节点点击、布局和世界哈希不变，存档格式保持不变。',
+    ],
+  },
+  {
     version: '1.10.2',
     date: '2026-08-29',
     title: '风声可寻，落钟可辨',

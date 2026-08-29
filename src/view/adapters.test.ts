@@ -4,9 +4,11 @@ import {
   advanceWorldBy,
   createWorld,
   serializeWorld,
+  stableHash,
   type BiographyFact,
   type CharacterState,
   type HistoryEvent,
+  type RelationshipState,
   type SimulationFact,
   type WorldState,
 } from '../sim';
@@ -773,4 +775,115 @@ describe('person experience attribution', () => {
       }
     }
   }, 15_000);
+});
+
+describe('person relationship projection', () => {
+  function relationship(
+    id: string,
+    sourceId: string,
+    targetId: string,
+    values: Partial<RelationshipState> = {},
+  ): RelationshipState {
+    return {
+      id,
+      sourceId,
+      targetId,
+      kinship: '无',
+      affinity: 0,
+      trust: 40,
+      fear: 0,
+      grievance: 0,
+      gratitude: 0,
+      lastInteractionTurn: 0,
+      memories: [],
+      ...values,
+    };
+  }
+
+  it('shows one person once while keeping both directions intelligible', () => {
+    const world = createWorld('人物关系双向合并');
+    const subject = world.characters[0];
+    const peer = world.characters[1];
+    world.relationships = [
+      relationship('rel_subject_peer', subject.id, peer.id, {
+        kinship: '子女',
+        affinity: 45,
+        trust: 82,
+        grievance: 3,
+        lastInteractionTurn: 8,
+        memories: [{ turn: 8, kind: '提携', impact: 12, summary: '甲曾提携乙', eventId: 'event_shared' }],
+      }),
+      relationship('rel_peer_subject', peer.id, subject.id, {
+        kinship: '父母',
+        affinity: -50,
+        trust: 14,
+        grievance: 77,
+        lastInteractionTurn: 9,
+        memories: [
+          { turn: 9, kind: '羞辱', impact: -15, summary: '乙因旧事怨甲', eventId: 'event_other' },
+          { turn: 8, kind: '提携', impact: 12, summary: '甲曾提携乙', eventId: 'event_shared' },
+        ],
+      }),
+    ];
+    const hashBefore = stableHash(world);
+    const saveBefore = serializeWorld(world);
+
+    const projected = toPersonInspector(world, subject).relationships ?? [];
+
+    expect(projected).toHaveLength(1);
+    expect(projected[0]).toMatchObject({
+      targetId: peer.id,
+      name: peer.name,
+      relation: '子女',
+      sentiment: '亲信',
+    });
+    expect(projected[0].detail).toContain(subject.name);
+    expect(projected[0].detail).toContain(peer.name);
+    expect(projected[0].detail).toContain('积怨深重');
+    expect(projected[0].memories).toHaveLength(2);
+    expect(projected[0].memories?.join(' ')).toContain('甲曾提携乙');
+    expect(projected[0].memories?.join(' ')).toContain('乙因旧事怨甲');
+    expect(projected[0].memories).toContain('双方所记：甲曾提携乙');
+    expect(toPersonArchive(world, subject).links.filter((link) => link.kind === 'person' && link.id === peer.id)).toHaveLength(1);
+    expect(stableHash(world)).toBe(hashBefore);
+    expect(serializeWorld(world)).toBe(saveBefore);
+  });
+
+  it('reverses an inbound kinship label into the selected person viewpoint', () => {
+    const world = createWorld('人物关系称谓方向');
+    const subject = world.characters[0];
+    const peer = world.characters[1];
+    world.relationships = [relationship('rel_parent_subject', peer.id, subject.id, { kinship: '父母' })];
+
+    expect(toPersonInspector(world, subject).relationships).toEqual([
+      expect.objectContaining({
+        targetId: peer.id,
+        relation: '子女',
+        sentiment: '尚无定见',
+      }),
+    ]);
+  });
+
+  it('groups both directions before applying the ten-person limit', () => {
+    const world = createWorld('人物关系先合并再截断');
+    const subject = world.characters[0];
+    const peers = world.characters.slice(1, 13);
+    expect(peers).toHaveLength(12);
+    world.relationships = peers.map((peer, index) => relationship(
+      `rel_subject_${index}`,
+      subject.id,
+      peer.id,
+      { trust: 20 + index, lastInteractionTurn: index },
+    ));
+    world.relationships.push(relationship('rel_top_peer_subject', peers[0].id, subject.id, {
+      grievance: 99,
+      lastInteractionTurn: 99,
+    }));
+
+    const projected = toPersonInspector(world, subject).relationships ?? [];
+    expect(projected).toHaveLength(10);
+    expect(new Set(projected.map((item) => item.targetId)).size).toBe(10);
+    expect(projected.filter((item) => item.targetId === peers[0].id)).toHaveLength(1);
+    expect(projected.some((item) => item.targetId === peers[0].id)).toBe(true);
+  });
 });

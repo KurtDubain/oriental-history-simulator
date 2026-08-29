@@ -2,6 +2,7 @@ import type {
   PersonAgencyCommandRequestView,
   PersonAgencyQuarterChoiceView,
   PersonInspectorData,
+  PersonRelationshipView,
 } from '../components/Inspector';
 import type { ArchiveDossier, ArchiveRecord } from '../components/HistoricalArchive';
 import type {
@@ -232,6 +233,123 @@ function relationSentiment(item: RelationshipState) {
   if (item.affinity <= -35) return '不睦';
   if (item.affinity >= 35) return '亲近';
   return '往来平淡';
+}
+
+interface PersonRelationshipPair {
+  targetId: string;
+  outward?: RelationshipState;
+  inward?: RelationshipState;
+}
+
+function inverseKinship(kinship: RelationshipState['kinship']): RelationshipState['kinship'] {
+  if (kinship === '父母') return '子女';
+  if (kinship === '子女') return '父母';
+  return kinship;
+}
+
+function preferredDirection(
+  current: RelationshipState | undefined,
+  candidate: RelationshipState,
+): RelationshipState {
+  if (!current) return candidate;
+  const salienceDifference = relationSalience(candidate) - relationSalience(current);
+  if (salienceDifference !== 0) return salienceDifference > 0 ? candidate : current;
+  if (candidate.lastInteractionTurn !== current.lastInteractionTurn) {
+    return candidate.lastInteractionTurn > current.lastInteractionTurn ? candidate : current;
+  }
+  return candidate.id.localeCompare(current.id) < 0 ? candidate : current;
+}
+
+function relationshipLabel(pair: PersonRelationshipPair): string {
+  if (pair.outward?.kinship && pair.outward.kinship !== '无') return pair.outward.kinship;
+  if (pair.inward?.kinship && pair.inward.kinship !== '无') return inverseKinship(pair.inward.kinship);
+  const latestMemory = [
+    ...(pair.outward?.memories ?? []),
+    ...(pair.inward?.memories ?? []),
+  ].sort((left, right) => right.turn - left.turn || left.summary.localeCompare(right.summary))[0];
+  return latestMemory?.kind ?? '相识';
+}
+
+function relationshipMemories(
+  subjectName: string,
+  targetName: string,
+  pair: PersonRelationshipPair,
+): string[] {
+  const projected = [
+    ...(pair.outward?.memories ?? []).map((memory) => ({ memory, owner: subjectName })),
+    ...(pair.inward?.memories ?? []).map((memory) => ({ memory, owner: targetName })),
+  ];
+  const grouped = new Map<string, { turn: number; summary: string; owners: Set<string> }>();
+  for (const { memory, owner } of projected) {
+    const sourceKey = memory.eventId
+      ? `event:${memory.eventId}`
+      : `memory:${memory.turn}:${memory.kind}`;
+    const key = `${sourceKey}:${memory.summary}`;
+    const current = grouped.get(key);
+    if (current) {
+      current.owners.add(owner);
+      current.turn = Math.max(current.turn, memory.turn);
+    } else {
+      grouped.set(key, { turn: memory.turn, summary: memory.summary, owners: new Set([owner]) });
+    }
+  }
+  return [...grouped.values()]
+    .sort((left, right) => right.turn - left.turn || left.summary.localeCompare(right.summary))
+    .slice(0, 2)
+    .map((entry) => entry.owners.size > 1
+      ? `双方所记：${entry.summary}`
+      : `${[...entry.owners][0]}所记：${entry.summary}`);
+}
+
+function projectPersonRelationships(world: WorldState, item: CharacterState): PersonRelationshipView[] {
+  const pairs = new Map<string, PersonRelationshipPair>();
+  for (const relation of worldRelationships(world)) {
+    const outward = relation.sourceId === item.id;
+    const inward = relation.targetId === item.id;
+    if (!outward && !inward) continue;
+    const targetId = outward ? relation.targetId : relation.sourceId;
+    if (targetId === item.id) continue;
+    const pair = pairs.get(targetId) ?? { targetId };
+    if (outward) pair.outward = preferredDirection(pair.outward, relation);
+    else pair.inward = preferredDirection(pair.inward, relation);
+    pairs.set(targetId, pair);
+  }
+
+  return [...pairs.values()]
+    .sort((left, right) => {
+      const leftSalience = Math.max(
+        left.outward ? relationSalience(left.outward) : 0,
+        left.inward ? relationSalience(left.inward) : 0,
+      );
+      const rightSalience = Math.max(
+        right.outward ? relationSalience(right.outward) : 0,
+        right.inward ? relationSalience(right.inward) : 0,
+      );
+      const leftTurn = Math.max(left.outward?.lastInteractionTurn ?? -1, left.inward?.lastInteractionTurn ?? -1);
+      const rightTurn = Math.max(right.outward?.lastInteractionTurn ?? -1, right.inward?.lastInteractionTurn ?? -1);
+      return rightSalience - leftSalience || rightTurn - leftTurn || left.targetId.localeCompare(right.targetId);
+    })
+    .slice(0, 10)
+    .map((pair) => {
+      const targetName = character(world, pair.targetId)?.name ?? '无名之人';
+      const outwardSentiment = pair.outward ? relationSentiment(pair.outward) : '尚无定见';
+      const inwardSentiment = pair.inward ? relationSentiment(pair.inward) : '尚无记载';
+      const outwardDetail = pair.outward
+        ? `信任 ${Math.round(pair.outward.trust)} · 怨 ${Math.round(pair.outward.grievance)}`
+        : '未留下明确态度';
+      const inwardDetail = pair.inward
+        ? `信任 ${Math.round(pair.inward.trust)} · 怨 ${Math.round(pair.inward.grievance)}`
+        : '未留下明确态度';
+      return {
+        id: `${item.id}:relation:${pair.targetId}`,
+        targetId: pair.targetId,
+        name: targetName,
+        relation: relationshipLabel(pair),
+        sentiment: outwardSentiment,
+        detail: `${item.name}：${outwardSentiment}（${outwardDetail}）；${targetName}：${inwardSentiment}（${inwardDetail}）`,
+        memories: relationshipMemories(item.name, targetName, pair),
+      };
+    });
 }
 
 export interface PersonAgencyDossierOptions {
@@ -715,25 +833,7 @@ export function toPersonInspector(
   };
   const currentStep = agency.currentPlanSteps.find((step) => step.status === 'available');
   const coreDesires = agency.desires.map((desire) => desire.label);
-  const relationships = worldRelationships(world)
-    .filter((relation) => relation.sourceId === item.id || relation.targetId === item.id)
-    .sort((a, b) => relationSalience(b) - relationSalience(a) || a.id.localeCompare(b.id))
-    .slice(0, 10)
-    .map((relation) => {
-      const targetId = relation.sourceId === item.id ? relation.targetId : relation.sourceId;
-      return {
-        id: relation.id,
-        targetId,
-        name: character(world, targetId)?.name ?? '无名之人',
-        relation: relation.kinship === '无' ? relation.memories.at(-1)?.kind ?? '相识' : relation.kinship,
-        sentiment: relationSentiment(relation),
-        detail: `信任 ${Math.round(relation.trust)} · 怨 ${Math.round(relation.grievance)}`,
-        memories: [...relation.memories]
-          .sort((a, b) => b.turn - a.turn)
-          .slice(0, 2)
-          .map((memory) => memory.summary),
-      };
-    });
+  const relationships = projectPersonRelationships(world, item);
   const experiences = toPersonExperienceRecords(world, item).slice(-12).reverse();
   return {
     id: item.id,

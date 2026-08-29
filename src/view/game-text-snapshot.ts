@@ -100,7 +100,6 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
   const regionName = (id: string | null) => world.regions.find((item) => item.id === id)?.name ?? id;
   const characterName = (id: string) => world.characters.find((item) => item.id === id)?.name ?? id;
   const families = Array.isArray(world.families) ? world.families : [];
-  const relationships = Array.isArray(world.relationships) ? world.relationships : [];
   const diplomacy = Array.isArray(world.diplomacy) ? world.diplomacy : [];
   const familyName = (id: string | null | undefined) => families.find((item) => item.id === id)?.name ?? id ?? null;
   let selectedDetail: object | null = null;
@@ -232,19 +231,14 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         insubordination: item.insubordination,
         agency: personDossier.agency,
         biography: Array.isArray(item.biography) ? item.biography.slice(-20) : [],
-        relationships: relationships
-          .filter((entry) => entry.sourceId === item.id || entry.targetId === item.id)
-          .slice(0, 10)
-          .map((entry) => ({
-            with: characterName(entry.sourceId === item.id ? entry.targetId : entry.sourceId),
-            kinship: entry.kinship,
-            affinity: entry.affinity,
-            trust: entry.trust,
-            fear: entry.fear,
-            grievance: entry.grievance,
-            gratitude: entry.gratitude,
-            memories: entry.memories,
-          })),
+        relationships: (personDossier.relationships ?? []).map((entry) => ({
+          targetId: entry.targetId,
+          with: entry.name,
+          relation: entry.relation,
+          sentiment: entry.sentiment,
+          detail: entry.detail,
+          memories: entry.memories,
+        })),
       };
     }
   } else if (options.selection) {
