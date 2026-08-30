@@ -2904,6 +2904,96 @@ button.observer-causal-chain__evidence:hover {
   }
 }
 
+@media (min-width: 761px) and (max-width: 1080px) {
+  .observer-topbar {
+    grid-template-columns: minmax(138px, 1fr) auto minmax(142px, 1fr);
+    padding-right: 10px;
+  }
+
+  .observer-brand__copy small,
+  .observer-date > svg,
+  .observer-date__era,
+  .observer-date__detail,
+  .observer-speed {
+    display: none;
+  }
+
+  .observer-date {
+    gap: 6px;
+    white-space: nowrap;
+  }
+
+  .observer-time-controls {
+    gap: 4px;
+  }
+
+  .observer-speed-cycle {
+    display: inline-flex;
+    width: 44px;
+    height: 44px;
+    flex: 0 0 auto;
+    align-items: center;
+    justify-content: center;
+    gap: 2px;
+    padding: 0;
+    border: 1px solid var(--observer-line-strong);
+    border-radius: 2px;
+    color: var(--observer-ink-soft);
+    background: transparent;
+    font-size: 9px;
+    font-weight: 750;
+  }
+
+  .observer-time-controls .observer-icon-button,
+  .observer-advance-button {
+    width: 44px;
+    height: 44px;
+    padding: 0;
+  }
+
+  .observer-advance-button span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+
+  .observer-inspector__actions .observer-icon-button,
+  .observer-inspector-tabs button,
+  .observer-inspector-records li > button,
+  .observer-causal-drawer__header .observer-icon-button,
+  .observer-causal-subjects button,
+  button.observer-causal-chain__evidence {
+    min-width: 44px;
+    min-height: 44px;
+  }
+
+  .observer-embodiment-switch > button,
+  .observer-embodiment-pending > button,
+  .observer-embodiment-result > button,
+  .observer-embodiment-closure button,
+  .observer-embodiment-action-list button,
+  .observer-entity-list > li > button,
+  .observer-diplomacy-list > li > button,
+  .observer-relation-list > li > button,
+  .observer-faction__movement button,
+  .observer-faction__assets summary,
+  .observer-faction > footer button,
+  .observer-scene-list li > button {
+    min-height: 44px;
+  }
+
+  .observer-inspector__jump .observer-text-link {
+    display: inline-flex;
+    min-width: 44px;
+    min-height: 44px;
+    align-items: center;
+    padding: 0 4px;
+  }
+}
+
 @media (max-width: 760px) {
   :root {
     --observer-chronicle-height: calc(120px + var(--observer-safe-bottom));
@@ -3220,6 +3310,7 @@ button.observer-causal-chain__evidence:hover {
 
   .observer-inspector__jump .observer-text-link {
     display: inline-flex;
+    min-width: 44px;
     min-height: 44px;
     align-items: center;
     padding: 0 4px;

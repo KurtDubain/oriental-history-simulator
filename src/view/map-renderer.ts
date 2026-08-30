@@ -185,7 +185,7 @@ export function terrainLabel(terrain: string) {
 function overlayTitle(overlay: MapOverlay) {
   if (overlay === "food") return "粮食余裕";
   if (overlay === "population") return "人口密度";
-  if (overlay === "conflict" || overlay === "war") return "战乱压力";
+  if (overlay === "war") return "兵势强弱";
   if (overlay === "trade") return "当季商路";
   if (overlay === "migration") return "人口迁徙";
   if (overlay === "naval") return "海权投射";
@@ -497,7 +497,7 @@ function regionFill(
   if (overlay === "naval") {
     return { color: region.port ? RIVER : INK, alpha: region.port ? 0.19 : 0.05 };
   }
-  if (overlay === "conflict" || overlay === "war") {
+  if (overlay === "war") {
     const value = Math.max(toUnit(region.unrest), toUnit(region.warDamage));
     return { color: VERMILION, alpha: 0.04 + value * 0.55 };
   }
@@ -1029,7 +1029,7 @@ function drawLegend(
     visibleColors.slice(0, 8).forEach((color, index, items) => {
       gradient.addColorStop(items.length === 1 ? 0 : index / (items.length - 1), color);
     });
-  } else if (overlay === "conflict" || overlay === "war" || overlay === "disease" || overlay === "migration") {
+  } else if (overlay === "war" || overlay === "disease" || overlay === "migration") {
     gradient.addColorStop(0, "rgba(163, 58, 46, 0.06)");
     gradient.addColorStop(1, "rgba(163, 58, 46, 0.62)");
   } else if (overlay === "population") {

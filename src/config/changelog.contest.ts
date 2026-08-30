@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.12.2',
+    date: '2026-08-30',
+    title: '一卷一页，来处可返',
+    items: [
+      '移动端从人物或势力名单直接进入完整档案，返回后仍在原分卷和原条目；档案展开时，本季变化收成一行。',
+      '叠层首屏只留四个常用项，其他图层收入“更多”，当前专业层仍直接可见；战乱图层统一称为兵势。',
+      '减少动效不再留下旧高度闪帧；桌面、平板与两档移动触控已验证焦点、返回和世界 hash，世界结果与存档格式保持不变。',
+    ],
+  },
+  {
     version: '1.12.1',
     date: '2026-08-30',
     title: '四层读史，一事一源',

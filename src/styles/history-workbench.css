@@ -867,6 +867,13 @@
   }
 }
 
+@media (min-width: 701px) and (max-width: 840px) {
+  .history-workbench__close {
+    width: 44px;
+    height: 44px;
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .history-workbench,
   .history-workbench-layer__backdrop,

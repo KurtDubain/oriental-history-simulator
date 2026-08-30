@@ -282,7 +282,20 @@
   }
 }
 
-@media (max-width: 780px) {
+@media (min-width: 761px) and (max-width: 1080px) {
+  .observer-app[data-inspector-open="true"] .roster-panel {
+    right: 358px;
+    width: auto;
+    max-width: 390px;
+  }
+
+  .roster-panel__header > button {
+    width: 44px;
+    height: 44px;
+  }
+}
+
+@media (max-width: 760px) {
   .roster-panel {
     inset: 12px;
     width: auto;
@@ -305,6 +318,10 @@
     padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
     scroll-padding-bottom: calc(76px + env(safe-area-inset-bottom, 0px));
   }
+}
+
+.roster-panel[data-roster-state="suspended"] {
+  display: none;
 }
 
 @media (prefers-reduced-motion: reduce) {

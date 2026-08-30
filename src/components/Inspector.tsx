@@ -1,6 +1,7 @@
 import {
   Activity,
   Anchor,
+  ArrowLeft,
   Castle,
   ChevronDown,
   ChevronUp,
@@ -368,6 +369,8 @@ export interface SystemInspectorData {
   history?: InspectorRecord[];
 }
 
+export type InspectorEntrySource = 'map' | 'roster' | 'link';
+
 interface InspectorSharedProps {
   isFollowing?: boolean;
   onToggleFollow?: () => void;
@@ -383,6 +386,8 @@ interface InspectorSharedProps {
   onDismissEmbodimentClosure?: () => void;
   mobileExpanded?: boolean;
   onMobileExpandedChange?: (expanded: boolean) => void;
+  entrySource?: InspectorEntrySource;
+  returnLabel?: string;
 }
 
 export type InspectorProps =
@@ -415,7 +420,9 @@ function Fact({ label, value }: { label: string; value?: DisplayValue }) {
   return <div className="observer-fact"><dt>{label}</dt><dd>{display(value)}</dd></div>;
 }
 
-function InspectorActions({ label, isFollowing, onToggleFollow, onClose }: InspectorSharedProps & { label: string }) {
+function InspectorActions({ label, isFollowing, onToggleFollow, onClose, entrySource, returnLabel }: InspectorSharedProps & { label: string }) {
+  const returnsToRoster = entrySource === 'roster';
+  const closeLabel = returnsToRoster ? returnLabel ?? '返回名单' : '关闭档案';
   return (
     <div className="observer-inspector__actions">
       {onToggleFollow ? (
@@ -423,7 +430,18 @@ function InspectorActions({ label, isFollowing, onToggleFollow, onClose }: Inspe
           <Star size={17} fill={isFollowing ? 'currentColor' : 'none'} aria-hidden="true" />
         </button>
       ) : null}
-      {onClose ? <button type="button" className="observer-icon-button" aria-label="关闭档案" onClick={onClose}><X size={18} aria-hidden="true" /></button> : null}
+      {onClose ? (
+        <button
+          type="button"
+          className="observer-icon-button"
+          autoFocus={returnsToRoster}
+          aria-label={closeLabel}
+          data-inspector-return={returnsToRoster ? 'roster' : undefined}
+          onClick={onClose}
+        >
+          {returnsToRoster ? <ArrowLeft size={18} aria-hidden="true" /> : <X size={18} aria-hidden="true" />}
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -574,7 +592,7 @@ function RelationshipConstellation({
               }
             }}
           >
-            <circle cx={x} cy={y} r="19" />
+            <circle cx={x} cy={y} r="22" />
             <text x={x} y={y + 3}>{relation.name.slice(0, 4)}</text>
             <text className="observer-relationship-map__relation" x={x} y={y + 30}>{relation.sentiment}</text>
           </g>
@@ -1086,7 +1104,7 @@ function PersonInspector({ data, onOpenMind, mobileMindRequest = 0, ...actions }
         <section className="observer-inspector__section" aria-labelledby="person-ability-heading"><h3 id="person-ability-heading">才能</h3><div className="observer-ability-grid">{abilities.map(([label, value]) => <div className="observer-ability" key={label}><span>{label}</span><strong>{Math.round(value)}</strong></div>)}</div><dl className="observer-facts observer-facts--after-grid"><Fact label="功绩" value={data.merit} /><Fact label="副将历练" value={data.deputyExperience} /></dl></section>
       </div> : null}
       {tab === 'mind' ? <div id={`${tabsId}-panel-mind`} role="tabpanel" aria-labelledby={`${tabsId}-tab-mind`}>{data.agency ? <PersonAgencySections key={data.id} agency={data.agency} onSelectEvent={actions.onSelectEvent} embodiment={actions.embodiment} onChooseEmbodiedAction={actions.onChooseEmbodiedAction} onCancelEmbodiedAction={actions.onCancelEmbodiedAction} /> : <section className="observer-inspector__section" aria-labelledby="person-motive-heading"><h3 id="person-motive-heading">心志与打算</h3><p className="observer-inspector__empty">现有记载不足以判断此人的打算。</p></section>}</div> : null}
-      {tab === 'relations' ? <div id={`${tabsId}-panel-relations`} role="tabpanel" aria-labelledby={`${tabsId}-tab-relations`}><section className="observer-inspector__section" aria-labelledby="person-relation-heading"><h3 id="person-relation-heading"><Network size={14} aria-hidden="true" />关系与记忆</h3>{data.relationships?.length ? <><RelationshipConstellation name={data.name} relationships={data.relationships} onSelect={actions.onSelectEntity} /><ul className="observer-relation-list">{data.relationships.map((relation) => <li key={relation.id}><button type="button" onClick={() => actions.onSelectEntity?.('person', relation.targetId)}><span><strong>{relation.name}</strong><small>{relation.relation} · {relation.sentiment}</small></span></button>{relation.detail || relation.memories?.length ? <p>{[relation.detail, ...(relation.memories ?? [])].filter(Boolean).join('；')}</p> : null}</li>)}</ul></> : <p className="observer-inspector__empty">此人尚无足以入档的人际记忆。</p>}</section></div> : null}
+      {tab === 'relations' ? <div id={`${tabsId}-panel-relations`} role="tabpanel" aria-labelledby={`${tabsId}-tab-relations`}><section className="observer-inspector__section" aria-labelledby="person-relation-heading"><h3 id="person-relation-heading"><Network size={14} aria-hidden="true" />关系与记忆</h3>{data.relationships?.length ? <><RelationshipConstellation name={data.name} relationships={data.relationships} onSelect={actions.onSelectEntity} /><ul className="observer-relation-list">{data.relationships.map((relation) => <li key={relation.id}><button type="button" data-related-person-id={relation.targetId} onClick={() => actions.onSelectEntity?.('person', relation.targetId)}><span><strong>{relation.name}</strong><small>{relation.relation} · {relation.sentiment}</small></span></button>{relation.detail || relation.memories?.length ? <p>{[relation.detail, ...(relation.memories ?? [])].filter(Boolean).join('；')}</p> : null}</li>)}</ul></> : <p className="observer-inspector__empty">此人尚无足以入档的人际记忆。</p>}</section></div> : null}
       {tab === 'history' ? <div id={`${tabsId}-panel-history`} role="tabpanel" aria-labelledby={`${tabsId}-tab-history`}><section className="observer-inspector__section" aria-labelledby="person-history-heading"><h3 id="person-history-heading"><ScrollText size={14} aria-hidden="true" />生平纪年</h3><RecordList records={data.experiences ?? []} onSelectEvent={actions.onSelectEvent} />{actions.onOpenArchive ? <EntityHistoryGateway kind="person" label="读完整人物传" onOpen={actions.onOpenArchive} /> : null}</section></div> : null}
     </>
   );
@@ -1197,8 +1215,10 @@ function mobileQuickLookFor(props: InspectorProps): MobileQuickLookView {
 export function Inspector(props: InspectorProps) {
   const [internalMobileExpanded, setInternalMobileExpanded] = useState(false);
   const [mobileMindRequest, setMobileMindRequest] = useState(0);
+  const mobileExpansionControlled = props.mobileExpanded !== undefined;
   const mobileExpanded = props.mobileExpanded ?? internalMobileExpanded;
   const inspectorId = useId();
+  const inspectorRef = useRef<HTMLElement>(null);
   const swipeStartRef = useRef<{ pointerId: number; x: number; y: number } | null>(null);
   const swipeConsumedRef = useRef(false);
   const selectionKey = `${props.kind}:${props.data.id}`;
@@ -1206,18 +1226,35 @@ export function Inspector(props: InspectorProps) {
   const embodimentClosureKey = props.kind === 'person' && props.embodiment?.closure
     ? `${props.data.id}:${props.embodiment.closure.reason}:${props.embodiment.closure.sourceEventId ?? 'no-event'}`
     : null;
+  const returnsToRoster = props.entrySource === 'roster' && Boolean(props.onClose);
+  const mobileReturnLabel = props.returnLabel ?? '返回名单';
   const setMobileExpanded = useCallback((next: boolean | ((current: boolean) => boolean)) => {
     const value = typeof next === 'function' ? next(mobileExpanded) : next;
     if (props.mobileExpanded === undefined) setInternalMobileExpanded(value);
     props.onMobileExpandedChange?.(value);
   }, [mobileExpanded, props.mobileExpanded, props.onMobileExpandedChange]);
   useEffect(() => {
-    setMobileExpanded(false);
+    if (!mobileExpansionControlled) setInternalMobileExpanded(false);
     setMobileMindRequest(0);
-  }, [selectionKey]);
+  }, [mobileExpansionControlled, selectionKey]);
   useEffect(() => {
     if (embodimentClosureKey) setMobileExpanded(true);
   }, [embodimentClosureKey]);
+  useEffect(() => {
+    if (!returnsToRoster || !mobileExpanded) return undefined;
+    const frame = requestAnimationFrame(() => inspectorRef.current?.querySelector<HTMLButtonElement>('[data-inspector-return="roster"]')?.focus({ preventScroll: true }));
+    return () => cancelAnimationFrame(frame);
+  }, [mobileExpanded, returnsToRoster, selectionKey]);
+  useEffect(() => {
+    if (!returnsToRoster || !mobileExpanded) return undefined;
+    const handleEscape = (event: globalThis.KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
+      event.preventDefault();
+      props.onClose?.();
+    };
+    window.addEventListener('keydown', handleEscape);
+    return () => window.removeEventListener('keydown', handleEscape);
+  }, [mobileExpanded, props.onClose, returnsToRoster]);
 
   const startQuickLookSwipe = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.pointerType === 'mouse') return;
@@ -1239,6 +1276,7 @@ export function Inspector(props: InspectorProps) {
     if (Math.abs(dy) < 42 || Math.abs(dy) < Math.abs(dx) * 1.2) return;
     swipeConsumedRef.current = true;
     if (dy < 0) setMobileExpanded(true);
+    else if (mobileExpanded && returnsToRoster) props.onClose?.();
     else if (mobileExpanded) setMobileExpanded(false);
     else props.onClose?.();
   };
@@ -1250,6 +1288,7 @@ export function Inspector(props: InspectorProps) {
 
   return (
     <aside
+      ref={inspectorRef}
       id={inspectorId}
       className="observer-inspector"
       tabIndex={-1}
@@ -1257,13 +1296,20 @@ export function Inspector(props: InspectorProps) {
       data-kind={props.kind}
       data-mobile-expanded={mobileExpanded}
       data-mobile-mode={mobileExpanded ? 'full' : 'quick'}
+      data-entry-source={props.entrySource}
+      onKeyDown={(event) => {
+        if (event.key !== 'Escape' || !returnsToRoster || !mobileExpanded) return;
+        event.preventDefault();
+        event.stopPropagation();
+        props.onClose?.();
+      }}
     >
       <section className="observer-inspector__mobile-toggle" data-testid="map-quick-look" aria-label={`${quickLook.name}地图速览`}>
         <button
           type="button"
           className="observer-inspector__mobile-handle"
           aria-expanded={mobileExpanded}
-          aria-label={mobileExpanded ? '下划或点按返回地图速览' : '上划或点按打开完整档案'}
+          aria-label={mobileExpanded && returnsToRoster ? `下划或点按${mobileReturnLabel}` : mobileExpanded ? '下划或点按返回地图速览' : '上划或点按打开完整档案'}
           onPointerDown={startQuickLookSwipe}
           onPointerUp={finishQuickLookSwipe}
           onPointerCancel={cancelQuickLookSwipe}
@@ -1275,12 +1321,16 @@ export function Inspector(props: InspectorProps) {
               swipeConsumedRef.current = false;
               return;
             }
+            if (mobileExpanded && returnsToRoster) {
+              props.onClose?.();
+              return;
+            }
             setMobileExpanded((current) => !current);
           }}
         >
           <i aria-hidden="true" />
-          <span>{mobileExpanded ? '完整档案' : '地图速览'}</span>
-          {mobileExpanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronUp size={16} aria-hidden="true" />}
+          <span>{mobileExpanded && returnsToRoster ? mobileReturnLabel : mobileExpanded ? '完整档案' : '地图速览'}</span>
+          {mobileExpanded && returnsToRoster ? <ArrowLeft size={16} aria-hidden="true" /> : mobileExpanded ? <ChevronDown size={16} aria-hidden="true" /> : <ChevronUp size={16} aria-hidden="true" />}
         </button>
         {!mobileExpanded ? (
           <div className="observer-inspector__mobile-quicklook">
@@ -1303,7 +1353,7 @@ export function Inspector(props: InspectorProps) {
                     if (props.kind === 'person') setMobileMindRequest((current) => current + 1);
                   }}
                 >{props.kind === 'person' ? '看所图' : '完整档案'}</button>
-                {props.onClose ? <button type="button" onClick={props.onClose}>收起</button> : null}
+                {props.onClose ? <button type="button" onClick={props.onClose}>{returnsToRoster ? mobileReturnLabel : '收起'}</button> : null}
               </div>
             </footer>
           </div>

@@ -814,7 +814,7 @@ export function WorldMap({
         ? [...visibleSeaZones, ...scene.fleets.map((item) => ({ kind: "fleet" as const, id: item.id }))]
         : overlay === "trade"
           ? [...scene.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId })), ...visibleSeaZones]
-        : overlay === "war" || overlay === "conflict"
+        : overlay === "war"
           ? scene.armies.map((item) => ({ kind: "army" as const, id: item.id }))
         : [...scene.markers.map((item) => ({ kind: item.kind, id: item.id })), ...scene.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId }))];
       if (scene.regions.length === 0 && contextualObjects.length === 0) return;

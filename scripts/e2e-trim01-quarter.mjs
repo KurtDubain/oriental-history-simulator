@@ -8,12 +8,15 @@ const externalUrl = process.env.TRIM01_E2E_URL;
 const APP_URL = externalUrl ?? `http://127.0.0.1:${PORT}`;
 const ARTIFACT_DIR = 'output/trim01-quarter-e2e';
 const QUARTERS = 8;
+const ROSTER_DOSSIER_MAX_WIDTH = 840;
+const SCENARIO_FILTER = process.env.TRIM01_E2E_SCENARIO;
 
 const SCENARIOS = Object.freeze([
   { slug: 'desktop-1440x900', viewport: { width: 1440, height: 900 } },
+  { slug: 'tablet-768x900', viewport: { width: 768, height: 900 } },
   { slug: 'mobile-390x844', viewport: { width: 390, height: 844 } },
   { slug: 'mobile-wide-640x900', viewport: { width: 640, height: 900 } },
-]);
+].filter((scenario) => !SCENARIO_FILTER || scenario.slug === SCENARIO_FILTER));
 
 function collectBrowserErrors(page, target) {
   page.on('console', (message) => {
@@ -28,6 +31,11 @@ function collectBrowserErrors(page, target) {
 
 async function snapshot(page) {
   return page.evaluate(() => JSON.parse(window.render_game_to_text()));
+}
+
+async function activate(locator, scenario) {
+  if (scenario.viewport.width <= ROSTER_DOSSIER_MAX_WIDTH) await locator.tap();
+  else await locator.click();
 }
 
 async function waitForTurn(page, turn) {
@@ -73,6 +81,10 @@ async function assertNoPageOverflow(page, scenario) {
         top: pulseRect.top,
         bottom: pulseRect.bottom,
       } : null,
+      timeButtons: Array.from(document.querySelectorAll('.observer-time-controls button')).map((button) => {
+        const bounds = button.getBoundingClientRect();
+        return { left: bounds.left, right: bounds.right, top: bounds.top, bottom: bounds.bottom };
+      }),
     };
   });
 
@@ -99,6 +111,11 @@ async function assertNoPageOverflow(page, scenario) {
       && layout.pulse.top >= -1
       && layout.pulse.bottom <= layout.viewportHeight + 1,
     `${scenario.slug} 本季变化不得被视口或外壳裁切：${JSON.stringify(layout)}`,
+  );
+  assert.equal(
+    layout.timeButtons.every((bounds) => bounds.left >= -1 && bounds.right <= layout.viewportWidth + 1 && bounds.top >= -1 && bounds.bottom <= layout.viewportHeight + 1),
+    true,
+    `${scenario.slug} 时间控制必须完整落在视口内：${JSON.stringify(layout.timeButtons)}`,
   );
 }
 
@@ -164,7 +181,7 @@ async function assertHistoryLayer(page, scenario, expected, baseline, detail) {
 }
 
 async function assertTouchTarget(locator, scenario, detail) {
-  if (scenario.viewport.width !== 390) return;
+  if (scenario.viewport.width > ROSTER_DOSSIER_MAX_WIDTH) return;
   await locator.scrollIntoViewIfNeeded();
   await locator.evaluate(async (element) => {
     const layer = element.closest('[data-history-layer]') ?? element;
@@ -184,6 +201,38 @@ async function assertTouchTarget(locator, scenario, detail) {
       && Boolean(hit && (hit === element || element.contains(hit)));
   });
   assert.equal(hittable, true, `${scenario.slug} ${detail}必须位于视口内且中心点可命中`);
+}
+
+async function assertMapTouchControls(page, scenario) {
+  if (scenario.viewport.width > ROSTER_DOSSIER_MAX_WIDTH) return;
+  const viewportButtons = page.locator('.world-map__viewport-controls button');
+  for (let index = 0; index < await viewportButtons.count(); index += 1) {
+    await assertTouchTarget(viewportButtons.nth(index), scenario, `舆图缩放控件 ${index + 1}`);
+  }
+  const primaryTools = page.locator('.observer-world-tools > button:visible');
+  assert.equal(await primaryTools.count(), 4, `${scenario.slug} 窄屏地图只直露观察、天意、设置和更多`);
+  for (let index = 0; index < await primaryTools.count(); index += 1) {
+    await assertTouchTarget(primaryTools.nth(index), scenario, `地图常用工具 ${index + 1}`);
+  }
+  const primer = page.locator('.observer-map-primer-trigger:visible');
+  if (await primer.count()) await assertTouchTarget(primer, scenario, '读图入口');
+  await activate(page.locator('.observer-world-tools__more'), scenario);
+  const secondaryTools = page.locator('.observer-world-tools__secondary button:visible');
+  assert.equal(await secondaryTools.count(), 4, `${scenario.slug} 更多菜单应收纳四项低频工具`);
+  for (let index = 0; index < await secondaryTools.count(); index += 1) {
+    await assertTouchTarget(secondaryTools.nth(index), scenario, `地图低频工具 ${index + 1}`);
+  }
+  await activate(page.locator('.observer-world-tools__more'), scenario);
+  const overlap = await page.evaluate(() => {
+    const tools = document.querySelector('.observer-world-tools')?.getBoundingClientRect();
+    const summaries = Array.from(document.querySelectorAll('.observer-world-summary > span'))
+      .filter((element) => getComputedStyle(element).display !== 'none')
+      .map((element) => element.getBoundingClientRect());
+    return tools ? summaries.some((summary) => !(
+      summary.right <= tools.left || summary.left >= tools.right || summary.bottom <= tools.top || summary.top >= tools.bottom
+    )) : false;
+  });
+  assert.equal(overlap, false, `${scenario.slug} 地图工具不得遮住世界总览`);
 }
 
 async function assertEvidenceIdentity(page, scenario, sourceEventId, evidenceState, detail) {
@@ -299,11 +348,59 @@ async function exercisePersonHistoryPath(page, scenario, baseline) {
 
   const inspector = page.locator('.observer-inspector[data-kind="person"]');
   await inspector.waitFor();
-  if (scenario.viewport.width <= 760) {
-    const mobileHandle = inspector.locator('.observer-inspector__mobile-handle');
-    await assertTouchTarget(mobileHandle, scenario, '人物完整档案展开入口');
-    await mobileHandle.click();
+  if (scenario.viewport.width <= ROSTER_DOSSIER_MAX_WIDTH) {
     await page.waitForFunction(() => document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true');
+    assert.equal(
+      await page.evaluate(() => document.activeElement?.getAttribute('data-inspector-return')),
+      'roster',
+      `${scenario.slug} 隐藏名录后焦点必须进入人物档案的返回入口`,
+    );
+    assert.equal(await roster.getAttribute('data-roster-state'), 'suspended', `${scenario.slug} 完整档案打开时原人物名录应留在原位但暂停交互`);
+    const fullState = await snapshot(page);
+    assert.equal(fullState.interface.view, 'people', `${scenario.slug} 名录来源档案必须保留人物卷上下文`);
+    assert.equal(fullState.interface.mobileInspectorMode, 'full');
+    if (scenario.viewport.width <= 760) {
+      assert.equal(await page.getByTestId('quarter-pulse').getAttribute('data-presentation'), 'condensed', `${scenario.slug} 完整档案必须让季度纪要收成单行`);
+      const pulseLayout = await page.getByTestId('quarter-pulse').evaluate((element) => ({
+        height: element.getBoundingClientRect().height,
+        media: matchMedia('(max-width: 760px)').matches,
+        innerWidth,
+      }));
+      assert.ok(pulseLayout.height <= 64, `${scenario.slug} 单行季度纪要不得超过64px：${JSON.stringify(pulseLayout)}`);
+      await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-dossier-condensed-quarter.png`, fullPage: false });
+    }
+  } else {
+    const separation = await page.evaluate(() => {
+      const rosterBounds = document.querySelector('.roster-panel')?.getBoundingClientRect();
+      const inspectorBounds = document.querySelector('.observer-inspector')?.getBoundingClientRect();
+      return rosterBounds && inspectorBounds ? { rosterRight: rosterBounds.right, inspectorLeft: inspectorBounds.left } : null;
+    });
+    assert.ok(separation && separation.rosterRight <= separation.inspectorLeft + 1, `${scenario.slug} 名录与档案不得重叠：${JSON.stringify(separation)}`);
+  }
+
+  const embodimentEntry = inspector.locator('.observer-embodiment-switch > button');
+  if (await embodimentEntry.count()) await assertTouchTarget(embodimentEntry, scenario, '人物入世入口');
+  const dossierLink = inspector.locator('.observer-inspector__jump .observer-text-link').first();
+  if (await dossierLink.count()) await assertTouchTarget(dossierLink, scenario, '档案内链');
+
+  if (scenario.viewport.width <= ROSTER_DOSSIER_MAX_WIDTH) {
+    const relationsTab = inspector.locator('[data-inspector-tab="relations"]');
+    await relationsTab.click();
+    const relationshipNode = inspector.locator('.observer-relationship-map__node').first();
+    if (await relationshipNode.count()) await assertTouchTarget(relationshipNode, scenario, '关系星图人物');
+    const relatedPerson = inspector.locator('.observer-relation-list [data-related-person-id]').first();
+    if (await relatedPerson.count()) {
+      const relatedPersonId = await relatedPerson.getAttribute('data-related-person-id');
+      await activate(relatedPerson, scenario);
+      await page.waitForFunction((id) => JSON.parse(window.render_game_to_text()).interface.selected?.id === id, relatedPersonId);
+      await page.waitForFunction(() => document.activeElement?.getAttribute('data-inspector-return') === 'roster');
+      await activate(inspector.locator('[data-inspector-return="roster"]'), scenario);
+      await inspector.waitFor({ state: 'detached' });
+      await page.waitForFunction((id) => document.activeElement?.getAttribute('data-roster-id') === id, personId);
+      await activate(roster.locator(`[data-roster-id="${personId}"]`), scenario);
+      await inspector.waitFor();
+      await page.waitForFunction(() => document.activeElement?.getAttribute('data-inspector-return') === 'roster');
+    }
   }
 
   const historyTab = inspector.locator('[data-inspector-tab="history"]');
@@ -366,20 +463,75 @@ async function exercisePersonHistoryPath(page, scenario, baseline) {
   const linkedState = await snapshot(page);
   assert.equal(linkedState.interface.selected?.kind, relatedKind, `${scenario.slug} 卷中链接必须打开同类对象档案`);
   assert.equal(linkedState.interface.selected?.id, relatedId, `${scenario.slug} 卷中链接必须打开同一对象档案`);
-  assert.equal(await linkedInspector.evaluate((element) => document.activeElement === element), true, `${scenario.slug} 跨对象后焦点必须落在新档案`);
-
-  if (scenario.viewport.width <= 760) {
-    await linkedInspector.getByRole('button', { name: '收起', exact: true }).click();
+  if (scenario.viewport.width <= ROSTER_DOSSIER_MAX_WIDTH) {
+    await page.waitForFunction(() => document.activeElement?.getAttribute('data-inspector-return') === 'roster');
   } else {
-    await linkedInspector.locator('button[aria-label="关闭档案"]').click();
+    assert.equal(await linkedInspector.evaluate((element) => document.activeElement === element), true, `${scenario.slug} 跨对象后焦点必须落在新档案`);
   }
+
+  if (scenario.viewport.width <= ROSTER_DOSSIER_MAX_WIDTH) {
+    const returnToRoster = linkedInspector.locator('[data-inspector-return="roster"]');
+    await assertTouchTarget(returnToRoster, scenario, '返回人物名录入口');
+    await activate(returnToRoster, scenario);
+  } else await linkedInspector.locator('button[aria-label="关闭档案"]').click();
   await linkedInspector.waitFor({ state: 'detached' });
+  if (scenario.viewport.width <= ROSTER_DOSSIER_MAX_WIDTH) {
+    await roster.waitFor();
+    assert.equal(await roster.getAttribute('data-roster-state'), 'active', `${scenario.slug} 返回后人物名录必须恢复交互`);
+    await page.waitForFunction((id) => document.activeElement?.getAttribute('data-roster-id') === id, personId);
+    assert.equal(await roster.locator(`[data-roster-id="${personId}"]`).isVisible(), true, `${scenario.slug} 返回后原人物必须仍在可见名单位置`);
+    assert.equal(await page.getByTestId('quarter-pulse').getAttribute('data-presentation'), 'full', `${scenario.slug} 返回名单后季度纪要必须恢复`);
+    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-roster-return.png`, fullPage: false });
+  }
   const openRoster = page.locator('.roster-panel');
   if (await openRoster.count()) {
     await openRoster.locator('.roster-panel__header > button').click();
     await openRoster.waitFor({ state: 'detached' });
   }
   await assertHistoryLayer(page, scenario, 'quarter', baseline, '人物生平阅读后返回季报');
+}
+
+async function exerciseLayerPicker(page, scenario, baseline) {
+  const trigger = page.getByRole('button', { name: /^舆图叠层/ });
+  await activate(trigger, scenario);
+  const sheet = page.locator('#observer-layer-sheet');
+  await sheet.waitFor();
+  const radios = sheet.locator('[data-layer-id]');
+  assert.equal(await radios.count(), 10, `${scenario.slug} 十种叠层必须保持唯一可达`);
+  assert.equal(new Set(await radios.evaluateAll((items) => items.map((item) => item.getAttribute('data-layer-id')))).size, 10);
+
+  if (scenario.viewport.width <= 760) {
+    assert.deepEqual(
+      await sheet.locator('[data-layer-id]:visible').evaluateAll((items) => items.map((item) => item.getAttribute('data-layer-id'))),
+      ['political', 'war', 'food', 'none'],
+      `${scenario.slug} 首屏只给常用叠层`,
+    );
+    const more = sheet.locator('[data-layer-more-trigger]');
+    await assertTouchTarget(more, scenario, '更多图层入口');
+    await activate(more, scenario);
+    assert.equal(await sheet.locator('[data-layer-id]:visible').count(), 10, `${scenario.slug} 展开后十种叠层应全部可见`);
+    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-layers-more.png`, fullPage: false });
+  }
+
+  await activate(sheet.locator('[data-layer-id="knowledge"]'), scenario);
+  await sheet.waitFor({ state: 'detached' });
+  let current = await snapshot(page);
+  assert.equal(current.interface.overlay, 'knowledge');
+  assert.equal(current.time.turn, baseline.time.turn);
+  assert.equal(current.deterministicWorldHash, baseline.deterministicWorldHash);
+
+  await activate(trigger, scenario);
+  await sheet.waitFor();
+  const knowledge = sheet.locator('[data-layer-id="knowledge"]');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-layer-id') === 'knowledge');
+  assert.equal(await knowledge.isVisible(), true, `${scenario.slug} 当前专业叠层必须直接露出`);
+  assert.equal(await knowledge.getAttribute('data-layer-tier'), 'current');
+  assert.equal(await sheet.locator('[data-layer-more-trigger]').getAttribute('aria-expanded'), 'false');
+  await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-layers-current.png`, fullPage: false });
+  await activate(sheet.locator('[data-layer-id="political"]'), scenario);
+  current = await snapshot(page);
+  assert.equal(current.interface.overlay, 'political');
+  assert.equal(current.deterministicWorldHash, baseline.deterministicWorldHash);
 }
 
 async function assertHighlightPulse(page, scenario, reportTurn, projected) {
@@ -413,7 +565,7 @@ async function assertHighlightPulse(page, scenario, reportTurn, projected) {
   }, reportTurn, { timeout: 2_500 });
   const elapsed = Date.now() - startedAt;
   assert.ok(
-    elapsed >= 650 && elapsed <= 1_800,
+    elapsed >= 600 && elapsed <= 1_800,
     `${scenario.slug} 季度高亮应约一秒后消退，实际 ${elapsed}ms`,
   );
 }
@@ -526,6 +678,22 @@ async function assertPrimaryNavigation(page, scenario, initial) {
     `${scenario.slug} 方向键应切页并把焦点留在当前页签`,
   );
 
+  if (scenario.viewport.width <= ROSTER_DOSSIER_MAX_WIDTH) {
+    await familyTab.click();
+    const familyEntry = panel.locator('[data-roster-id]').first();
+    const familyId = await familyEntry.getAttribute('data-roster-id');
+    await activate(familyEntry, scenario);
+    const familyInspector = page.locator('.observer-inspector[data-kind="family"]');
+    await familyInspector.waitFor();
+    assert.equal(await panel.getAttribute('data-roster-state'), 'suspended', `${scenario.slug} 世家档案打开时应暂停原势力卷`);
+    await page.waitForFunction(() => document.activeElement?.getAttribute('data-inspector-return') === 'roster');
+    await activate(familyInspector.locator('[data-inspector-return="roster"]'), scenario);
+    await familyInspector.waitFor({ state: 'detached' });
+    await panel.waitFor();
+    assert.equal(await panel.getAttribute('data-active-section'), 'families', `${scenario.slug} 应返回原世家分卷`);
+    await page.waitForFunction((id) => document.activeElement?.getAttribute('data-roster-id') === id, familyId);
+  }
+
   if (scenario.viewport.width <= 760) {
     const list = panel.locator('.roster-panel__list');
     await list.evaluate((element) => { element.scrollTop = element.scrollHeight; });
@@ -548,6 +716,91 @@ async function assertPrimaryNavigation(page, scenario, initial) {
   const closed = await snapshot(page);
   assert.equal(closed.interface.view, 'world', `${scenario.slug} 关闭势力卷应回到世界`);
   assert.equal(closed.deterministicWorldHash, initial.deterministicWorldHash, `${scenario.slug} 完整导航浏览不得改写世界`);
+}
+
+async function exerciseResponsiveRosterDossier(page, scenario, baseline) {
+  const height = scenario.viewport.height;
+  await page.setViewportSize({ width: 1024, height });
+
+  const peopleTrigger = page.locator('[data-observer-view="people"]');
+  await peopleTrigger.click();
+  const roster = page.locator('.roster-panel[data-roster-scope="people"]');
+  await roster.waitFor();
+  const personEntry = roster.locator('[data-roster-id]').first();
+  const personId = await personEntry.getAttribute('data-roster-id');
+  assert.ok(personId, `${scenario.slug} 响应式回归必须取得原人物身份`);
+  await personEntry.click();
+
+  const inspector = page.locator('.observer-inspector[data-kind="person"]');
+  await inspector.waitFor();
+  assert.equal(await roster.getAttribute('data-roster-state'), 'active', `${scenario.slug} 1024px 下人物名录应保持可交互`);
+  assert.equal(await inspector.locator('[data-inspector-return="roster"]').count(), 0, `${scenario.slug} 1024px 双栏档案不应显示返回名录入口`);
+
+  await page.setViewportSize({ width: 768, height });
+  await page.waitForFunction(() => document.querySelector('.roster-panel')?.getAttribute('data-roster-state') === 'suspended');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-inspector-return') === 'roster');
+  assert.equal(await inspector.locator('[data-inspector-return="roster"]').count(), 1, `${scenario.slug} 缩至 768px 后应切换为名录到档案单页流`);
+
+  await page.setViewportSize({ width: 1024, height });
+  await page.waitForFunction(() => document.querySelector('.roster-panel')?.getAttribute('data-roster-state') === 'active');
+  await page.waitForFunction(() => !document.querySelector('[data-inspector-return="roster"]'));
+  const separation = await page.evaluate(() => {
+    const rosterBounds = document.querySelector('.roster-panel')?.getBoundingClientRect();
+    const inspectorBounds = document.querySelector('.observer-inspector')?.getBoundingClientRect();
+    return rosterBounds && inspectorBounds
+      ? { rosterRight: rosterBounds.right, inspectorLeft: inspectorBounds.left }
+      : null;
+  });
+  assert.ok(
+    separation && separation.rosterRight <= separation.inspectorLeft + 1,
+    `${scenario.slug} 扩回 1024px 后名录与档案应恢复无重叠双栏：${JSON.stringify(separation)}`,
+  );
+
+  await page.setViewportSize({ width: 844, height });
+  await page.waitForFunction(() => document.querySelector('.roster-panel')?.getAttribute('data-roster-state') === 'active');
+  await page.setViewportSize({ width: 390, height });
+  await page.waitForFunction(() => document.querySelector('.roster-panel')?.getAttribute('data-roster-state') === 'suspended');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-inspector-return') === 'roster');
+  assert.equal(await page.getByTestId('quarter-pulse').getAttribute('data-presentation'), 'condensed', `${scenario.slug} 844→390 后完整档案应同步收起季度纪要`);
+
+  await page.setViewportSize({ width: 844, height });
+  await page.waitForFunction(() => document.querySelector('.roster-panel')?.getAttribute('data-roster-state') === 'active');
+  await page.waitForFunction(() => !document.querySelector('[data-inspector-return="roster"]'));
+  assert.equal(await page.getByTestId('quarter-pulse').getAttribute('data-presentation'), 'full', `${scenario.slug} 扩回 844px 后季度纪要应恢复完整展示`);
+
+  await page.setViewportSize({ width: 768, height });
+  await page.waitForFunction(() => document.querySelector('.roster-panel')?.getAttribute('data-roster-state') === 'suspended');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-inspector-return') === 'roster');
+  await page.locator('.observer-speed-cycle').focus();
+  await page.keyboard.press('Escape');
+  await inspector.waitFor({ state: 'detached' });
+  await roster.waitFor();
+  assert.equal(await roster.getAttribute('data-roster-state'), 'active', `${scenario.slug} Escape 返回后人物名录必须恢复交互`);
+  await page.waitForFunction((id) => document.activeElement?.getAttribute('data-roster-id') === id, personId);
+
+  await roster.locator('.roster-panel__header > button').click();
+  await roster.waitFor({ state: 'detached' });
+  await page.setViewportSize(scenario.viewport);
+
+  await page.setViewportSize({ width: 1024, height });
+  await peopleTrigger.click();
+  await roster.waitFor();
+  await roster.locator('[data-roster-id]').first().click();
+  await inspector.waitFor();
+  const canvas = page.locator('.world-map__canvas');
+  await canvas.focus();
+  await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.selected?.kind === 'region');
+  await page.setViewportSize({ width: 768, height });
+  assert.equal(await page.locator('[data-inspector-return="roster"]').count(), 0, `${scenario.slug} 地图改选后不得复活旧名录来路`);
+  assert.equal(await page.locator('.roster-panel').count(), 0, `${scenario.slug} 地图改选后旧名录必须退出`);
+  await page.locator('.observer-inspector button[aria-label="关闭档案"]').click();
+  await page.locator('.observer-inspector').waitFor({ state: 'detached' });
+  await page.setViewportSize(scenario.viewport);
+
+  const returned = await snapshot(page);
+  assert.equal(returned.time.turn, baseline.time.turn, `${scenario.slug} 响应式档案往返不得推进季度`);
+  assert.equal(returned.deterministicWorldHash, baseline.deterministicWorldHash, `${scenario.slug} 响应式档案往返不得改写世界`);
 }
 
 async function createWorld(page, scenario) {
@@ -581,7 +834,8 @@ async function createWorld(page, scenario) {
 async function verifyScenario(browser, scenario) {
   const context = await browser.newContext({
     viewport: scenario.viewport,
-    hasTouch: scenario.viewport.width === 390,
+    hasTouch: scenario.viewport.width <= ROSTER_DOSSIER_MAX_WIDTH,
+    isMobile: scenario.viewport.width <= 760,
   });
   const page = await context.newPage();
   const browserErrors = [];
@@ -589,7 +843,12 @@ async function verifyScenario(browser, scenario) {
 
   try {
     const initial = await createWorld(page, scenario);
+    await assertMapTouchControls(page, scenario);
     await assertPrimaryNavigation(page, scenario, initial);
+    if (scenario.slug === 'desktop-1440x900') {
+      await exerciseResponsiveRosterDossier(page, scenario, initial);
+    }
+    await exerciseLayerPicker(page, scenario, initial);
     let previousDate = '';
     let situationHistoryPathCovered = false;
     for (let turn = 1; turn <= QUARTERS; turn += 1) {

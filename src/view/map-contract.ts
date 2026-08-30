@@ -111,7 +111,6 @@ export type MapOverlay =
   | "political"
   | "food"
   | "population"
-  | "conflict"
   | "war"
   | "trade"
   | "migration"

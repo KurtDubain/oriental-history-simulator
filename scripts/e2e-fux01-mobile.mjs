@@ -151,7 +151,9 @@ async function selectLayer(page, layer) {
   const trigger = page.getByRole('button', { name: /^舆图叠层/ });
   await trigger.click();
   await page.waitForSelector('#observer-layer-sheet');
-  await page.locator(`[data-layer-id="${layer}"]`).click();
+  const target = page.locator(`[data-layer-id="${layer}"]`);
+  if (!(await target.isVisible())) await page.locator('[data-layer-more-trigger]').click();
+  await target.click();
   await page.waitForSelector(`.world-map[data-overlay="${layer}"]`);
   await waitForState(page, (current, expected) => current.interface.overlay === expected, layer);
 }

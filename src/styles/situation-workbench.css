@@ -903,6 +903,14 @@
   }
 }
 
+@media (min-width: 761px) and (max-width: 840px) {
+  .situation-workbench__timeline li button,
+  .situation-workbench__fact-list li button {
+    min-height: 44px;
+    padding: 0 8px;
+  }
+}
+
 @media (max-width: 760px) {
   .situation-workbench-layer {
     padding: 0;

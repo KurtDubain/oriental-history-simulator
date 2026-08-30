@@ -218,6 +218,7 @@ import type {
 } from './view/observer-shell-contract';
 import { shouldShowObserverSoundInvitation } from './view/observer-interface-settings';
 import { useObserverInterface } from './view/use-observer-interface';
+import { useRosterDossierFlow } from './view/use-roster-dossier-flow';
 import './styles/app.css';
 
 type AdvanceSource = 'manual' | 'auto';
@@ -308,6 +309,8 @@ export function App() {
   const [mapGestureActive, setMapGestureActive] = useState(false);
   const [mapCameraKey, setMapCameraKey] = useState(0);
   const [selection, setSelection] = useState<Selection>(null);
+  const { returnTarget: rosterDossierReturn, compactPresentation: compactRosterDossier, begin: beginRosterDossier, clear: clearRosterDossier, returnToRoster } = useRosterDossierFlow(activeView, powerRosterSection);
+  useEffect(() => { setMobileInspectorExpanded(Boolean(rosterDossierReturn)); }, [rosterDossierReturn]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [focusedArmyId, setFocusedArmyId] = useState<string | null>(null);
   const [primerOpen, setPrimerOpen] = useState(false);
@@ -350,7 +353,6 @@ export function App() {
     || selection?.kind === 'seaZone'
     || selection?.kind === 'tradeCorridor';
   const dangerAudioFocused = overlay === 'war'
-    || overlay === 'conflict'
     || overlay === 'disease'
     || selection?.kind === 'army'
     || selection?.kind === 'outbreak';
@@ -373,7 +375,7 @@ export function App() {
     turn: world?.turn,
     worldViewActive: activeView === 'world' && historicalView === null,
     selectionOpen: selection !== null,
-  });
+  }) && !mobileToolsOpen;
 
   const worldRef = useRef<WorldState | null>(null);
   const worldShellRef = useRef<HTMLElement>(null);
@@ -732,7 +734,7 @@ export function App() {
     source: OpenWorldSource,
     restoreToken: string | null = null,
   ) => {
-    resetRuntimePerformanceMetrics();
+    clearRosterDossier(); resetRuntimePerformanceMetrics();
     const validWorld = assertValidWorld(nextWorld);
     resetAutosaveCoordinator(source === 'continue' ? validWorld.turn : 0);
     const defaultRegionId = validWorld.regions.find((region) => (
@@ -853,7 +855,7 @@ export function App() {
     runningRef.current = false;
     setRunning(false);
     clockAccumulatorRef.current = 0;
-  }, [commitAgencyShadow, commitEmbodiedObserver, commitWorld, resetAgencyShadowAtWorld, resetAutosaveCoordinator]);
+  }, [clearRosterDossier, commitAgencyShadow, commitEmbodiedObserver, commitWorld, resetAgencyShadowAtWorld, resetAutosaveCoordinator]);
 
   const handleCreate = useCallback(async () => {
     setStartBusy(true);
@@ -1258,7 +1260,7 @@ export function App() {
       if (nextEmbodiment.closure && nextEmbodiment.closure !== embodimentBeforeAdvance.closure) {
         const closureActorExists = next.characters.some((item) => item.id === nextEmbodiment.closure?.actorId);
         if (closureActorExists) {
-          setActiveView('people');
+          clearRosterDossier(); setActiveView('people');
           setSelection({ kind: 'person', id: nextEmbodiment.closure.actorId });
         }
       }
@@ -1295,7 +1297,7 @@ export function App() {
     } finally {
       advancingRef.current = false;
     }
-  }, [commitAgencyShadow, commitWorld, resetAgencyShadowAtWorld, selection]);
+  }, [clearRosterDossier, commitAgencyShadow, commitWorld, resetAgencyShadowAtWorld, selection]);
   advanceRef.current = advanceOne;
 
   const driveClock = useCallback((milliseconds: number) => {
@@ -1368,12 +1370,12 @@ export function App() {
         runningRef.current = false;
         setRunning(false);
         clockAccumulatorRef.current = 0;
-        setActiveView('chronicle');
+        clearRosterDossier(); setActiveView('chronicle');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [clearRosterDossier]);
 
   useEffect(() => {
     window.render_game_to_text = () => makeTextSnapshot(worldRef.current, snapshotOptionsRef.current);
@@ -1427,11 +1429,11 @@ export function App() {
     gameAudio.play('select', 0.46);
     setOverlay(nextOverlay);
     if (selection && shouldCloseMapSelectionForOverlay(selection.kind, nextOverlay)) {
-      setSelection(null);
+      clearRosterDossier(); setSelection(null);
       setMobileInspectorExpanded(false);
     }
     if (nextOverlay !== 'political') completeGuideStep('overlay-switched');
-  }, [completeGuideStep, selection]);
+  }, [clearRosterDossier, completeGuideStep, selection]);
 
   const handleOpenMapPrimer = useCallback(() => {
     if (!worldRef.current) return;
@@ -1447,14 +1449,14 @@ export function App() {
     setResumeHistoryAfterEvent(false);
     archiveFocusRestoreAllowedRef.current = false;
     setHistoricalView(null);
-    setActiveView('world');
+    clearRosterDossier(); setActiveView('world');
     primerAdvanceDoneRef.current = false;
     primerNewestEventIdRef.current = null;
     setPrimerStep('terrain');
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
     setPrimerOpen(true);
     gameAudio.play('open', 0.6);
-  }, []);
+  }, [clearRosterDossier]);
 
   const handleCloseMapPrimer = useCallback((_reason: MapPrimerCloseReason) => {
     try {
@@ -1510,8 +1512,8 @@ export function App() {
     } else {
       gameAudio.play('select', 0.44);
     }
-    setActiveView(nextView);
-  }, []);
+    clearRosterDossier(); setActiveView(nextView);
+  }, [clearRosterDossier]);
 
   const handleCloseHistoryWorkbench = useCallback(() => {
     setActiveView('world');
@@ -1703,31 +1705,26 @@ export function App() {
       : activeView === 'people'
         ? peopleTriggerRef.current
         : null;
-    setActiveView('world');
+    clearRosterDossier(); setActiveView('world');
     gameAudio.play('close', 0.4);
     window.setTimeout(() => returnTarget?.focus(), 0);
-  }, [activeView]);
+  }, [activeView, clearRosterDossier]);
 
   const handleRosterSelect = useCallback((id: string) => {
     const current = worldRef.current;
     if (!current) return;
     gameAudio.play('select', 0.48);
-    const closeCompactRoster = () => {
-      if (window.matchMedia('(max-width: 780px)').matches) setActiveView('world');
-    };
+    setMobileInspectorExpanded(Boolean(beginRosterDossier(id)));
     if (activeView === 'powers' && powerRosterSection === 'polities') {
       setSelection({ kind: 'country', id });
-      closeCompactRoster();
       return;
     }
     if (activeView === 'powers' && powerRosterSection === 'families') {
       setSelection({ kind: 'family', id });
-      closeCompactRoster();
       return;
     }
     if (activeView === 'people') {
       setSelection({ kind: 'person', id });
-      closeCompactRoster();
       return;
     }
     if (activeView === 'powers' && powerRosterSection === 'military') {
@@ -1736,23 +1733,23 @@ export function App() {
       setFocusedArmyId(id);
       if (army) setSelection({ kind: 'army', id: army.id });
       else if (fleet) setSelection({ kind: 'fleet', id: fleet.id });
-      closeCompactRoster();
       return;
     }
     if (activeView === 'chronicle') setSelectedEventId(id);
-  }, [activeView, powerRosterSection]);
+  }, [activeView, beginRosterDossier, powerRosterSection]);
 
   const handleSelectArchiveEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
     gameAudio.play('select', 0.44);
     setSelectedEventId(null);
     setSelection({ kind, id });
+    if (rosterDossierReturn) return; clearRosterDossier();
     if (kind === 'country' || kind === 'family') {
       setPowerRosterSection(kind === 'country' ? 'polities' : 'families');
       setActiveView('powers');
     } else {
       setActiveView(kind === 'person' ? 'people' : 'world');
     }
-  }, []);
+  }, [clearRosterDossier, rosterDossierReturn]);
 
   const handleSelectArchiveLink = useCallback((kind: ArchiveEntityKind, id: string) => {
     archiveFocusRestoreAllowedRef.current = false; setArchiveOpen(false); setResumeArchiveAfterEvent(false);
@@ -1874,13 +1871,15 @@ export function App() {
   }, [commitEmbodiedObserver]);
 
   const closeInspectorToMap = useCallback(() => {
+    const rosterTarget = returnToRoster();
     gameAudio.play('close', 0.38);
     setSelection(null);
     setMobileInspectorExpanded(false);
+    if (rosterTarget) { setActiveView(rosterTarget.view); if (rosterTarget.section) setPowerRosterSection(rosterTarget.section); return; }
     window.setTimeout(() => {
       document.querySelector<HTMLCanvasElement>('.world-map__canvas')?.focus({ preventScroll: true });
     }, 0);
-  }, []);
+  }, [returnToRoster]);
 
   const inspector = useMemo<ReactNode>(() => {
     if (!world || !selection) return null;
@@ -1897,6 +1896,7 @@ export function App() {
         gameAudio.play('select', 0.5);
       },
       onClose: closeInspectorToMap,
+      entrySource: rosterDossierReturn ? 'roster' as const : undefined, returnLabel: rosterDossierReturn?.view === 'people' ? '返回人物名录' : rosterDossierReturn ? '返回势力名录' : undefined,
       mobileExpanded: mobileInspectorExpanded,
       onMobileExpandedChange: setMobileInspectorExpanded,
       onOpenArchive: selection.kind === 'country' || selection.kind === 'family' || selection.kind === 'person' ? () => {
@@ -1963,6 +1963,7 @@ export function App() {
     handleSelectScopedEvent,
     mobileInspectorExpanded,
     pendingEmbodiedAction,
+    rosterDossierReturn,
     selection,
     world,
   ]);
@@ -2014,7 +2015,7 @@ export function App() {
       return;
     }
     if (item.kind === 'army' || item.kind === 'fleet') setFocusedArmyId(item.id);
-    setSelection(nextSelection);
+    clearRosterDossier(); setSelection(nextSelection);
     if (item.kind === 'country' || item.kind === 'family') {
       setPowerRosterSection(item.kind === 'country' ? 'polities' : 'families');
       setActiveView('powers');
@@ -2023,16 +2024,16 @@ export function App() {
     }
     setObserverDeskOpen(false);
     setPauseMatch(null);
-  }, [handleOpenSituationWorkbench]);
+  }, [clearRosterDossier, handleOpenSituationWorkbench]);
 
   const handleInspectObserverLead = useCallback((lead: ObserverLead) => {
     if (!lead.situationId) gameAudio.play('select', 0.52);
     setPauseMatch(null);
     setOverlay(lead.overlay);
-    setSelection(lead.target);
+    clearRosterDossier(); setSelection(lead.target);
     setActiveView('world');
     if (lead.situationId) handleOpenSituationWorkbench(lead.situationId);
-  }, [handleOpenSituationWorkbench]);
+  }, [clearRosterDossier, handleOpenSituationWorkbench]);
 
   const handleToggleObserverLead = useCallback((lead: ObserverLead) => {
     const current = worldRef.current;
@@ -2100,9 +2101,9 @@ export function App() {
     const item = watchItemForSelection(current, target);
     if (!item) return;
     commitObserverSettings(upsertObserverWatch(observerSettingsRef.current, item));
-    setSelection(target);
+    clearRosterDossier(); setSelection(target);
     setActiveView('world');
-  }, [commitObserverSettings, completeGuideStep, handleOverlayChange, selection]);
+  }, [clearRosterDossier, commitObserverSettings, completeGuideStep, handleOverlayChange, selection]);
 
   const mandateTarget = useMemo<MandateTarget | null>(() => {
     if (!world || !selection) return null;
@@ -2221,7 +2222,7 @@ export function App() {
                 gameAudio.play('select', 0.46);
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
-                setSelection({ kind: 'region', id });
+                clearRosterDossier(); setSelection({ kind: 'region', id });
                 setActiveView('world');
               }}
               onSelectObject={(kind, id) => {
@@ -2229,7 +2230,7 @@ export function App() {
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
                 if (kind === 'army' || kind === 'fleet') setFocusedArmyId(id);
-                setSelection({ kind, id });
+                clearRosterDossier(); setSelection({ kind, id });
                 setActiveView('world');
               }}
             />
@@ -2383,7 +2384,7 @@ export function App() {
                 emptyMessage={rosterConfig.emptyMessage}
                 searchPlaceholder={rosterConfig.searchPlaceholder}
                 onSelect={handleRosterSelect}
-                onClose={handleCloseRoster}
+                onClose={handleCloseRoster} suspended={Boolean(rosterDossierReturn && inspector)}
                 sections={activeView === 'powers' ? powerRosterSections : undefined}
                 activeSection={activeView === 'powers' ? powerRosterSection : undefined}
                 onSectionChange={activeView === 'powers' ? handlePowerRosterSectionChange : undefined}
@@ -2415,7 +2416,7 @@ export function App() {
           <QuarterPulse
             key={world.lastTurn?.turn ?? 'unwritten'}
             report={world.lastTurn}
-            stories={quarterPulseProjection.stories}
+            stories={quarterPulseProjection.stories} compact={Boolean(inspector) && mobileInspectorExpanded && compactRosterDossier}
             onSelectEvent={selectQuarterEvent}
             onSelectSituation={handleOpenSituationWorkbench}
             onSelectLedger={selectQuarterLedger}
@@ -2593,7 +2594,6 @@ export function App() {
       />
 
       {toast ? <div className="observer-toast" role="status">{toast}</div> : null}
-
     </>
   );
 }

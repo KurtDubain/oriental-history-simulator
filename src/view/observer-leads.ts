@@ -213,7 +213,7 @@ function derivePersonLead(world: WorldState): RankedLead {
     stage: stageFor(tension),
     tension,
     target: { kind: 'person', id: person.id },
-    overlay: openlyRestive ? 'conflict' : 'political',
+    overlay: openlyRestive ? 'war' : 'political',
     rankScore: winner.rankScore,
   };
 }
@@ -414,7 +414,7 @@ function diplomacyLead(world: WorldState, relation: DiplomacyState): RankedLead 
     stage: stageFor(tension),
     tension,
     target: { kind: 'country', id: relation.polityAId },
-    overlay: 'conflict',
+    overlay: 'war',
     rankScore: raw,
   };
 }
@@ -457,7 +457,7 @@ function regionLead(region: RegionState): RankedLead {
     stage: stageFor(tension),
     tension,
     target: { kind: 'region', id: region.id },
-    overlay: foodPressure ? 'food' : 'conflict',
+    overlay: foodPressure ? 'food' : 'war',
     rankScore: raw,
   };
 }
@@ -600,7 +600,7 @@ function situationCandidate(
     stage: situationStage(item.phase, resolvedEcho),
     tension: item.tension,
     target,
-    overlay: state.type === 'war_progress' ? 'war' : state.type === 'military_power_crisis' ? 'conflict' : 'political',
+    overlay: state.type === 'war_progress' || state.type === 'military_power_crisis' ? 'war' : 'political',
     source: 'situation',
     situationId: state.id,
     situationType: state.type,
@@ -736,7 +736,7 @@ function personLeadForId(world: WorldState, id: string): RankedLead | null {
     stage: stageFor(tension),
     tension,
     target: { kind: 'person', id: person.id },
-    overlay: openlyRestive ? 'conflict' : 'political',
+    overlay: openlyRestive ? 'war' : 'political',
     source: 'fallback',
     situationId: null,
     situationType: null,

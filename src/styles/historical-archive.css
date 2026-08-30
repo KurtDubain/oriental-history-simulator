@@ -458,6 +458,18 @@
   }
 }
 
+@media (min-width: 761px) and (max-width: 840px) {
+  .history-archive__masthead > button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .history-archive__chronology li > button,
+  .history-archive__index button {
+    min-height: 44px;
+  }
+}
+
 @media (max-width: 480px) {
   .history-archive__facts {
     padding: 0 14px;

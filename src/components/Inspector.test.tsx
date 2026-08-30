@@ -274,3 +274,34 @@ describe('entity history gateways', () => {
     expect(markup).not.toContain('data-testid="entity-history-gateway"');
   });
 });
+
+describe('mobile roster dossier contract', () => {
+  it('renders an explicit return route in a full dossier opened from a roster', () => {
+    const markup = renderToStaticMarkup(createElement(Inspector, {
+      kind: 'person',
+      data: {
+        id: 'person-gu',
+        name: '顾庭芳',
+        age: 41,
+        gender: '女',
+        role: '副将',
+        ambition: 72,
+        loyalty: 61,
+        caution: 55,
+        abilities: { command: 68, martial: 57, governance: 49, strategy: 63, charisma: 58, scholarship: 52 },
+      },
+      entrySource: 'roster',
+      returnLabel: '返回人物名录',
+      mobileExpanded: true,
+      onClose: () => undefined,
+    }));
+
+    expect(markup).toContain('data-entry-source="roster"');
+    expect(markup).toContain('data-mobile-mode="full"');
+    expect(markup).toContain('data-inspector-return="roster"');
+    expect(markup).toContain('autofocus=""');
+    expect(markup).toContain('aria-label="返回人物名录"');
+    expect(markup).toContain('下划或点按返回人物名录');
+    expect(markup).not.toContain('aria-label="关闭档案"');
+  });
+});

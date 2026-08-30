@@ -52,6 +52,7 @@ export function QuarterPulse({
         className="quarter-pulse quarter-pulse--empty"
         data-history-layer="quarter"
         data-compact={compact || undefined}
+        data-presentation={compact ? 'condensed' : 'full'}
         data-testid="quarter-pulse"
         aria-label="季报尚未生成"
       >
@@ -93,6 +94,7 @@ export function QuarterPulse({
       className="quarter-pulse"
       data-history-layer="quarter"
       data-compact={compact || undefined}
+      data-presentation={compact ? 'condensed' : 'full'}
       data-testid="quarter-pulse"
       data-turn={report.turn}
       data-story-count={visibleStories.length}

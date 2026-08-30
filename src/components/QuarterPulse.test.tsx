@@ -144,4 +144,21 @@ describe('QuarterPulse Situation stream', () => {
     expect(markup).toContain('data-history-layer="quarter"');
     expect(markup).toContain('本季无大事');
   });
+
+  it('marks the same bounded quarter projection as condensed for a full mobile dossier', () => {
+    const markup = renderToStaticMarkup(createElement(QuarterPulse, {
+      report,
+      stories: [event('event-major', '燕京易主', 100)],
+      onSelectEvent: () => undefined,
+      onSelectSituation: () => undefined,
+      onSelectLedger: () => undefined,
+      compact: true,
+    }));
+
+    expect(markup).toContain('data-presentation="condensed"');
+    expect(markup).toContain('data-compact="true"');
+    expect(markup).toContain('data-story-count="1"');
+    expect(markup).toContain('第 2 年 · 冬季');
+    expect(markup).toContain('data-event-id="event-major"');
+  });
 });

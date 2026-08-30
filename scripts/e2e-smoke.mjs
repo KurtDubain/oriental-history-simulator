@@ -302,7 +302,9 @@ async function selectLayer(page, layer) {
   const trigger = page.getByRole('button', { name: /^舆图叠层/ });
   if (!(await page.locator('#observer-layer-sheet').isVisible().catch(() => false))) await trigger.click();
   await page.waitForSelector('#observer-layer-sheet');
-  await page.locator(`[data-layer-id="${layer}"]`).click();
+  const target = page.locator(`[data-layer-id="${layer}"]`);
+  if (!(await target.isVisible())) await page.locator('[data-layer-more-trigger]').click();
+  await target.click();
   await page.waitForSelector(`.world-map[data-overlay="${layer}"]`);
   assert.equal((await snapshot(page)).interface.overlay, layer);
 }
@@ -314,12 +316,19 @@ async function auditLayerDialog(page, mobile = false) {
   await sheet.waitFor();
   assert.equal(await sheet.getAttribute('role'), 'dialog');
   assert.equal(await sheet.getAttribute('aria-modal'), 'true');
-  assert.equal(await sheet.locator('[role="radio"]').count(), 10);
+  assert.equal(await sheet.locator('[data-layer-id]').count(), 10);
   for (let index = 0; index < 14; index += 1) {
     await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => Boolean(document.activeElement?.closest('#observer-layer-sheet'))), true);
   }
   if (mobile) {
+    assert.deepEqual(
+      await sheet.locator('[data-layer-id]:visible').evaluateAll((items) => items.map((item) => item.getAttribute('data-layer-id'))),
+      ['political', 'war', 'food', 'none'],
+      '移动端叠层首屏只应给出四个常用入口',
+    );
+    const more = sheet.locator('[data-layer-more-trigger]');
+    assert.equal(await more.getAttribute('aria-expanded'), 'false');
     const layout = await sheet.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const section = element.querySelector('.layer-picker__groups section');
@@ -331,6 +340,9 @@ async function auditLayerDialog(page, mobile = false) {
     });
     assert.ok(layout.left >= 0 && layout.right <= 390, '移动端叠层弹页不可越出视口');
     assert.equal(layout.sectionDisplay, 'block', '移动端叠层应为单列');
+    await more.click();
+    assert.equal(await more.getAttribute('aria-expanded'), 'true');
+    assert.equal(await sheet.locator('[data-layer-id]:visible').count(), 10, '展开更多后十个图层必须全部可达');
   }
   await page.keyboard.press('Escape');
   await sheet.waitFor({ state: 'detached' });
@@ -1981,18 +1993,20 @@ try {
   const mobilePersonRows = mobilePage.locator('.roster-panel button[data-roster-id]');
   const mobilePerson = await selectPersonWithCommandRequest(mobilePage, mobilePersonRows);
   assert.ok(mobilePerson, '移动端人物名录中应能找到副将请令计划');
-  await mobilePage.waitForSelector('.roster-panel', { state: 'detached' });
-  assert.equal(mobilePerson.interface.view, 'world', '移动端点选名录后应直接收起名录，露出人物速览');
+  await mobilePage.waitForFunction(() => document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true');
+  assert.equal(await mobilePage.locator('.roster-panel').getAttribute('data-roster-state'), 'suspended', '移动端点选名录后应保留原名单位置并暂停背景交互');
+  assert.equal(mobilePerson.interface.view, 'people', '移动端名录来源档案必须保留人物卷上下文');
+  assert.equal(mobilePerson.interface.mobileInspectorMode, 'full', '移动端名录应直接进入完整人物档案');
+  assert.equal(await mobilePage.getByTestId('quarter-pulse').getAttribute('data-presentation'), 'condensed', '完整档案应让季度纪要收成单行');
   assert.equal(mobilePerson.interface.selectedDetail.kind, 'person');
   assert.equal(mobilePerson.interface.selectedDetail.agency.desires.length, 2);
   assert.ok(mobilePerson.interface.selectedDetail.agency.primaryGoal?.label);
   assert.ok(mobilePerson.interface.selectedDetail.agency.commandRequest);
   assert.ok(mobilePerson.interface.selectedDetail.agency.powerPosition);
-  const quickMind = mobilePage.getByRole('button', { name: /看所图/ });
-  const quickMindBounds = await quickMind.boundingBox();
-  assert.ok(quickMindBounds && quickMindBounds.height >= 44, '移动端“看所图”触控高度不得小于44px');
-  await quickMind.click();
-  await mobilePage.waitForFunction(() => document.querySelector('.observer-inspector')?.getAttribute('data-mobile-expanded') === 'true');
+  const mobileMindTab = mobilePage.locator('.observer-inspector [data-inspector-tab="mind"]');
+  const mobileMindBounds = await mobileMindTab.boundingBox();
+  assert.ok(mobileMindBounds && mobileMindBounds.height >= 44, '移动端“所图”页签触控高度不得小于44px');
+  await mobileMindTab.click();
   const mobileAgency = mobilePage.getByRole('tabpanel');
   await mobileAgency.getByRole('heading', { name: '放在心上的事' }).waitFor();
   await mobileAgency.getByRole('heading', { name: '眼下所图' }).waitFor();
@@ -2035,8 +2049,11 @@ try {
   await mobileAgency.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-plan-390x844.png`, fullPage: true });
   assert.equal((await snapshot(mobilePage)).deterministicWorldHash, mobileSituationState.deterministicWorldHash, '移动端查看人物所图不得改变世界哈希');
-  await mobilePage.locator('.observer-inspector button[aria-label="关闭档案"]').click();
+  await mobilePage.locator('.observer-inspector [data-inspector-return="roster"]').click();
   await mobilePage.waitForSelector('.observer-inspector', { state: 'detached' });
+  await mobilePage.waitForFunction((id) => document.activeElement?.getAttribute('data-roster-id') === id, mobilePerson.interface.selected.id);
+  assert.equal(await mobilePage.locator('.roster-panel').getAttribute('data-roster-state'), 'active', '关闭人物档案应恢复原人物名录');
+  assert.equal(await mobilePage.locator(`.roster-panel [data-roster-id="${mobilePerson.interface.selected.id}"]`).isVisible(), true, '返回名录后原人物行应可见');
   await mobilePage.click('button[data-observer-view="world"]');
   const mobileSituationTrigger = mobileLeads.locator('.observer-leads__situation-shortcut');
   await mobileSituationTrigger.waitFor();

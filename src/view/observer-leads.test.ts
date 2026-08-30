@@ -159,6 +159,7 @@ describe('observer story leads', () => {
     expect(first.leads.every((item) => item.evidence.length === 2 && item.nextSignal.length > 0)).toBe(true);
     expect(first.leads.every((item) => item.tension >= 0 && item.tension <= 100)).toBe(true);
     expect(first.leads.every((item) => targetExists(world, item.target.kind, item.target.id))).toBe(true);
+    expect(first.leads.every((item) => item.overlay !== ('conflict' as string))).toBe(true);
     expect(world.hash).toBe(hash);
     expect(JSON.stringify(world)).toBe(serialized);
   });

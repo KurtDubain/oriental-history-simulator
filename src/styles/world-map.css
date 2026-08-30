@@ -391,6 +391,18 @@
   }
 }
 
+@media (min-width: 681px) and (max-width: 840px) {
+  .world-map__viewport-controls {
+    grid-template-columns: 44px 46px 44px 44px;
+    min-height: 44px;
+  }
+
+  .world-map__viewport-controls button,
+  .world-map__viewport-controls output {
+    height: 44px;
+  }
+}
+
 @media (hover: none), (pointer: coarse) {
   .world-map__gesture-hint-desktop {
     display: none;

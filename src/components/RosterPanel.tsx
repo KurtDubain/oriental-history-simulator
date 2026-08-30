@@ -30,6 +30,7 @@ interface RosterPanelProps {
   activeSection?: string;
   onSectionChange?: (id: string) => void;
   searchPlaceholder?: string;
+  suspended?: boolean;
 }
 
 export function RosterPanel({
@@ -44,6 +45,7 @@ export function RosterPanel({
   activeSection,
   onSectionChange,
   searchPlaceholder = '检索名号或身份',
+  suspended = false,
 }: RosterPanelProps) {
   const pageSize = 120;
   const titleId = useId();
@@ -72,6 +74,7 @@ export function RosterPanel({
   }, [activeSection]);
 
   useEffect(() => {
+    if (suspended) return undefined;
     const handleEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented) return;
       event.preventDefault();
@@ -79,7 +82,7 @@ export function RosterPanel({
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [onClose]);
+  }, [onClose, suspended]);
 
   const handleSectionKeyDown = (event: KeyboardEvent<HTMLButtonElement>, index: number) => {
     if (!sections?.length) return;
@@ -105,6 +108,8 @@ export function RosterPanel({
       data-roster-scope={sections?.length ? 'powers' : 'people'}
       data-active-section={activeSection}
       data-roster-title={title}
+      data-roster-state={suspended ? 'suspended' : 'active'}
+      aria-hidden={suspended || undefined}
     >
       <header className="roster-panel__header">
         <div>
