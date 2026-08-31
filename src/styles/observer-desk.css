@@ -805,6 +805,21 @@
     width: 44px;
     height: 44px;
   }
+
+  .observer-desk__master-switch {
+    min-height: 44px;
+    padding: 0 4px;
+  }
+
+  .observer-desk__rules select {
+    height: 44px;
+  }
+
+  .observer-desk__guide footer > button,
+  .observer-desk__release-notes summary {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

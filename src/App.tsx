@@ -34,7 +34,6 @@ import {
 import { ObserverDesk } from './components/ObserverDesk';
 import {
   ObserverLeads,
-  observerLeadWatchKey,
 } from './components/ObserverLeads';
 import { SituationWorkbench } from './components/SituationWorkbench';
 import { SettingsPanel } from './components/SettingsPanel';
@@ -380,6 +379,7 @@ export function App() {
   const archiveReturnFocusRef = useRef<HTMLElement | null>(null);
   const causalReturnFocusRef = useRef<HTMLElement | null>(null);
   const archiveFocusRestoreAllowedRef = useRef(false);
+  const causalFocusRestoreAllowedRef = useRef(false);
   const mandateTriggerRef = useRef<HTMLButtonElement>(null);
   const observerDeskTriggerRef = useRef<HTMLButtonElement>(null);
   const situationReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -403,6 +403,7 @@ export function App() {
   const agencyShadowBranchIdRef = useRef<string | null>(agencyShadowBranchId);
   const embodimentObserverRef = useRef<EmbodimentObserverState>(embodimentObserver);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
+  const shouldRestoreCausalFocus = useCallback(() => causalFocusRestoreAllowedRef.current, []);
   useEffect(() => startAppUpdateMonitor(), []);
 
   useEffect(() => {
@@ -769,6 +770,7 @@ export function App() {
     navigation.reset(restoredSession.navigation);
     setMandateMessage(null);
     archiveFocusRestoreAllowedRef.current = false;
+    causalFocusRestoreAllowedRef.current = false;
     setFocusedArmyId(null);
     setPauseMatch(null);
     setHistoricalView(null);
@@ -1330,6 +1332,7 @@ export function App() {
     }
     playback.pause();
     causalReturnFocusRef.current = returnFocusTo;
+    causalFocusRestoreAllowedRef.current = true;
     navigation.openEvent(eventId, preserveCurrent);
     completeGuideStep('cause-traced');
     gameAudio.play('open', 0.58);
@@ -1626,6 +1629,18 @@ export function App() {
     }, 0);
   }, [handleSelectArchiveEntity]);
 
+  const handleSelectNarrativeEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
+    archiveFocusRestoreAllowedRef.current = false;
+    causalFocusRestoreAllowedRef.current = false;
+    situationFocusRestoreAllowedRef.current = false;
+    clearRosterDossier();
+    setSelection({ kind, id });
+    setMobileInspectorExpanded(true);
+    navigation.reset({ view: 'world', powerRosterSection, layers: [] });
+    gameAudio.play('select', 0.44);
+    window.setTimeout(() => document.querySelector<HTMLElement>('.observer-inspector')?.focus({ preventScroll: true }), 0);
+  }, [clearRosterDossier, navigation, powerRosterSection]);
+
   const handleSelectScopedEvent = useCallback((eventId: string) => {
     gameAudio.play('open', 0.58);
     archiveFocusRestoreAllowedRef.current = false;
@@ -1670,8 +1685,8 @@ export function App() {
 
   const handleSelectSituationEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
     situationFocusRestoreAllowedRef.current = false;
-    handleSelectArchiveEntity(kind, id);
-  }, [handleSelectArchiveEntity]);
+    handleSelectNarrativeEntity(kind, id);
+  }, [handleSelectNarrativeEntity]);
 
   const handleSelectSituationHistory = useCallback((eventId: string) => {
     situationFocusRestoreAllowedRef.current = false;
@@ -1732,6 +1747,22 @@ export function App() {
     commitEmbodiedObserver(dismissEmbodimentClosure(embodimentObserverRef.current));
   }, [commitEmbodiedObserver]);
 
+  const toggleObserverWatchItem = useCallback((item: ObserverWatchItem) => {
+    const key = observerWatchKey(item.kind, item.id);
+    const watched = observerSettingsRef.current.watchlist.some((entry) => (
+      observerWatchKey(entry.kind, entry.id) === key
+    ));
+    commitObserverSettings(watched
+      ? removeObserverWatch(observerSettingsRef.current, item.kind, item.id)
+      : upsertObserverWatch(observerSettingsRef.current, item));
+    gameAudio.play('select', 0.5);
+    setToast(watched
+      ? `已取消关注：${item.label}`
+      : item.kind === 'situation'
+        ? `已关注局势：${item.label}。有重要转折或结案时，推演会停下。`
+        : `已关注：${item.label}。有新动向时，推演会停下。`);
+  }, [commitObserverSettings]);
+
   const closeInspectorToMap = useCallback(() => {
     const rosterTarget = returnToRoster();
     gameAudio.play('close', 0.38);
@@ -1754,11 +1785,7 @@ export function App() {
       onToggleFollow: () => {
         const item = watchItemForSelection(world, selection);
         if (!item) return;
-        const nextSettings = followed.has(followKey)
-          ? removeObserverWatch(observerSettingsRef.current, item.kind, item.id)
-          : upsertObserverWatch(observerSettingsRef.current, item);
-        commitObserverSettings(nextSettings);
-        gameAudio.play('select', 0.5);
+        toggleObserverWatchItem(item);
       },
       onClose: closeInspectorToMap,
       entrySource: rosterDossierReturn ? 'roster' as const : undefined, returnToOrigin: rosterDossierEntry, returnLabel: activeView === 'people' ? '返回人物名录' : '返回势力名录',
@@ -1817,7 +1844,6 @@ export function App() {
     agencyShadowBranchId,
     agencyShadowLedger,
     closeInspectorToMap,
-    commitObserverSettings,
     embodiedCharacterId,
     embodimentObserver.closure,
     followed,
@@ -1835,6 +1861,7 @@ export function App() {
     rosterDossierEntry,
     rosterDossierReturn,
     selection,
+    toggleObserverWatchItem,
     world,
   ]);
 
@@ -1890,12 +1917,17 @@ export function App() {
   }, [clearRosterDossier, handleOpenSituationWorkbench, navigation]);
 
   const handleInspectObserverLead = useCallback((lead: ObserverLead) => {
-    if (!lead.situationId) gameAudio.play('select', 0.52);
     setPauseMatch(null);
     setOverlay(lead.overlay);
-    clearRosterDossier(); setSelection(lead.target);
+    clearRosterDossier();
+    if (lead.situationId) {
+      setSelection(null);
+      handleOpenSituationWorkbench(lead.situationId);
+      return;
+    }
+    setSelection(lead.target);
     navigation.goToView('world');
-    if (lead.situationId) handleOpenSituationWorkbench(lead.situationId);
+    gameAudio.play('select', 0.52);
   }, [clearRosterDossier, handleOpenSituationWorkbench, navigation]);
 
   const handleToggleObserverLead = useCallback((lead: ObserverLead) => {
@@ -1905,20 +1937,15 @@ export function App() {
       ? watchItemForSituation(current, lead.situationId)
       : watchItemForSelection(current, lead.target);
     if (!item) return;
-    const watched = observerSettingsRef.current.watchlist.some((entry) => (
-      observerWatchKey(entry.kind, entry.id) === observerLeadWatchKey(lead)
-    ));
-    const nextSettings = watched
-      ? removeObserverWatch(observerSettingsRef.current, item.kind, item.id)
-      : upsertObserverWatch(observerSettingsRef.current, item);
-    commitObserverSettings(nextSettings);
-    gameAudio.play('select', 0.5);
-    setToast(watched
-      ? `已取消关注：${item.label}`
-      : item.kind === 'situation'
-        ? `已关注局势：${item.label}。形成、阶段变化、核心人物死亡或结案时会提醒并自动暂停。`
-        : `已关注：${item.label}。推进季度后，相关动向会提醒并自动暂停。`);
-  }, [commitObserverSettings]);
+    toggleObserverWatchItem(item);
+  }, [toggleObserverWatchItem]);
+
+  const handleToggleSelectedSituation = useCallback(() => {
+    const current = worldRef.current;
+    if (!current || !selectedSituationId) return;
+    const item = watchItemForSituation(current, selectedSituationId);
+    if (item) toggleObserverWatchItem(item);
+  }, [selectedSituationId, toggleObserverWatchItem]);
 
   const handleSelectPauseMatch = useCallback((match: ObserverPauseMatch) => {
     if (!match.situationId) return;
@@ -2321,16 +2348,19 @@ export function App() {
         event={world && selectedHistoryEvent ? toCausalEvent(world, selectedHistoryEvent) : null}
         onClose={handleCloseCausalEvent}
         returnFocusTo={causalReturnFocusRef.current}
+        shouldRestoreFocus={shouldRestoreCausalFocus}
         onInspectEvidence={inspectEvidence}
         onSelectReference={(reference: CausalReference) => {
           archiveFocusRestoreAllowedRef.current = false;
+          causalFocusRestoreAllowedRef.current = false;
           situationFocusRestoreAllowedRef.current = false;
-          handleSelectArchiveEntity(reference.kind, reference.id);
+          handleSelectNarrativeEntity(reference.kind, reference.id);
         }}
         onSelectSubject={(kind, id) => {
           archiveFocusRestoreAllowedRef.current = false;
+          causalFocusRestoreAllowedRef.current = false;
           situationFocusRestoreAllowedRef.current = false;
-          handleSelectArchiveEntity(kind, id);
+          handleSelectNarrativeEntity(kind, id);
         }}
       />
 
@@ -2396,6 +2426,8 @@ export function App() {
         onSelectSituation={handleSelectSituation}
         onSelectEntity={handleSelectSituationEntity}
         onSelectHistoryEvent={handleSelectSituationHistory}
+        isWatched={Boolean(selectedSituationId && followed.has(`situation:${selectedSituationId}`))}
+        onToggleWatch={handleToggleSelectedSituation}
         returnFocusTo={situationReturnFocusRef.current}
         shouldRestoreFocus={shouldRestoreSituationFocus}
       />

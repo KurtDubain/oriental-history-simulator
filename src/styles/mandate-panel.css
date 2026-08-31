@@ -306,6 +306,15 @@
   .mandate-panel__ledger strong {
     font-size: 27px;
   }
+
+  .mandate-panel__header > button {
+    width: 44px;
+    height: 44px;
+  }
+
+  .mandate-panel__confirmation button {
+    min-height: 44px;
+  }
 }
 
 @media (prefers-reduced-motion: reduce) {

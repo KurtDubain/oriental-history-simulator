@@ -46,6 +46,7 @@ export interface CausalDrawerProps {
   onSelectSubject?: (kind: ArchiveEntityKind, id: string) => void;
   onSelectReference?: (reference: CausalReference) => void;
   returnFocusTo?: HTMLElement | null;
+  shouldRestoreFocus?: () => boolean;
 }
 
 const ROLE_LABELS: Record<CausalRole, string> = {
@@ -64,6 +65,7 @@ export function CausalDrawer({
   onSelectSubject,
   onSelectReference,
   returnFocusTo,
+  shouldRestoreFocus,
 }: CausalDrawerProps) {
   const titleId = useId();
   const drawerRef = useRef<HTMLElement>(null);
@@ -77,6 +79,7 @@ export function CausalDrawer({
     initialFocusRef: closeRef,
     onClose,
     returnFocusTo,
+    shouldRestoreFocus,
   });
 
   if (!open || !event) return null;
@@ -110,18 +113,6 @@ export function CausalDrawer({
         </header>
 
         <div className="observer-causal-drawer__body">
-          {event.subjects?.length ? (
-            <section className="observer-causal-subjects" aria-label="史事相关人物、家族与政权">
-              <span><UsersRound size={13} aria-hidden="true" />卷中人事</span>
-              <div>
-                {event.subjects.map((subject) => (
-                  <button key={`${subject.kind}-${subject.id}`} type="button" onClick={() => onSelectSubject?.(subject.kind, subject.id)}>
-                    <strong>{subject.label}</strong><small>{subject.detail}</small>
-                  </button>
-                ))}
-              </div>
-            </section>
-          ) : null}
           <p className="observer-causal-drawer__question">此事为何发生？</p>
           {event.factors.length ? (
             <ol className="observer-causal-chain">
@@ -180,6 +171,20 @@ export function CausalDrawer({
               <span>后续影响</span>
               <p>{event.consequence}</p>
             </footer>
+          ) : null}
+
+          {event.subjects?.length ? (
+            <section className="observer-causal-subjects observer-causal-subjects--next" aria-label="接着查看相关人物、家族与政权">
+              <span><UsersRound size={13} aria-hidden="true" />接着看这些人</span>
+              <p>打开档案可关注后续；人物还可从其处入世。</p>
+              <div>
+                {event.subjects.map((subject) => (
+                  <button key={`${subject.kind}-${subject.id}`} type="button" onClick={() => onSelectSubject?.(subject.kind, subject.id)}>
+                    <strong>{subject.label}</strong><small>{subject.detail}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
           ) : null}
         </div>
       </aside>

@@ -427,8 +427,9 @@ function InspectorActions({ label, isFollowing, onToggleFollow, onClose, entrySo
   return (
     <div className="observer-inspector__actions">
       {onToggleFollow ? (
-        <button type="button" className="observer-icon-button" data-active={isFollowing || undefined} aria-label={isFollowing ? `取消关注${label}` : `关注${label}`} aria-pressed={isFollowing} onClick={onToggleFollow}>
+        <button type="button" className="observer-icon-button observer-inspector__follow" data-active={isFollowing || undefined} aria-label={isFollowing ? `取消关注${label}` : `关注${label}`} aria-pressed={isFollowing} onClick={onToggleFollow}>
           <Star size={17} fill={isFollowing ? 'currentColor' : 'none'} aria-hidden="true" />
+          <span>{isFollowing ? '已关注' : '关注'}</span>
         </button>
       ) : null}
       {onClose ? (

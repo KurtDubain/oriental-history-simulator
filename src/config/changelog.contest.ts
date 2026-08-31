@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.15.1',
+    date: '2026-08-31',
+    title: '一季一线，读史有路',
+    items: [
+      '本季变化标出首要史事；何故页先解释因果，再引向相关档案，发展中的持续局势也可直接关注。',
+      '史事与局势中的对象链接回到舆图档案，关注状态有明确文字和停表反馈；同一局势从不同入口打开后保持一致。',
+      '390px 与 640px 的声音邀请、观察台和天意操作补足 44px 触控区；模拟结果、hash 与存档格式保持不变。',
+    ],
+  },
+  {
     version: '1.15.0',
     date: '2026-08-31',
     title: '开卷有序，去处可返',

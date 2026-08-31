@@ -94,7 +94,16 @@
   .observer-audio-invitation {
     top: 66px;
     right: 10px;
+    grid-template-columns: 32px minmax(0, 1fr) auto 44px;
     width: min(360px, calc(100% - 20px));
+  }
+
+  .observer-audio-invitation button {
+    min-height: 44px;
+  }
+
+  .observer-audio-invitation__dismiss {
+    width: 44px;
   }
 }
 

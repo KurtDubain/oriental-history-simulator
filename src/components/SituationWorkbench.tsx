@@ -7,6 +7,7 @@ import {
   ListTree,
   ScrollText,
   ShieldAlert,
+  Star,
   UserRound,
   UsersRound,
   X,
@@ -28,6 +29,8 @@ export interface SituationWorkbenchProps {
   onSelectSituation: (situationId: string) => void;
   onSelectEntity: (kind: ArchiveEntityKind, id: string) => void;
   onSelectHistoryEvent: (eventId: string) => void;
+  isWatched?: boolean;
+  onToggleWatch?: () => void;
   returnFocusTo?: HTMLElement | null;
   shouldRestoreFocus?: () => boolean;
 }
@@ -62,6 +65,8 @@ export function SituationWorkbench({
   onSelectSituation,
   onSelectEntity,
   onSelectHistoryEvent,
+  isWatched = false,
+  onToggleWatch,
   returnFocusTo,
   shouldRestoreFocus,
 }: SituationWorkbenchProps) {
@@ -189,10 +194,25 @@ export function SituationWorkbench({
               </div>
               <h2 id={titleId} ref={titleRef} tabIndex={-1}>{detail.title}</h2>
               {detail.status === 'resolved' ? <span className="situation-workbench__resolved-stamp" aria-label="已结案">结案</span> : null}
-              <div className="situation-workbench__phase" aria-label={`当前为${detail.phaseLabel}阶段`}>
-                {['萌芽', '发展', '临界'].map((label, index) => (
-                  <span key={label} data-reached={index + 1 <= currentPhase || undefined}>{label}</span>
-                ))}
+              <div className="situation-workbench__progress-row">
+                <div className="situation-workbench__phase" aria-label={`当前为${detail.phaseLabel}阶段`}>
+                  {['萌芽', '发展', '临界'].map((label, index) => (
+                    <span key={label} data-reached={index + 1 <= currentPhase || undefined}>{label}</span>
+                  ))}
+                </div>
+                {detail.status === 'open' && onToggleWatch ? (
+                  <button
+                    type="button"
+                    className="situation-workbench__watch"
+                    data-watched={isWatched || undefined}
+                    aria-pressed={isWatched}
+                    aria-label={isWatched ? `取消关注局势：${detail.title}` : `关注局势：${detail.title}`}
+                    onClick={onToggleWatch}
+                  >
+                    <Star size={14} fill={isWatched ? 'currentColor' : 'none'} aria-hidden="true" />
+                    {isWatched ? '已关注' : '关注局势'}
+                  </button>
+                ) : null}
               </div>
             </header>
 

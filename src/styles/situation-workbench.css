@@ -325,9 +325,42 @@
 .situation-workbench__phase {
   position: relative;
   display: grid;
+  width: 100%;
   max-width: 410px;
   grid-template-columns: repeat(3, 1fr);
   gap: 0;
+}
+
+.situation-workbench__progress-row {
+  display: flex;
+  max-width: 590px;
+  align-items: center;
+  gap: 18px;
+}
+
+.situation-workbench__watch {
+  display: inline-flex;
+  min-width: 104px;
+  min-height: 44px;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 10px;
+  border: 1px solid var(--observer-line-strong, rgb(48 47 40 / 28%));
+  color: var(--observer-ink-soft, #656357);
+  font-size: 10px;
+  font-weight: 720;
+  background: rgb(255 251 239 / 30%);
+  cursor: pointer;
+}
+
+.situation-workbench__watch:hover,
+.situation-workbench__watch:focus-visible,
+.situation-workbench__watch[data-watched="true"] {
+  border-color: rgb(156 53 43 / 48%);
+  color: var(--observer-vermilion-dark, #79271f);
+  background: rgb(156 53 43 / 8%);
 }
 
 .situation-workbench__phase::before,
@@ -998,6 +1031,14 @@
   .situation-workbench__kicker {
     flex-wrap: wrap;
     font-size: 10px;
+  }
+
+  .situation-workbench__progress-row {
+    gap: 10px;
+  }
+
+  .situation-workbench__watch {
+    min-width: 102px;
   }
 
   .situation-workbench__reading > p {

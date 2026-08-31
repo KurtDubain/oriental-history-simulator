@@ -133,9 +133,10 @@ export function QuarterPulse({
       <div className="quarter-pulse__events" aria-label="本季局势与重要史事">
         {visibleStories.length ? (
           <ol className="quarter-pulse__event-list">
-            {visibleStories.map((story) => {
+            {visibleStories.map((story, index) => {
+              const primary = index === 0;
               if (story.kind === 'situation') return (
-                <li key={story.id} data-story-id={story.id} data-story-kind="situation">
+                <li key={story.id} data-story-id={story.id} data-story-kind="situation" data-priority={primary ? 'primary' : undefined}>
                   <button
                     type="button"
                     className="quarter-pulse__event quarter-pulse__situation"
@@ -147,6 +148,7 @@ export function QuarterPulse({
                     onClick={() => onSelectSituation(story.situationId)}
                   >
                     <span className="quarter-pulse__event-meta">
+                      {primary ? <span className="quarter-pulse__priority">本季首事</span> : null}
                       <span className="quarter-pulse__situation-kind">{story.kindLabel}</span>
                       <span>{story.typeLabel} · {story.threadTitle}</span>
                     </span>
@@ -157,6 +159,7 @@ export function QuarterPulse({
               );
               const content = <>
                 <span className="quarter-pulse__event-meta">
+                  {primary ? <span className="quarter-pulse__priority">本季首事</span> : null}
                   <span>{story.category}</span>
                   {story.location ? <span>{story.location}</span> : null}
                 </span>
@@ -168,7 +171,7 @@ export function QuarterPulse({
               </>;
               const eventId = story.eventId;
               return (
-                <li key={story.id} data-story-id={story.id} data-story-kind="event">
+                <li key={story.id} data-story-id={story.id} data-story-kind="event" data-priority={primary ? 'primary' : undefined}>
                   {eventId ? <button
                     type="button"
                     className="quarter-pulse__event"

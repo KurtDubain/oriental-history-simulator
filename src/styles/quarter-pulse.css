@@ -164,12 +164,15 @@
   padding: 0;
   overflow-x: auto;
   list-style: none;
+  overscroll-behavior-x: contain;
+  scroll-snap-type: x proximity;
   scrollbar-width: thin;
 }
 
 .quarter-pulse__event-list li {
   min-width: min(220px, 72vw);
   flex: 1 0 0;
+  scroll-snap-align: start;
 }
 
 .quarter-pulse__event-list li[data-story-kind="situation"] {
@@ -178,6 +181,10 @@
 
 .quarter-pulse__event-list li + li {
   border-left: 1px solid var(--observer-line, rgb(48 47 40 / 16%));
+}
+
+.quarter-pulse__event-list li[data-priority="primary"] {
+  background: linear-gradient(90deg, rgb(156 53 43 / 8%), transparent 72%);
 }
 
 .quarter-pulse__event {
@@ -211,6 +218,25 @@
   overflow: hidden;
   color: var(--observer-ink-faint, #8a8677);
   text-overflow: ellipsis;
+}
+
+.quarter-pulse__event-meta .quarter-pulse__priority {
+  display: inline-flex;
+  min-height: 18px;
+  flex: 0 0 auto;
+  align-items: center;
+  padding: 0 5px;
+  overflow: visible;
+  border-radius: 1px;
+  color: #f6ecd7;
+  background: var(--observer-vermilion-dark, #79271f);
+  font-size: 9px;
+  letter-spacing: 0.05em;
+}
+
+.quarter-pulse__event-meta .quarter-pulse__priority + span {
+  overflow: visible;
+  color: var(--observer-vermilion-dark, #79271f);
 }
 
 .quarter-pulse__situation-kind {

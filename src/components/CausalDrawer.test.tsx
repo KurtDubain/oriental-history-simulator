@@ -15,6 +15,7 @@ const event: CausalEvent = {
     evidence: '守城军令',
   }],
   consequence: '燕南仍属燕国。',
+  subjects: [{ id: 'person-1', kind: 'person', label: '顾临川', detail: '燕南守将' }],
 };
 
 describe('CausalDrawer reading layer', () => {
@@ -29,6 +30,8 @@ describe('CausalDrawer reading layer', () => {
     expect(markup).toContain('data-event-id="event-1"');
     expect(markup).toContain('何故与证据');
     expect(markup).toContain('此事为何发生？');
+    expect(markup).toContain('接着看这些人');
+    expect(markup.indexOf('此事为何发生？')).toBeLessThan(markup.indexOf('接着看这些人'));
     expect(markup).not.toContain('史事溯因');
   });
 

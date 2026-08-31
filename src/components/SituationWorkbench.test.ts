@@ -47,4 +47,25 @@ describe('SituationWorkbench', () => {
     }));
     expect(markup).toBe('');
   });
+
+  it('lets an open Situation be followed from its own dossier', () => {
+    const world = advanceWorldBy(createWorld('春战副将'), 8);
+    const situation = world.situationSystem.situations.find((item) => item.status === 'open');
+    if (!situation) throw new Error('expected an open Situation');
+    const projection = projectSituationWorkbench(world, situation.id);
+    const markup = renderToStaticMarkup(createElement(SituationWorkbench, {
+      open: true,
+      projection,
+      isWatched: true,
+      onToggleWatch: () => undefined,
+      onClose: () => undefined,
+      onSelectSituation: () => undefined,
+      onSelectEntity: () => undefined,
+      onSelectHistoryEvent: () => undefined,
+    }));
+
+    expect(markup).toContain('class="situation-workbench__watch"');
+    expect(markup).toContain('aria-pressed="true"');
+    expect(markup).toContain('已关注');
+  });
 });
