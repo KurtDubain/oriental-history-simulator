@@ -34,6 +34,25 @@ export function worldOffices(world: WorldState) {
   return Array.isArray(world.offices) ? world.offices : [];
 }
 
+/** Current subjects, including people serving in land and naval forces. */
+export function polityPopulation(world: WorldState, polityId: string): number {
+  return world.regions
+    .filter((item) => item.controllerId === polityId)
+    .reduce((sum, item) => sum + item.population, 0)
+    + world.armies
+      .filter((item) => item.polityId === polityId)
+      .reduce((sum, item) => sum + item.soldiers, 0)
+    + world.fleets
+      .filter((item) => item.polityId === polityId)
+      .reduce((sum, item) => sum + item.sailors, 0);
+}
+
+export function worldPopulation(world: WorldState): number {
+  return world.regions.reduce((sum, item) => sum + item.population, 0)
+    + world.armies.reduce((sum, item) => sum + item.soldiers, 0)
+    + world.fleets.reduce((sum, item) => sum + item.sailors, 0);
+}
+
 export function turnLabel(turn: number) {
   const safeTurn = Math.max(0, Number.isFinite(turn) ? Math.floor(turn) : 0);
   return `第 ${Math.floor(safeTurn / 4) + 1} 年 · ${SEASON_NAMES[safeTurn % 4]}`;

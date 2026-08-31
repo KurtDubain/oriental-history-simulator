@@ -13,6 +13,7 @@ export interface RosterDossierReturnTarget {
 
 export interface RosterDossierFlow {
   returnTarget: RosterDossierReturnTarget | null;
+  enteredFromRoster: boolean;
   compactPresentation: boolean;
   begin: (itemId: string) => RosterDossierReturnTarget | null;
   clear: () => void;
@@ -76,6 +77,7 @@ export function useRosterDossierFlow(
   section: PowerRosterSection,
 ): RosterDossierFlow {
   const [returnTarget, setReturnTarget] = useState<RosterDossierReturnTarget | null>(null);
+  const [enteredFromRoster, setEnteredFromRoster] = useState(false);
   const [compactPresentation, setCompactPresentation] = useState(
     () => matchesMedia(ROSTER_DOSSIER_COMPACT_MEDIA_QUERY),
   );
@@ -104,6 +106,7 @@ export function useRosterDossierFlow(
   const begin = useCallback((itemId: string) => {
     const origin = createRosterDossierReturnTarget(activeView, section, itemId, true);
     originTargetRef.current = origin;
+    setEnteredFromRoster(Boolean(origin));
     const next = matchesMedia(ROSTER_DOSSIER_MEDIA_QUERY) ? origin : null;
     if (!origin) {
       returnTargetRef.current = null;
@@ -117,18 +120,20 @@ export function useRosterDossierFlow(
 
   const clear = useCallback(() => {
     originTargetRef.current = null;
+    setEnteredFromRoster(false);
     returnTargetRef.current = null;
     setReturnTarget(null);
   }, []);
 
   const returnToRoster = useCallback(() => {
-    const target = returnTargetRef.current;
+    const target = originTargetRef.current;
     originTargetRef.current = null;
+    setEnteredFromRoster(false);
     returnTargetRef.current = null;
     setReturnTarget(null);
     if (target) restoreRosterFocusAfterCommit(target);
     return target;
   }, []);
 
-  return { returnTarget, compactPresentation, begin, clear, returnToRoster };
+  return { returnTarget, enteredFromRoster, compactPresentation, begin, clear, returnToRoster };
 }

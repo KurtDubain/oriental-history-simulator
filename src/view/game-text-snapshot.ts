@@ -1,4 +1,4 @@
-import type { RosterItem } from '../components/RosterPanel';
+import type { RosterItem } from './roster-discovery';
 import {
   getAppUpdateState,
 } from '../infra/app-update';
@@ -16,14 +16,13 @@ import {
 import { findWorldHistoryEvent } from '../sim/archive';
 import { APP_VERSION } from '../version';
 import {
-  familyRoster,
-  militaryRoster,
-  peopleRoster,
-  polityRoster,
+  projectRosterCollection,
+  rosterScopeFor,
   toCountryInspector,
   toMapFlows,
   toPersonInspector,
   toSystemInspector,
+  worldPopulation,
 } from './adapters';
 import { projectEmbodimentTextSnapshot } from './embodiment-view';
 import { shouldShowObserverSoundInvitation } from './observer-interface-settings';
@@ -278,17 +277,13 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     causes: selectedEvent.causes.map((cause) => ({ label: cause.label, role: cause.role, evidence: cause.evidence, refs: cause.refs ?? [] })),
     stateDeltas: selectedEvent.stateDeltas.slice(0, 12),
   } : null;
-  const visibleRoster = options.view === 'powers'
-    ? options.powerRosterSection === 'polities'
-      ? polityRoster(world)
-      : options.powerRosterSection === 'families'
-        ? familyRoster(world)
-        : militaryRoster(world)
-    : options.view === 'people'
-      ? peopleRoster(world)
-      : options.view === 'chronicle'
-        ? historyRoster(world)
-        : [];
+  const rosterScope = rosterScopeFor(options.view, options.powerRosterSection);
+  const rosterProjection = rosterScope
+    ? projectRosterCollection(world, rosterScope, options.rosterDiscovery[rosterScope], options.watchlist)
+    : null;
+  const visibleRoster = rosterProjection?.items
+    ?? (options.view === 'chronicle' ? historyRoster(world) : []);
+  const visibleRosterLimit = rosterScope ? options.rosterVisibleCounts[rosterScope] : 60;
   const topFlows = (options.historicalTurn === null ? toMapFlows(world, options.overlay) : []).map((flow) => ({
     id: flow.id,
     kind: flow.kind,
@@ -501,8 +496,19 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       primerStep: options.primerStep,
       selectedDetail,
       selectedEvent: selectedEventDetail,
-      visibleRoster: visibleRoster.slice(0, 60),
-      rosterTotal: visibleRoster.length,
+      visibleRoster: visibleRoster.slice(0, visibleRosterLimit),
+      rosterVisibleLimit: visibleRosterLimit,
+      rosterTotal: rosterProjection?.totalCount ?? visibleRoster.length,
+      rosterMatched: rosterProjection?.matchedCount ?? visibleRoster.length,
+      rosterDiscovery: rosterProjection ? {
+        scope: rosterProjection.scope,
+        query: rosterProjection.state.query,
+        quickView: rosterProjection.state.quickView,
+        filters: rosterProjection.state.filters,
+        sort: rosterProjection.state.sort,
+        activeFilterCount: rosterProjection.activeFilterCount,
+        conditionSummary: rosterProjection.conditionSummary,
+      } : null,
       topFlows,
     },
     mandate: {
@@ -535,8 +541,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       knownPractices: new Set(world.practiceStates.filter((item) => item.mastery > 0 && item.lostTurn === null).map((item) => item.practiceId)).size,
       migrationsThisTurn: report?.trade.shipments.filter((item) => item.kind === '迁徙').length ?? 0,
       activeWars: world.wars.filter((item) => item.active).length,
-      population: world.regions.reduce((sum, item) => sum + item.population, 0)
-        + world.armies.reduce((sum, item) => sum + item.soldiers, 0),
+      population: worldPopulation(world),
     },
     recentHistory: world.history.slice(-8).map((event) => ({
       id: event.id,

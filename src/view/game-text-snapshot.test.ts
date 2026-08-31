@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { DEFAULT_MAP_PROFILE_ID, getMapProfile } from '../maps';
 import { advanceWorld, createWorld, serializeWorld } from '../sim';
 import { compactWorldArchive } from '../sim/archive';
-import { familyRoster, militaryRoster, polityRoster } from './adapters';
+import { familyRoster, militaryRoster, polityRoster, projectRosterCollection } from './adapters';
 import { DEFAULT_MAP_CAMERA } from './map-scene-geometry';
 import {
   deriveHistoryReadingLayer,
@@ -10,6 +10,7 @@ import {
 } from './game-text-snapshot';
 import { createObserverInterfaceSettings } from './observer-interface-settings';
 import type { SnapshotOptions } from './observer-shell-contract';
+import { createRosterDiscoveryStates, createRosterVisibleCounts, ROSTER_PAGE_SIZE } from './roster-discovery';
 import { createAgencyShadowLedger } from './v1-agency-shadow';
 
 function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
@@ -20,6 +21,8 @@ function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
     speed: 1,
     view: 'world',
     powerRosterSection: 'polities',
+    rosterDiscovery: createRosterDiscoveryStates(),
+    rosterVisibleCounts: createRosterVisibleCounts(),
     overlay: 'political',
     selection: null,
     selectedEventId: null,
@@ -155,6 +158,58 @@ describe('render_game_to_text projection boundary', () => {
       rosterTotal: expected.length,
     });
     expect(snapshot.interface.visibleRoster[0]?.id).toBe(expected[0]?.id);
+    expect(snapshot.deterministicWorldHash).toBe(world.hash);
+    expect(serializeWorld(world)).toBe(before);
+  });
+
+  it('publishes the exact observer-only roster query, filters and ordering shown on screen', () => {
+    const world = createWorld('架构-人物名簿条件', DEFAULT_MAP_PROFILE_ID);
+    const before = serializeWorld(world);
+    const baseStates = createRosterDiscoveryStates();
+    const target = projectRosterCollection(world, 'people').items[0];
+    const state = {
+      ...baseStates.people,
+      query: target.title,
+      filters: {
+        polity: target.discovery?.filters.polity ?? 'all',
+        identity: target.discovery?.filters.identity ?? 'all',
+      },
+      sort: 'influence',
+    };
+    const expected = projectRosterCollection(world, 'people', state);
+    const snapshot = JSON.parse(makeTextSnapshot(world, options({
+      view: 'people',
+      rosterDiscovery: { ...baseStates, people: state },
+    }))) as {
+      deterministicWorldHash: string;
+      interface: {
+        visibleRoster: Array<{ id: string }>;
+        rosterTotal: number;
+        rosterMatched: number;
+        rosterDiscovery: {
+          scope: string;
+          query: string;
+          filters: Record<string, string>;
+          sort: string;
+          conditionSummary: string;
+        };
+      };
+    };
+
+    expect(snapshot.interface.visibleRoster.map((item) => item.id)).toEqual(
+      expected.items.slice(0, ROSTER_PAGE_SIZE).map((item) => item.id),
+    );
+    expect(snapshot.interface).toMatchObject({
+      rosterTotal: expected.totalCount,
+      rosterMatched: expected.matchedCount,
+      rosterDiscovery: {
+        scope: 'people',
+        query: target.title,
+        filters: state.filters,
+        sort: 'influence',
+        conditionSummary: expected.conditionSummary,
+      },
+    });
     expect(snapshot.deterministicWorldHash).toBe(world.hash);
     expect(serializeWorld(world)).toBe(before);
   });

@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.14.0',
+    date: '2026-08-31',
+    title: '名簿有序，缘由可寻',
+    items: [
+      '人物、列国、世家与军旅名簿新增少量筛选、排序与快捷查看，并分别保留当前条件。',
+      '“值得关注”逐项说明真实依据，可直达既有史事、持续局势或对象档案，不另造综合评分。',
+      '桌面与移动端均显示命中数和清除入口；所有条件只属于观察界面，不改变存档、历史或世界 hash。',
+    ],
+  },
+  {
     version: '1.13.0',
     date: '2026-08-31',
     title: '旧卷入匣，来由不失',

@@ -52,7 +52,7 @@ import {
   type MapOverlay,
   type ObserverView,
 } from './components/NavigationRail';
-import { RosterPanel, type RosterSection } from './components/RosterPanel';
+import { RosterPanel } from './components/RosterPanel';
 import { TopBar, type PlaybackSpeed } from './components/TopBar';
 import {
   DEFAULT_MAP_CAMERA,
@@ -120,10 +120,8 @@ import {
   type MapProfileId,
 } from './maps';
 import {
-  familyRoster,
-  militaryRoster,
-  peopleRoster,
-  polityRoster,
+  projectRosterDirectory,
+  rosterScopeFor,
   toCausalEvent,
   toCountryInspector,
   toCountryArchive,
@@ -140,6 +138,8 @@ import {
   toPersonArchive,
   toRegionInspector,
   toSystemInspector,
+  worldPopulation,
+  type RosterReason,
 } from './view/adapters';
 import {
   type HistoricalTerritoryView,
@@ -219,6 +219,7 @@ import type {
 } from './view/observer-shell-contract';
 import { shouldShowObserverSoundInvitation } from './view/observer-interface-settings';
 import { useObserverInterface } from './view/use-observer-interface';
+import { useRosterDiscovery } from './view/use-roster-discovery';
 import { useRosterDossierFlow } from './view/use-roster-dossier-flow';
 import './styles/app.css';
 
@@ -310,7 +311,7 @@ export function App() {
   const [mapGestureActive, setMapGestureActive] = useState(false);
   const [mapCameraKey, setMapCameraKey] = useState(0);
   const [selection, setSelection] = useState<Selection>(null);
-  const { returnTarget: rosterDossierReturn, compactPresentation: compactRosterDossier, begin: beginRosterDossier, clear: clearRosterDossier, returnToRoster } = useRosterDossierFlow(activeView, powerRosterSection);
+  const { returnTarget: rosterDossierReturn, enteredFromRoster: rosterDossierEntry, compactPresentation: compactRosterDossier, begin: beginRosterDossier, clear: clearRosterDossier, returnToRoster } = useRosterDossierFlow(activeView, powerRosterSection);
   useEffect(() => { setMobileInspectorExpanded(Boolean(rosterDossierReturn)); }, [rosterDossierReturn]);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [focusedArmyId, setFocusedArmyId] = useState<string | null>(null);
@@ -343,6 +344,9 @@ export function App() {
   const [embodimentObserver, setEmbodimentObserver] = useState<EmbodimentObserverState>(() => createEmbodimentObserverState());
   const embodiedCharacterId = embodimentObserver.activeActor?.id ?? null;
   const pendingEmbodiedAction = embodimentObserver.pendingAction;
+  const rosterDiscovery = useRosterDiscovery(
+    world ? `${world.mapContentVersion}:${world.seed}` : null,
+  );
   const appUpdate = useSyncExternalStore(
     subscribeAppUpdate,
     getAppUpdateState,
@@ -441,6 +445,8 @@ export function App() {
     speed,
     view: activeView,
     powerRosterSection,
+    rosterDiscovery: rosterDiscovery.states,
+    rosterVisibleCounts: rosterDiscovery.visibleCounts,
     overlay,
     selection,
     selectedEventId,
@@ -735,7 +741,7 @@ export function App() {
     source: OpenWorldSource,
     restoreToken: string | null = null,
   ) => {
-    clearRosterDossier(); resetRuntimePerformanceMetrics();
+    clearRosterDossier(); rosterDiscovery.reset(); resetRuntimePerformanceMetrics();
     const validWorld = assertValidWorld(nextWorld);
     resetAutosaveCoordinator(source === 'continue' ? validWorld.turn : 0);
     const defaultRegionId = validWorld.regions.find((region) => (
@@ -856,7 +862,7 @@ export function App() {
     runningRef.current = false;
     setRunning(false);
     clockAccumulatorRef.current = 0;
-  }, [clearRosterDossier, commitAgencyShadow, commitEmbodiedObserver, commitWorld, resetAgencyShadowAtWorld, resetAutosaveCoordinator]);
+  }, [clearRosterDossier, commitAgencyShadow, commitEmbodiedObserver, commitWorld, resetAgencyShadowAtWorld, resetAutosaveCoordinator, rosterDiscovery.reset]);
 
   const handleCreate = useCallback(async () => {
     setStartBusy(true);
@@ -1630,24 +1636,14 @@ export function App() {
       ? projectSituationWorkbench(world, selectedSituationId)
       : null
   ), [selectedSituationId, situationWorkbenchOpen, world]);
-  const polityItems = useMemo(() => world ? polityRoster(world) : [], [world]);
-  const familyItems = useMemo(() => world ? familyRoster(world) : [], [world]);
-  const peopleItems = useMemo(() => world ? peopleRoster(world) : [], [world]);
-  const militaryItems = useMemo(() => world ? militaryRoster(world) : [], [world]);
-  const powerMilitaryAlertCount = useMemo(() => world
-    ? world.wars.filter((item) => item.active).length
-      + world.armies.filter((item) => item.supply < 45 || item.morale < 40).length
-    : 0, [world]);
-  const powerRosterSections = useMemo<readonly RosterSection[]>(() => [
-    { id: 'polities', label: '列国', count: polityItems.length },
-    { id: 'families', label: '世家', count: familyItems.length },
-    {
-      id: 'military',
-      label: '军旅',
-      count: militaryItems.length,
-      alertCount: powerMilitaryAlertCount,
-    },
-  ], [familyItems.length, militaryItems.length, polityItems.length, powerMilitaryAlertCount]);
+  const rosterDirectory = useMemo(() => (
+    world && (activeView === 'people' || activeView === 'powers')
+      ? projectRosterDirectory(world, observerSettings.watchlist)
+      : null
+  ), [activeView, observerSettings.watchlist, world]);
+  const activeRosterScope = rosterScopeFor(activeView, powerRosterSection);
+  const rosterConfig = activeRosterScope ? rosterDirectory?.[activeRosterScope] ?? null : null;
+  const powerRosterSections = rosterDirectory?.sections ?? [];
   const quarterPulseProjection = useMemo(() => (
     world ? projectQuarterPulse(world) : { stories: [], highlightedRegionIds: [] }
   ), [world]);
@@ -1677,22 +1673,6 @@ export function App() {
     }
     return null;
   }, [agencyShadowBranchId, agencyShadowLedger, archiveOpen, selection, world]);
-
-  const rosterConfig = useMemo(() => {
-    if (activeView === 'powers' && powerRosterSection === 'polities') return {
-      title: '天下列国', eyebrow: '势力诸卷 · 政权根基', items: polityItems, emptyMessage: '天下已无成形政权。', searchPlaceholder: '检索国号、君主或都城',
-    };
-    if (activeView === 'powers' && powerRosterSection === 'families') return {
-      title: '天下世家', eyebrow: '势力诸卷 · 门第传承', items: familyItems, emptyMessage: '尚无被谱牒记名的家族。', searchPlaceholder: '检索家名、家主或门望',
-    };
-    if (activeView === 'people') return {
-      title: '时人群像', eyebrow: '声望与所图', items: peopleItems, emptyMessage: '暂无可记名人物。', searchPlaceholder: '检索姓名、身份或所图',
-    };
-    if (activeView === 'powers' && powerRosterSection === 'military') return {
-      title: '天下军旅', eyebrow: '势力诸卷 · 兵力军需', items: militaryItems, emptyMessage: '天下暂无宏观军团。', searchPlaceholder: '检索军号、主帅或驻地',
-    };
-    return null;
-  }, [activeView, familyItems, militaryItems, peopleItems, polityItems, powerRosterSection]);
 
   const handlePowerRosterSectionChange = useCallback((id: string) => {
     if (id !== 'polities' && id !== 'families' && id !== 'military') return;
@@ -1788,6 +1768,18 @@ export function App() {
     setResumeSituationAfterEvent(false);
     gameAudio.play('open', 0.64);
   }, [selectedSituationId]);
+
+  const handleRosterReasonSelect = useCallback((reason: RosterReason) => {
+    if (reason.target.kind === 'event') {
+      handleSelectScopedEvent(reason.target.id);
+      return;
+    }
+    if (reason.target.kind === 'situation') {
+      handleOpenSituationWorkbench(reason.target.id);
+      return;
+    }
+    handleRosterSelect(reason.target.id);
+  }, [handleOpenSituationWorkbench, handleRosterSelect, handleSelectScopedEvent]);
 
   const handleCloseSituationWorkbench = useCallback(() => {
     situationFocusRestoreAllowedRef.current = true;
@@ -1897,7 +1889,7 @@ export function App() {
         gameAudio.play('select', 0.5);
       },
       onClose: closeInspectorToMap,
-      entrySource: rosterDossierReturn ? 'roster' as const : undefined, returnLabel: rosterDossierReturn?.view === 'people' ? '返回人物名录' : rosterDossierReturn ? '返回势力名录' : undefined,
+      entrySource: rosterDossierReturn ? 'roster' as const : undefined, returnToOrigin: rosterDossierEntry, returnLabel: activeView === 'people' ? '返回人物名录' : '返回势力名录',
       mobileExpanded: mobileInspectorExpanded,
       onMobileExpandedChange: setMobileInspectorExpanded,
       onOpenArchive: selection.kind === 'country' || selection.kind === 'family' || selection.kind === 'person' ? () => {
@@ -1948,6 +1940,7 @@ export function App() {
     const system = toSystemInspector(world, selection.kind, selection.id);
     return system ? <Inspector kind="system" data={system} {...shared} /> : null;
   }, [
+    activeView,
     agencyShadowBranchId,
     agencyShadowLedger,
     closeInspectorToMap,
@@ -1964,6 +1957,7 @@ export function App() {
     handleSelectScopedEvent,
     mobileInspectorExpanded,
     pendingEmbodiedAction,
+    rosterDossierEntry,
     rosterDossierReturn,
     selection,
     world,
@@ -2126,10 +2120,7 @@ export function App() {
   const latestIntervention = world ? [...world.history].reverse().find(isV03InterventionEvent) ?? null : null;
   const mandateUsedThisTurn = Boolean(world && latestIntervention?.turn === world.turn);
 
-  const totalPopulation = world
-    ? world.regions.reduce((sum, item) => sum + item.population, 0)
-      + world.armies.reduce((sum, item) => sum + item.soldiers, 0)
-    : 0;
+  const totalPopulation = world ? worldPopulation(world) : 0;
   const activeWarCount = world?.wars.filter((item) => item.active).length ?? 0;
   const livingPolityCount = world?.polities.filter((item) => item.alive).length ?? 0;
   const lowSupplyCount = world?.armies.filter((item) => item.supply < 45 || item.morale < 40).length ?? 0;
@@ -2377,15 +2368,20 @@ export function App() {
 
             {rosterConfig ? (
               <RosterPanel
-                key={activeView}
                 title={rosterConfig.title}
                 eyebrow={rosterConfig.eyebrow}
                 items={rosterConfig.items}
+                definition={rosterConfig.definition}
+                state={rosterDiscovery.states[rosterConfig.scope]}
+                onStateChange={(nextState) => rosterDiscovery.update(rosterConfig.scope, nextState)}
+                visibleCount={rosterDiscovery.visibleCounts[rosterConfig.scope]} onShowMore={() => rosterDiscovery.showMore(rosterConfig.scope)}
                 selectedId={rosterSelectedId}
                 emptyMessage={rosterConfig.emptyMessage}
                 searchPlaceholder={rosterConfig.searchPlaceholder}
                 onSelect={handleRosterSelect}
+                onReasonSelect={handleRosterReasonSelect}
                 onClose={handleCloseRoster} suspended={Boolean(rosterDossierReturn && inspector)}
+                escapeBlocked={Boolean(rosterDossierEntry && inspector)}
                 sections={activeView === 'powers' ? powerRosterSections : undefined}
                 activeSection={activeView === 'powers' ? powerRosterSection : undefined}
                 onSectionChange={activeView === 'powers' ? handlePowerRosterSectionChange : undefined}

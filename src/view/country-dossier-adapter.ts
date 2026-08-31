@@ -15,6 +15,7 @@ import {
   family,
   livingCharacter,
   polity,
+  polityPopulation,
   region,
   scopedHistory,
   toHistoricalSceneView,
@@ -28,9 +29,6 @@ import {
 
 export function toCountryInspector(world: WorldState, item: PolityState): CountryInspectorData {
   const owned = world.regions.filter((candidate) => candidate.controllerId === item.id);
-  const fieldedSoldiers = world.armies
-    .filter((army) => army.polityId === item.id)
-    .reduce((sum, army) => sum + army.soldiers, 0);
   const ruler = livingCharacter(world, item.rulerId);
   const capital = region(world, item.capitalRegionId);
   const enemies = world.wars
@@ -101,7 +99,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     government: [item.governmentForm, item.dynastyName].filter(Boolean).join(' · '),
     rulingFamily: rulingFamily?.name,
     rulingFamilyId: rulingFamily?.id ?? null,
-    population: owned.reduce((sum, candidate) => sum + candidate.population, 0) + fieldedSoldiers,
+    population: polityPopulation(world, item.id),
     treasury: Math.max(0, item.treasury),
     food: owned.reduce((sum, candidate) => sum + candidate.food, 0),
     regionCount: owned.length,

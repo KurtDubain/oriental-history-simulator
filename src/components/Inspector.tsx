@@ -387,6 +387,7 @@ interface InspectorSharedProps {
   mobileExpanded?: boolean;
   onMobileExpandedChange?: (expanded: boolean) => void;
   entrySource?: InspectorEntrySource;
+  returnToOrigin?: boolean;
   returnLabel?: string;
 }
 
@@ -420,7 +421,7 @@ function Fact({ label, value }: { label: string; value?: DisplayValue }) {
   return <div className="observer-fact"><dt>{label}</dt><dd>{display(value)}</dd></div>;
 }
 
-function InspectorActions({ label, isFollowing, onToggleFollow, onClose, entrySource, returnLabel }: InspectorSharedProps & { label: string }) {
+function InspectorActions({ label, isFollowing, onToggleFollow, onClose, entrySource, returnToOrigin, returnLabel }: InspectorSharedProps & { label: string }) {
   const returnsToRoster = entrySource === 'roster';
   const closeLabel = returnsToRoster ? returnLabel ?? '返回名单' : '关闭档案';
   return (
@@ -434,8 +435,9 @@ function InspectorActions({ label, isFollowing, onToggleFollow, onClose, entrySo
         <button
           type="button"
           className="observer-icon-button"
-          autoFocus={returnsToRoster}
+          autoFocus={returnsToRoster || returnToOrigin}
           aria-label={closeLabel}
+          data-inspector-close
           data-inspector-return={returnsToRoster ? 'roster' : undefined}
           onClick={onClose}
         >
@@ -1227,6 +1229,7 @@ export function Inspector(props: InspectorProps) {
     ? `${props.data.id}:${props.embodiment.closure.reason}:${props.embodiment.closure.sourceEventId ?? 'no-event'}`
     : null;
   const returnsToRoster = props.entrySource === 'roster' && Boolean(props.onClose);
+  const returnsToOrigin = (props.returnToOrigin || returnsToRoster) && Boolean(props.onClose);
   const mobileReturnLabel = props.returnLabel ?? '返回名单';
   const setMobileExpanded = useCallback((next: boolean | ((current: boolean) => boolean)) => {
     const value = typeof next === 'function' ? next(mobileExpanded) : next;
@@ -1241,12 +1244,12 @@ export function Inspector(props: InspectorProps) {
     if (embodimentClosureKey) setMobileExpanded(true);
   }, [embodimentClosureKey]);
   useEffect(() => {
-    if (!returnsToRoster || !mobileExpanded) return undefined;
-    const frame = requestAnimationFrame(() => inspectorRef.current?.querySelector<HTMLButtonElement>('[data-inspector-return="roster"]')?.focus({ preventScroll: true }));
+    if (!returnsToOrigin) return undefined;
+    const frame = requestAnimationFrame(() => inspectorRef.current?.querySelector<HTMLButtonElement>('[data-inspector-close]')?.focus({ preventScroll: true }));
     return () => cancelAnimationFrame(frame);
-  }, [mobileExpanded, returnsToRoster, selectionKey]);
+  }, [mobileExpanded, returnsToOrigin, selectionKey]);
   useEffect(() => {
-    if (!returnsToRoster || !mobileExpanded) return undefined;
+    if (!returnsToOrigin) return undefined;
     const handleEscape = (event: globalThis.KeyboardEvent) => {
       if (event.key !== 'Escape' || event.defaultPrevented || document.querySelector('[aria-modal="true"]')) return;
       event.preventDefault();
@@ -1254,7 +1257,7 @@ export function Inspector(props: InspectorProps) {
     };
     window.addEventListener('keydown', handleEscape);
     return () => window.removeEventListener('keydown', handleEscape);
-  }, [mobileExpanded, props.onClose, returnsToRoster]);
+  }, [props.onClose, returnsToOrigin]);
 
   const startQuickLookSwipe = (event: ReactPointerEvent<HTMLButtonElement>) => {
     if (event.pointerType === 'mouse') return;

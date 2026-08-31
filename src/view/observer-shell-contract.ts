@@ -7,6 +7,7 @@ import type { MapOverlay, ObserverView } from '../components/NavigationRail';
 import type { MapPrimerStep } from '../components/MapPrimer';
 import type { MapProfileId } from '../maps';
 import type { EmbodimentClosure } from './embodiment-observer';
+import type { RosterDiscoveryStateMap, RosterVisibleCountMap } from './roster-discovery';
 import type {
   ObserverAudioState,
   ObserverInterfaceSettings,
@@ -50,6 +51,8 @@ export interface SnapshotOptions {
   speed: PlaybackSpeed;
   view: ObserverView;
   powerRosterSection: PowerRosterSection;
+  rosterDiscovery: RosterDiscoveryStateMap;
+  rosterVisibleCounts: RosterVisibleCountMap;
   overlay: MapOverlay;
   selection: Selection;
   selectedEventId: string | null;

@@ -1734,6 +1734,7 @@ try {
   await closurePage.locator('[data-map-primer-skip]').click();
   await advanceTo(closurePage, 3);
   await closurePage.click('button[data-observer-view="people"]');
+  await closurePage.getByLabel('检索时人群像').fill('郑季安');
   await closurePage.locator('.roster-panel button[data-roster-id="c_102"]').click();
   const closureBefore = await snapshot(closurePage);
   assert.equal(closureBefore.interface.selectedDetail.name, '郑季安', '离世验收种子应稳定定位人物');
@@ -1832,6 +1833,7 @@ try {
   await advanceTo(governancePage, 5);
   await governancePage.click('button[data-observer-view="people"]');
   await governancePage.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
+  await governancePage.getByLabel('检索时人群像').fill('卫延昭');
   await governancePage.locator('.roster-panel button[data-roster-id="c_022"]').click();
   const governanceSelected = await snapshot(governancePage);
   assert.equal(governanceSelected.interface.selectedDetail.name, '卫延昭', '地方施政验收种子应稳定定位人物');
