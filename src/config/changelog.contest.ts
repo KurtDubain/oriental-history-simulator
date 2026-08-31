@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.16.0',
+    date: '2026-09-01',
+    title: '朝堂有席，权势有根',
+    items: [
+      '人物拥有唯一且持续的派系归属；建立、继任、分裂、合并与消亡都有可追溯的前后身。联盟解除后旧承诺立即失效，举兵离朝者也会在同季退出原派。',
+      '国家“朝局”按真实君位与中枢官职展示席位，每一席都能查看任职与任命依据；派系位置、权势根由、近期得失和公开关系来自同一份权势账。',
+      '桌面与移动端均可查看派系、缘由与领袖；长期推演同步修正支持行为重复请求、新造舰队重号和久远史料过度常驻，旧 schema 4 存档继续兼容。',
+    ],
+  },
+  {
     version: '1.15.1',
     date: '2026-08-31',
     title: '一季一线，读史有路',

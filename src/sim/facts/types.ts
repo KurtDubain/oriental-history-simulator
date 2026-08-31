@@ -21,6 +21,8 @@ export type SimulationFactKind =
   | 'local_governance_resolved'
   | 'embodied_action_submitted'
   | 'embodied_action_resolved'
+  | 'faction_lifecycle'
+  | 'faction_relation_changed'
   | 'situation_milestone';
 
 export interface BattleForceFact {
@@ -242,6 +244,40 @@ export interface SituationMilestoneFactPayload {
   outcomeKey: string | null;
 }
 
+export interface FactionLifecycleSnapshot {
+  factionId: string;
+  name: string;
+  leaderId: string;
+  coreMemberIds: string[];
+  memberCount: number;
+  agenda: string;
+  active: boolean;
+}
+
+export interface FactionLifecycleFactPayload {
+  transition: 'formed' | 'leader_changed' | 'split' | 'merged' | 'ended';
+  reasonCode: string;
+  polityId: string;
+  affectedFactionIds: string[];
+  createdFactionIds: string[];
+  endedFactionIds: string[];
+  previousLeaderId: string | null;
+  nextLeaderId: string | null;
+  before: FactionLifecycleSnapshot[];
+  after: FactionLifecycleSnapshot[];
+}
+
+export interface FactionRelationChangedFactPayload {
+  polityId: string;
+  leftFactionId: string;
+  rightFactionId: string;
+  relation: 'alliance' | 'rivalry';
+  action: 'formed' | 'ended';
+  reasonCode: string;
+  leftLeaderId: string;
+  rightLeaderId: string;
+}
+
 export type EmbodiedActionFactKind =
   | 'strengthen_relationship'
   | 'seek_opportunity'
@@ -311,6 +347,8 @@ export type LocalGovernanceResolvedFact = SimulationFactBase<'local_governance_r
 export type SituationMilestoneFact = SimulationFactBase<'situation_milestone', SituationMilestoneFactPayload>;
 export type EmbodiedActionSubmittedFact = SimulationFactBase<'embodied_action_submitted', EmbodiedActionSubmittedFactPayload>;
 export type EmbodiedActionResolvedFact = SimulationFactBase<'embodied_action_resolved', EmbodiedActionResolvedFactPayload>;
+export type FactionLifecycleFact = SimulationFactBase<'faction_lifecycle', FactionLifecycleFactPayload>;
+export type FactionRelationChangedFact = SimulationFactBase<'faction_relation_changed', FactionRelationChangedFactPayload>;
 
 export type SimulationFact =
   | WarStartedFact
@@ -327,6 +365,8 @@ export type SimulationFact =
   | LocalGovernanceResolvedFact
   | EmbodiedActionSubmittedFact
   | EmbodiedActionResolvedFact
+  | FactionLifecycleFact
+  | FactionRelationChangedFact
   | SituationMilestoneFact;
 
 export type SimulationFactInput = SimulationFact extends infer Fact

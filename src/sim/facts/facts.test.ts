@@ -77,16 +77,32 @@ describe('schema 4 authoritative fact layer', () => {
       && fact.payload.defenders.every((force) => force.soldiersBefore - force.soldiersAfter === force.losses)
     ))).toBe(true);
     const survivingArmyIds = new Set(world.armies.map((army) => army.id));
-    expect(battles.some((fact) => (
-      !survivingArmyIds.has(fact.payload.attacker.armyId)
-      || fact.payload.defenders.some((force) => !survivingArmyIds.has(force.armyId))
-    ))).toBe(true);
+    const disbandedParticipant = battles
+      .flatMap((fact) => [fact.payload.attacker, ...fact.payload.defenders])
+      .find((force) => !survivingArmyIds.has(force.armyId));
+    expect(disbandedParticipant).toMatchObject({
+      armyId: expect.any(String),
+      polityId: expect.any(String),
+      commanderId: expect.any(String),
+      soldiersBefore: expect.any(Number),
+      soldiersAfter: expect.any(Number),
+      losses: expect.any(Number),
+    });
 
     const unpublishedIds = new Set(unpublished.map((fact) => fact.id));
     const creditedDeputy = world.characters.find((character) => character.biography.some((entry) => (
       entry.kind === '首次参战' && entry.factId !== null && unpublishedIds.has(entry.factId)
     )));
     expect(creditedDeputy?.deputyExperience).toBeGreaterThanOrEqual(4);
+    const creditedEntry = creditedDeputy?.biography.find((entry) => (
+      entry.kind === '首次参战' && entry.factId !== null && unpublishedIds.has(entry.factId)
+    ));
+    const creditedBattle = unpublished.find((fact) => fact.id === creditedEntry?.factId);
+    expect(creditedBattle).toBeDefined();
+    expect([
+      ...(creditedBattle ? [creditedBattle.payload.attacker] : []),
+      ...(creditedBattle?.payload.defenders ?? []),
+    ].some((force) => force.deputyCommanderId === creditedDeputy?.id)).toBe(true);
     const factKinds = new Set(world.facts.map((fact) => fact.kind));
     for (const requiredKind of [
       'battle',
@@ -103,9 +119,17 @@ describe('schema 4 authoritative fact layer', () => {
     expect(world.facts.filter((fact) => (
       fact.kind === 'territory_control_changed' || fact.kind === 'character_death' || fact.kind === 'marriage'
     )).every((fact) => world.history.some((event) => event.sourceFactIds.includes(fact.id)))).toBe(true);
-    expect(world.facts.filter((fact) => fact.kind.startsWith('appointment_')).every((fact) => (
-      world.history.every((event) => !event.sourceFactIds.includes(fact.id))
-    ))).toBe(true);
+    // The founding Chronicle may cite opening court appointments as part of the
+    // initial world snapshot. Keep checking the runtime publication boundary
+    // without coupling this regression to that opening presentation choice.
+    const foundingSourceFactIds = new Set(
+      world.history.find((event) => event.kind === 'world_created')?.sourceFactIds ?? [],
+    );
+    const runtimeAppointmentFacts = world.facts.filter((fact) => (
+      fact.kind.startsWith('appointment_') && !foundingSourceFactIds.has(fact.id)
+    ));
+    expect(runtimeAppointmentFacts.length).toBeGreaterThan(0);
+    expect(runtimeAppointmentFacts.every((fact) => !projectedFactIds.has(fact.id))).toBe(true);
   });
 
   it('round-trips JSON facts while Chronicle filtering cannot change the simulation hash', () => {

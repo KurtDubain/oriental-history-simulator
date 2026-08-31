@@ -122,19 +122,40 @@ export function toPersonExperienceRecords(
   const facts = readScope === 'all' ? readWorldFacts(world) : world.facts;
   const eventById = new Map(history.map((event) => [event.id, event]));
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
+  const eventsBySourceFactId = new Map<string, HistoryEvent[]>();
+  for (const event of history) {
+    if (!event.actorIds.includes(item.id)) continue;
+    for (const sourceFactId of event.sourceFactIds) {
+      const linked = eventsBySourceFactId.get(sourceFactId) ?? [];
+      linked.push(event);
+      eventsBySourceFactId.set(sourceFactId, linked);
+    }
+  }
 
   for (const fact of biography) {
     const source = biographySource(item, fact, eventById, factById);
     if (!source) continue;
-    if (source.event) {
-      knownEventIds.add(source.event.id);
-      for (const sourceFactId of source.event.sourceFactIds) knownFactIds.add(sourceFactId);
+    const linkedFactEvents = source.fact
+      ? (eventsBySourceFactId.get(source.fact.id) ?? []).filter((event) => event.turn === fact.turn)
+      : [];
+    const canonicalEvents = source.event ? [source.event] : linkedFactEvents;
+    const canonicalEvent = canonicalEvents[0] ?? null;
+    for (const linkedEvent of canonicalEvents) {
+      knownEventIds.add(linkedEvent.id);
+      // The opening Chronicle is an umbrella for many independent founding
+      // Facts. Treating every one of them as already narrated by a person's
+      // generic “entered the annals” biography would hide that person's
+      // concrete initial appointment. Ordinary events remain canonical for
+      // all of their direct source Facts.
+      if (linkedEvent.kind !== 'world_created') {
+        for (const sourceFactId of linkedEvent.sourceFactIds) knownFactIds.add(sourceFactId);
+      }
     }
     if (source.fact) knownFactIds.add(source.fact.id);
     entries.push({
       turn: fact.turn,
       record: {
-        ...(source.event ? eventArchiveRecord(source.event) : {
+        ...(canonicalEvent ? eventArchiveRecord(canonicalEvent) : {
           id: fact.id,
           date: turnLabel(fact.turn),
           title: fact.kind,
@@ -142,9 +163,10 @@ export function toPersonExperienceRecords(
           eventId: null,
           importance: fact.importance,
         }),
-        // Biography rows are the person's index into a canonical event, not a
-        // second account of that event. Keep the biography identity for stable
-        // dossier ordering while reusing the event title and summary verbatim.
+        // Biography rows are the person's index into a canonical Fact or
+        // Chronicle, not a second telling. Keep the biography identity for
+        // stable dossier ordering while reusing any Chronicle projection that
+        // cites the same Fact.
         id: fact.id,
       },
     });
@@ -157,7 +179,9 @@ export function toPersonExperienceRecords(
       record: eventArchiveRecord(event),
     });
     knownEventIds.add(event.id);
-    for (const sourceFactId of event.sourceFactIds) knownFactIds.add(sourceFactId);
+    if (event.kind !== 'world_created') {
+      for (const sourceFactId of event.sourceFactIds) knownFactIds.add(sourceFactId);
+    }
   }
 
   const appointmentFacts = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }> => (

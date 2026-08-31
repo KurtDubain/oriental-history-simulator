@@ -7,7 +7,8 @@ import {
   SEA_LANE_DEFINITIONS,
   SEA_ZONE_DEFINITIONS,
 } from './data';
-import { createWorld } from './engine';
+import { computeWorldHash, createWorld } from './engine';
+import { validateWorld } from './invariants';
 import type { V03Emit, V03TurnContext } from './v03-context';
 import {
   createV03OceanSystems,
@@ -138,6 +139,48 @@ describe('V0.3a ocean and trade kernel', () => {
     expect(world.fleets.every((fleet) => fleet.sailors > 0 && fleet.food >= 0)).toBe(true);
     expect(new Set(world.fleets.map((fleet) => fleet.commanderId)).size).toBe(world.fleets.length);
     expect(world.fleets.every((fleet) => !world.armies.some((army) => army.commanderId === fleet.commanderId || army.deputyCommanderId === fleet.commanderId))).toBe(true);
+  });
+
+  it('keeps a newly commissioned fleet in the fleet id namespace when its project has a higher ordinal', () => {
+    const world = createWorld('v03-ship-project-fleet-counter');
+    const portRegion = world.regions.find((region) => region.port && world.polities.some((polity) => (
+      polity.id === region.controllerId && polity.alive
+    )));
+    expect(portRegion).toBeTruthy();
+    if (!portRegion) return;
+
+    const fleetIdsBefore = new Set(world.fleets.map((fleet) => fleet.id));
+    const fleetCounterBefore = world.counters.fleet;
+    world.shipbuildingProjects = [{
+      id: 'shipproject_00025',
+      polityId: portRegion.controllerId,
+      portRegionId: portRegion.id,
+      targetFleetId: null,
+      warships: 2,
+      transports: 2,
+      patrolShips: 2,
+      timberCommitted: 320,
+      ironCommitted: 116,
+      treasurySpent: 600,
+      progress: 99,
+      startedTurn: world.turn - 3,
+      completedTurn: null,
+      status: '建造中',
+    }];
+    world.counters.shipProject = 25;
+    portRegion.population = Math.max(portRegion.population, 10_000);
+    portRegion.food = Math.max(portRegion.food, 10_000);
+
+    const context = contextFor(world);
+    processV03Maritime(world, context, emitterFor(world, context));
+
+    const commissioned = world.fleets.find((fleet) => !fleetIdsBefore.has(fleet.id));
+    expect(commissioned?.id).toBe(`fleet_${String(fleetCounterBefore + 1).padStart(4, '0')}`);
+    expect(world.counters.fleet).toBe(fleetCounterBefore + 1);
+    world.hash = computeWorldHash(world);
+    expect(validateWorld(world).filter((issue) => (
+      issue.code === 'counter.invalid' && issue.message.startsWith('fleet')
+    ))).toEqual([]);
   });
 
   it('settles price-driven trade with commodity, wealth and capacity conservation', () => {

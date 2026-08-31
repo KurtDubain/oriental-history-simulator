@@ -215,6 +215,8 @@ const FACT_KIND_LABELS: Record<SimulationFact['kind'], string> = {
   local_governance_resolved: '地方施政',
   embodied_action_submitted: '人物行动',
   embodied_action_resolved: '行动结果',
+  faction_lifecycle: '派系变动',
+  faction_relation_changed: '派系关系',
   situation_milestone: '局势里程碑',
 };
 

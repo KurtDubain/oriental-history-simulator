@@ -1505,10 +1505,15 @@ try {
     && faction.power >= 0
     && faction.power <= 100
   )), '每个朝中派系都应有有界权势分类和具体资产');
-  const factionLedgers = page.locator('[data-testid="faction-power-ledger"]');
-  assert.equal(await factionLedgers.count(), selectedCountry.interface.selectedDetail.factions.length);
-  await factionLedgers.first().locator('summary').click();
-  assert.match(await factionLedgers.first().textContent(), /中枢席位|地方任官|军令|家门与财富|人物声望/);
+  const courtProjection = page.locator('[data-testid="court-projection"]');
+  assert.equal(await courtProjection.count(), 1, '朝局页应呈现当季朝堂投影');
+  const factionRanks = courtProjection.locator('[data-court-rank]');
+  assert.equal(await factionRanks.count(), selectedCountry.interface.selectedDetail.factions.length);
+  await factionRanks.first().click();
+  const factionAssets = courtProjection.locator('.court-projection__assets');
+  assert.equal(await factionAssets.count(), 1, '选中派系后应能查看权势根由');
+  await factionAssets.locator('summary').click();
+  assert.match(await factionAssets.textContent(), /中枢席位|地方任官|军令|家门与财富|人物声望/);
   await waitForVisualSettled(page.locator('.observer-inspector'));
   await page.screenshot({ path: `${ARTIFACT_DIR}/country-power-ledger.png`, fullPage: true });
   await page.getByRole('tab', { name: '海贸' }).click();

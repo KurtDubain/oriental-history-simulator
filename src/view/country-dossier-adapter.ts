@@ -3,10 +3,10 @@ import type { ArchiveDossier } from '../components/HistoricalArchive';
 import type { PolityState, WorldState } from '../sim/types';
 import { readWorldHistory } from '../sim/archive';
 import {
-  calculateCharacterPowerPosition,
   calculateFactionPowerLedger,
   recentFactionPowerMovements,
 } from '../sim/politics/power-ledger';
+import { projectCourt } from './court-projection';
 import { projectHistoricalScenes } from './historical-scenes';
 import {
   character,
@@ -24,7 +24,6 @@ import {
   uniqueArchiveLinks,
   worldDiplomacy,
   worldFactions,
-  worldOffices,
 } from './dossier-adapter-shared';
 
 export function toCountryInspector(world: WorldState, item: PolityState): CountryInspectorData {
@@ -40,32 +39,22 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     .filter((faction) => faction.polityId === item.id && faction.active !== false)
     .map((faction) => ({ faction, ledger: calculateFactionPowerLedger(world, faction) }))
     .sort((a, b) => b.ledger.total - a.ledger.total || a.faction.id.localeCompare(b.faction.id));
-  const appointments = worldOffices(world).filter((office) => office.polityId === item.id && office.active);
-  const powerholders = world.characters
-    .filter((candidate) => candidate.alive && candidate.polityId === item.id)
-    .map((candidate) => ({ candidate, position: calculateCharacterPowerPosition(world, candidate.id) }))
-    .sort((a, b) => b.position.total - a.position.total || b.candidate.influence - a.candidate.influence || a.candidate.id.localeCompare(b.candidate.id))
-    .slice(0, 5)
-    .map(({ candidate, position }) => {
-      const office = appointments
-        .filter((appointment) => appointment.holderId === candidate.id)
-        .sort((a, b) => b.rank - a.rank)[0];
-      const faction = factions.find((entry) => entry.faction.memberIds.includes(candidate.id))?.faction;
-      return {
-        id: candidate.id,
-        name: candidate.name,
-        office: office?.kind ?? candidate.role,
-        influence: position.total,
-        faction: faction?.name,
-        standing: position.standing,
-      };
-    });
+  const activeCourt = projectCourt(world, item.id, 'active');
+  const courtPositionByFactionId = new Map(activeCourt.factionPositions.map((position) => [position.factionId, position]));
+  const powerholders = activeCourt.seats.map((seat) => ({
+    id: seat.holderId,
+    name: seat.holder,
+    office: seat.office,
+    influence: seat.factionId ? courtPositionByFactionId.get(seat.factionId)?.power ?? seat.rank : seat.rank,
+    faction: seat.factionName ?? undefined,
+    standing: seat.accessLabel,
+  }));
   const courtScenes = projectHistoricalScenes(
     world,
     world.facts.filter((fact) => (
       fact.polityIds.includes(item.id)
       && fact.turn >= Math.max(0, world.turn - 16)
-      && ['agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'local_governance_resolved', 'appointment_started', 'appointment_ended'].includes(fact.kind)
+      && ['agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'local_governance_resolved', 'appointment_started', 'appointment_ended', 'faction_lifecycle', 'faction_relation_changed'].includes(fact.kind)
     )),
     3,
     'active',
@@ -90,7 +79,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     ...world.fleets.filter((fleet) => fleet.polityId === item.id).map((fleet) => ({ id: fleet.id, kind: 'fleet' as const, label: fleet.name, detail: `${fleet.mission} · 战备${Math.round(fleet.readiness)}`, value: fleet.warships + fleet.transports + fleet.patrolShips })),
     ...world.ports.filter((port) => world.regions.find((candidate) => candidate.id === port.regionId)?.controllerId === item.id).slice(0, 4).flatMap((port) => { const portRegion = region(world, port.regionId); return portRegion ? [{ id: portRegion.id, kind: 'region' as const, label: portRegion.name, detail: `港口${port.level}级 · 吞吐${compact.format(port.throughput)}`, value: port.level }] : []; }),
   ];
-  return {
+  const inspector: CountryInspectorData = {
     id: item.id,
     name: item.name,
     ruler: ruler?.name ?? '君位空悬',
@@ -133,6 +122,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     maritimeOrientation: item.maritimeOrientation,
     maritimeAssets,
     courtScenes,
+    court: activeCourt,
     history: scopedHistory(world, (event) => event.polityIds.includes(item.id)),
     status: !item.alive
       ? '该政权已退出当代政治。'
@@ -142,6 +132,16 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
           ? '长期动员正在侵蚀财政与服从。'
           : '政令与财政尚能维持日常统治。',
   };
+  let completeCourt: ReturnType<typeof projectCourt> | null = null;
+  Object.defineProperty(inspector, 'court', {
+    enumerable: true,
+    configurable: false,
+    get: () => {
+      completeCourt ??= projectCourt(world, item.id, 'all');
+      return completeCourt;
+    },
+  });
+  return inspector;
 }
 
 export function toCountryArchive(world: WorldState, item: PolityState): ArchiveDossier {
@@ -149,9 +149,10 @@ export function toCountryArchive(world: WorldState, item: PolityState): ArchiveD
   const ruler = character(world, item.rulerId);
   const rulingFamily = family(world, item.rulingFamilyId);
   const records = readWorldHistory(world).filter((event) => event.polityIds.includes(item.id)).map(eventArchiveRecord);
-  const factionSentence = inspector.factions?.length
-    ? `${inspector.factions.map((faction) => `${faction.name}主张${faction.agenda}`).join('；')}。其中${inspector.factions[0].name}权势最盛。`
-    : '朝中尚未形成足以被史家命名的稳定派系，权力更多系于具体官职与个人。';
+  const factionSentence = inspector.court?.summary
+    ?? (inspector.factions?.length
+      ? `${inspector.factions.map((faction) => `${faction.name}主张${faction.agenda}`).join('；')}。其中${inspector.factions[0].name}权势最盛。`
+      : '朝中尚未形成足以被史家命名的稳定派系，权力更多系于具体官职与个人。');
   const diplomacySentence = inspector.diplomacy?.length
     ? inspector.diplomacy.map((relation) => `与${relation.polity}${relation.status}`).join('，') + '。'
     : '现存记录中未见稳定联盟、朝贡或公开敌对关系。';

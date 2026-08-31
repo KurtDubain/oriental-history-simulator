@@ -2,19 +2,21 @@ import { describe, expect, it } from 'vitest';
 import { zlibSync } from 'fflate';
 
 import { getDateForTurn } from '../calendar';
-import { computeWorldHash, createWorld } from '../engine';
+import { advanceWorldDetailed, computeWorldHash, createWorld } from '../engine';
 import type { SimulationFact } from '../facts';
 import { deserializeWorld, serializeWorld } from '../persistence';
 import { stableHash, stableStringify } from '../random';
 import type { HistoryEvent, TurnReport, WorldState } from '../types';
 import { archiveDecodeCacheEntryCount } from './codec';
 import { createArchiveBlock } from './metadata';
+import { collectLegacyPinnedFactIds } from './pins';
 import {
   MAX_ARCHIVE_BLOCK_RAW_BYTES,
   MAX_ARCHIVE_BLOCK_COMPRESSED_BYTES,
   WORLD_ARCHIVE_CHUNK_TURNS,
   clearWorldArchiveDecodeCache,
   cloneWorldArchiveState,
+  collectReferencedFactIds,
   compactWorldArchive,
   createWorldArchiveState,
   decodeArchiveBlock,
@@ -116,7 +118,7 @@ function syntheticWorld(completedTurns: number): ArchiveWorldState {
     appendEvent(world, turn, turn === 2 ? 'observer_intervention_support_character' : undefined);
   }
   setWorldTurn(world, completedTurns);
-  (world.situationSystem as unknown as { archiveTestFactId: string }).archiveTestFactId = referencedId;
+  (world.agencyDecisionSystem as unknown as { archiveTestFactId: string }).archiveTestFactId = referencedId;
   world.lastTurn = { factIds: [world.facts.at(-1)?.id ?? ''] } as unknown as TurnReport;
   world.hash = computeWorldHash(world as never);
   return world;
@@ -130,7 +132,7 @@ function incrementallyCompactedWorld(completedTurns: number): ArchiveWorldState 
     const fact = appendFact(world, turn, sourceFactIds);
     if (turn === 4) recursiveSourceId = fact.id;
     if (turn === 5) {
-      (world.situationSystem as unknown as { archiveTestFactId: string }).archiveTestFactId = fact.id;
+      (world.agencyDecisionSystem as unknown as { archiveTestFactId: string }).archiveTestFactId = fact.id;
     }
     appendEvent(world, turn, turn === 2 ? 'observer_intervention_support_character' : undefined);
     world.lastTurn = { factIds: [fact.id] } as unknown as TurnReport;
@@ -144,6 +146,22 @@ function incrementallyCompactedWorld(completedTurns: number): ArchiveWorldState 
 describe('self-contained world cold archive', () => {
   it('keeps complete chains, cold pins, indexes and world hash while compacting', () => {
     const world = syntheticWorld(96);
+    const openingFactionFacts = world.facts.filter((fact) => (
+      fact.kind === 'faction_lifecycle'
+      && fact.payload.transition === 'formed'
+      && fact.payload.reasonCode === 'opening_order'
+    ));
+    expect(openingFactionFacts).toHaveLength(40);
+    const referencedFactId = (world.agencyDecisionSystem as unknown as { archiveTestFactId: string })
+      .archiveTestFactId;
+    const referencedFact = world.facts.find((fact) => fact.id === referencedFactId);
+    const recursiveSourceFactId = referencedFact?.sourceFactIds[0];
+    expect(referencedFact?.turn).toBe(5);
+    expect(recursiveSourceFactId).toBeDefined();
+    if (!referencedFact || !recursiveSourceFactId) return;
+    const expectedFirstBlockFactIds = world.facts
+      .filter((fact) => fact.turn >= 0 && fact.turn <= 15)
+      .map((fact) => fact.id);
     const originalFacts = stableStringify(world.facts);
     const originalHistory = stableStringify(world.history);
     const originalHash = computeWorldHash(world as never);
@@ -156,9 +174,11 @@ describe('self-contained world cold archive', () => {
       [0, 15],
       [16, 31],
     ]);
-    expect(archive?.pinnedFactIds).toEqual(['fact_0000005', 'fact_0000006']);
+    expect(archive?.pinnedFactIds).toEqual([recursiveSourceFactId, referencedFactId]);
     expect(archive?.pinnedEventIds).toEqual(['event_000001', 'event_000004']);
     expect(world.facts.slice(0, 2).map((fact) => fact.id)).toEqual(archive?.pinnedFactIds);
+    expect(findWorldFact(world, referencedFactId)?.sourceFactIds).toEqual([recursiveSourceFactId]);
+    expect(findWorldFact(world, recursiveSourceFactId)?.turn).toBe(4);
     expect(world.facts.at(-1)?.turn).toBe(95);
     expect(world.history.at(-1)?.turn).toBe(95);
     expect(stableStringify(readWorldFacts(world))).toBe(originalFacts);
@@ -173,7 +193,11 @@ describe('self-contained world cold archive', () => {
     const firstBlock = archive?.blocks[0];
     expect(firstBlock?.indexes.kind.situation_milestone).toHaveLength(16);
     expect(firstBlock?.importantEventPreviews.length).toBeLessThanOrEqual(8);
-    expect(firstBlock ? decodeArchiveBlock(firstBlock).facts : []).toHaveLength(16);
+    const firstBlockFacts = firstBlock ? decodeArchiveBlock(firstBlock).facts : [];
+    expect(firstBlockFacts.filter((fact) => fact.kind === 'situation_milestone')).toHaveLength(16);
+    expect(firstBlockFacts.filter((fact) => fact.kind === 'faction_lifecycle'))
+      .toHaveLength(openingFactionFacts.length);
+    expect(firstBlockFacts.map((fact) => fact.id)).toEqual(expectedFirstBlockFactIds);
 
     const clone = archive ? cloneWorldArchiveState(archive) : null;
     expect(clone).not.toBe(archive);
@@ -183,6 +207,79 @@ describe('self-contained world cold archive', () => {
     expect(clone?.digestCheckpoints).not.toBe(archive?.digestCheckpoints);
     expect(clone?.digestCheckpoints[0]).not.toBe(archive?.digestCheckpoints[0]);
   });
+
+  it('pins candidate and open-Situation evidence but leaves resolved evidence cold', () => {
+    const world = createWorld('冷档案存活根测试') as ArchiveWorldState;
+    const factIds = world.facts.slice(0, 6).map((fact) => fact.id);
+    expect(factIds).toHaveLength(6);
+    const [candidateFactId, openFactId, resolvedFactId, archivedRootFactId, decisionFactId, lastTurnFactId] = factIds as [string, string, string, string, string, string];
+    const situationSystem = world.situationSystem as unknown as {
+      candidates: unknown[];
+      situations: unknown[];
+      archivedRootFactId: string;
+    };
+    situationSystem.candidates = [{ evidenceFactIds: [candidateFactId] }];
+    situationSystem.situations = [
+      { status: 'open', causalFactIds: [openFactId] },
+      { status: 'resolved', causalFactIds: [resolvedFactId] },
+    ];
+    situationSystem.archivedRootFactId = archivedRootFactId;
+    (world.agencyDecisionSystem as unknown as { archiveTestFactId: string }).archiveTestFactId = decisionFactId;
+    world.lastTurn = { factIds: [lastTurnFactId] } as unknown as TurnReport;
+
+    const referenced = collectReferencedFactIds(world);
+    expect(referenced).toEqual(new Set([
+      candidateFactId,
+      openFactId,
+      decisionFactId,
+      lastTurnFactId,
+    ]));
+    expect(referenced.has(resolvedFactId)).toBe(false);
+    expect(referenced.has(archivedRootFactId)).toBe(false);
+  });
+
+  it('imports the original whole-Situation pin layout and repins it to live roots', () => {
+    let world = createWorld('冷档案旧引用根兼容') as ArchiveWorldState;
+    for (let turn = 0; turn < 80; turn += 1) world = advanceWorldDetailed(world as WorldState).world;
+    const archive = world.archiveSystem;
+    expect(archive?.blocks).toHaveLength(1);
+    if (!archive) return;
+    const legacyOnlyFact = readWorldFacts(world).find((fact) => (
+      fact.turn <= archive.archivedThroughTurn
+      && !archive.pinnedFactIds.includes(fact.id)
+    ));
+    expect(legacyOnlyFact).toBeDefined();
+    if (!legacyOnlyFact) return;
+
+    (world.situationSystem as unknown as { archivedResolvedFactId: string })
+      .archivedResolvedFactId = legacyOnlyFact.id;
+    world.hash = computeWorldHash(world as never);
+    const allFacts = readWorldFacts(world);
+    const legacyPinSet = collectLegacyPinnedFactIds(world, allFacts);
+    const legacyColdPins = allFacts.filter((fact) => (
+      fact.turn <= archive.archivedThroughTurn && legacyPinSet.has(fact.id)
+    ));
+    const hotFacts = allFacts.filter((fact) => fact.turn > archive.archivedThroughTurn);
+    archive.pinnedFactIds = legacyColdPins.map((fact) => fact.id);
+    world.facts = [...legacyColdPins, ...hotFacts];
+
+    expect(validateWorldArchiveIntegrity(world)).toEqual([]);
+    const blocksBefore = stableStringify(archive.blocks);
+    const serializedLegacy = serializeWorld(world as WorldState);
+    const restored = deserializeWorld(serializedLegacy);
+    expect(restored.hash).toBe(world.hash);
+    expect(restored.factDigest).toBe(world.factDigest);
+    expect(restored.historyDigest).toBe(world.historyDigest);
+    expect(stableStringify(restored.archiveSystem?.blocks)).toBe(blocksBefore);
+    expect(restored.archiveSystem?.pinnedFactIds).not.toContain(legacyOnlyFact.id);
+    expect(findActiveWorldFact(restored, legacyOnlyFact.id)).toBeUndefined();
+    expect(findWorldFact(restored, legacyOnlyFact.id)).toEqual(legacyOnlyFact);
+    expect(validateWorldArchiveIntegrity(restored)).toEqual([]);
+    const normalized = serializeWorld(restored);
+    expect(new TextEncoder().encode(normalized).byteLength)
+      .toBeLessThan(new TextEncoder().encode(serializedLegacy).byteLength);
+    expect(serializeWorld(deserializeWorld(normalized))).toBe(normalized);
+  }, 60_000);
 
   it('uses bounded authenticated chunk checkpoints without changing canonical blocks', () => {
     const incremental = incrementallyCompactedWorld(96);
@@ -339,6 +436,30 @@ describe('self-contained world cold archive', () => {
       .toContain('archive.active.history');
     expect(() => deserializeWorld(serializeWorld(historyWorld as WorldState)))
       .toThrow(/历史冷档案校验失败/);
+  });
+
+  it('rejects an arbitrary extra cold pin that belongs to neither residency layout', () => {
+    const world = syntheticWorld(96);
+    compactWorldArchive(world);
+    const archive = world.archiveSystem;
+    expect(archive).toBeDefined();
+    if (!archive) return;
+    const extra = readWorldFacts(world).find((fact) => (
+      fact.turn <= archive.archivedThroughTurn
+      && !archive.pinnedFactIds.includes(fact.id)
+    ));
+    expect(extra).toBeDefined();
+    if (!extra) return;
+    const coldPins = [...world.facts.filter((fact) => archive.pinnedFactIds.includes(fact.id)), extra]
+      .sort((left, right) => left.id.localeCompare(right.id));
+    archive.pinnedFactIds = coldPins.map((fact) => fact.id);
+    world.facts = [
+      ...coldPins,
+      ...world.facts.filter((fact) => fact.turn > archive.archivedThroughTurn),
+    ];
+
+    expect(validateWorldArchiveIntegrity(world).map((issue) => issue.code))
+      .toContain('archive.active.facts');
   });
 
   it('rejects an under-compacted archive even when every existing block is valid', () => {

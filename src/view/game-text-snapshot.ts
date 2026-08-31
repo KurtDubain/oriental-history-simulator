@@ -207,6 +207,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         resources: entry.resources,
         recentMovement: entry.recentMovement,
       })) ?? [],
+      court: countryDossier.court ?? null,
       powerholders: countryDossier.powerholders ?? [],
       courtScenes: countryDossier.courtScenes ?? [],
       diplomacy: diplomacy.filter((entry) => entry.polityAId === item.id || entry.polityBId === item.id).map((entry) => ({

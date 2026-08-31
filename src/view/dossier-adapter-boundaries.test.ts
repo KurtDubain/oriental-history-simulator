@@ -116,6 +116,12 @@ describe('dossier adapter boundaries', () => {
 
     expect(() => toPersonInspector(world, person)).not.toThrow();
     expect(() => toFamilyInspector(world, personFamily)).not.toThrow();
-    expect(() => toCountryInspector(world, country)).not.toThrow();
+    let countryInspector: ReturnType<typeof toCountryInspector> | null = null;
+    expect(() => {
+      countryInspector = toCountryInspector(world, country);
+      void countryInspector.powerholders;
+    }).not.toThrow();
+    expect(countryInspector).not.toBeNull();
+    expect(() => countryInspector?.court).toThrow();
   });
 });

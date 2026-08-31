@@ -97,9 +97,15 @@ export default defineConfig({
   },
   plugins: [contestIsolation(contestBuild), appVersionAsset(packageJson.version, buildId), react()],
   build: {
+    minify: 'terser',
+    terserOptions: {
+      compress: { passes: 3 },
+      mangle: { toplevel: true },
+      format: { comments: false },
+    },
     // Keep stable domain boundaries cacheable without changing when modules execute.
-    // These are all static chunks: cold-start bytes stay effectively unchanged, while
-    // ordinary UI releases no longer invalidate the framework, map, or simulation payloads.
+    // Archive/fact primitives form an acyclic base chunk; the rest of the simulation
+    // depends on it in one direction, so releases stay inside the original size budgets.
     chunkSizeWarningLimit: 550,
     rollupOptions: {
       output: {
@@ -112,6 +118,12 @@ export default defineConfig({
           ) return 'framework';
           if (normalized.includes('/node_modules/fflate/')) return 'compression';
           if (normalized.includes('/src/maps/')) return 'maps';
+          if (
+            normalized.includes('/src/sim/archive/')
+            || normalized.includes('/src/sim/facts/')
+            || normalized.endsWith('/src/sim/random.ts')
+            || normalized.endsWith('/src/sim/world-hash.ts')
+          ) return 'simulation-core';
           if (normalized.includes('/src/sim/')) return 'simulation';
           return undefined;
         },

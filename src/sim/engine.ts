@@ -40,6 +40,7 @@ import {
   markWarDiplomacy,
   processV02Diplomacy,
   processV02MilitaryCareers,
+  processV02PoliticalCommitments,
   processV02Politics,
   processV02Society,
   promoteBackgroundPerson,
@@ -55,6 +56,14 @@ import {
 } from './agency/decision';
 import type { EmbodiedActionCommand } from './agency/embodiment';
 import { refreshFactionPowerLedgers } from './politics/power-ledger';
+import {
+  endPolityFactions,
+  expelFactionMembers,
+} from './politics/faction-lifecycle';
+import {
+  createRebellionFactionSettlement,
+  suppressParallelRebellions,
+} from './politics/rebellion-faction-settlement';
 import { getDateForTurn } from './calendar';
 import { computeWorldHash } from './world-hash';
 import {
@@ -339,6 +348,7 @@ function createInitialCharacters(
       health: 100,
       activeDiseaseId: null,
       protectedUntilTurn: null,
+      factionId: null,
     };
   });
 }
@@ -515,6 +525,7 @@ export function createWorld(
     facts: [],
     factDigest: stableHash([]),
     legacyArchiveBoundary: null,
+    legacyFactionFactBoundaryTurn: null,
     archiveSystem: createWorldArchiveState(),
     situationSystem: createSituationSystemState(-1),
     agencySystem: createAgencySystemState(-1),
@@ -526,7 +537,13 @@ export function createWorld(
   createInitialArmies(world);
   const foundingEvent = initialHistoryEvent(world);
   world.history.push(foundingEvent);
-  createV02WorldSystems(world, foundingEvent.id);
+  const openingFactionFactIds = createV02WorldSystems(world, foundingEvent.id, {
+    turn: 0,
+    year: 1,
+    season: '春',
+    facts: [],
+  });
+  foundingEvent.sourceFactIds = openingFactionFactIds;
   createV03OceanSystems(world, { legacy: false, profile });
   createV03LifeSystems(world, { legacy: false });
   foundingEvent.summary = `${world.regions.length}处州域、${world.seaZones.length}片海域、${world.polities.length}方政权与${world.characters.length}名核心人物进入同一条可推演的历史。`;
@@ -796,16 +813,12 @@ function dissolveHeirlessPolity(
   polity.capitalRegionId = null;
   polity.controlledRegionIds = [];
   for (const family of world.families.filter((candidate) => candidate.polityId === polity.id)) family.polityId = recipient.id;
-  const dissolvedFactions = world.factions.filter((faction) => faction.active && faction.polityId === polity.id);
-  const dissolvedFactionIds = new Set(dissolvedFactions.map((faction) => faction.id));
-  for (const faction of dissolvedFactions) {
-    faction.active = false;
-    faction.endedTurn = context.turn;
-    faction.alliedFactionIds = [];
-  }
-  for (const faction of world.factions) {
-    faction.alliedFactionIds = faction.alliedFactionIds.filter((id) => !dissolvedFactionIds.has(id));
-  }
+  endPolityFactions(world, context,
+    polity.id,
+    'polity_dissolved',
+    territoryFacts.map((item) => item.id),
+    (input) => pushEvent(world, context, input),
+  );
   for (const relation of world.diplomacy.filter((candidate) => candidate.polityAId === polity.id || candidate.polityBId === polity.id)) {
     relation.status = '中立';
     relation.allianceUntilTurn = null;
@@ -1164,7 +1177,10 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
       successor = promoteBackgroundPerson(world, polity, 'regency-ward');
       anonymousCouncilRegency = true;
     }
-    if (successor.polityId !== polity.id) successor.polityId = polity.id;
+    if (successor.polityId !== polity.id) {
+      if (successor.factionId) expelFactionMembers(world, successor.factionId, [successor.id]);
+      successor.polityId = polity.id;
+    }
     const rulerIdBefore = deceasedRuler?.id ?? '';
     const governmentFormBefore = polity.governmentForm;
     polity.rulerId = successor.id;
@@ -1942,6 +1958,8 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
   parent.lastRebellionTurn = context.turn;
   region.controllerId = rebelId;
   region.unrest = clamp(region.unrest - 18);
+  const factionSettlement = createRebellionFactionSettlement(world, context);
+  factionSettlement.detach(character);
   character.polityId = rebelId;
   character.governedRegionId = null;
   character.loyalty = 100;
@@ -1961,6 +1979,7 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
       if (defectorId === parent.rulerId) continue;
       const defector = world.characters.find((item) => item.id === defectorId && item.alive);
       if (!defector) continue;
+      factionSettlement.detach(defector);
       defector.polityId = rebelId;
       defector.locationRegionId = region.id;
       defector.governedRegionId = null;
@@ -1991,7 +2010,10 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
       { label: '地方起兵', role: '触发', weight: 0.62, evidence: `${character.name}已完成财源、军力与政治准备` },
       { label: '脱离宗主', role: '结果', weight: 0.38, evidence: `${region.name}转入${newPolity.name}实际控制` },
     ],
-    stateDeltas: [{ entityType: 'region', entityId: region.id, field: 'controllerId', before: oldController, after: rebelId }],
+    stateDeltas: [
+      { entityType: 'region', entityId: region.id, field: 'controllerId', before: oldController, after: rebelId },
+      ...factionSettlement.stateDeltas,
+    ],
     sourceFactIds: [],
     payload: {
       regionId: region.id,
@@ -2001,24 +2023,7 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
       warId: rebellionWar.id,
     },
   });
-  const crackdownDeltas: StateDelta[] = [];
-  for (const governor of world.characters.filter((item) => (
-    item.alive
-    && item.polityId === parent.id
-    && Boolean(item.governedRegionId)
-    && item.rebellionReadiness > 0
-  ))) {
-    const before = governor.rebellionReadiness;
-    governor.rebellionReadiness = Math.round(before * 0.45);
-    crackdownDeltas.push({
-      entityType: 'character',
-      entityId: governor.id,
-      field: 'rebellionReadiness',
-      before,
-      after: governor.rebellionReadiness,
-      delta: governor.rebellionReadiness - before,
-    });
-  }
+  const crackdownDeltas = suppressParallelRebellions(world, parent.id);
   pushEvent(world, context, {
     category: '政治',
     kind: 'rebellion',
@@ -2043,6 +2048,7 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
       { entityType: 'character', entityId: character.id, field: 'polityId', before: parent.id, after: rebelId },
       { entityType: 'character', entityId: character.id, field: 'loyalty', before: loyaltyBefore, after: 100, delta: 100 - loyaltyBefore },
       { entityType: 'character', entityId: character.id, field: 'rebellionReadiness', before: readinessBefore, after: 0, delta: -readinessBefore },
+      ...factionSettlement.stateDeltas,
       { entityType: 'polity', entityId: newPolity.id, field: 'alive', before: false, after: true },
       { entityType: 'polity', entityId: parent.id, field: 'treasury', before: parentTreasuryBefore, after: parent.treasury, delta: parent.treasury - parentTreasuryBefore },
       { entityType: 'region', entityId: region.id, field: 'wealth', before: regionWealthBefore, after: region.wealth, delta: region.wealth - regionWealthBefore },
@@ -2055,6 +2061,7 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
     ],
     ...projectFactLinks([rebellionWarStartedFact, territoryFact]),
   });
+  factionSettlement.settle([territoryFact.id], (input) => pushEvent(world, context, input));
   repairAppointments(world, context);
 }
 
@@ -2209,16 +2216,12 @@ function eliminatePolity(
     character.commandingArmyId = null;
     character.loyalty = Math.round(clamp(character.loyalty * 0.55));
   }
-  const losingFactions = world.factions.filter((faction) => faction.active && faction.polityId === loser.id);
-  const losingFactionIds = new Set(losingFactions.map((faction) => faction.id));
-  for (const faction of losingFactions) {
-    faction.active = false;
-    faction.endedTurn = context.turn;
-    faction.alliedFactionIds = [];
-  }
-  for (const faction of world.factions) {
-    faction.alliedFactionIds = faction.alliedFactionIds.filter((id) => !losingFactionIds.has(id));
-  }
+  endPolityFactions(world, context,
+    loser.id,
+    'polity_destroyed',
+    [territoryFact.id],
+    (input) => pushEvent(world, context, input),
+  );
   for (const family of world.families.filter((item) => item.polityId === loser.id)) family.polityId = victor.id;
   for (const background of world.backgroundPeople.filter((item) => item.polityId === loser.id && item.promotedCharacterId === null)) {
     background.polityId = world.regions.find((item) => item.id === background.regionId)?.controllerId ?? victor.id;
@@ -2905,6 +2908,12 @@ function cloneWorld(world: WorldState): WorldState {
       ...faction,
       memberIds: [...faction.memberIds],
       alliedFactionIds: [...faction.alliedFactionIds],
+      rivalFactionIds: [...faction.rivalFactionIds],
+      relationSinceTurns: { ...faction.relationSinceTurns },
+      coreMemberIds: [...faction.coreMemberIds],
+      predecessorFactionIds: [...faction.predecessorFactionIds],
+      successorFactionIds: [...faction.successorFactionIds],
+      lifecycle: faction.lifecycle.map((record) => ({ ...record, relatedFactionIds: [...record.relatedFactionIds] })),
     })),
     diplomacy: world.diplomacy.map((relation) => ({
       ...relation,
@@ -3063,6 +3072,7 @@ export function advanceWorldDetailed(
   runSystem('military_careers', () => processV02MilitaryCareers(world, context, (input) => pushEvent(world, context, input)));
   runSystem('agency_decisions', () => processAgencyDecisionSystem(world, context, (input) => pushEvent(world, context, input)));
   runSystem('appointments', () => {
+    processV02PoliticalCommitments(world, context, (input) => pushEvent(world, context, input));
     syncOfficeAppointments(world, context.turn, context);
     refreshFactionPowerLedgers(world);
   });

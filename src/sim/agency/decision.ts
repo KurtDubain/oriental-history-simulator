@@ -708,38 +708,122 @@ function supportActionFor(
   if (actor.goal.status !== 'active'
     || actor.plan.status !== 'active'
     || turn < actor.nextEligibleSupportTurn
-    || actor.supportActions.some((action) => action.outcome === 'secured')) return null;
+    // The retained action ledger is also the hard lifetime budget for one
+    // goal. Once every available approach has had a fair chance, keep the
+    // unresolved ambition quiet instead of forgetting an old refusal and
+    // manufacturing an endless lobbying loop.
+    || actor.supportAttemptOrdinal >= MAX_AGENCY_SUPPORT_ACTIONS) return null;
   const character = world.characters.find((item) => item.id === actor.characterId && item.alive);
   const army = world.armies.find((item) => item.id === actor.goal.targetArmyId);
   const polity = world.polities.find((item) => item.id === actor.goal.targetPolityId && item.alive);
   if (!character || !army || !polity || army.deputyCommanderId !== character.id) return null;
   const signals = preparationSignals(world, character, army.commanderId, army.id, turn, actor.supportActions);
+  const preparations = [signals.patronage, signals.militarySupport, signals.familyBacking]
+    .filter(Boolean).length;
+  // One concrete promise is enough evidence for a formal request, but it is
+  // not necessarily enough preparation. Keep seeking a genuinely missing
+  // support channel until two pillars exist; once they do, waiting on merit or
+  // a command opening must not generate repetitive lobbying.
+  if (signals.explicitSupport && preparations >= 2) return null;
+  const securedPatronage = actor.supportActions.some((item) => (
+    item.outcome === 'secured'
+    && item.action === 'request_backing'
+    && (item.targetKind === 'commander' || item.targetKind === 'ruler')
+  ));
+  const securedMilitarySupport = actor.supportActions.some((item) => (
+    item.outcome === 'secured' && item.action === 'cultivate_military_support'
+  ));
+  const securedFamilyBacking = actor.supportActions.some((item) => (
+    item.outcome === 'secured'
+    && item.action === 'request_backing'
+    && item.targetKind === 'family_head'
+  ));
+  const refusedTargets = new Set(actor.supportActions
+    .filter((item) => item.action === 'request_backing' && item.outcome === 'refused')
+    .map((item) => item.targetId));
+  const backingCandidates = [
+    {
+      targetKind: army.commanderId === polity.rulerId ? 'ruler' as const : 'commander' as const,
+      targetId: army.commanderId,
+      value: patronageValue(directedRelationship(world, army.commanderId, character.id)),
+      priority: 0,
+    },
+    {
+      targetKind: 'ruler' as const,
+      targetId: polity.rulerId,
+      value: patronageValue(directedRelationship(world, polity.rulerId, character.id)),
+      priority: 1,
+    },
+  ]
+    .filter((candidate, index, all) => (
+      candidate.targetId !== character.id
+      && !refusedTargets.has(candidate.targetId)
+      && all.findIndex((item) => item.targetId === candidate.targetId) === index
+    ))
+    .sort((left, right) => right.value - left.value
+      || left.priority - right.priority
+      || stableCompare(left.targetId, right.targetId));
+  const family = world.families.find((item) => item.id === character.familyId && item.active);
+  const familyTargetId = family?.headId;
+  const familyTargetAvailable = Boolean(
+    familyTargetId
+    && familyTargetId !== character.id
+    && !refusedTargets.has(familyTargetId),
+  );
   let action: AgencySupportActionKind;
   let targetKind: AgencySupportTargetKind;
   let targetId: string;
   let planAction: IndependentCommandPlanAction;
-  if (!signals.patronage || (signals.militarySupport && signals.familyBacking)) {
-    action = 'request_backing';
-    const commanderSupport = patronageValue(directedRelationship(world, army.commanderId, character.id));
-    const rulerSupport = patronageValue(directedRelationship(world, polity.rulerId, character.id));
-    if (commanderSupport >= rulerSupport || army.commanderId === polity.rulerId) {
-      targetKind = army.commanderId === polity.rulerId ? 'ruler' : 'commander';
-      targetId = army.commanderId;
+  if (!signals.explicitSupport) {
+    const backing = backingCandidates[0];
+    if (backing && !securedPatronage) {
+      action = 'request_backing';
+      targetKind = backing.targetKind;
+      targetId = backing.targetId;
+      planAction = 'seek_patronage';
+    } else if (!securedMilitarySupport) {
+      action = 'cultivate_military_support';
+      targetKind = 'army_officers';
+      targetId = army.id;
+      planAction = 'build_military_support';
+    } else if (!securedFamilyBacking && familyTargetAvailable && familyTargetId) {
+      action = 'request_backing';
+      targetKind = 'family_head';
+      targetId = familyTargetId;
+      planAction = 'seek_family_backing';
     } else {
-      targetKind = 'ruler';
-      targetId = polity.rulerId;
+      return null;
     }
-    planAction = 'seek_patronage';
+  } else if (!signals.patronage) {
+    action = 'request_backing';
+    const backing = backingCandidates[0];
+    if (backing) {
+      targetKind = backing.targetKind;
+      targetId = backing.targetId;
+      planAction = 'seek_patronage';
+    } else if (!signals.familyBacking && !securedFamilyBacking && familyTargetAvailable && familyTargetId) {
+      targetKind = 'family_head';
+      targetId = familyTargetId;
+      planAction = 'seek_family_backing';
+    } else if (!signals.militarySupport && !securedMilitarySupport) {
+      action = 'cultivate_military_support';
+      targetKind = 'army_officers';
+      targetId = army.id;
+      planAction = 'build_military_support';
+    } else {
+      return null;
+    }
   } else if (!signals.militarySupport) {
+    if (securedMilitarySupport) return null;
     action = 'cultivate_military_support';
     targetKind = 'army_officers';
     targetId = army.id;
     planAction = 'build_military_support';
   } else {
-    const family = world.families.find((item) => item.id === character.familyId && item.active);
+    if (securedFamilyBacking || !familyTargetAvailable || !familyTargetId) return null;
     action = 'request_backing';
     targetKind = 'family_head';
-    targetId = family?.headId ?? polity.rulerId;
+    targetId = familyTargetId;
     planAction = 'seek_family_backing';
   }
   return {
@@ -783,11 +867,25 @@ function resolveSupportAction(
   const familyWeight = action.targetKind === 'family_head'
     ? (family?.prestige ?? 0) * 0.18 + (family?.politicalInfluence ?? 0) * 0.16
     : 0;
-  const score = action.action === 'cultivate_military_support'
+  const previousSameTrack = actorState.supportActions.filter((item) => (
+    item.action === action.action
+    && item.targetKind === action.targetKind
+    && item.targetId === action.targetId
+    && item.outcome !== 'secured'
+  ));
+  const persistenceBonus = action.action === 'cultivate_military_support'
+    // Repeated work among the same officers builds a bounded network. A very
+    // weak deputy still cannot grind a guaranteed success: the cap is 12.
+    ? Math.min(12, previousSameTrack.length * 3)
+    // Only a deferral can mature through follow-up. An explicit refusal is
+    // handled by changing targets in supportActionFor, never by persistence.
+    : Math.min(12, previousSameTrack.filter((item) => item.outcome === 'deferred').length * 3);
+  const baseScore = action.action === 'cultivate_military_support'
     ? actor.leadership * 0.22 + actor.merit * 0.24 + actor.deputyExperience * 0.24
       + actor.renown * 0.16 + army.morale * 0.14 - actor.insubordination * 0.08
     : actor.loyalty * 0.2 + actor.influence * 0.2 + actor.merit * 0.12
       + actor.cunning * 0.1 + relationTrust * 0.24 + familyWeight - actor.ambition * 0.08;
+  const score = baseScore + persistenceBonus;
   const outcome: AgencySupportOutcome = score >= 42 ? 'secured' : score >= 33 ? 'deferred' : 'refused';
   const strength = clamp(score);
   const deltas: StateDelta[] = [];
@@ -848,7 +946,9 @@ function resolveSupportAction(
     causes: [
       { label: '独立统军之志', role: '结构', weight: 0.28, evidence: `${actor.name}正在为请领${army.name}军令作准备` },
       { label: '人物选择', role: '选择', weight: 0.26, evidence: action.action === 'cultivate_military_support' ? `${actor.name}拿出时间与资财联络本军将校` : `${actor.name}亲自向${targetLabel}请求明确背书` },
-      { label: '回应条件', role: '条件', weight: 0.22, evidence: `履历、信任与处境合计为${Math.round(score)}` },
+      { label: '回应条件', role: '条件', weight: 0.22, evidence: persistenceBonus > 0
+        ? `履历、信任与处境为${Math.round(baseScore)}，连续经营增加${persistenceBonus}`
+        : `履历、信任与处境合计为${Math.round(baseScore)}` },
       { label: '本次结果', role: '结果', weight: 0.24, evidence: `${targetLabel}${resultCopy}` },
     ],
     stateDeltas: deltas,

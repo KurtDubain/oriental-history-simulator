@@ -246,7 +246,13 @@ function createFleetAtPort(
     homePortRegionId: portRegion.id,
     portRegionId: portRegion.id,
     seaZoneId: null,
-    ...ships,
+    // Keep the fleet identity namespace independent from the shipbuilding
+    // project that supplied this composition. A completed project is a wider
+    // structural object at runtime; spreading it here can overwrite `id` with
+    // `shipproject_*` and leave the fleet allocation counter behind its entity.
+    warships: ships.warships,
+    transports: ships.transports,
+    patrolShips: ships.patrolShips,
     sailors,
     morale: 62,
     training: 46 + level * 4,

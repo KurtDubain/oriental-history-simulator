@@ -40,6 +40,9 @@ jobs:
       - name: Run unit tests
         run: npm run test:run
 
+      - name: Audit political identity and court projection
+        run: npm run test:audit:politics
+
       - name: Check architecture boundaries
         run: npm run test:audit:architecture
 
@@ -66,6 +69,9 @@ jobs:
 
       - name: Run explainable roster browser flow
         run: npm run test:e2e:roster01
+
+      - name: Run political visibility browser flow
+        run: npm run test:e2e:politics
 
       - name: Run settings and audio browser flow
         run: npm run test:e2e:fux03

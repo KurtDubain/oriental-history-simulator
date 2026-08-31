@@ -1,8 +1,21 @@
 import { FAMILY_NAMES, GIVEN_NAMES } from './names';
 import { findMapProfileForContentVersion } from '../maps';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
-import { emitSimulationFact, projectFactLinks } from './facts';
+import { emitSimulationFact, projectFactLinks, type FactTurnBuffer } from './facts';
 import { refreshFactionPowerLedgers } from './politics/power-ledger';
+import {
+  bootstrapFactionModel,
+  changeFactionRelation,
+  expelFactionMembers,
+  invalidatePoliticalAllianceCommitment,
+  processFactionLifecycle,
+} from './politics/faction-lifecycle';
+import {
+  firstPoliticalAllianceEndFact,
+  legacyPoliticalAllianceRelationIsActive,
+  politicalAllianceFormationFact,
+  politicalAllianceRelationIsActive,
+} from './politics/faction-commitments';
 import type {
   BackgroundPersonState,
   BiographyFact,
@@ -11,8 +24,6 @@ import type {
   CommitmentState,
   DiplomacyState,
   EventCause,
-  FactionKind,
-  FactionState,
   FamilyState,
   HistoryEvent,
   MemoryKind,
@@ -34,6 +45,10 @@ interface V02TurnContext {
   appointmentSourceFactIdsByArmyId?: Record<string, string>;
 }
 
+type AppointmentFactContext = FactTurnBuffer & {
+  appointmentSourceFactIdsByArmyId?: Record<string, string>;
+};
+
 interface V02EventInput {
   category: HistoryEvent['category'];
   kind: string;
@@ -54,6 +69,12 @@ type EmitEvent = (input: V02EventInput) => HistoryEvent;
 
 const MAX_MEMORIES_PER_RELATIONSHIP = 8;
 const MAX_BIOGRAPHY_FACTS = 80;
+const OPENING_CENTRAL_OFFICE_KINDS = new Set<OfficeAppointment['kind']>([
+  '君主',
+  '宰辅',
+  '枢密使',
+  '廷臣',
+]);
 
 function clamp(value: number, minimum = 0, maximum = 100): number {
   return Math.max(minimum, Math.min(maximum, value));
@@ -364,73 +385,6 @@ function ensureDiplomacyPairs(world: WorldState): void {
   world.diplomacy.sort((left, right) => stableCompare(left.id, right.id));
 }
 
-function factionKindFor(character: CharacterState): FactionKind {
-  if (character.politicalClass === '宗室' || character.politicalClass === '外戚') return '宗室';
-  if (character.politicalClass === '军门' || character.commandingArmyId || character.commandingFleetId) return '军门';
-  if (character.politicalClass === '地方豪强' || character.governedRegionId) return '地方';
-  if (character.politicalClass === '士族') return '士族';
-  return '官僚';
-}
-
-function factionAgenda(kind: FactionKind): FactionState['agenda'] {
-  if (kind === '军门') return '对外战争';
-  if (kind === '地方') return '地方自治';
-  if (kind === '宗室') return '维持秩序';
-  if (kind === '士族') return '休养生息';
-  return '扩张权势';
-}
-
-function ensureFactions(world: WorldState, polityId: string): void {
-  const adults = livingAdults(world, polityId);
-  if (adults.length === 0) return;
-  const groups = new Map<FactionKind, CharacterState[]>();
-  for (const character of adults) {
-    const kind = factionKindFor(character);
-    const list = groups.get(kind) ?? [];
-    list.push(character);
-    groups.set(kind, list);
-  }
-  for (const faction of world.factions.filter((item) => item.active && item.polityId === polityId && !groups.has(item.kind))) {
-    faction.active = false;
-    faction.endedTurn = world.turn;
-    faction.alliedFactionIds = [];
-    for (const other of world.factions) other.alliedFactionIds = other.alliedFactionIds.filter((id) => id !== faction.id);
-  }
-  for (const kind of [...groups.keys()].sort(stableCompare)) {
-    const members = groups.get(kind) as CharacterState[];
-    let faction = world.factions.find((item) => item.active && item.polityId === polityId && item.kind === kind);
-    const leader = [...members].sort((left, right) => (
-      right.influence - left.influence
-      || right.renown - left.renown
-      || right.cunning - left.cunning
-      || stableCompare(left.id, right.id)
-    ))[0] as CharacterState;
-    if (!faction) {
-      world.counters.faction += 1;
-      faction = {
-        id: `fac_${String(world.counters.faction).padStart(4, '0')}`,
-        polityId,
-        name: `${leader.familyName}氏${kind}派`,
-        kind,
-        leaderId: leader.id,
-        memberIds: [],
-        power: 0,
-        cohesion: keyedInt(world.seed, 42, 72, 'faction', polityId, kind, 'cohesion'),
-        agenda: factionAgenda(kind),
-        alliedFactionIds: [],
-        lastActionTurn: -100,
-        active: true,
-        endedTurn: null,
-      };
-      world.factions.push(faction);
-    }
-    faction.leaderId = leader.id;
-    faction.memberIds = members.map((item) => item.id).sort(stableCompare);
-    faction.cohesion = Math.round(clamp(faction.cohesion + (members.length >= 2 ? 0.2 : -0.5)));
-  }
-  refreshFactionPowerLedgers(world, polityId);
-}
-
 function appendBackgroundPerson(world: WorldState, regionId: string, id: string, birthTurn: number, initialOpportunity: number): void {
   const region = world.regions.find((candidate) => candidate.id === regionId);
   if (!region) throw new Error(`Cannot create background cohort in missing region ${regionId}`);
@@ -627,6 +581,7 @@ export function promoteBackgroundPerson(
     health: 100,
     activeDiseaseId: null,
     protectedUntilTurn: null,
+    factionId: null,
   };
   stub.promotedCharacterId = character.id;
   stub.promotedTurn = world.turn;
@@ -689,7 +644,7 @@ export function ensureV02PolitySystems(world: WorldState, polityId: string): voi
     const ruler = world.characters.find((character) => character.id === polity.rulerId);
     polity.rulingFamilyId = ruler?.familyId ?? null;
   }
-  ensureFactions(world, polityId);
+  if (!world.factions.length) bootstrapFactionModel(world, 'legacy');
   ensureDiplomacyPairs(world);
 }
 
@@ -702,10 +657,9 @@ export function establishRulingFamilyBranch(world: WorldState, polity: PolitySta
     person.promotedCharacterId === null && person.regionId === polity.capitalRegionId
   ))) background.polityId = polity.id;
   syncFamilyMembers(world);
-  ensureFactions(world, polity.id);
 }
 
-export function createV02WorldSystems(world: WorldState, foundingEventId: string): void {
+export function createV02WorldSystems(world: WorldState, foundingEventId: string, factContext?: FactTurnBuffer): string[] {
   // Initial rulers define a concrete lineage; unrelated same-surname courtiers get distinct IDs.
   for (const polity of [...world.polities].sort((left, right) => stableCompare(left.id, right.id))) {
     const members = world.characters
@@ -749,9 +703,15 @@ export function createV02WorldSystems(world: WorldState, foundingEventId: string
       inward.trust = Math.max(inward.trust, 58);
     }
   }
-  for (const polity of world.polities) ensureFactions(world, polity.id);
+  const factionFactIds = bootstrapFactionModel(world, 'opening', factContext);
   ensureDiplomacyPairs(world);
-  syncOfficeAppointments(world, 0);
+  const factCountBeforeAppointments = factContext?.facts.length ?? 0;
+  syncOfficeAppointments(world, 0, factContext, OPENING_CENTRAL_OFFICE_KINDS);
+  const appointmentFactIds = factContext?.facts
+    .slice(factCountBeforeAppointments)
+    .filter((fact) => fact.kind === 'appointment_started')
+    .map((fact) => fact.id) ?? [];
+  return [...factionFactIds, ...appointmentFactIds];
 }
 
 function applyMarriage(
@@ -915,6 +875,7 @@ function createChild(world: WorldState, parents: readonly [CharacterState, Chara
     health: 100,
     activeDiseaseId: null,
     protectedUntilTurn: null,
+    factionId: null,
   };
   world.characters.push(child);
   const event = emit({
@@ -1212,6 +1173,10 @@ function updateFamilyMetrics(world: WorldState): void {
 function processDueCommitments(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
   if (context.season !== '冬') return;
   for (const commitment of world.commitments.filter((item) => item.status === '生效')) {
+    // Faction relations can still end during politics, rebellion or battle in
+    // this same quarter. Their deadlines are settled by
+    // processV02PoliticalCommitments after those systems have finished.
+    if (commitment.kind === '政治联盟') continue;
     if (commitment.kind === '婚盟') {
       const left = world.characters.find((character) => character.id === commitment.promisorId);
       const right = world.characters.find((character) => character.id === commitment.promiseeId);
@@ -1235,22 +1200,85 @@ function processDueCommitments(world: WorldState, context: V02TurnContext, emit:
       continue;
     }
     if (commitment.dueTurn === null || commitment.dueTurn > context.turn || commitment.kind === '军令') continue;
-    const event = emit({
-      category: commitment.kind === '外交盟约' ? '外交' : '政治',
-      kind: 'commitment_fulfilled',
-      title: `${commitment.kind}承诺履行`,
-      summary: `${commitment.promisorId}与${commitment.promiseeId}在约定期限内维持“${commitment.terms}”，承诺转化为可追溯的信任记忆。`,
-      importance: commitment.kind === '外交盟约' ? 3 : 2,
-      actorIds: [commitment.promisorId, commitment.promiseeId],
-      polityIds: commitment.polityIds,
-      causes: [
-        { label: '承诺条款', role: '结构', weight: 0.35, evidence: commitment.terms },
-        { label: '期限届满', role: '触发', weight: 0.25, evidence: `约定第${commitment.dueTurn}回合复核` },
-        { label: '履约记录', role: '结果', weight: 0.4, evidence: `承诺${commitment.id}未出现背约事件` },
-      ],
-      stateDeltas: [{ entityType: 'commitment', entityId: commitment.id, field: 'status', before: '生效', after: '履约' }],
-    });
-    resolveCommitment(world, commitment, '履约', event);
+    fulfillDueCommitment(world, commitment, emit);
+  }
+}
+
+function fulfillDueCommitment(
+  world: WorldState,
+  commitment: CommitmentState,
+  emit: EmitEvent,
+): void {
+  const event = emit({
+    category: commitment.kind === '外交盟约' ? '外交' : '政治',
+    kind: 'commitment_fulfilled',
+    title: `${commitment.kind}承诺履行`,
+    summary: `${commitment.promisorId}与${commitment.promiseeId}在约定期限内维持“${commitment.terms}”，承诺转化为可追溯的信任记忆。`,
+    importance: commitment.kind === '外交盟约' ? 3 : 2,
+    actorIds: [commitment.promisorId, commitment.promiseeId],
+    polityIds: commitment.polityIds,
+    causes: [
+      { label: '承诺条款', role: '结构', weight: 0.35, evidence: commitment.terms },
+      { label: '期限届满', role: '触发', weight: 0.25, evidence: `约定第${commitment.dueTurn}回合复核` },
+      { label: '履约记录', role: '结果', weight: 0.4, evidence: `承诺${commitment.id}未出现背约事件` },
+    ],
+    stateDeltas: [{ entityType: 'commitment', entityId: commitment.id, field: 'status', before: '生效', after: '履约' }],
+  });
+  resolveCommitment(world, commitment, '履约', event);
+}
+
+/** Settle political promises only after every same-quarter faction-ending path. */
+export function processV02PoliticalCommitments(
+  world: WorldState,
+  context: V02TurnContext,
+  emit: EmitEvent,
+): void {
+  if (context.season !== '冬') return;
+  for (const commitment of world.commitments.filter((item) => (
+    item.kind === '政治联盟' && item.status === '生效'
+  ))) {
+    const formationFact = politicalAllianceFormationFact(world, commitment);
+    if (formationFact) {
+      const endingFact = firstPoliticalAllianceEndFact(world, formationFact);
+      if (endingFact) {
+        invalidatePoliticalAllianceCommitment(world, commitment, endingFact, emit);
+        continue;
+      }
+      // A typed formation link makes the faction relation authoritative.
+      if (!politicalAllianceRelationIsActive(world, formationFact)) continue;
+    } else {
+      const legacyFactionFactBoundaryTurn = Math.max(
+        world.legacyArchiveBoundary?.turn ?? -1,
+        world.legacyFactionFactBoundaryTurn ?? -1,
+      );
+      // A modern promise without its typed formation Fact is malformed and
+      // must never mature into a false fulfillment. Validation reports it.
+      if (commitment.madeTurn > legacyFactionFactBoundaryTurn) continue;
+      if (!legacyPoliticalAllianceRelationIsActive(world, commitment)) {
+        const promisorName = world.characters.find((character) => character.id === commitment.promisorId)?.name ?? '原承诺人';
+        const promiseeName = world.characters.find((character) => character.id === commitment.promiseeId)?.name ?? '原受诺人';
+        const event = emit({
+          category: '政治',
+          kind: 'commitment_ended',
+          title: '旧政治联盟承诺失效',
+          summary: `旧卷没有保存这项联盟的建立事实，而${promisorName}与${promiseeName}当前也不再分属一对互相结盟的活动派系；“${commitment.terms}”因此失效，不记为履约或背约。`,
+          importance: 2,
+          actorIds: [commitment.promisorId, commitment.promiseeId],
+          polityIds: commitment.polityIds,
+          regionIds: [],
+          causes: [
+            { label: '旧卷边界', role: '结构', weight: 0.3, evidence: `该承诺建立于第${commitment.madeTurn}回合，当时尚未记录派系关系事实` },
+            { label: '联盟载体消失', role: '条件', weight: 0.45, evidence: '原承诺双方当前不再分属一对双向结盟的活动派系' },
+            { label: '保守结案', role: '结果', weight: 0.25, evidence: `${commitment.id}状态生效→失效，避免凭缺失史料判作履约` },
+          ],
+          stateDeltas: [{ entityType: 'commitment', entityId: commitment.id, field: 'status', before: '生效', after: '失效' }],
+        });
+        resolveCommitment(world, commitment, '失效', event);
+        continue;
+      }
+    }
+    if (commitment.dueTurn === null || commitment.dueTurn > context.turn) continue;
+    fulfillDueCommitment(world, commitment, emit);
   }
 }
 
@@ -1277,8 +1305,9 @@ function actionRecentlyRecorded(character: CharacterState, kind: string, turn: n
 }
 
 export function processV02Politics(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
+  processFactionLifecycle(world, context, emit);
   for (const polity of world.polities.filter((item) => item.alive).sort((left, right) => stableCompare(left.id, right.id))) {
-    ensureFactions(world, polity.id);
+    refreshFactionPowerLedgers(world, polity.id);
     const ruler = world.characters.find((character) => character.id === polity.rulerId && character.alive);
     if (!ruler) continue;
     const factions = world.factions
@@ -1302,31 +1331,15 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
         ? world.characters.find((character) => character.id === partner.leaderId && character.alive)
         : undefined;
       if (partner && partnerLeader && dominant.cohesion + partner.cohesion >= 104) {
-        dominant.alliedFactionIds = [...new Set([...dominant.alliedFactionIds, partner.id])].sort(stableCompare);
-        partner.alliedFactionIds = [...new Set([...partner.alliedFactionIds, dominant.id])].sort(stableCompare);
-        const event = emit({
-          category: '政治',
-          kind: 'political_alliance',
-          title: `${dominant.name}与${partner.name}结盟`,
-          summary: `${leader.name}与${partnerLeader.name}围绕朝廷议程交换支持，形成有期限、可履约或背约的政治联盟。`,
-          importance: 3,
-          actorIds: [leader.id, partnerLeader.id],
-          polityIds: [polity.id],
-          regionIds: polity.capitalRegionId ? [polity.capitalRegionId] : [],
-          causes: [
-            { label: '派系并存', role: '结构', weight: 0.28, evidence: `${dominant.name}权力${dominant.power}，${partner.name}权力${partner.power}` },
-            { label: '联盟条件', role: '条件', weight: 0.24, evidence: `双方凝聚合计${dominant.cohesion + partner.cohesion}` },
-            { label: '交换支持', role: '选择', weight: 0.28, evidence: `议程为“${dominant.agenda}”与“${partner.agenda}”` },
-            { label: '承诺成立', role: '结果', weight: 0.2, evidence: '双方派系ID互相登记并建立四年政治承诺' },
-          ],
-          stateDeltas: [
-            { entityType: 'faction', entityId: dominant.id, field: 'alliedFactionIds', before: null, after: partner.id },
-            { entityType: 'faction', entityId: partner.id, field: 'alliedFactionIds', before: null, after: dominant.id },
-          ],
-        });
-        createCommitment(world, '政治联盟', leader.id, partnerLeader.id, [polity.id], '在朝廷议程中互相支持且不以清洗夺取盟友席位', event.id, context.turn + 16, 18);
-        remember(world, leader.id, partnerLeader.id, '恩义', 10, event.summary, event.id);
-        remember(world, partnerLeader.id, leader.id, '恩义', 10, event.summary, event.id);
+        const relationFact = changeFactionRelation(world, context, dominant.id, partner.id, 'alliance', 'formed', 'court_support_exchange', emit);
+        const event = relationFact
+          ? [...context.events].reverse().find((item) => item.sourceFactIds.includes(relationFact.id))
+          : undefined;
+        if (event) {
+          createCommitment(world, '政治联盟', leader.id, partnerLeader.id, [polity.id], '在朝廷议程中互相支持且不以清洗夺取盟友席位', event.id, context.turn + 16, 18);
+          remember(world, leader.id, partnerLeader.id, '恩义', 10, event.summary, event.id);
+          remember(world, partnerLeader.id, leader.id, '恩义', 10, event.summary, event.id);
+        }
       }
     }
 
@@ -1434,7 +1447,8 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       leader.governedRegionId = null;
       leader.influence = Math.round(clamp(leader.influence - 16));
       leader.loyalty = Math.round(clamp(leader.loyalty - 18));
-      dominant.memberIds = dominant.memberIds.filter((id) => id === leader.id || keyedRandom(world.seed, context.turn, 'purge', dominant.id, id) > 0.35);
+      const retainedMemberIds = dominant.memberIds.filter((id) => id === leader.id || keyedRandom(world.seed, context.turn, 'purge', dominant.id, id) > 0.35);
+      expelFactionMembers(world, dominant.id, dominant.memberIds.filter((id) => !retainedMemberIds.includes(id)));
       dominant.power = Math.round(clamp(dominant.power - 18));
       dominant.lastActionTurn = context.turn;
       polity.lastCourtCrisisTurn = context.turn;
@@ -1816,19 +1830,41 @@ function officeKey(office: Pick<OfficeAppointment, 'polityId' | 'kind' | 'holder
   return [office.polityId, office.kind, office.holderId, office.regionId ?? '', office.armyId ?? '', office.fleetId ?? ''].join(':');
 }
 
-export function syncOfficeAppointments(world: WorldState, turn: number, context?: V02TurnContext): void {
+function appointmentBasis(world: WorldState, office: Pick<OfficeAppointment, 'kind' | 'holderId' | 'armyId' | 'fleetId'>): string {
+  const holder = world.characters.find((character) => character.id === office.holderId);
+  const name = holder?.name ?? '任官者';
+  if (office.kind === '君主') return `${name}是当前在位统治者`;
+  if (office.kind === '宰辅' && holder) {
+    return `${name}以政略${holder.governance}、谋略${holder.cunning}、影响${holder.influence}居群臣前列`;
+  }
+  if (office.kind === '枢密使' && holder) {
+    return `${name}以统率${holder.leadership}、谋略${holder.cunning}、功名${holder.merit}居军政人物前列`;
+  }
+  if (office.kind === '军团主帅' && office.armyId) return `${name}实际统领军团${office.armyId}`;
+  if (office.kind === '军团副将' && office.armyId) return `${name}实际辅佐军团${office.armyId}`;
+  if ((office.kind === '水师提督' || office.kind === '水师副将') && office.fleetId) {
+    return `${name}实际承担水师${office.fleetId}的${office.kind}职责`;
+  }
+  return `${name}实际承担${office.kind}对应职责`;
+}
+
+export function syncOfficeAppointments(
+  world: WorldState,
+  turn: number,
+  context?: AppointmentFactContext,
+  recordedKinds?: ReadonlySet<OfficeAppointment['kind']>,
+): void {
   for (const background of world.backgroundPeople.filter((person) => person.promotedCharacterId === null)) {
     const controllerId = world.regions.find((region) => region.id === background.regionId)?.controllerId;
     if (controllerId) background.polityId = controllerId;
   }
-  for (const polity of world.polities.filter((item) => item.alive)) ensureFactions(world, polity.id);
   const desired = desiredOffices(world);
   const desiredKeys = new Set(desired.map(officeKey));
   for (const office of world.offices.filter((item) => item.active)) {
     if (!desiredKeys.has(officeKey(office))) {
       office.active = false;
       office.endedTurn = turn;
-      if (context) {
+      if (context && (!recordedKinds || recordedKinds.has(office.kind))) {
         emitSimulationFact(world, context, {
           kind: 'appointment_ended',
           category: '政治',
@@ -1871,7 +1907,7 @@ export function syncOfficeAppointments(world: WorldState, turn: number, context?
       active: true,
     };
     world.offices.push(appointment);
-    if (context) {
+    if (context && (!recordedKinds || recordedKinds.has(appointment.kind))) {
       emitSimulationFact(world, context, {
         kind: 'appointment_started',
         category: '政治',
@@ -1880,7 +1916,7 @@ export function syncOfficeAppointments(world: WorldState, turn: number, context?
         polityIds: [appointment.polityId],
         regionIds: appointment.regionId ? [appointment.regionId] : [],
         causes: [
-          { label: '当前职权', role: '结构', weight: 0.65, evidence: `${appointment.holderId}实际承担${appointment.kind}对应职责` },
+          { label: '任职依据', role: '结构', weight: 0.65, evidence: appointmentBasis(world, appointment) },
           { label: '任命生效', role: '结果', weight: 0.35, evidence: `${appointment.id}于第${turn}回合开始` },
         ],
         stateDeltas: [{ entityType: 'office', entityId: appointment.id, field: 'active', before: false, after: true }],
@@ -1931,6 +1967,7 @@ export function migrateV01SocialState(world: WorldState): void {
     character.merit = character.role === '将领' ? Math.round(character.renown * 0.5) : 0;
     character.deputyExperience = 0;
     character.insubordination = 0;
+    character.factionId = null;
     const legacyEventId = referenceEventId && world.history[0]?.actorIds.includes(character.id) ? referenceEventId : null;
     character.biography = [{
       id: `${character.id}:bio:${legacyEventId ?? 'unrecorded'}:legacy`,
@@ -1974,7 +2011,7 @@ export function migrateV01SocialState(world: WorldState): void {
   }
   syncFamilyMembers(world);
   createBackgroundPopulation(world);
-  for (const polity of world.polities.filter((item) => item.alive)) ensureFactions(world, polity.id);
+  bootstrapFactionModel(world, 'legacy');
   ensureDiplomacyPairs(world);
   syncOfficeAppointments(world, world.turn);
 }

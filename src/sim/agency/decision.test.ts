@@ -19,6 +19,7 @@ import {
 import { syncOfficeAppointments } from '../v02';
 import {
   AGENCY_DECISION_CLOSED_RETENTION_TURNS,
+  MAX_AGENCY_SUPPORT_ACTIONS,
   createAgencyDecisionSystemState,
   validateAgencyDecisionSystemState,
   processAgencyDecisionSystem,
@@ -80,6 +81,18 @@ function eventEmitter(world: WorldState, context: AgencyDecisionTurnContext & { 
     world.historyDigest = stableHash([world.historyDigest, event]);
     return event;
   };
+}
+
+function processDecisionOnlyTurn(
+  world: WorldState,
+  turn: number,
+): AgencyDecisionTurnContext & { events: HistoryEvent[] } {
+  const context = emptyDecisionContext(turn);
+  world.turn = turn;
+  world.year = context.year;
+  world.season = context.season;
+  processAgencyDecisionSystem(world, context, eventEmitter(world, context));
+  return context;
 }
 
 interface DecisionFixture {
@@ -369,6 +382,88 @@ describe('C10/C11 authoritative agency decision core', () => {
     expect(context.facts.some((fact) => fact.kind === 'agency_intent_resolved')).toBe(false);
     expect(actor?.plan.steps.find((step) => step.action === 'seek_family_backing')?.status).toBe('completed');
     expect(context.events.every((event) => !event.summary.includes('已经明确背书'))).toBe(true);
+  });
+
+  it('lets a genuine deferral mature through bounded follow-up and reach formal review', () => {
+    const { world, context, deputyId, commanderId } = decisionFixture('agency-backing-follow-up', 'rejected');
+    const polity = world.polities.find((item) => item.id === world.characters.find((character) => character.id === deputyId)?.polityId);
+    const deputy = world.characters.find((character) => character.id === deputyId);
+    if (!polity || !deputy) throw new Error('Expected deputy and polity for follow-up fixture');
+    world.relationships = world.relationships.filter((relationship) => !(
+      relationship.targetId === deputyId
+      && (relationship.sourceId === commanderId || relationship.sourceId === polity.rulerId)
+    ));
+    deputy.loyalty = 80;
+    deputy.influence = 50;
+    deputy.merit = 40;
+    deputy.cunning = 50;
+    deputy.ambition = 88;
+
+    processAgencyDecisionSystem(world, context, eventEmitter(world, context));
+    const first = context.facts.find((fact): fact is Extract<SimulationFact, { kind: 'agency_support_resolved' }> => (
+      fact.kind === 'agency_support_resolved'
+    ));
+    expect(first).toMatchObject({
+      payload: { action: 'request_backing', targetKind: 'commander', outcome: 'deferred' },
+    });
+
+    let submission: Extract<SimulationFact, { kind: 'agency_intent_submitted' }> | undefined;
+    const startTurn = context.turn;
+    for (let offset = 1; offset <= 10 && !submission; offset += 1) {
+      const next = processDecisionOnlyTurn(world, startTurn + offset);
+      submission = next.facts.find((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_submitted' }> => (
+        fact.kind === 'agency_intent_submitted'
+      ));
+    }
+    const supportFacts = world.facts.filter((fact): fact is Extract<SimulationFact, { kind: 'agency_support_resolved' }> => (
+      fact.kind === 'agency_support_resolved' && fact.payload.goalId === first?.payload.goalId
+    ));
+    const secured = supportFacts.find((fact) => fact.payload.outcome === 'secured');
+    expect(secured?.payload.attemptOrdinal).toBeLessThanOrEqual(5);
+    expect(submission?.sourceFactIds).toContain(secured?.id);
+  });
+
+  it('changes support channel after an explicit refusal instead of repeating the same request', () => {
+    const { world, context, deputyId, commanderId } = decisionFixture('agency-backing-refusal-rotation', 'rejected');
+    const polity = world.polities.find((item) => item.id === world.characters.find((character) => character.id === deputyId)?.polityId);
+    const deputy = world.characters.find((character) => character.id === deputyId);
+    if (!polity || !deputy) throw new Error('Expected deputy and polity for refusal fixture');
+    world.relationships = world.relationships.filter((relationship) => !(
+      relationship.targetId === deputyId
+      && (relationship.sourceId === commanderId || relationship.sourceId === polity.rulerId)
+    ));
+    deputy.loyalty = 20;
+    deputy.influence = 10;
+    deputy.merit = 40;
+    deputy.cunning = 20;
+    deputy.ambition = 88;
+
+    processAgencyDecisionSystem(world, context, eventEmitter(world, context));
+    const first = context.facts.find((fact): fact is Extract<SimulationFact, { kind: 'agency_support_resolved' }> => (
+      fact.kind === 'agency_support_resolved'
+    ));
+    expect(first).toMatchObject({ payload: { targetKind: 'commander', outcome: 'refused' } });
+
+    const later: Extract<SimulationFact, { kind: 'agency_support_resolved' }>[] = [];
+    for (let offset = 1; offset <= 28; offset += 1) {
+      later.push(...processDecisionOnlyTurn(world, context.turn + offset).facts.filter(
+        (fact): fact is Extract<SimulationFact, { kind: 'agency_support_resolved' }> => (
+          fact.kind === 'agency_support_resolved'
+          && fact.payload.actorId === deputyId
+          && fact.payload.goalId === first?.payload.goalId
+        ),
+      ));
+    }
+    expect(later[0]).toMatchObject({ payload: { targetKind: 'ruler', outcome: 'refused' } });
+    expect(later[1]).toMatchObject({ payload: { action: 'cultivate_military_support', targetKind: 'army_officers' } });
+    expect(later.every((fact) => fact.payload.targetId !== first?.payload.targetId)).toBe(true);
+    expect(later.slice(1).every((fact) => fact.payload.targetId !== later[0]?.payload.targetId)).toBe(true);
+    const militarySupport = later.filter((fact) => fact.payload.action === 'cultivate_military_support');
+    const securedMilitaryIndex = militarySupport.findIndex((fact) => fact.payload.outcome === 'secured');
+    if (securedMilitaryIndex >= 0) expect(militarySupport.slice(securedMilitaryIndex + 1)).toEqual([]);
+    expect(later.length).toBeLessThanOrEqual(MAX_AGENCY_SUPPORT_ACTIONS - 1);
+    const actor = world.agencyDecisionSystem.actors.find((item) => item.characterId === deputyId);
+    expect(actor?.supportAttemptOrdinal).toBeLessThanOrEqual(MAX_AGENCY_SUPPORT_ACTIONS);
   });
 
   it('does not invent gratitude or fulfilled duty when the former commander opposed replacement', () => {

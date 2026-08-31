@@ -64,10 +64,14 @@ function attachFaction(
     cohesion: 90,
     agenda: '扩张权势',
     alliedFactionIds: [],
+    rivalFactionIds: [], relationSinceTurns: {},
     lastActionTurn: world.turn,
     active: true,
     endedTurn: null,
+    origin: 'formed', formedTurn: world.turn, coreMemberIds: [character.id], predecessorFactionIds: [], successorFactionIds: [],
+    leaderSinceTurn: world.turn, lastLifecycleTurn: world.turn, originFactId: null, endedReason: null, endedFactId: null, lifecycle: [],
   };
+  character.factionId = faction.id;
   world.factions.push(faction);
   return faction;
 }

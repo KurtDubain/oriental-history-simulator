@@ -695,24 +695,23 @@ function buildCandidate(
     ],
   ));
 
-  const militaryFactions = index.factions.filter((faction) => (
+  const actorFactions = index.factions.filter((faction) => (
     faction.active
     && faction.polityId === polity.id
-    && faction.kind === '军门'
-    && (faction.leaderId === actor.id || faction.memberIds.includes(actor.id))
+    && (faction.id === actor.factionId || faction.leaderId === actor.id || faction.memberIds.includes(actor.id))
   ));
-  const bestMilitaryFaction = [...militaryFactions].sort((left, right) => (
+  const bestPoliticalFaction = [...actorFactions].sort((left, right) => (
     right.power * right.cohesion - left.power * left.cohesion || stableCompare(left.id, right.id)
   ))[0];
-  if (bestMilitaryFaction) {
-    const factionSupport = bestMilitaryFaction.power * bestMilitaryFaction.cohesion / 100;
+  if (bestPoliticalFaction) {
+    const factionSupport = bestPoliticalFaction.power * bestPoliticalFaction.cohesion / 100;
     add(makeSignal(
       'military_network_support', 'capability', clamp(factionSupport * 0.13, 1, 13),
-      '军中网络支持', `${bestMilitaryFaction.name}权力${bestMilitaryFaction.power}、凝聚${bestMilitaryFaction.cohesion}`,
+      '政治网络支持', `${bestPoliticalFaction.name}权势${bestPoliticalFaction.power}、凝聚${bestPoliticalFaction.cohesion}`,
       [
-        indexRef('faction', bestMilitaryFaction.id, 'power', bestMilitaryFaction.power),
-        indexRef('faction', bestMilitaryFaction.id, 'cohesion', bestMilitaryFaction.cohesion),
-        indexRef('faction', bestMilitaryFaction.id, 'leaderId', bestMilitaryFaction.leaderId),
+        indexRef('faction', bestPoliticalFaction.id, 'power', bestPoliticalFaction.power),
+        indexRef('faction', bestPoliticalFaction.id, 'cohesion', bestPoliticalFaction.cohesion),
+        indexRef('faction', bestPoliticalFaction.id, 'leaderId', bestPoliticalFaction.leaderId),
       ],
     ));
   }
@@ -737,8 +736,8 @@ function buildCandidate(
   const hasExecutableActor = hasMainCommand || Boolean(activeExecutableOrder && deputyPositions.length > 0);
   const supporters = uniqueSorted([
     ...familySupport.supportingIds,
-    ...(bestMilitaryFaction
-      ? bestMilitaryFaction.memberIds.filter((id) => id !== actor.id && index.charactersById.get(id)?.alive)
+    ...(bestPoliticalFaction
+      ? bestPoliticalFaction.memberIds.filter((id) => id !== actor.id && index.charactersById.get(id)?.alive)
       : []),
     ...mainPositions.flatMap((position) => {
       const deputyId = position.army.deputyCommanderId;
@@ -758,7 +757,7 @@ function buildCandidate(
     supportingCharacterIds: supporters,
     opposingCharacterIds: opponents,
     familyIds: family?.active ? [family.id] : [],
-    factionIds: bestMilitaryFaction ? [bestMilitaryFaction.id] : [],
+    factionIds: bestPoliticalFaction ? [bestPoliticalFaction.id] : [],
     polityIds: [polity.id],
     regionIds: uniqueSorted(orderedPositions.map((position) => position.army.regionId), 4),
     armyIds: uniqueSorted(orderedPositions.map((position) => position.army.id), MAX_PARTICIPANT_ARMIES),
@@ -797,7 +796,7 @@ function buildCandidate(
     }
     return {
       key: 'watch_command_and_army_support',
-      label: '观察军职是否变化，以及战功、军中网络和家族可动员支撑是否继续扩大',
+      label: '观察军职是否变化，以及战功、政治网络和家族可动员支撑是否继续扩大',
       refs: [
         indexRef('army', primary.army.id, 'commanderId', primary.army.commanderId),
         indexRef('character', actor.id, 'merit', actor.merit),

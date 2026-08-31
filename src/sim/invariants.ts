@@ -14,6 +14,8 @@ import {
 import type { SituationRecentChange } from './situations/types';
 import type { HistoryEvent, InvariantViolation, SimulationFact, WorldState } from './types';
 import { validateRuntimeEmbodiedActions } from './validation/embodiment';
+import { validateFactionState } from './validation/factions';
+import { validateCommitmentState } from './validation/commitments';
 import { findMapProfileForContentVersion } from '../maps';
 import { findActiveWorldFact, readWorldFacts, readWorldHistory, validateWorldArchiveIntegrity } from './archive';
 
@@ -1807,27 +1809,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     }
   }
 
-  for (const faction of world.factions) {
-    if (!polityById.has(faction.polityId) || !characterById.has(faction.leaderId)) push(violations, 'faction.references', `${faction.name}政权或首领引用无效`, faction.id);
-    if (!isFiniteRange(faction.power, 0, 100) || !isFiniteRange(faction.cohesion, 0, 100)) push(violations, 'faction.metrics', `${faction.name}权力或凝聚越界`, faction.id);
-    for (const memberId of faction.memberIds) if (!characterById.has(memberId)) push(violations, 'faction.member', `${faction.name}引用未知成员${memberId}`, faction.id);
-    if (faction.active) {
-      const leader = characterById.get(faction.leaderId);
-      if (faction.endedTurn !== null || !polityById.get(faction.polityId)?.alive || !leader?.alive || leader.polityId !== faction.polityId) {
-        push(violations, 'faction.active', `${faction.name}活动状态或首领归属无效`, faction.id);
-      }
-      for (const memberId of faction.memberIds) {
-        const member = characterById.get(memberId);
-        if (!member?.alive || member.polityId !== faction.polityId) push(violations, 'faction.active-member', `${faction.name}包含非本国在世成员${memberId}`, faction.id);
-      }
-    } else if (faction.endedTurn === null || faction.endedTurn < faction.lastActionTurn || faction.alliedFactionIds.length > 0) {
-      push(violations, 'faction.ended', `${faction.name}解散状态无效`, faction.id);
-    }
-    for (const alliedId of faction.alliedFactionIds) {
-      const allied = factionById.get(alliedId);
-      if (!allied || !allied.alliedFactionIds.includes(faction.id)) push(violations, 'faction.alliance', `${faction.name}派系联盟不对称`, faction.id);
-    }
-  }
+  violations.push(...validateFactionState(world));
 
   const diplomaticPairs = new Set<string>();
   for (const relation of world.diplomacy) {
@@ -1896,25 +1878,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     }
   }
 
-  for (const commitment of world.commitments) {
-    if (!eventById.has(commitment.eventId)) push(violations, 'commitment.event', `${commitment.id}建立事件不可追溯`, commitment.id);
-    if (!characterById.has(commitment.promisorId) || !characterById.has(commitment.promiseeId)) push(violations, 'commitment.characters', `${commitment.id}承诺人物引用无效`, commitment.id);
-    if (commitment.polityIds.some((id) => !polityById.has(id))) push(violations, 'commitment.polities', `${commitment.id}承诺政权引用无效`, commitment.id);
-    if (commitment.status === '生效') {
-      if (commitment.resolvedTurn !== null || commitment.resolutionEventId !== null) push(violations, 'commitment.active', `${commitment.id}生效状态却已有结案`, commitment.id);
-    } else if (commitment.resolvedTurn === null || !commitment.resolutionEventId || !eventById.has(commitment.resolutionEventId)) {
-      push(violations, 'commitment.resolution', `${commitment.id}结案不可追溯`, commitment.id);
-    } else if (
-      (commitment.status === '履约' || commitment.status === '背约')
-      && world.turn - commitment.resolvedTurn < 32
-    ) {
-      const expectedMemory = commitment.status === '履约' ? '恩义' : '背叛';
-      const hasResolutionMemory = world.relationships.some((relationship) => relationship.memories.some((memory) => (
-        memory.eventId === commitment.resolutionEventId && memory.kind === expectedMemory
-      )));
-      if (!hasResolutionMemory) push(violations, 'commitment.memory', `${commitment.id}${commitment.status}没有对应关系记忆`, commitment.id);
-    }
-  }
+  violations.push(...validateCommitmentState(fullWorld));
 
   const commandAssignments = new Set<string>();
   const deputyAssignments = new Set<string>();
@@ -2473,8 +2437,12 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       const fact = factById.get(factId);
       if (!fact || fact.turn !== world.lastTurn.turn) push(violations, 'last-turn.fact', `最近季度引用无效事实${factId}`);
     }
+    const openingFactIds = new Set(history.find((event) => event.kind === 'world_created')?.sourceFactIds ?? []);
     const expectedFactIds = facts
-      .filter((fact) => fact.turn === world.lastTurn?.turn)
+      .filter((fact) => (
+        fact.turn === world.lastTurn?.turn
+        && !openingFactIds.has(fact.id)
+      ))
       .map((fact) => fact.id);
     if (JSON.stringify(expectedFactIds) !== JSON.stringify(world.lastTurn.factIds)) {
       push(violations, 'last-turn.facts-exact', '最近季度事实ID不是该季事实的完整有序集合');

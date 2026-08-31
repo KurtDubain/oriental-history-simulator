@@ -51,6 +51,10 @@ function regionName(world: WorldState, id: string): string {
   return world.regions.find((item) => item.id === id)?.name ?? '未载州域';
 }
 
+function factionName(world: WorldState, id: string): string {
+  return world.factions.find((item) => item.id === id)?.name ?? '未载派系';
+}
+
 function armyName(world: WorldState, id: string, recordedName?: string): string {
   return world.armies.find((item) => item.id === id)?.name ?? recordedName ?? '旧日所部';
 }
@@ -219,6 +223,39 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact): F
     return {
       title: `${characterName(world, fact.payload.actorId)}${fact.payload.outcome === 'succeeded' ? '办成此事' : '尝试此事'}`,
       summary: fact.payload.resultSummary,
+    };
+  }
+  if (fact.kind === 'faction_lifecycle') {
+    const created = fact.payload.createdFactionIds.map((id) => factionName(world, id));
+    const ended = fact.payload.endedFactionIds.map((id) => factionName(world, id));
+    if (fact.payload.transition === 'formed') {
+      return { title: `${created.join('、') || '新派'}结成`, summary: `围绕共同议程形成了明确成员与领袖；此后权势得失按这一派系身份记载。` };
+    }
+    if (fact.payload.transition === 'leader_changed') {
+      return {
+        title: `${factionName(world, fact.payload.affectedFactionIds[0] ?? '')}更换领袖`,
+        summary: `${characterName(world, fact.payload.previousLeaderId ?? '')}离开领袖位置，${characterName(world, fact.payload.nextLeaderId ?? '')}由存续核心成员推为继任者。`,
+      };
+    }
+    if (fact.payload.transition === 'split') {
+      return { title: `${factionName(world, fact.payload.affectedFactionIds[0] ?? '')}发生分裂`, summary: `${created.join('、') || '新派'}由原成员另立议席，旧派身份继续由留守核心承继。` };
+    }
+    if (fact.payload.transition === 'merged') {
+      return { title: `${ended.join('与') || '旧派'}合议重组`, summary: `旧派结束原有身份，共同组成${created.join('、') || '新派'}。` };
+    }
+    return { title: `${ended.join('、') || '派系'}退出朝局`, summary: '其成员或政权载体已不足以继续维持这一政治身份。' };
+  }
+  if (fact.kind === 'faction_relation_changed') {
+    const left = factionName(world, fact.payload.leftFactionId);
+    const right = factionName(world, fact.payload.rightFactionId);
+    const relation = fact.payload.relation === 'alliance' ? '盟约' : '相争';
+    return {
+      title: `${left}与${right}${fact.payload.action === 'formed'
+        ? (fact.payload.relation === 'alliance' ? '结成盟约' : '公开相争')
+        : (fact.payload.relation === 'alliance' ? '解除盟约' : '停止相争')}`,
+      summary: fact.payload.action === 'formed'
+        ? `双方领袖把${relation === '盟约' ? '互相支持' : '彼此牵制'}登记为明确朝局关系。`
+        : `双方不再维持此前的${relation}关系。`,
     };
   }
   const transition = fact.payload.transition === 'formed'

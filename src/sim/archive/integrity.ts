@@ -12,7 +12,11 @@ import {
   extendFactDigest,
   extendHistoryDigest,
 } from './metadata';
-import { collectPinnedFactIds, isPermanentlyPinnedEvent } from './pins';
+import {
+  collectLegacyPinnedFactIds,
+  collectPinnedFactIds,
+  isPermanentlyPinnedEvent,
+} from './pins';
 import type {
   ArchiveDigestCheckpoint,
   ArchiveIntegrityIssue,
@@ -109,8 +113,8 @@ function expectedActiveFacts(
   world: ArchiveWorldState,
   facts: readonly SimulationFact[],
   archivedThroughTurn: number,
+  pinSet = collectPinnedFactIds(world, facts),
 ): { records: SimulationFact[]; pinnedIds: string[] } {
-  const pinSet = collectPinnedFactIds(world, facts);
   const pins = facts.filter((fact) => fact.turn <= archivedThroughTurn && pinSet.has(fact.id));
   return {
     records: [...pins, ...facts.filter((fact) => fact.turn > archivedThroughTurn)],
@@ -452,8 +456,20 @@ export function validateWorldArchiveIntegrity(world: ArchiveWorldState): Archive
     addIssue(issues, 'archive.history.digest', 'reconstructed Chronicle chain does not reach world.historyDigest');
   }
   const activeFacts = expectedActiveFacts(world, facts, archive.archivedThroughTurn);
-  if (!equalValues(archive.pinnedFactIds, activeFacts.pinnedIds)
-    || !equalValues(world.facts, activeFacts.records)) {
+  const currentResidencyMatches = equalValues(archive.pinnedFactIds, activeFacts.pinnedIds)
+    && equalValues(world.facts, activeFacts.records);
+  const legacyActiveFacts = currentResidencyMatches
+    ? null
+    : expectedActiveFacts(
+        world,
+        facts,
+        archive.archivedThroughTurn,
+        collectLegacyPinnedFactIds(world, facts),
+      );
+  const legacyResidencyMatches = legacyActiveFacts !== null
+    && equalValues(archive.pinnedFactIds, legacyActiveFacts.pinnedIds)
+    && equalValues(world.facts, legacyActiveFacts.records);
+  if (!currentResidencyMatches && !legacyResidencyMatches) {
     addIssue(issues, 'archive.active.facts', 'active Facts are not cold pins followed by the hot suffix');
   }
   const activeHistory = expectedActiveHistory(world, history, archive.archivedThroughTurn);

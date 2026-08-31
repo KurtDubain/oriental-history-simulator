@@ -170,6 +170,83 @@ describe('V0.2 coupled social simulation', () => {
     expect(validateWorld(world)).toEqual([]);
   });
 
+  it('invalidates a political promise in the same turn its exact faction alliance ends', () => {
+    const beforeDestruction = advanceWorldBy(createWorld('军权春秋'), 23);
+    const commitmentBefore = beforeDestruction.commitments.find((commitment) => commitment.id === 'commit_00051');
+    expect(commitmentBefore).toMatchObject({
+      kind: '政治联盟',
+      madeTurn: 11,
+      dueTurn: 27,
+      status: '生效',
+      resolvedTurn: null,
+      resolutionEventId: null,
+    });
+
+    let world = advanceWorld(beforeDestruction);
+    const commitmentAfter = world.commitments.find((commitment) => commitment.id === commitmentBefore?.id);
+    expect(commitmentAfter).toMatchObject({
+      status: '失效',
+      resolvedTurn: 23,
+    });
+
+    const endingFact = world.facts.find((fact) => (
+      fact.kind === 'faction_relation_changed'
+      && fact.turn === 23
+      && fact.payload.relation === 'alliance'
+      && fact.payload.action === 'ended'
+      && [fact.payload.leftFactionId, fact.payload.rightFactionId].includes('fac_0010')
+      && [fact.payload.leftFactionId, fact.payload.rightFactionId].includes('fac_0008')
+    ));
+    if (!endingFact || endingFact.kind !== 'faction_relation_changed') {
+      throw new Error('expected the destroyed polity to emit the alliance-ending Fact');
+    }
+    expect(endingFact.payload.reasonCode).toBe('faction_polity_destroyed');
+    expect(endingFact.sourceFactIds).toHaveLength(1);
+
+    const resolutionEvent = world.history.find((event) => event.id === commitmentAfter?.resolutionEventId);
+    expect(resolutionEvent).toMatchObject({
+      turn: 23,
+      kind: 'commitment_ended',
+      sourceFactIds: [endingFact.id],
+      stateDeltas: [{
+        entityType: 'commitment',
+        entityId: commitmentAfter?.id,
+        field: 'status',
+        before: '生效',
+        after: '失效',
+      }],
+    });
+    expect(resolutionEvent?.title).toContain('海台阁');
+    expect(resolutionEvent?.title).toContain('海清议');
+    expect(resolutionEvent?.summary).not.toContain(commitmentAfter?.promisorId);
+    expect(resolutionEvent?.summary).not.toContain(commitmentAfter?.promiseeId);
+    expect(world.relationships.some((relationship) => relationship.memories.some((memory) => (
+      memory.eventId === resolutionEvent?.id
+    )))).toBe(false);
+    expect(validateWorld(world)).toEqual([]);
+
+    world = advanceWorldBy(world, 4);
+    const commitmentAtDeadline = world.commitments.find((commitment) => commitment.id === commitmentAfter?.id);
+    expect(commitmentAtDeadline).toMatchObject({
+      status: '失效',
+      resolvedTurn: 23,
+      resolutionEventId: resolutionEvent?.id,
+    });
+    expect(world.history.filter((event) => event.stateDeltas.some((delta) => (
+      delta.entityType === 'commitment' && delta.entityId === commitmentAtDeadline?.id
+    )))).toEqual([resolutionEvent]);
+    expect(validateWorld(world)).toEqual([]);
+
+    if (!commitmentAtDeadline) throw new Error('expected the political commitment at its original deadline');
+    commitmentAtDeadline.status = '履约';
+    commitmentAtDeadline.resolvedTurn = 27;
+    world.hash = computeWorldHash(world);
+    expect(validateWorld(world)).toContainEqual(expect.objectContaining({
+      code: 'commitment.faction-alliance-outcome',
+      entityId: commitmentAtDeadline.id,
+    }));
+  });
+
   it('dissolves a polity with no heir, regent or adult background candidate instead of fabricating an adult', () => {
     const world = advanceWorldBy(createWorld('无嗣断档'), 3);
     const polity = world.polities.find((candidate) => candidate.id === 'p_yan');
@@ -243,7 +320,15 @@ describe('V0.2 coupled social simulation', () => {
       faction.active = false;
       faction.endedTurn = 2;
       faction.alliedFactionIds = [];
+      faction.rivalFactionIds = [];
+      faction.relationSinceTurns = {};
+      faction.origin = 'legacy';
+      faction.formedTurn = null;
+      faction.originFactId = null;
+      faction.endedReason = 'legacy';
+      faction.endedFactId = null;
     }
+    for (const character of world.characters) character.factionId = null;
     for (const relation of world.diplomacy) {
       relation.status = '中立';
       relation.allianceUntilTurn = null;

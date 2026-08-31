@@ -718,6 +718,29 @@ describe('person experience attribution', () => {
         expect([source.payload.attacker, ...source.payload.defenders].some((force) => (
           force.deputyCommanderId === deputy.id || force.commanderId === deputy.id
         ))).toBe(true);
+        const canonicalEvent: HistoryEvent = {
+          id: 'event_fact_biography_canonical_fixture',
+          turn: source.turn,
+          year: source.year,
+          season: source.season,
+          category: '军事',
+          kind: 'battle_recorded',
+          title: `${deputy.name}随军参战`,
+          summary: `${deputy.name}以副将身份参与本季会战。`,
+          importance: 2,
+          actorIds: [deputy.id],
+          polityIds: [...source.polityIds],
+          regionIds: [...source.regionIds],
+          causes: [],
+          evidence: [],
+          stateDeltas: [],
+          sourceFactIds: [source.id],
+          situationIds: [],
+        };
+        world.history.push(canonicalEvent);
+        const deduplicated = toPersonArchive(world, deputy).records;
+        expect(deduplicated.find((record) => record.id === firstBattle?.id)?.eventId).toBe(canonicalEvent.id);
+        expect(deduplicated.some((record) => record.id === canonicalEvent.id)).toBe(false);
       }
     }
 

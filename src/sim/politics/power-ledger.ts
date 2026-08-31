@@ -388,8 +388,47 @@ export function recentFactionPowerMovements(
   maximum = 3,
 ): PoliticalPowerMovement[] {
   const memberIds = new Set(faction.memberIds);
+  const membershipBoundary = faction.formedTurn ?? faction.lastLifecycleTurn;
   return world.facts
     .flatMap((fact) => {
+      if (fact.kind === 'faction_lifecycle' && fact.payload.affectedFactionIds.includes(faction.id)) {
+        const transition = fact.payload.transition;
+        const label = transition === 'formed'
+          ? '结成议席'
+          : transition === 'leader_changed'
+            ? '领袖更替'
+            : transition === 'split'
+              ? '内部拆分'
+              : transition === 'merged'
+                ? '合议重组'
+                : '退出朝局';
+        const direction = transition === 'ended' ? 'lost' : transition === 'formed' || transition === 'merged' ? 'gained' : 'held';
+        return [{
+          id: `movement:${fact.id}:${faction.id}`,
+          turn: fact.turn,
+          direction,
+          label,
+          detail: `${faction.name}${transition === 'leader_changed' ? '由核心成员推举新领袖' : transition === 'split' ? '因内部歧见产生新的议席' : transition === 'merged' ? '结束旧名并进入新的共同议席' : transition === 'ended' ? '已失去继续维系的政治载体' : `围绕“${faction.agenda}”形成稳定归属`}`,
+          factId: fact.id,
+          characterIds: [...fact.actorIds],
+        } satisfies PoliticalPowerMovement];
+      }
+      if (fact.kind === 'faction_relation_changed' && (fact.payload.leftFactionId === faction.id || fact.payload.rightFactionId === faction.id)) {
+        const otherId = fact.payload.leftFactionId === faction.id ? fact.payload.rightFactionId : fact.payload.leftFactionId;
+        const other = world.factions.find((item) => item.id === otherId)?.name ?? '另一派系';
+        const formed = fact.payload.action === 'formed';
+        const relation = fact.payload.relation === 'alliance' ? '结盟' : '相争';
+        return [{
+          id: `movement:${fact.id}:${faction.id}`,
+          turn: fact.turn,
+          direction: formed ? fact.payload.relation === 'alliance' ? 'gained' : 'held' : 'lost',
+          label: formed ? `与${other}${relation}` : `与${other}结束${relation}`,
+          detail: formed ? `${faction.name}与${other}正式登记为${relation}关系` : `双方不再维持此前的${relation}关系`,
+          factId: fact.id,
+          characterIds: [...fact.actorIds],
+        } satisfies PoliticalPowerMovement];
+      }
+      if (fact.turn < membershipBoundary) return [];
       const movement = agencyMovement(world, fact);
       return movement && movement.characterIds.some((id) => memberIds.has(id)) ? [movement] : [];
     })
@@ -406,8 +445,8 @@ function standingFor(score: number): CharacterPowerPosition['standing'] {
 
 export function calculateCharacterPowerPosition(world: WorldState, characterId: string): CharacterPowerPosition {
   const character = world.characters.find((item) => item.id === characterId);
-  const faction = character
-    ? world.factions.find((item) => item.active && item.polityId === character.polityId && item.memberIds.includes(characterId))
+  const faction = character?.factionId
+    ? world.factions.find((item) => item.id === character.factionId && item.active && item.polityId === character.polityId)
     : undefined;
   const factionResources = faction
     ? calculateFactionPowerLedger(world, faction).resources.filter((resource) => resource.characterIds.includes(characterId))

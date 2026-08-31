@@ -5,7 +5,6 @@ import {
   Castle,
   ChevronDown,
   ChevronUp,
-  Crown,
   Handshake,
   HeartPulse,
   MapPin,
@@ -31,6 +30,8 @@ import {
 import type { ArchiveEntityKind } from './HistoricalArchive';
 import { gameAudio } from '../audio';
 import type { PersonEmbodimentView } from '../view/embodiment-view';
+import type { CourtProjectionView } from '../view/court-projection';
+import { CourtProjection } from './CourtProjection';
 import '../styles/observer-ui.css';
 
 export type { PersonEmbodiedActionView, PersonEmbodimentView } from '../view/embodiment-view';
@@ -159,6 +160,7 @@ export interface CountryInspectorData {
   maritimeOrientation?: number;
   maritimeAssets?: SystemInspectorLink[];
   courtScenes?: readonly HistoricalSceneView[];
+  court?: CourtProjectionView;
 }
 
 export interface PersonAbilitySet {
@@ -623,6 +625,7 @@ function RegionInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
 
 function CountryInspector({ data, ...actions }: Extract<InspectorProps, { kind: 'country' }>) {
   const [tab, setTab] = useState<'realm' | 'court' | 'maritime' | 'diplomacy' | 'history'>('realm');
+  const tabsId = useId();
   useEffect(() => setTab('realm'), [data.id]);
   return (
     <>
@@ -631,9 +634,9 @@ function CountryInspector({ data, ...actions }: Extract<InspectorProps, { kind: 
         <InspectorActions label={data.name} {...actions} />
       </div>
       {data.status ? <p className="observer-inspector__summary">{data.status}</p> : null}
-      <InspectorTabs value={tab} onChange={setTab} items={[{ id: 'realm', label: '国势' }, { id: 'court', label: '朝局' }, { id: 'maritime', label: '海贸' }, { id: 'diplomacy', label: '邦交' }, { id: 'history', label: '国史' }]} />
+      <InspectorTabs value={tab} onChange={setTab} idPrefix={tabsId} items={[{ id: 'realm', label: '国势' }, { id: 'court', label: '朝局' }, { id: 'maritime', label: '海贸' }, { id: 'diplomacy', label: '邦交' }, { id: 'history', label: '国史' }]} />
       {tab === 'realm' ? (
-        <div role="tabpanel">
+        <div id={`${tabsId}-panel-realm`} role="tabpanel" aria-labelledby={`${tabsId}-tab-realm`}>
           <section className="observer-inspector__section" aria-labelledby="country-ledger-heading">
             <h3 id="country-ledger-heading">国计</h3>
             <dl className="observer-facts"><Fact label="君主" value={data.ruler} /><Fact label="领地" value={`${data.regionCount} 郡`} /><Fact label="人口" value={data.population} /><Fact label="府库" value={data.treasury} /><Fact label="粮储" value={data.food} /><Fact label="宗主家族" value={data.rulingFamily} /></dl>
@@ -644,59 +647,30 @@ function CountryInspector({ data, ...actions }: Extract<InspectorProps, { kind: 
         </div>
       ) : null}
       {tab === 'court' ? (
-        <div role="tabpanel">
+        <div id={`${tabsId}-panel-court`} role="tabpanel" aria-labelledby={`${tabsId}-tab-court`}>
+          {data.court ? (
+            <CourtProjection
+              court={data.court}
+              factions={data.factions ?? []}
+              onSelectPerson={(personId) => actions.onSelectEntity?.('person', personId)}
+              onSelectEvent={actions.onSelectEvent}
+            />
+          ) : <p className="observer-inspector__empty">朝廷座次尚无足够记录。</p>}
           {data.courtScenes?.length ? (
             <section className="observer-inspector__section observer-court-scenes" aria-labelledby="country-court-scene-heading">
               <h3 id="country-court-scene-heading"><ScrollText size={14} aria-hidden="true" />朝局近事</h3>
               <HistoricalSceneList scenes={data.courtScenes} onSelectEvent={actions.onSelectEvent} />
             </section>
           ) : null}
-          <section className="observer-inspector__section" aria-labelledby="country-powerholder-heading">
-            <h3 id="country-powerholder-heading"><Crown size={14} aria-hidden="true" />权力中枢</h3>
-            {data.powerholders?.length ? <ul className="observer-entity-list">{data.powerholders.map((person) => <li key={person.id}><button type="button" onClick={() => actions.onSelectEntity?.('person', person.id)}><span><strong>{person.name}</strong><small>{person.office}{person.faction ? ` · ${person.faction}` : ''}</small></span><b>{person.standing ?? '权势'} {Math.round(person.influence)}</b></button></li>)}</ul> : <p className="observer-inspector__empty">朝中尚无足以独据一席的权臣。</p>}
-          </section>
-          <section className="observer-inspector__section" aria-labelledby="country-faction-heading">
-            <h3 id="country-faction-heading"><UsersRound size={14} aria-hidden="true" />朝中派系</h3>
-            {data.factions?.length ? data.factions.map((faction) => (
-              <article className="observer-faction" key={faction.id} data-testid="faction-power-ledger">
-                <header>
-                  <div><strong>{faction.name}</strong><span>{faction.kind} · 所图：{faction.agenda}</span></div>
-                  <b>权势 {Math.round(faction.power)}</b>
-                </header>
-                {faction.categories?.length ? (
-                  <dl className="observer-faction__categories">
-                    {faction.categories.slice(0, 5).map((category) => <div key={category.key}><dt>{category.label}</dt><dd>{Math.round(category.value)}</dd></div>)}
-                  </dl>
-                ) : null}
-                {faction.recentMovement ? (
-                  <p className="observer-faction__movement" data-direction={faction.recentMovement.direction}>
-                    <span>{faction.recentMovement.periodLabel} · {faction.recentMovement.label}</span>
-                    <strong>{faction.recentMovement.detail}</strong>
-                    {faction.recentMovement.sourceEventId && actions.onSelectEvent ? <button type="button" onClick={() => actions.onSelectEvent?.(faction.recentMovement!.sourceEventId!)}>为何如此</button> : null}
-                  </p>
-                ) : null}
-                {faction.resources?.length ? (
-                  <details className="observer-faction__assets">
-                    <summary>查看权势构成 <span>{faction.resources.length} 项</span></summary>
-                    <ol>{faction.resources.map((resource) => <li key={resource.id}><span><strong>{resource.label}</strong><small>{resource.detail}</small></span><b>+{Math.round(resource.value)}</b></li>)}</ol>
-                  </details>
-                ) : null}
-                <footer>
-                  <button type="button" onClick={() => actions.onSelectEntity?.('person', faction.leaderId)}>看领袖 · {faction.leader}</button>
-                  <span>凝聚 {Math.round(faction.cohesion)}</span>
-                </footer>
-              </article>
-            )) : <p className="observer-inspector__empty">派系尚未形成稳定名目。</p>}
-          </section>
         </div>
       ) : null}
-      {tab === 'maritime' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="country-maritime-heading"><h3 id="country-maritime-heading"><Anchor size={14} aria-hidden="true" />海贸与舰政</h3><dl className="observer-facts"><Fact label="贸易收入" value={data.tradeRevenue} /><Fact label="海军预算" value={data.navalBudget} /></dl>{data.maritimeOrientation !== undefined ? <Meter label="向海倾向" value={data.maritimeOrientation} /> : null}{data.maritimeAssets?.length ? <ul className="observer-entity-list observer-entity-list--after-meter">{data.maritimeAssets.map((asset) => <li key={`${asset.kind}-${asset.id}`}><button type="button" onClick={() => actions.onSelectEntity?.(asset.kind, asset.id)}><span><strong>{asset.label}</strong><small>{asset.detail}</small></span>{asset.value !== undefined ? <b>{display(asset.value)}</b> : null}</button></li>)}</ul> : <p className="observer-inspector__empty">尚无足以维持远海行动的舰队或港口。</p>}</section></div> : null}
+      {tab === 'maritime' ? <div id={`${tabsId}-panel-maritime`} role="tabpanel" aria-labelledby={`${tabsId}-tab-maritime`}><section className="observer-inspector__section" aria-labelledby="country-maritime-heading"><h3 id="country-maritime-heading"><Anchor size={14} aria-hidden="true" />海贸与舰政</h3><dl className="observer-facts"><Fact label="贸易收入" value={data.tradeRevenue} /><Fact label="海军预算" value={data.navalBudget} /></dl>{data.maritimeOrientation !== undefined ? <Meter label="向海倾向" value={data.maritimeOrientation} /> : null}{data.maritimeAssets?.length ? <ul className="observer-entity-list observer-entity-list--after-meter">{data.maritimeAssets.map((asset) => <li key={`${asset.kind}-${asset.id}`}><button type="button" onClick={() => actions.onSelectEntity?.(asset.kind, asset.id)}><span><strong>{asset.label}</strong><small>{asset.detail}</small></span>{asset.value !== undefined ? <b>{display(asset.value)}</b> : null}</button></li>)}</ul> : <p className="observer-inspector__empty">尚无足以维持远海行动的舰队或港口。</p>}</section></div> : null}
       {tab === 'diplomacy' ? (
-        <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="country-diplomacy-heading"><h3 id="country-diplomacy-heading"><Handshake size={14} aria-hidden="true" />邦交形势</h3>
+        <div id={`${tabsId}-panel-diplomacy`} role="tabpanel" aria-labelledby={`${tabsId}-tab-diplomacy`}><section className="observer-inspector__section" aria-labelledby="country-diplomacy-heading"><h3 id="country-diplomacy-heading"><Handshake size={14} aria-hidden="true" />邦交形势</h3>
           {data.diplomacy?.length ? <ul className="observer-diplomacy-list">{data.diplomacy.map((relation) => <li key={relation.polityId} data-status={relation.status}><button type="button" onClick={() => actions.onSelectEntity?.('country', relation.polityId)}><span><strong>{relation.polity}</strong><small>{relation.status} · 信任 {Math.round(relation.trust)}</small></span><span><b>威胁 {Math.round(relation.threat)}</b><small>宿怨 {Math.round(relation.grievance)} · 商贸 {Math.round(relation.tradeDependency)}</small></span></button></li>)}</ul> : <p className="observer-inspector__empty">暂无可考的邦交往来。</p>}
         </section></div>
       ) : null}
-      {tab === 'history' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="country-history-heading"><h3 id="country-history-heading"><ScrollText size={14} aria-hidden="true" />国史近录</h3><RecordList records={data.history ?? []} onSelectEvent={actions.onSelectEvent} />{actions.onOpenArchive ? <EntityHistoryGateway kind="country" label="读完整本纪" onOpen={actions.onOpenArchive} /> : null}</section></div> : null}
+      {tab === 'history' ? <div id={`${tabsId}-panel-history`} role="tabpanel" aria-labelledby={`${tabsId}-tab-history`}><section className="observer-inspector__section" aria-labelledby="country-history-heading"><h3 id="country-history-heading"><ScrollText size={14} aria-hidden="true" />国史近录</h3><RecordList records={data.history ?? []} onSelectEvent={actions.onSelectEvent} />{actions.onOpenArchive ? <EntityHistoryGateway kind="country" label="读完整本纪" onOpen={actions.onOpenArchive} /> : null}</section></div> : null}
     </>
   );
 }

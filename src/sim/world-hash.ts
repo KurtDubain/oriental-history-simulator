@@ -98,6 +98,10 @@ export function computeWorldHash(world: WorldState): string {
   const hasSituationSystem = Object.prototype.hasOwnProperty.call(world, 'situationSystem');
   const hasAgencySystem = Object.prototype.hasOwnProperty.call(world, 'agencySystem');
   const hasAgencyDecisionSystem = Object.prototype.hasOwnProperty.call(world, 'agencyDecisionSystem');
+  // `null` is the modern default and carries no authority, so omit it just as
+  // pre-POL02 schema-4 snapshots did. A migrated numeric boundary is retained
+  // and authenticated on every subsequent save.
+  const hasLegacyFactionFactBoundary = Number.isSafeInteger(world.legacyFactionFactBoundaryTurn);
   return stableHash({
     ...schema4Base,
     characters,
@@ -105,6 +109,9 @@ export function computeWorldHash(world: WorldState): string {
     lastTurn,
     factDigest: world.factDigest,
     legacyArchiveBoundary: world.legacyArchiveBoundary,
+    ...(hasLegacyFactionFactBoundary
+      ? { legacyFactionFactBoundaryTurn: world.legacyFactionFactBoundaryTurn }
+      : {}),
     ...(hasSituationSystem ? { situationSystem: world.situationSystem } : {}),
     ...(hasAgencySystem ? { agencySystem: world.agencySystem } : {}),
     ...(hasAgencyDecisionSystem ? { agencyDecisionSystem: world.agencyDecisionSystem } : {}),

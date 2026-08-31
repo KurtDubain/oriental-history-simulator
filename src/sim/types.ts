@@ -203,6 +203,8 @@ export interface CharacterState {
   health: number;
   activeDiseaseId: string | null;
   protectedUntilTurn: number | null;
+  /** Current political affiliation. A character can belong to at most one active faction. */
+  factionId: string | null;
 }
 
 export interface BackgroundPersonState {
@@ -277,6 +279,18 @@ export interface RelationshipState {
 
 export type FactionKind = '宗室' | '官僚' | '士族' | '军门' | '地方';
 
+export type FactionOrigin = 'opening' | 'legacy' | 'formed' | 'split' | 'merged';
+export type FactionEndReason = 'core_exhausted' | 'merged' | 'polity_destroyed' | 'polity_dissolved' | 'legacy' | null;
+export type FactionLifecycleTransition = 'formed' | 'leader_changed' | 'split' | 'merged' | 'ended';
+
+export interface FactionLifecycleRecord {
+  turn: number;
+  transition: FactionLifecycleTransition;
+  reasonCode: string;
+  factId: string | null;
+  relatedFactionIds: string[];
+}
+
 export interface FactionState {
   id: string;
   polityId: string;
@@ -288,9 +302,22 @@ export interface FactionState {
   cohesion: number;
   agenda: '维持秩序' | '扩张权势' | '地方自治' | '对外战争' | '休养生息';
   alliedFactionIds: string[];
+  rivalFactionIds: string[];
+  relationSinceTurns: Record<string, number>;
   lastActionTurn: number;
   active: boolean;
   endedTurn: number | null;
+  origin: FactionOrigin;
+  formedTurn: number | null;
+  coreMemberIds: string[];
+  predecessorFactionIds: string[];
+  successorFactionIds: string[];
+  leaderSinceTurn: number;
+  lastLifecycleTurn: number;
+  originFactId: string | null;
+  endedReason: FactionEndReason;
+  endedFactId: string | null;
+  lifecycle: FactionLifecycleRecord[];
 }
 
 export type DiplomaticStatus = '中立' | '联盟' | '战争' | '朝贡';
@@ -801,6 +828,13 @@ export interface WorldState {
   facts: SimulationFact[];
   factDigest: string;
   legacyArchiveBoundary: LegacyArchiveBoundary | null;
+  /**
+   * Authenticated import boundary for schema-4 saves written before faction
+   * relation Facts existed. Political-alliance commitments made at or before
+   * this turn may use their live bilateral faction relation as legacy evidence;
+   * newer commitments always require a typed formation Fact.
+   */
+  legacyFactionFactBoundaryTurn: number | null;
   archiveSystem: WorldArchiveSystemState;
   situationSystem: SituationSystemState;
   agencySystem: AgencySystemState;

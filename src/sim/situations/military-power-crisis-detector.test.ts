@@ -66,15 +66,19 @@ function attachMilitaryFaction(world: WorldState, actor: CharacterState, polity:
     cohesion: 90,
     agenda: '扩张权势' as const,
     alliedFactionIds: [],
+    rivalFactionIds: [], relationSinceTurns: {},
     lastActionTurn: world.turn,
     active: true,
     endedTurn: null,
+    origin: 'formed' as const, formedTurn: world.turn, coreMemberIds: [actor.id], predecessorFactionIds: [], successorFactionIds: [],
+    leaderSinceTurn: world.turn, lastLifecycleTurn: world.turn, originFactId: null, endedReason: null, endedFactId: null, lifecycle: [],
   };
   faction.active = true;
   faction.leaderId = actor.id;
   faction.memberIds = [...new Set([actor.id, ...faction.memberIds])];
   faction.power = 94;
   faction.cohesion = 92;
+  actor.factionId = faction.id;
   if (!existing) world.factions.push(faction);
   return faction;
 }

@@ -82,7 +82,7 @@ const SIGNAL_LABELS: Record<string, string> = {
   recent_battle_record: '可核验战功',
   recent_command_granted: '新授军权',
   recent_command_removed: '削去军职',
-  military_network_support: '军中网络',
+  military_network_support: '政治网络',
   family_mobilization_capacity: '家族支撑',
   ruler_mortality_exposure: '君主寿命风险',
   ruler_health_stable: '君主健康稳定',

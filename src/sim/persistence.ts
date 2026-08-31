@@ -10,6 +10,7 @@ import { createSituationSystemState } from './situations';
 import { createAgencySystemState } from './agency/memory';
 import { createAgencyDecisionSystemState } from './agency/decision';
 import { findMapProfileForContentVersion } from '../maps';
+import { migrateFactionIdentityModel } from './politics/faction-lifecycle';
 import {
   compactWorldArchive,
   createWorldArchiveState,
@@ -165,8 +166,26 @@ export function deserializeWorld(serialized: string): WorldState {
         historyDigest: typeof world.historyDigest === 'string' ? world.historyDigest : historyDigestOf(world),
       }
     : null;
+  const hasLegacyFactionFactBoundary = Object.prototype.hasOwnProperty.call(
+    world,
+    'legacyFactionFactBoundaryTurn',
+  );
+  const predatesFactionIdentityFacts = originalVersion === 4 && (
+    world.characters.some((character) => !Object.prototype.hasOwnProperty.call(character, 'factionId'))
+    || world.factions.some((faction) => !Object.prototype.hasOwnProperty.call(faction, 'origin'))
+  );
   let migrated = false;
   let factsMigrated = false;
+  if (!hasLegacyFactionFactBoundary) {
+    // Authenticate the old snapshot first (above), then record the exact live
+    // turn at which its pre-POL02 political relations become legacy evidence.
+    // A schema-4 save that already has the stable faction shape receives null,
+    // so a malformed modern commitment cannot hide behind this migration.
+    world.legacyFactionFactBoundaryTurn = predatesFactionIdentityFacts
+      ? world.turn
+      : null;
+    migrated = true;
+  }
   for (const character of world.characters) {
     if (!Number.isFinite(character.rebellionReadiness)) {
       character.rebellionReadiness = 0;
@@ -218,6 +237,7 @@ export function deserializeWorld(serialized: string): WorldState {
       faction.active ??= world.polities.some((polity) => polity.id === faction.polityId && polity.alive);
       faction.endedTurn ??= faction.active ? null : world.turn;
     }
+    if (migrateFactionIdentityModel(world, originalVersion < 4)) migrated = true;
     for (const polity of world.polities) polity.lastCourtCrisisTurn ??= -100;
   }
   if (originalVersion < 3) {
@@ -287,7 +307,10 @@ export function deserializeWorld(serialized: string): WorldState {
     compactWorldArchive(world);
     migrated = true;
   } else {
-    normalizeWorldArchiveState(world);
+    // Integrity accepts the original archive-v1 whole-Situation pin layout.
+    // Recompact after authentication so imported saves immediately adopt the
+    // narrower live-decision roots without changing their Fact chain.
+    compactWorldArchive(world);
   }
   if (migrated) world.hash = computeWorldHash(world);
   const violations = validateWorld(world);
