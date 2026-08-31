@@ -3,10 +3,13 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import type { MapPresentationDefinition } from '../maps/types';
 import type {
   MapLodScene,
+  MapMarkerView,
   MapRegionView,
   MapSeaZoneView,
 } from './map-contract';
+import { layoutMapMarkers } from './map-marker-layout';
 import { drawWorldMap } from './map-renderer';
+import { createMapViewportTransform, resolveMapSceneHit } from './map-scene-geometry';
 
 class Path2DStub {
   moveTo() {}
@@ -25,11 +28,13 @@ function recordingContext() {
   const fillTexts: TextCall[] = [];
   const strokeTexts: TextCall[] = [];
   const ellipses: Array<{ x: number; y: number }> = [];
+  const translations: Array<{ x: number; y: number }> = [];
   const gradient = { addColorStop() {} };
   const context = {
     fillTexts,
     strokeTexts,
     ellipses,
+    translations,
     font: '',
     globalAlpha: 1,
     fillStyle: '',
@@ -56,8 +61,9 @@ function recordingContext() {
     stroke() {},
     fillRect() {},
     strokeRect() {},
+    rect() {},
     clip() {},
-    translate() {},
+    translate(x: number, y: number) { translations.push({ x, y }); },
     rotate() {},
     setLineDash() {},
     createLinearGradient() { return gradient; },
@@ -112,6 +118,7 @@ function region(
 function scene(options: {
   regions?: MapRegionView[];
   seaZones?: MapSeaZoneView[];
+  markers?: MapMarkerView[];
   interactiveSeaZoneIds?: ReadonlySet<string>;
 } = {}): MapLodScene {
   const regions = options.regions ?? [];
@@ -125,7 +132,7 @@ function scene(options: {
     seaZones,
     fleets: [],
     flows: [],
-    markers: [],
+    markers: options.markers ?? [],
     regionLabelIds: new Set(regions.filter((item) => item.capital).map((item) => item.id)),
     cityRegionIds: new Set(regions.filter((item) => item.capital).map((item) => item.id)),
     portRegionIds: new Set(),
@@ -220,5 +227,46 @@ describe('map renderer LOD contract', () => {
       text: '云岚国',
       font: expect.stringContaining('10px'),
     }));
+  });
+
+  it('paints a political marker at the exact shared layout point used by hit testing', () => {
+    const marker: MapMarkerView = {
+      id: 'capital-pulse-shared-anchor',
+      kind: 'capitalPulse',
+      position: { x: 480, y: 330 },
+      magnitude: 68,
+      label: '云京朝局',
+      targetKind: 'country',
+      targetId: 'polity-cloud',
+      tone: 'watch',
+    };
+    const viewport = { width: 1210, height: 560 };
+    const mapScene = scene({ markers: [marker] });
+    const context = recordingContext();
+    const transform = createMapViewportTransform(viewport.width, viewport.height);
+    const expected = layoutMapMarkers([marker], transform)[0];
+
+    drawWorldMap(
+      context,
+      { ...viewport, dpr: 1 },
+      mapScene,
+      'political',
+      [],
+      null,
+      null,
+      undefined,
+      { zoom: 1, panX: 0, panY: 0 },
+    );
+
+    expect(context.translations).toContainEqual(expect.objectContaining({
+      x: expect.closeTo(expected.point.x, 5),
+      y: expect.closeTo(expected.point.y, 5),
+    }));
+    expect(resolveMapSceneHit(
+      mapScene,
+      expected.point,
+      viewport.width,
+      viewport.height,
+    )).toMatchObject({ kind: 'marker', marker: { id: marker.id } });
   });
 });

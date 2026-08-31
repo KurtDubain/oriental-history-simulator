@@ -44,6 +44,7 @@ import {
 import { buildMapPresentation } from "../view/map-presentation";
 import { buildMapLodScene, resolveMapLodLevel } from "../view/map-lod";
 import { resolveMapFocusOffset, type MapFocusOcclusion } from "../view/map-focus-offset";
+import { layoutMapMarkers, mapMarkerMatchesSelection, mapMarkerTarget } from "../view/map-marker-layout";
 import {
   drawWorldMap,
   foodDescription,
@@ -126,6 +127,8 @@ export interface WorldMapProps {
   season?: MapSeason;
   atmosphereEnabled?: boolean;
   motionReduced?: boolean;
+  politicalFocusPolityId?: string | null;
+  politicalFocusFactionId?: string | null;
 }
 
 type HoverState =
@@ -170,10 +173,9 @@ function selectedSceneAnchor(
     const seaZone = scene.seaZones.find((item) => item.id === selectedObject.id);
     return seaZone ? worldToScreenPoint(seaZone.center, transform) : null;
   }
-  const marker = scene.markers.find((item) => (
-    item.kind === selectedObject.kind && item.id === selectedObject.id
-  ));
-  if (marker) return worldToScreenPoint(marker.position, transform);
+  const marker = layoutMapMarkers(scene.markers, transform)
+    .find((layout) => mapMarkerMatchesSelection(layout.marker, selectedObject));
+  if (marker) return marker.point;
   const flow = scene.flows.find((item) => (
     item.selectedKind === selectedObject.kind && item.selectedId === selectedObject.id
   ));
@@ -220,6 +222,8 @@ export function WorldMap({
   season = '春',
   atmosphereEnabled = true,
   motionReduced = false,
+  politicalFocusPolityId = null,
+  politicalFocusFactionId = null,
 }: WorldMapProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -526,8 +530,10 @@ export function WorldMap({
       showTapFeedback(point);
       return;
     }
-    if (hit.kind === 'marker' && onSelectObject) {
-      onSelectObject(hit.marker.kind, hit.marker.id);
+    if (hit.kind === 'marker') {
+      const target = mapMarkerTarget(hit.marker);
+      if (target.kind === 'region') onSelectRegion(target.id);
+      else onSelectObject?.(target.kind, target.id);
       showTapFeedback(point);
       return;
     }
@@ -816,7 +822,7 @@ export function WorldMap({
           ? [...scene.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId })), ...visibleSeaZones]
         : overlay === "war"
           ? scene.armies.map((item) => ({ kind: "army" as const, id: item.id }))
-        : [...scene.markers.map((item) => ({ kind: item.kind, id: item.id })), ...scene.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId }))];
+        : [...scene.markers.map(mapMarkerTarget), ...scene.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId }))];
       if (scene.regions.length === 0 && contextualObjects.length === 0) return;
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -829,7 +835,9 @@ export function WorldMap({
           return;
         }
         if (hover?.kind === "marker") {
-          onSelectObject?.(hover.marker.kind, hover.marker.id);
+          const target = mapMarkerTarget(hover.marker);
+          if (target.kind === 'region') onSelectRegion(target.id);
+          else onSelectObject?.(target.kind, target.id);
           return;
         }
         if (hover?.kind === "flow") {
@@ -840,7 +848,8 @@ export function WorldMap({
           item.id === selectedObject?.id && item.kind === selectedObject.kind
         ));
         if (selectedContext) {
-          onSelectObject?.(selectedContext.kind, selectedContext.id);
+          if (selectedContext.kind === 'region') onSelectRegion(selectedContext.id);
+          else onSelectObject?.(selectedContext.kind, selectedContext.id);
           return;
         }
         const targetId = hover?.kind === "region" || hover?.kind === "regionNode"
@@ -855,7 +864,8 @@ export function WorldMap({
         const currentIndex = contextualObjects.findIndex((item) => item.id === selectedObject?.id);
         const direction = event.key === "ArrowRight" ? 1 : -1;
         const next = contextualObjects[(currentIndex + direction + contextualObjects.length) % contextualObjects.length];
-        if (next) onSelectObject?.(next.kind, next.id);
+        if (next?.kind === 'region') onSelectRegion(next.id);
+        else if (next) onSelectObject?.(next.kind, next.id);
         return;
       }
       const currentIndex = scene.regions.findIndex((region) => region.id === selectedRegionId);
@@ -868,9 +878,10 @@ export function WorldMap({
 
   const tooltipStyle = useMemo(() => {
     if (!hover) return undefined;
-    const tooltipWidth = 172;
+    const political = hover.kind === 'marker' && (hover.marker.kind === 'capitalPulse' || hover.marker.kind === 'powerRoot');
+    const tooltipWidth = Math.min(political ? 244 : 172, size.width - 20);
     const left = Math.min(size.width - tooltipWidth - 10, Math.max(10, hover.x + 16));
-    const top = Math.min(size.height - 116, Math.max(10, hover.y + 14));
+    const top = Math.min(size.height - (political ? 164 : 116), Math.max(10, hover.y + 14));
     return { left, top };
   }, [hover, size.height, size.width]);
 
@@ -878,7 +889,7 @@ export function WorldMap({
     ?? seaZones.find((item) => selectedObject?.kind === "seaZone" && item.id === selectedObject.id)?.name
     ?? fleets.find((item) => selectedObject?.kind === "fleet" && item.id === selectedObject.id)?.name
     ?? armies.find((item) => selectedObject?.kind === "army" && item.id === selectedObject.id)?.name
-    ?? markers.find((item) => item.kind === selectedObject?.kind && item.id === selectedObject.id)?.label
+    ?? markers.find((item) => mapMarkerMatchesSelection(item, selectedObject))?.label
     ?? flows.find((item) => item.selectedKind === selectedObject?.kind && item.selectedId === selectedObject.id)?.label;
 
   const hoverTooltip = useMemo(() => {
@@ -911,11 +922,16 @@ export function WorldMap({
       type: "水师 · 可点击",
       rows: [["舰力", formatPopulation(hover.fleet.strength)], ["战备", `${Math.round(hover.fleet.readiness)}`], ["任务", hover.fleet.mission]],
     };
-    if (hover.kind === "marker") return {
-      name: hover.marker.label,
-      type: hover.marker.kind === "outbreak" ? "疫病 · 可点击" : "技艺 · 可点击",
-      rows: [["强度", `${Math.round(hover.marker.magnitude)}`]],
-    };
+    if (hover.kind === "marker") {
+      const political = hover.marker.kind === 'capitalPulse' || hover.marker.kind === 'powerRoot';
+      return {
+        name: hover.marker.label,
+        type: political ? `${hover.marker.categoryLabel ?? '朝局'} · 可点击` : hover.marker.kind === "outbreak" ? "疫病 · 可点击" : "技艺 · 可点击",
+        rows: political
+          ? [[hover.marker.kind === 'capitalPulse' ? '主导' : '派系', hover.marker.factionName ?? '尚未成形'], ['实据', hover.marker.detail ?? '当季权势记录']]
+          : [["强度", `${Math.round(hover.marker.magnitude)}`]],
+      };
+    }
     const flowNames: Record<MapFlowKind, string> = { trade: "商路", migration: "迁徙", disease: "传播", knowledge: "知识", naval: "航路" };
     return {
       name: hover.flow.label,
@@ -950,6 +966,10 @@ export function WorldMap({
       data-visible-fleet-count={scene.fleets.length}
       data-visible-flow-count={scene.flows.length}
       data-visible-marker-count={scene.markers.length}
+      data-political-pulse-ids={scene.markers.filter((item) => item.kind === 'capitalPulse').map((item) => item.id).join(',') || undefined}
+      data-political-root-ids={scene.markers.filter((item) => item.kind === 'powerRoot').map((item) => item.id).join(',') || undefined}
+      data-political-focus-polity-id={politicalFocusPolityId ?? undefined}
+      data-political-focus-faction-id={politicalFocusFactionId ?? undefined}
       data-visible-army-ids={scene.armies.map((item) => item.id).join(",")}
       data-visible-fleet-ids={scene.fleets.map((item) => item.id).join(",")}
       data-mobile-quick-look-open={mobileQuickLookOpen || undefined}
@@ -1019,8 +1039,8 @@ export function WorldMap({
 
       {!hasInteracted && regions.length > 0 ? (
         <p className="world-map__gesture-hint" aria-hidden="true">
-          <span className="world-map__gesture-hint-desktop">点州域、军团或水师查看 · 滚轮缩放</span>
-          <span className="world-map__gesture-hint-touch">轻点州域、军团或水师速览 · 双指缩放</span>
+          <span className="world-map__gesture-hint-desktop">点州域、军团或都城印记查看 · 滚轮缩放</span>
+          <span className="world-map__gesture-hint-touch">轻点州域、军团或都城印记速览 · 双指缩放</span>
         </p>
       ) : null}
 
@@ -1042,7 +1062,7 @@ export function WorldMap({
       ) : null}
 
       {hover && hoverTooltip && tooltipStyle ? (
-        <div className="world-map__tooltip" style={tooltipStyle} aria-hidden="true">
+        <div className={`world-map__tooltip${hover.kind === 'marker' && (hover.marker.kind === 'capitalPulse' || hover.marker.kind === 'powerRoot') ? ' world-map__tooltip--political' : ''}`} style={tooltipStyle} aria-hidden="true">
           <div className="world-map__tooltip-heading">
             <strong>{hoverTooltip.name}</strong>
             <span>{hoverTooltip.type}</span>

@@ -9,6 +9,10 @@ import type {
   MapRouteView,
   MapSeaZoneView,
 } from './map-contract';
+import {
+  projectCapitalPoliticalPulses,
+  projectFactionSpatialPowerRoots,
+} from './political-map-projection';
 
 const compact = new Intl.NumberFormat('zh-CN', {
   notation: 'compact',
@@ -258,7 +262,11 @@ export function toMapFlows(world: WorldState, overlay: MapOverlay): MapFlowView[
     .slice(0, 16);
 }
 
-export function toMapMarkers(world: WorldState, overlay: MapOverlay): MapMarkerView[] {
+export function toMapMarkers(
+  world: WorldState,
+  overlay: MapOverlay,
+  focusedFactionId: string | null = null,
+): MapMarkerView[] {
   if (overlay === 'disease') {
     return world.infections
       .filter((item) => item.infectious > 0 || item.exposed > 0)
@@ -273,6 +281,8 @@ export function toMapMarkers(world: WorldState, overlay: MapOverlay): MapMarkerV
           magnitude: Math.min(100, (item.exposed + item.infectious) / Math.max(1, total) * 1_000),
           label: pathogen?.name ?? '疫病',
           alert: item.infectious > 0,
+          targetKind: 'outbreak' as const,
+          targetId: item.id,
         }] : [];
       })
       .sort((left, right) => right.magnitude - left.magnitude)
@@ -294,10 +304,65 @@ export function toMapMarkers(world: WorldState, overlay: MapOverlay): MapMarkerV
           position: { x: practiceRegion.x, y: practiceRegion.y },
           magnitude: Math.max(item.adoption, item.mastery, item.innovationProgress),
           label: practice.name,
+          targetKind: 'practice' as const,
+          targetId: practice.id,
         }] : [];
       })
       .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
       .slice(0, 20);
+  }
+  if (overlay === 'political') {
+    const capitalPulses: MapMarkerView[] = projectCapitalPoliticalPulses(world, 'active')
+      .flatMap((pulse) => {
+        const capital = region(world, pulse.capitalRegionId);
+        return capital ? [{
+          id: pulse.id,
+          kind: 'capitalPulse' as const,
+          position: { x: capital.x, y: capital.y },
+          magnitude: pulse.dominantFactionPower,
+          label: `${capital.name}朝局`,
+          targetKind: 'country' as const,
+          targetId: pulse.polityId,
+          polityId: pulse.polityId,
+          factionId: pulse.dominantFactionId ?? undefined,
+          factionName: pulse.dominantFactionName ?? undefined,
+          categoryLabel: pulse.headline,
+          detail: pulse.detail,
+          tone: pulse.tone,
+          color: polity(world, pulse.polityId)?.color,
+        }] : [];
+      });
+    const roots: MapMarkerView[] = focusedFactionId
+      ? projectFactionSpatialPowerRoots(world, focusedFactionId).flatMap((root) => {
+        const anchor = root.anchor.kind === 'region'
+          ? region(world, root.anchor.id)
+          : world.seaZones.find((zone) => zone.id === root.anchor.id);
+        const asset = root.assets[0];
+        if (!anchor || !asset) return [];
+        const targetKind = root.kind === 'regional_governance'
+          ? 'region' as const
+          : root.kind === 'army_command'
+            ? 'army' as const
+            : 'fleet' as const;
+        return [{
+          id: root.id,
+          kind: 'powerRoot' as const,
+          position: { x: anchor.x, y: anchor.y },
+          magnitude: root.powerContribution,
+          label: root.label,
+          targetKind,
+          targetId: targetKind === 'region' ? root.regionId : asset.id,
+          polityId: root.polityId,
+          factionId: root.factionId,
+          factionName: root.factionName,
+          categoryLabel: root.kindLabel,
+          detail: root.detail,
+          rootKind: root.kind,
+          color: polity(world, root.polityId)?.color,
+        }];
+      })
+      : [];
+    return [...capitalPulses, ...roots];
   }
   return [];
 }

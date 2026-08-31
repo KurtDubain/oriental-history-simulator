@@ -23,6 +23,11 @@ import {
   worldToScreenPoint as worldToScreen,
   type MapRegionNodeLayout,
 } from './map-scene-geometry';
+import {
+  isPoliticalMapMarker,
+  layoutMapMarkers,
+  mapMarkerMatchesSelection,
+} from './map-marker-layout';
 
 export interface MapCanvasSize {
   width: number;
@@ -685,28 +690,69 @@ function drawMarkers(
   transform: MapViewportTransform,
   selectedObject: MapSelectedObject,
 ) {
-  for (const marker of markers) {
-    const point = worldToScreen(marker.position, transform);
-    const selected = selectedObject?.kind === marker.kind && selectedObject.id === marker.id;
-    const radius = selected ? 8 : 5 + clamp(marker.magnitude / 100) * 3;
+  for (const { marker, point, radius: baseRadius } of layoutMapMarkers(markers, transform)) {
+    const selected = mapMarkerMatchesSelection(marker, selectedObject);
+    const radius = selected ? baseRadius + 1.5 : baseRadius;
     context.save();
     context.translate(point.x, point.y);
     if (selected) drawSelectionHalo(context, radius + 3);
-    context.strokeStyle = marker.kind === "outbreak" ? VERMILION : OLIVE;
-    context.fillStyle = marker.kind === "outbreak" ? "rgba(163, 58, 46, 0.12)" : "rgba(102, 112, 91, 0.13)";
+    const politicalColor = marker.tone === 'alert'
+      ? VERMILION
+      : marker.tone === 'watch'
+        ? '#8a6535'
+        : marker.color ?? OLIVE;
+    context.strokeStyle = marker.kind === "outbreak" ? VERMILION : isPoliticalMapMarker(marker) ? politicalColor : OLIVE;
+    context.fillStyle = marker.kind === "outbreak"
+      ? "rgba(163, 58, 46, 0.12)"
+      : isPoliticalMapMarker(marker)
+        ? 'rgba(244, 238, 223, 0.9)'
+        : "rgba(102, 112, 91, 0.13)";
     context.lineWidth = selected ? 2.1 : 1.2;
     context.beginPath();
-    if (marker.kind === "practice") {
+    if (marker.kind === 'capitalPulse') {
+      context.rotate(Math.PI / 4);
+      context.rect(-radius * 0.72, -radius * 0.72, radius * 1.44, radius * 1.44);
+    } else if (marker.kind === 'powerRoot' && marker.rootKind === 'army_command') {
+      context.moveTo(-radius * 0.72, radius);
+      context.lineTo(-radius * 0.72, -radius);
+      context.lineTo(radius, -radius * 0.35);
+      context.lineTo(-radius * 0.72, radius * 0.1);
+      context.closePath();
+    } else if (marker.kind === 'powerRoot' && marker.rootKind === 'fleet_command') {
+      context.moveTo(-radius, -radius * 0.25);
+      context.lineTo(radius, -radius * 0.25);
+      context.lineTo(radius * 0.55, radius * 0.65);
+      context.lineTo(-radius * 0.55, radius * 0.65);
+      context.closePath();
+    } else if (marker.kind === "practice") {
       context.moveTo(0, -radius);
       context.lineTo(radius, 0);
       context.lineTo(0, radius);
       context.lineTo(-radius, 0);
       context.closePath();
+    } else if (marker.kind === 'powerRoot') {
+      context.rect(-radius * 0.7, -radius * 0.7, radius * 1.4, radius * 1.4);
     } else {
       context.arc(0, 0, radius, 0, Math.PI * 2);
     }
     context.fill();
     context.stroke();
+    if (marker.kind === 'capitalPulse') {
+      context.beginPath();
+      context.arc(0, 0, Math.max(1.5, radius * 0.24), 0, Math.PI * 2);
+      context.fillStyle = politicalColor;
+      context.fill();
+    } else if (marker.kind === 'powerRoot' && marker.rootKind === 'fleet_command') {
+      context.beginPath();
+      context.moveTo(-radius * 0.75, radius);
+      context.quadraticCurveTo(0, radius * 0.45, radius * 0.75, radius);
+      context.stroke();
+    } else if (marker.kind === 'powerRoot') {
+      context.beginPath();
+      context.arc(0, 0, Math.max(1.2, radius * 0.22), 0, Math.PI * 2);
+      context.fillStyle = politicalColor;
+      context.fill();
+    }
     context.restore();
   }
 }
@@ -1220,7 +1266,7 @@ export function drawWorldMap(
   drawSeaGeography(context, renderedSeaZones, routes, regions, transform, compactMap);
 
   drawFlows(context, flows, transform, selectedObject);
-  drawMarkers(context, markers, transform, selectedObject);
+  drawMarkers(context, markers.filter((marker) => !isPoliticalMapMarker(marker)), transform, selectedObject);
 
   regions.forEach((region) => {
     const center = worldToScreen(region.center, transform);
@@ -1283,6 +1329,7 @@ export function drawWorldMap(
   });
 
   drawPolityLabels(context, regions, transform, overlay, compactMap, scene.level);
+  drawMarkers(context, markers.filter(isPoliticalMapMarker), transform, selectedObject);
 
   layoutMapArmyIcons(armies, regions, transform).forEach(({ army, point, radius }) => {
     const { x, y } = point;

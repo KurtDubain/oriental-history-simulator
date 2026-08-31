@@ -13,6 +13,7 @@ import type {
   MapSeaZoneView,
   MapViewportTransform,
 } from './map-contract';
+import { isPoliticalMapMarker, layoutMapMarkers } from './map-marker-layout';
 
 // Every current MapProfile uses this stable scene-space contract. Individual
 // coastlines and display sites stay inside the selected profile; camera math
@@ -498,25 +499,42 @@ export function resolveMapSceneHit(
   const worldRadius = (screenPixels: number) => screenPixels
     / Math.max(0.001, transform.scale * Math.min(1, transform.yScale));
 
+  const markerLayouts = layoutMapMarkers(presentation.markers, transform);
+  const nearestPoliticalMarker = nearestByDistance(
+    markerLayouts.filter((layout) => isPoliticalMapMarker(layout.marker)),
+    (layout) => Math.hypot(layout.point.x - scenePoint.x, layout.point.y - scenePoint.y),
+  );
+  const politicalMarkerHit = nearestPoliticalMarker
+    && nearestPoliticalMarker.distance <= Math.max(coarse ? 22 : 12, nearestPoliticalMarker.value.radius + 3)
+    ? nearestPoliticalMarker
+    : null;
   const nearestFleet = nearestByDistance(
     presentation.fleets,
-    (fleet) => Math.hypot(fleet.position.x - worldPoint.x, fleet.position.y - worldPoint.y),
+    (fleet) => {
+      const fleetPoint = worldToScreenPoint(fleet.position, transform);
+      return Math.hypot(fleetPoint.x - scenePoint.x, fleetPoint.y - scenePoint.y);
+    },
   );
-  if (nearestFleet && nearestFleet.distance <= worldRadius(coarse ? 22 : 12)) {
-    return { kind: 'fleet', fleet: nearestFleet.value };
+  const nearestArmy = nearestByDistance(
+    layoutMapArmyIcons(presentation.armies, presentation.regions, transform),
+    (layout) => Math.hypot(layout.point.x - scenePoint.x, layout.point.y - scenePoint.y),
+  );
+  const foregroundHits: Array<{ distance: number; priority: number; hit: MapSceneHit }> = [];
+  if (nearestFleet && nearestFleet.distance <= (coarse ? 22 : 12)) {
+    foregroundHits.push({ distance: nearestFleet.distance, priority: 0, hit: { kind: 'fleet', fleet: nearestFleet.value } });
   }
-
-  const army = armyAtScreenPoint(
-    presentation.armies,
-    presentation.regions,
-    scenePoint,
-    width,
-    height,
-    MAP_PADDING,
-    camera,
-    coarse,
-  );
-  if (army) return { kind: 'army', army };
+  if (nearestArmy && nearestArmy.distance <= Math.max(coarse ? 22 : 12, nearestArmy.value.radius + 3)) {
+    foregroundHits.push({ distance: nearestArmy.distance, priority: 1, hit: { kind: 'army', army: nearestArmy.value.army } });
+  }
+  if (politicalMarkerHit && foregroundHits.length) {
+    foregroundHits.push({ distance: politicalMarkerHit.distance, priority: 2, hit: { kind: 'marker', marker: politicalMarkerHit.value.marker } });
+  }
+  const foregroundHit = foregroundHits
+    .sort((left, right) => {
+      const distanceDelta = left.distance - right.distance;
+      return Math.abs(distanceDelta) <= 1e-6 ? left.priority - right.priority : distanceDelta;
+    })[0];
+  if (foregroundHit) return foregroundHit.hit;
 
   const directRegion = regionNearScreenPoint(
     presentation.regions,
@@ -543,15 +561,21 @@ export function resolveMapSceneHit(
     } : undefined,
   );
   if (regionNode && (!directRegion || regionNode.region.id === directRegion.id)) {
+    const nodeDistance = Math.hypot(regionNode.point.x - scenePoint.x, regionNode.point.y - scenePoint.y);
+    if (politicalMarkerHit && politicalMarkerHit.distance < nodeDistance) {
+      return { kind: 'marker', marker: politicalMarkerHit.value.marker };
+    }
     return { kind: 'regionNode', node: regionNode };
   }
 
+  if (politicalMarkerHit) return { kind: 'marker', marker: politicalMarkerHit.value.marker };
+
   const nearestMarker = nearestByDistance(
-    presentation.markers,
-    (marker) => Math.hypot(marker.position.x - worldPoint.x, marker.position.y - worldPoint.y),
+    markerLayouts.filter((layout) => !isPoliticalMapMarker(layout.marker)),
+    (layout) => Math.hypot(layout.point.x - scenePoint.x, layout.point.y - scenePoint.y),
   );
-  if (nearestMarker && nearestMarker.distance <= worldRadius(coarse ? 22 : 12)) {
-    return { kind: 'marker', marker: nearestMarker.value };
+  if (nearestMarker && nearestMarker.distance <= Math.max(coarse ? 22 : 12, nearestMarker.value.radius + 3)) {
+    return { kind: 'marker', marker: nearestMarker.value.marker };
   }
 
   const nearestFlow = nearestByDistance(

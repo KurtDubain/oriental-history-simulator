@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.17.0',
+    date: '2026-09-01',
+    title: '朝局落印，实权落地',
+    items: [
+      '“疆界”舆图为各国首都增加朝局印记，提示主导集团、君权受制与公开相争；点按后直接进入现有国家“朝局”。',
+      '从朝局可回到舆图查看所选派系的真实州治、军团和舰队根基；无地域依据的中枢影响、声望与家门财富不会被画成领土。',
+      '桌面与移动触控共用绘制/命中几何，军队与附近印记均可准确点选；双地图推演、存读档、schema 4 与世界 hash 保持兼容。',
+    ],
+  },
+  {
     version: '1.16.0',
     date: '2026-09-01',
     title: '朝堂有席，权势有根',

@@ -57,6 +57,7 @@ export interface SnapshotOptions {
   mapLod: MapLodLevel;
   mobileInspectorExpanded: boolean;
   mapGestureActive: boolean;
+  focusedPoliticalFactionId: string | null;
   agencyShadowLedger: AgencyShadowLedger;
   agencyShadowBranchId: string | null;
   embodiedCharacterId: string | null;

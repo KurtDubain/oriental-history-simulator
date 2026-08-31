@@ -100,11 +100,21 @@ export interface MapFlowView {
 
 export interface MapMarkerView {
   id: string;
-  kind: "outbreak" | "practice";
+  kind: "outbreak" | "practice" | "capitalPulse" | "powerRoot";
   position: MapPoint;
   magnitude: number;
   label: string;
   alert?: boolean;
+  targetKind?: MapMarkerTargetKind;
+  targetId?: string;
+  polityId?: string;
+  factionId?: string;
+  factionName?: string;
+  categoryLabel?: string;
+  detail?: string;
+  tone?: "quiet" | "watch" | "alert";
+  rootKind?: "regional_governance" | "army_command" | "fleet_command";
+  color?: string;
 }
 
 export type MapOverlay =
@@ -119,7 +129,9 @@ export type MapOverlay =
   | "knowledge"
   | "none";
 
-export type MapObjectKind = MapFlowView["selectedKind"] | "seaZone" | "fleet" | "army";
+export type MapObjectKind = MapFlowView["selectedKind"] | "seaZone" | "fleet" | "army" | "country";
+
+export type MapMarkerTargetKind = MapObjectKind | "region";
 
 export type MapSelectedObject = { kind: string; id: string } | null;
 

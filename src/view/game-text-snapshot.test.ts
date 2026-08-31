@@ -42,6 +42,7 @@ function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
     mapLod: 'overview',
     mobileInspectorExpanded: false,
     mapGestureActive: false,
+    focusedPoliticalFactionId: null,
     agencyShadowLedger: createAgencyShadowLedger(),
     agencyShadowBranchId: null,
     embodiedCharacterId: null,
@@ -231,6 +232,32 @@ describe('render_game_to_text projection boundary', () => {
       revision: getMapProfile(DEFAULT_MAP_PROFILE_ID).revision,
     });
     expect(snapshot.settings).toMatchObject({ soundEnabled: false, audioState: 'silent' });
+  });
+
+  it('publishes only the political markers that are actually visible on the map', () => {
+    const world = createWorld('snapshot-political-map');
+    const before = serializeWorld(world);
+    const overview = JSON.parse(makeTextSnapshot(world, options()));
+    const factionId = overview.interface.politicalMap.visiblePulses[0]?.factionId;
+    expect(overview.interface.politicalMap.active).toBe(true);
+    expect(overview.interface.politicalMap.visiblePulses).toHaveLength(
+      world.polities.filter((polity) => polity.alive).length,
+    );
+    expect(overview.interface.politicalMap.visibleRoots).toEqual([]);
+
+    const focused = JSON.parse(makeTextSnapshot(world, options({
+      focusedPoliticalFactionId: factionId,
+      selection: { kind: 'country', id: overview.interface.politicalMap.visiblePulses[0].polityId, initialTab: 'court', tabRequestKey: 1 },
+    })));
+    expect(focused.interface.politicalMap.focusedFactionId).toBe(factionId);
+    expect(focused.interface.politicalMap.courtEntryActive).toBe(true);
+    expect(focused.interface.politicalMap.visibleRoots.every((root: { factionId: string }) => root.factionId === factionId)).toBe(true);
+    expect(JSON.parse(makeTextSnapshot(world, options({ overlay: 'war' }))).interface.politicalMap).toMatchObject({
+      active: false,
+      visiblePulses: [],
+      visibleRoots: [],
+    });
+    expect(serializeWorld(world)).toBe(before);
   });
 
   it('reports only the visible collection layer while the start page waits underneath', () => {

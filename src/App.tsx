@@ -313,6 +313,7 @@ export function App() {
   const [mapGestureActive, setMapGestureActive] = useState(false);
   const [mapCameraKey, setMapCameraKey] = useState(0);
   const [selection, setSelection] = useState<Selection>(null);
+  const [focusedPoliticalFactionId, setFocusedPoliticalFactionId] = useState<string | null>(null);
   const { returnTarget: rosterDossierReturn, enteredFromRoster: rosterDossierEntry, compactPresentation: compactRosterDossier, begin: beginRosterDossier, clear: clearRosterDossier, returnToRoster } = useRosterDossierFlow(activeView, powerRosterSection);
   useEffect(() => { setMobileInspectorExpanded(Boolean(rosterDossierReturn)); }, [rosterDossierReturn]);
   const [focusedArmyId, setFocusedArmyId] = useState<string | null>(null);
@@ -402,6 +403,7 @@ export function App() {
   const agencyShadowLedgerRef = useRef(agencyShadowLedger);
   const agencyShadowBranchIdRef = useRef<string | null>(agencyShadowBranchId);
   const embodimentObserverRef = useRef<EmbodimentObserverState>(embodimentObserver);
+  const capitalPulseRequestRef = useRef(0);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
   const shouldRestoreCausalFocus = useCallback(() => causalFocusRestoreAllowedRef.current, []);
   useEffect(() => startAppUpdateMonitor(), []);
@@ -455,6 +457,7 @@ export function App() {
     mapLod,
     mobileInspectorExpanded,
     mapGestureActive,
+    focusedPoliticalFactionId,
     agencyShadowLedger,
     agencyShadowBranchId,
     embodiedCharacterId,
@@ -767,6 +770,7 @@ export function App() {
     setSeed(restoredSession.seed);
     setSelectedMapProfileId(restoredSession.mapProfileId);
     setSelection(restoredSession.selection);
+    setFocusedPoliticalFactionId(restoredSession.focusedPoliticalFactionId);
     navigation.reset(restoredSession.navigation);
     setMandateMessage(null);
     archiveFocusRestoreAllowedRef.current = false;
@@ -1513,7 +1517,9 @@ export function App() {
   }, [historicalView, world]);
   const mapFleets = useMemo(() => world && !historicalView ? toMapFleets(world) : [], [historicalView, world]);
   const mapFlows = useMemo(() => world && !historicalView ? toMapFlows(world, overlay) : [], [historicalView, overlay, world]);
-  const mapMarkers = useMemo(() => world && !historicalView ? toMapMarkers(world, overlay) : [], [historicalView, overlay, world]);
+  const mapMarkers = useMemo(() => world && !historicalView
+    ? toMapMarkers(world, overlay, focusedPoliticalFactionId)
+    : [], [focusedPoliticalFactionId, historicalView, overlay, world]);
   const observerLeads = observerLeadProjection?.leads ?? [];
   const readableSituationCount = world ? (
     world.situationSystem.situations.filter((item) => item.status === 'open').length
@@ -1777,6 +1783,27 @@ export function App() {
     }, 0);
   }, [navigation, returnToRoster]);
 
+  const handleShowFactionRoots = useCallback((factionId: string) => {
+    const current = worldRef.current;
+    const faction = current?.factions.find((item) => item.id === factionId && item.active);
+    if (!current || !faction) {
+      setToast('这支派系已退出当下朝局，舆图上没有可追踪的根基。');
+      return;
+    }
+    const rootCount = toMapMarkers(current, 'political', factionId)
+      .filter((marker) => marker.kind === 'powerRoot').length;
+    setFocusedPoliticalFactionId(factionId);
+    setOverlay('political');
+    clearRosterDossier(); setSelection(null);
+    setMobileInspectorExpanded(false);
+    navigation.goToView('world');
+    setToast(rootCount
+      ? `舆图已标出${faction.name}的 ${rootCount} 处实权根基。`
+      : `${faction.name}本季只有中枢影响，没有可落在舆图上的州治或军令。`);
+    gameAudio.play('open', 0.48);
+    window.setTimeout(() => document.querySelector<HTMLCanvasElement>('.world-map__canvas')?.focus({ preventScroll: true }), 0);
+  }, [clearRosterDossier, navigation]);
+
   const inspector = useMemo<ReactNode>(() => {
     if (!world || !selection) return null;
     const followKey = `${selection.kind}:${selection.id}`;
@@ -1807,7 +1834,14 @@ export function App() {
     }
     if (selection.kind === 'country') {
       const item = world.polities.find((candidate) => candidate.id === selection.id);
-      return item ? <Inspector kind="country" data={toCountryInspector(world, item)} {...shared} /> : null;
+      return item ? <Inspector
+        kind="country"
+        data={toCountryInspector(world, item)}
+        initialTab={selection.initialTab}
+        tabRequestKey={selection.tabRequestKey}
+        onShowFactionRoots={handleShowFactionRoots}
+        {...shared}
+      /> : null;
     }
     if (selection.kind === 'family') {
       const item = world.families?.find((candidate) => candidate.id === selection.id);
@@ -1852,6 +1886,7 @@ export function App() {
     handleEnterEmbodiment,
     handleDismissEmbodimentClosure,
     handleLeaveEmbodiment,
+    handleShowFactionRoots,
     handleSelectArchiveEntity,
     handleSelectScopedEvent,
     mobileInspectorExpanded,
@@ -2105,7 +2140,7 @@ export function App() {
               highlightedRegionIds={quarterHighlightedRegionIds}
               highlightEpoch={world.lastTurn?.turn ?? -1}
               selectedRegionId={selection?.kind === 'region' ? selection.id : null}
-              selectedObject={selection && selection.kind !== 'region' && selection.kind !== 'country' && selection.kind !== 'family' && selection.kind !== 'person' ? selection : null}
+              selectedObject={selection && selection.kind !== 'region' && selection.kind !== 'family' && selection.kind !== 'person' ? selection : null}
               overlay={historicalView ? 'political' : overlay}
               cameraKey={mapCameraKey}
               onCameraChange={setMapCamera}
@@ -2115,6 +2150,8 @@ export function App() {
               season={historicalView?.season ?? world.season}
               atmosphereEnabled={interfaceSettings.mapAtmosphere}
               motionReduced={interfaceSettings.motion === 'reduced'}
+              politicalFocusPolityId={world.factions.find((item) => item.id === focusedPoliticalFactionId)?.polityId ?? null}
+              politicalFocusFactionId={focusedPoliticalFactionId}
               onSelectBlank={closeInspectorToMap}
               onSelectRegion={(id) => {
                 gameAudio.play('select', 0.46);
@@ -2128,7 +2165,13 @@ export function App() {
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
                 if (kind === 'army' || kind === 'fleet') setFocusedArmyId(id);
-                clearRosterDossier(); setSelection({ kind, id });
+                if (kind === 'country') {
+                  capitalPulseRequestRef.current += 1;
+                  setFocusedPoliticalFactionId(null);
+                }
+                clearRosterDossier(); setSelection(kind === 'country'
+                  ? { kind, id, initialTab: 'court', tabRequestKey: capitalPulseRequestRef.current }
+                  : { kind, id });
                 navigation.goToView('world');
               }}
             />

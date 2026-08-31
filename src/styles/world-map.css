@@ -278,6 +278,21 @@
   white-space: nowrap;
 }
 
+.world-map__tooltip--political {
+  width: min(244px, calc(100% - 20px));
+}
+
+.world-map__tooltip--political dl > div {
+  align-items: flex-start;
+}
+
+.world-map__tooltip--political dd {
+  overflow: visible;
+  overflow-wrap: anywhere;
+  text-overflow: clip;
+  white-space: normal;
+}
+
 .world-map__empty {
   position: absolute;
   z-index: 3;

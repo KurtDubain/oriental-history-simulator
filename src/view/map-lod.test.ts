@@ -177,6 +177,27 @@ describe('map LOD scene', () => {
     expect(scene.markers).toEqual(source.markers);
   });
 
+  it('keeps restrained political marks legible at every LOD without promoting unrelated marks', () => {
+    const source = fixture();
+    const capitalPulse: MapMarkerView = {
+      id: 'capital-pulse', kind: 'capitalPulse', position: { x: 5, y: 5 }, magnitude: 60,
+      label: '甲都朝局', targetKind: 'country', targetId: 'p_a', polityId: 'p_a',
+    };
+    const powerRoot: MapMarkerView = {
+      id: 'power-root', kind: 'powerRoot', position: { x: 15, y: 5 }, magnitude: 12,
+      label: '甲地军令', targetKind: 'army', targetId: 'a_a_large', polityId: 'p_a',
+      factionId: 'faction-a', rootKind: 'army_command',
+    };
+    source.markers = [...source.markers, capitalPulse, powerRoot];
+
+    expect(buildMapLodScene(source, 'overview').markers.map((marker) => marker.id))
+      .toEqual(['capital-pulse', 'power-root']);
+    expect(buildMapLodScene(source, 'regional').markers.map((marker) => marker.id))
+      .toEqual(['capital-pulse', 'power-root']);
+    expect(buildMapLodScene(source, 'local').markers.map((marker) => marker.id))
+      .toEqual(['outbreak_1', 'capital-pulse', 'power-root']);
+  });
+
   it('promotes the exact selected object while keeping other hidden peers absent', () => {
     const source = fixture();
     const selectedArmy = buildMapLodScene(source, 'overview', {

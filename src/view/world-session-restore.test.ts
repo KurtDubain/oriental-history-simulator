@@ -20,6 +20,7 @@ describe('restoreWorldSession', () => {
 
     expect(session.seed).toBe(world.seed);
     expect(session.selection).toBeNull();
+    expect(session.focusedPoliticalFactionId).toBeNull();
     expect(session.navigation).toEqual({
       view: 'world',
       powerRosterSection: 'polities',
@@ -37,5 +38,14 @@ describe('restoreWorldSession', () => {
     );
 
     expect(session.navigation.layers).toEqual([]);
+  });
+
+  it('never carries a faction map focus across worlds with reused faction ids', () => {
+    const first = createWorld('session-restore-faction-a', 'private-v03');
+    const second = createWorld('session-restore-faction-b', 'contest-v01');
+    expect(first.factions[0]?.id).toBe(second.factions[0]?.id);
+
+    expect(restoreWorldSession(first, 'continue', new MemoryReader(), false).focusedPoliticalFactionId).toBeNull();
+    expect(restoreWorldSession(second, 'collection', new MemoryReader(), false).focusedPoliticalFactionId).toBeNull();
   });
 });

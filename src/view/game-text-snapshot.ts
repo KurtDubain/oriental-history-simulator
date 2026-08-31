@@ -20,6 +20,7 @@ import {
   rosterScopeFor,
   toCountryInspector,
   toMapFlows,
+  toMapMarkers,
   toPersonInspector,
   toSystemInspector,
   worldPopulation,
@@ -40,6 +41,7 @@ import { projectQuarterPulse } from './quarter-pulse-stories';
 import type { SnapshotOptions } from './observer-shell-contract';
 import { projectSituationWorkbench } from './situation-detail';
 import { toSituationSnapshot } from './situation-snapshot';
+import { mapMarkerTarget } from './map-marker-layout';
 
 const HISTORY_COLORS: Record<string, string> = {
   世界: '#777267',
@@ -323,6 +325,10 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     label: flow.label,
     target: { kind: flow.selectedKind, id: flow.selectedId },
   }));
+  const politicalMarkers = options.historicalTurn === null && options.overlay === 'political'
+    ? toMapMarkers(world, 'political', options.focusedPoliticalFactionId)
+    : [];
+  const focusedPoliticalFaction = world.factions.find((item) => item.id === options.focusedPoliticalFactionId);
   const importantRegions = world.regions
     .slice()
     .sort((left, right) => Number(left.id === options.selection?.id) - Number(right.id === options.selection?.id)
@@ -494,6 +500,24 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         panX: Number(options.mapCamera.panX.toFixed(1)),
         panY: Number(options.mapCamera.panY.toFixed(1)),
         lod: options.mapLod,
+      },
+      politicalMap: {
+        active: options.historicalTurn === null && options.overlay === 'political',
+        focusedPolityId: focusedPoliticalFaction?.polityId ?? null,
+        focusedFactionId: focusedPoliticalFaction?.id ?? null,
+        courtEntryActive: options.selection?.kind === 'country' && options.selection.initialTab === 'court',
+        visiblePulses: politicalMarkers.filter((marker) => marker.kind === 'capitalPulse').map((marker) => ({
+          id: marker.id, polityId: marker.polityId, factionId: marker.factionId ?? null,
+          label: marker.label, status: marker.categoryLabel, summary: marker.detail,
+          power: marker.magnitude, tone: marker.tone, position: [marker.position.x, marker.position.y],
+          target: mapMarkerTarget(marker),
+        })),
+        visibleRoots: politicalMarkers.filter((marker) => marker.kind === 'powerRoot').map((marker) => ({
+          id: marker.id, polityId: marker.polityId, factionId: marker.factionId,
+          faction: marker.factionName, category: marker.rootKind, label: marker.label,
+          detail: marker.detail, value: marker.magnitude, position: [marker.position.x, marker.position.y],
+          target: mapMarkerTarget(marker),
+        })),
       },
       quarterPulse: {
         turn: report?.turn ?? null,

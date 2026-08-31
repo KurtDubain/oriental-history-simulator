@@ -1,4 +1,6 @@
 import { describe, expect, it } from 'vitest';
+// @ts-expect-error Tests read one local stylesheet; browser production code has no Node types.
+import { readFileSync } from 'node:fs';
 
 import { REGION_DEFINITIONS } from '../sim/data';
 import { getRegionDisplaySite } from '../view/map-geography';
@@ -405,5 +407,22 @@ describe('WorldBox-style presentation atlas', () => {
       8,
       bayCamera,
     )).toBeNull();
+  });
+});
+
+describe('political map tooltip reading contract', () => {
+  it('lets concrete political evidence wrap onto multiple lines instead of clipping it', () => {
+    const worldMapStyles = readFileSync(new URL('../styles/world-map.css', import.meta.url), 'utf8');
+    const worldMapSource = readFileSync(new URL('./WorldMap.tsx', import.meta.url), 'utf8');
+    expect(worldMapSource).toContain('world-map__tooltip--political');
+    const detailRules = [...worldMapStyles.matchAll(/\.world-map__tooltip--political dd\s*\{([^}]*)\}/g)]
+      .map((match) => match[1])
+      .join('\n');
+
+    expect(detailRules).toContain('white-space: normal');
+    expect(detailRules).toContain('overflow-wrap: anywhere');
+    expect(detailRules).not.toContain('line-clamp');
+    expect(detailRules).not.toContain('ellipsis');
+    expect(detailRules).not.toContain('white-space: nowrap');
   });
 });

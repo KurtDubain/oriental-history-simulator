@@ -8,6 +8,7 @@ import type {
   MapRegionView,
   MapSelectedObject,
 } from './map-contract';
+import { isPoliticalMapMarker, mapMarkerMatchesSelection } from './map-marker-layout';
 
 export const MAP_LOD_THRESHOLDS = Object.freeze({
   overviewToRegional: 1.3,
@@ -133,7 +134,7 @@ function selectedFleetId(selectedObject: MapSelectedObject) {
 }
 
 function markerIsSelected(marker: MapMarkerView, selectedObject: MapSelectedObject) {
-  return marker.kind === selectedObject?.kind && marker.id === selectedObject.id;
+  return mapMarkerMatchesSelection(marker, selectedObject);
 }
 
 function flowIsSelected(
@@ -220,6 +221,8 @@ export function buildMapLodScene(
       : presentation.flows.filter((flow) => flowIsSelected(flow, selectedObject)),
     markers: level === 'local'
       ? [...presentation.markers]
-      : presentation.markers.filter((marker) => marker.alert || markerIsSelected(marker, selectedObject)),
+      : presentation.markers.filter((marker) => (
+        isPoliticalMapMarker(marker) || marker.alert || markerIsSelected(marker, selectedObject)
+      )),
   };
 }

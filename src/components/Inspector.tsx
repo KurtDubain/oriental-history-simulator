@@ -395,7 +395,13 @@ interface InspectorSharedProps {
 
 export type InspectorProps =
   | (InspectorSharedProps & { kind: 'region'; data: RegionInspectorData })
-  | (InspectorSharedProps & { kind: 'country'; data: CountryInspectorData })
+  | (InspectorSharedProps & {
+      kind: 'country';
+      data: CountryInspectorData;
+      initialTab?: 'court';
+      tabRequestKey?: number;
+      onShowFactionRoots?: (factionId: string) => void;
+    })
   | (InspectorSharedProps & { kind: 'family'; data: FamilyInspectorData })
   | (InspectorSharedProps & { kind: 'person'; data: PersonInspectorData })
   | (InspectorSharedProps & { kind: 'system'; data: SystemInspectorData });
@@ -623,10 +629,10 @@ function RegionInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
   );
 }
 
-function CountryInspector({ data, ...actions }: Extract<InspectorProps, { kind: 'country' }>) {
-  const [tab, setTab] = useState<'realm' | 'court' | 'maritime' | 'diplomacy' | 'history'>('realm');
+function CountryInspector({ data, initialTab, tabRequestKey, onShowFactionRoots, ...actions }: Extract<InspectorProps, { kind: 'country' }>) {
+  const [tab, setTab] = useState<'realm' | 'court' | 'maritime' | 'diplomacy' | 'history'>(initialTab ?? 'realm');
   const tabsId = useId();
-  useEffect(() => setTab('realm'), [data.id]);
+  useEffect(() => setTab(initialTab ?? 'realm'), [data.id, initialTab, tabRequestKey]);
   return (
     <>
       <div className="observer-inspector__header">
@@ -654,6 +660,7 @@ function CountryInspector({ data, ...actions }: Extract<InspectorProps, { kind: 
               factions={data.factions ?? []}
               onSelectPerson={(personId) => actions.onSelectEntity?.('person', personId)}
               onSelectEvent={actions.onSelectEvent}
+              onShowFactionRoots={onShowFactionRoots}
             />
           ) : <p className="observer-inspector__empty">朝廷座次尚无足够记录。</p>}
           {data.courtScenes?.length ? (
@@ -1146,12 +1153,14 @@ function mobileQuickLookFor(props: InspectorProps): MobileQuickLookView {
     destination: '地方帐簿、局势与往来',
   };
   if (props.kind === 'country') return {
-    eyebrow: '国势速览',
+    eyebrow: props.initialTab === 'court' ? '朝局速览' : '国势速览',
     name: props.data.name,
-    ownerLabel: '中枢',
+    ownerLabel: props.initialTab === 'court' ? '都城' : '中枢',
     owner: [props.data.government, `都于${props.data.capital}`].filter(Boolean).join(' · '),
-    current: props.data.status ?? `治下${props.data.regionCount}郡，君主${props.data.ruler}。`,
-    destination: '国势、朝局、邦交与国史',
+    current: props.initialTab === 'court'
+      ? props.data.court?.summary ?? `君主${props.data.ruler}，朝中派系格局尚待查考。`
+      : props.data.status ?? `治下${props.data.regionCount}郡，君主${props.data.ruler}。`,
+    destination: props.initialTab === 'court' ? '君位、朝班与派系根基' : '国势、朝局、邦交与国史',
   };
   if (props.kind === 'family') return {
     eyebrow: '门第速览',
@@ -1330,7 +1339,7 @@ export function Inspector(props: InspectorProps) {
                     setMobileExpanded(true);
                     if (props.kind === 'person') setMobileMindRequest((current) => current + 1);
                   }}
-                >{props.kind === 'person' ? '看所图' : '完整档案'}</button>
+                >{props.kind === 'person' ? '看所图' : props.kind === 'country' && props.initialTab === 'court' ? '看朝局' : '完整档案'}</button>
                 {props.onClose ? <button type="button" onClick={props.onClose}>{returnsToRoster ? mobileReturnLabel : '收起'}</button> : null}
               </div>
             </footer>

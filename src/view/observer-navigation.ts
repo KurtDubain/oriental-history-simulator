@@ -5,7 +5,7 @@ export type PowerRosterSection = 'polities' | 'families' | 'military';
 /** A selection is observer-only navigation state and never enters WorldState. */
 export type Selection =
   | { kind: 'region'; id: string }
-  | { kind: 'country'; id: string }
+  | { kind: 'country'; id: string; initialTab?: 'court'; tabRequestKey?: number }
   | { kind: 'family'; id: string }
   | { kind: 'person'; id: string }
   | { kind: 'seaZone'; id: string }

@@ -34,6 +34,7 @@ export interface CourtProjectionProps {
   factions: readonly CourtFactionDetail[];
   onSelectPerson?: (personId: string) => void;
   onSelectEvent?: (eventId: string) => void;
+  onShowFactionRoots?: (factionId: string) => void;
 }
 
 function defaultFocus(court: CourtProjectionView): CourtFocus | null {
@@ -84,7 +85,7 @@ function CourtSeatButton({
   );
 }
 
-export function CourtProjection({ court, factions, onSelectPerson, onSelectEvent }: CourtProjectionProps) {
+export function CourtProjection({ court, factions, onSelectPerson, onSelectEvent, onShowFactionRoots }: CourtProjectionProps) {
   const detailId = useId();
   const [focus, setFocus] = useState<CourtFocus | null>(() => defaultFocus(court));
   useEffect(() => {
@@ -291,6 +292,7 @@ export function CourtProjection({ court, factions, onSelectPerson, onSelectEvent
               </details>
             ) : null}
             <footer>
+              {onShowFactionRoots ? <button type="button" data-court-map-roots={focusedFaction.id} onClick={() => onShowFactionRoots(focusedFaction.id)}>舆图看根基</button> : null}
               {onSelectPerson ? <button type="button" onClick={() => onSelectPerson(focusedFaction.leaderId)}>看领袖 · {focusedFaction.leader}</button> : null}
             </footer>
           </>

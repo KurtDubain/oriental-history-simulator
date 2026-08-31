@@ -16,6 +16,12 @@ import {
   recentFactionPowerMovements,
 } from '../src/sim/politics/power-ledger';
 import { projectCourt, type CourtProjectionView } from '../src/view/court-projection';
+import {
+  POLITICAL_MAP_PROJECTION_LIMITS,
+  projectPoliticalMap,
+  type FactionSpatialPowerRootView,
+  type PoliticalMapProjectionView,
+} from '../src/view/political-map-projection';
 
 const DEFAULT_SEEDS = ['朝局审计-甲', '朝局审计-乙'] as const;
 const configuredSeeds = process.env.POLITICS_AUDIT_SEEDS
@@ -35,6 +41,7 @@ interface PoliticalFingerprint {
   factDigest: string;
   historyDigest: string;
   factionDigest: string;
+  politicalSpatialDigest: string;
 }
 
 interface TransitionCounts {
@@ -58,8 +65,11 @@ interface AuditRun {
   splitSave: string;
   peakActiveFactions: number;
   peakCourtSeats: number;
+  peakSpatialRoots: number;
   validationChecks: number;
   projectionChecks: number;
+  capitalPulseChecks: number;
+  spatialRootChecks: number;
 }
 
 interface AuditSample {
@@ -71,10 +81,13 @@ interface AuditSample {
   activeFactions: number;
   peakActiveFactions: number;
   peakCourtSeats: number;
+  peakSpatialRoots: number;
   lifecycle: TransitionCounts;
   relations: RelationCounts;
   validationChecks: number;
   projectionChecks: number;
+  capitalPulseChecks: number;
+  spatialRootChecks: number;
   replayExact: boolean;
   resumeExact: boolean;
 }
@@ -103,6 +116,7 @@ function unique(values: readonly string[]): boolean {
 }
 
 function politicalFingerprint(world: WorldState): PoliticalFingerprint {
+  const politicalMap = projectPoliticalMap(world, 'active');
   return {
     turn: world.turn,
     hash: world.hash,
@@ -112,6 +126,31 @@ function politicalFingerprint(world: WorldState): PoliticalFingerprint {
     // identity and lineage in this audit fingerprint so replay checks still
     // catch an unauthenticated lifecycle drift.
     factionDigest: stableHash(world.factions),
+    // Keep replay/save-resume checks sensitive to the observer-facing spatial
+    // politics without serialising an unbounded presentation tree. Roots and
+    // assets are capped by the projection contract; pulses are one per polity.
+    politicalSpatialDigest: stableHash({
+      capitalPulses: politicalMap.capitalPulses.map((pulse) => ({
+        polityId: pulse.polityId,
+        capitalRegionId: pulse.capitalRegionId,
+        dominantFactionId: pulse.dominantFactionId,
+        conflictId: pulse.conflict?.relationId ?? null,
+        tone: pulse.tone,
+      })),
+      roots: politicalMap.roots
+        .slice(0, POLITICAL_MAP_PROJECTION_LIMITS.rootsPerWorld)
+        .map((root) => ({
+          id: root.id,
+          factionId: root.factionId,
+          regionId: root.regionId,
+          anchor: [root.anchor.kind, root.anchor.id],
+          kind: root.kind,
+          powerContribution: root.powerContribution,
+          assets: root.assets
+            .slice(0, POLITICAL_MAP_PROJECTION_LIMITS.assetsPerRoot)
+            .map((asset) => [asset.kind, asset.id, asset.holderId, asset.ledgerResourceId]),
+        })),
+    }),
   };
 }
 
@@ -120,7 +159,8 @@ function sameFingerprint(left: PoliticalFingerprint, right: PoliticalFingerprint
     && left.hash === right.hash
     && left.factDigest === right.factDigest
     && left.historyDigest === right.historyDigest
-    && left.factionDigest === right.factionDigest;
+    && left.factionDigest === right.factionDigest
+    && left.politicalSpatialDigest === right.politicalSpatialDigest;
 }
 
 function latestRelationFact(
@@ -425,7 +465,336 @@ function auditCourtProjection(
   }
 }
 
-function auditWorld(profile: MapProfile, seed: string, world: WorldState): { activePeak: number; courtSeatPeak: number; projectionChecks: number } {
+function preferredCurrentOpposition(
+  court: CourtProjectionView,
+): CourtProjectionView['relations'][number] | null {
+  const dominantFactionId = court.factionPositions.find((position) => position.dominant)?.factionId ?? null;
+  return court.relations
+    .filter((relation) => relation.kind === 'opposed')
+    .sort((left, right) => (
+      Number(!(dominantFactionId && [left.leftFactionId, left.rightFactionId].includes(dominantFactionId)))
+      - Number(!(dominantFactionId && [right.leftFactionId, right.rightFactionId].includes(dominantFactionId)))
+      || stableCompare(left.id, right.id)
+    ))[0] ?? null;
+}
+
+function auditCapitalPoliticalPulses(
+  world: WorldState,
+  projection: PoliticalMapProjectionView,
+  courtsByPolityId: ReadonlyMap<string, CourtProjectionView>,
+  scope: string,
+): number {
+  const livingPolities = world.polities
+    .filter((polity) => polity.alive)
+    .sort((left, right) => stableCompare(left.id, right.id));
+  const pulses = projection.capitalPulses;
+  if (pulses.length !== livingPolities.length) {
+    fail(scope, `首都朝局脉搏${pulses.length}个，与存续势力${livingPolities.length}个不符`);
+  }
+  if (!unique(pulses.map((pulse) => pulse.id)) || !unique(pulses.map((pulse) => pulse.polityId))) {
+    fail(scope, '首都朝局脉搏 ID 或势力引用重复');
+  }
+
+  for (const polity of livingPolities) {
+    const pulse = pulses.find((candidate) => candidate.polityId === polity.id);
+    const court = courtsByPolityId.get(polity.id);
+    if (!pulse || !court) {
+      fail(scope, `${polity.id}缺少当季首都朝局脉搏`);
+      continue;
+    }
+    const capital = world.regions.find((region) => region.id === polity.capitalRegionId);
+    const ruler = world.characters.find((character) => character.id === polity.rulerId);
+    if (
+      !capital
+      || pulse.id !== `capital-politics:${polity.id}`
+      || pulse.capitalRegionId !== capital.id
+      || pulse.capitalName !== capital.name
+      || pulse.polityName !== polity.name
+    ) {
+      fail(scope, `${polity.id}首都脉搏没有落在真实首都`);
+    }
+    if (
+      !ruler
+      || pulse.rulerId !== ruler.id
+      || pulse.ruler !== ruler.name
+      || pulse.authority !== polity.authority
+    ) {
+      fail(scope, `${polity.id}首都脉搏的君主或权威不是当前状态`);
+    }
+
+    const dominant = court.factionPositions.find((position) => position.dominant) ?? null;
+    if (
+      pulse.dominantFactionId !== (dominant?.factionId ?? null)
+      || pulse.dominantFactionName !== (dominant?.name ?? null)
+      || pulse.dominantFactionLeaderId !== (dominant?.leaderId ?? null)
+      || pulse.dominantFactionPower !== (dominant?.power ?? 0)
+    ) {
+      fail(scope, `${polity.id}首都脉搏的主导派系与当季活动朝堂不一致`);
+    }
+    if (pulse.dominantFactionId) {
+      const dominantState = world.factions.find((faction) => faction.id === pulse.dominantFactionId);
+      if (!dominantState?.active || dominantState.polityId !== polity.id) {
+        fail(scope, `${polity.id}首都脉搏引用了非活动或异国主导派系`);
+      }
+    }
+
+    const expectedOpposition = preferredCurrentOpposition(court);
+    if ((pulse.conflict?.relationId ?? null) !== (expectedOpposition?.id ?? null)) {
+      fail(scope, `${polity.id}首都脉搏没有采用当季朝堂的优先公开相争`);
+    }
+    if (pulse.conflict && expectedOpposition) {
+      if (
+        pulse.conflict.leftFactionId !== expectedOpposition.leftFactionId
+        || pulse.conflict.leftFactionName !== expectedOpposition.leftName
+        || pulse.conflict.rightFactionId !== expectedOpposition.rightFactionId
+        || pulse.conflict.rightFactionName !== expectedOpposition.rightName
+        || pulse.conflict.sourceEventId !== expectedOpposition.sourceEventId
+        || pulse.conflict.sinceLabel !== expectedOpposition.sinceLabel
+      ) {
+        fail(scope, `${polity.id}首都脉搏的公开相争详情与活动朝堂关系不一致`);
+      }
+      const currentFactionIds = new Set(court.factionPositions.map((position) => position.factionId));
+      if (
+        !currentFactionIds.has(pulse.conflict.leftFactionId)
+        || !currentFactionIds.has(pulse.conflict.rightFactionId)
+      ) {
+        fail(scope, `${polity.id}首都脉搏的相争端点不是当季活动派系`);
+      }
+    }
+  }
+  return pulses.length;
+}
+
+function currentFleetAnchor(
+  world: WorldState,
+  fleet: WorldState['fleets'][number],
+): FactionSpatialPowerRootView['anchor'] | null {
+  if (fleet.seaZoneId) {
+    const seaZone = world.seaZones.find((candidate) => candidate.id === fleet.seaZoneId);
+    if (seaZone) return { kind: 'seaZone', id: seaZone.id, name: seaZone.name };
+  }
+  const port = world.regions.find((candidate) => (
+    candidate.id === (fleet.portRegionId ?? fleet.homePortRegionId)
+  ));
+  return port ? { kind: 'region', id: port.id, name: port.name } : null;
+}
+
+function matchingRootAssetCount(world: WorldState, root: FactionSpatialPowerRootView): number {
+  if (root.kind === 'regional_governance') {
+    return world.characters.filter((holder) => (
+      holder.alive
+      && holder.polityId === root.polityId
+      && holder.factionId === root.factionId
+      && holder.governedRegionId === root.regionId
+      && world.regions.some((region) => region.id === root.regionId && region.controllerId === root.polityId)
+      && world.offices.some((office) => (
+        office.active
+        && office.kind === '地方长官'
+        && office.polityId === root.polityId
+        && office.holderId === holder.id
+        && office.regionId === root.regionId
+      ))
+    )).length;
+  }
+  if (root.kind === 'army_command') {
+    return world.armies.filter((army) => {
+      const commander = world.characters.find((character) => character.id === army.commanderId);
+      return army.polityId === root.polityId
+        && army.regionId === root.regionId
+        && army.soldiers > 0
+        && Boolean(commander?.alive)
+        && commander?.polityId === root.polityId
+        && commander.factionId === root.factionId
+        && commander.commandingArmyId === army.id;
+    }).length;
+  }
+  // Fleet roots are deliberately one-per-fleet: fleets sharing a home port
+  // may currently be in different ports or sea zones and must never collapse
+  // into a marker that follows only the first asset.
+  if (root.assets.length !== 1 || root.assets[0]?.kind !== 'fleet') return 0;
+  const fleet = world.fleets.find((candidate) => candidate.id === root.assets[0]?.id);
+  const commander = world.characters.find((character) => character.id === fleet?.commanderId);
+  const anchor = fleet ? currentFleetAnchor(world, fleet) : null;
+  return fleet
+    && fleet.polityId === root.polityId
+    && fleet.homePortRegionId === root.regionId
+    && fleet.warships + fleet.transports + fleet.patrolShips > 0
+    && Boolean(commander?.alive)
+    && commander?.polityId === root.polityId
+    && commander.factionId === root.factionId
+    && commander.commandingFleetId === fleet.id
+    && anchor?.kind === root.anchor.kind
+    && anchor.id === root.anchor.id
+    ? 1
+    : 0;
+}
+
+function auditSpatialPowerRoot(
+  world: WorldState,
+  root: FactionSpatialPowerRootView,
+  scope: string,
+): void {
+  const faction = world.factions.find((candidate) => candidate.id === root.factionId);
+  const polity = world.polities.find((candidate) => candidate.id === root.polityId);
+  const region = world.regions.find((candidate) => candidate.id === root.regionId);
+  const anchor = root.anchor.kind === 'region'
+    ? world.regions.find((candidate) => candidate.id === root.anchor.id)
+    : world.seaZones.find((candidate) => candidate.id === root.anchor.id);
+  if (!faction?.active || !polity?.alive || faction.polityId !== polity.id || !region) {
+    fail(scope, `${root.id}引用非活动派系、亡国或未知区域`);
+    return;
+  }
+  if (root.polityName !== polity.name || root.factionName !== faction.name || root.regionName !== region.name) {
+    fail(scope, `${root.id}的势力、派系或区域名称不是当前状态`);
+  }
+  if (!anchor || root.anchor.name !== anchor.name) {
+    fail(scope, `${root.id}引用未知或失真的当前空间锚点${root.anchor.kind}:${root.anchor.id}`);
+  }
+  if (root.kind !== 'fleet_command' && (root.anchor.kind !== 'region' || root.anchor.id !== region.id)) {
+    fail(scope, `${root.id}州治/军团根基没有落在其当前区域`);
+  }
+  if (!['regional_governance', 'army_command', 'fleet_command'].includes(root.kind)) {
+    fail(scope, `${root.id}把无空间坐标的权势画成了根基`);
+    return;
+  }
+  if (root.assets.length === 0 || root.assets.length > POLITICAL_MAP_PROJECTION_LIMITS.assetsPerRoot) {
+    fail(scope, `${root.id}实权资产为空或超过展示上限`);
+  }
+  if (!unique(root.assets.map((asset) => `${asset.kind}:${asset.id}`))) {
+    fail(scope, `${root.id}包含重复实权资产`);
+  }
+  const currentAssetCount = matchingRootAssetCount(world, root);
+  if (root.assetCount !== currentAssetCount || root.assetCount < root.assets.length) {
+    fail(scope, `${root.id}资产计数${root.assetCount}与当前实权${currentAssetCount}不一致`);
+  }
+
+  const ledger = calculateFactionPowerLedger(world, faction);
+  let retainedPower = 0;
+  for (const asset of root.assets) {
+    const holder = world.characters.find((character) => character.id === asset.holderId);
+    if (
+      !holder?.alive
+      || holder.polityId !== polity.id
+      || holder.factionId !== faction.id
+      || holder.name !== asset.holder
+    ) {
+      fail(scope, `${root.id}/${asset.id}持有人不是同国同派的在世人物`);
+      continue;
+    }
+    if (asset.kind === 'governorship') {
+      const office = world.offices.find((candidate) => (
+        candidate.active
+        && candidate.kind === '地方长官'
+        && candidate.polityId === polity.id
+        && candidate.holderId === holder.id
+        && candidate.regionId === region.id
+      ));
+      if (root.kind !== 'regional_governance' || asset.id !== holder.id || holder.governedRegionId !== region.id || !office) {
+        fail(scope, `${root.id}/${asset.id}无法反查当前地方任官`);
+      }
+    } else if (asset.kind === 'army') {
+      const army = world.armies.find((candidate) => candidate.id === asset.id);
+      if (
+        root.kind !== 'army_command'
+        || !army
+        || army.polityId !== polity.id
+        || army.regionId !== region.id
+        || army.soldiers <= 0
+        || army.commanderId !== holder.id
+        || holder.commandingArmyId !== army.id
+      ) {
+        fail(scope, `${root.id}/${asset.id}无法反查现役军团与双向主将关系`);
+      }
+    } else {
+      const fleet = world.fleets.find((candidate) => candidate.id === asset.id);
+      const currentAnchor = fleet ? currentFleetAnchor(world, fleet) : null;
+      if (
+        root.kind !== 'fleet_command'
+        || !fleet
+        || fleet.polityId !== polity.id
+        || fleet.homePortRegionId !== region.id
+        || fleet.warships + fleet.transports + fleet.patrolShips <= 0
+        || fleet.commanderId !== holder.id
+        || holder.commandingFleetId !== fleet.id
+        || !currentAnchor
+        || currentAnchor.kind !== root.anchor.kind
+        || currentAnchor.id !== root.anchor.id
+        || currentAnchor.name !== root.anchor.name
+        || root.assetCount !== 1
+        || root.assets.length !== 1
+      ) {
+        fail(scope, `${root.id}/${asset.id}无法反查现役舰队、双向主将或当前舰位锚点`);
+      }
+    }
+
+    const resource = asset.ledgerResourceId
+      ? ledger.resources.find((candidate) => candidate.id === asset.ledgerResourceId)
+      : null;
+    if (resource) {
+      retainedPower += resource.value;
+      const allowedCategory = asset.kind === 'governorship' ? 'regional_office' : 'military_command';
+      const hasConcreteEvidence = asset.kind === 'governorship'
+        ? resource.evidence.some((reference) => (
+          reference.entityType === 'office'
+          && world.offices.some((office) => (
+            office.id === reference.entityId
+            && office.active
+            && office.kind === '地方长官'
+            && office.holderId === holder.id
+            && office.regionId === region.id
+          ))
+        ))
+        : resource.evidence.some((reference) => (
+          reference.entityType === asset.kind
+          && reference.entityId === asset.id
+          && reference.field === 'commanderId'
+        ));
+      // Fleet roots retain homePortRegionId as asset provenance, but their map
+      // anchor follows the current port/sea zone. FleetState is authoritative
+      // for that moving anchor; governance/armies must still match ledger
+      // regionIds directly.
+      const ledgerRegionMatches = asset.kind === 'fleet' || resource.regionIds.includes(region.id);
+      if (
+        resource.category !== allowedCategory
+        || !resource.characterIds.includes(holder.id)
+        || !ledgerRegionMatches
+        || !hasConcreteEvidence
+      ) {
+        fail(scope, `${root.id}/${asset.id}引用了非空间权势资源${resource.category}`);
+      }
+    } else if (asset.ledgerResourceId !== null) {
+      fail(scope, `${root.id}/${asset.id}引用不存在的POL01资源${asset.ledgerResourceId}`);
+    }
+  }
+  if (Math.round(retainedPower * 10) / 10 !== root.powerContribution) {
+    fail(scope, `${root.id}权势贡献没有复用可追溯的POL01资源`);
+  }
+}
+
+function auditPoliticalMapProjection(
+  world: WorldState,
+  projection: PoliticalMapProjectionView,
+  courtsByPolityId: ReadonlyMap<string, CourtProjectionView>,
+  scope: string,
+): { capitalPulseChecks: number; spatialRootChecks: number } {
+  if (projection.roots.length > POLITICAL_MAP_PROJECTION_LIMITS.rootsPerWorld) {
+    fail(scope, `空间权势根基${projection.roots.length}个，超过世界上限${POLITICAL_MAP_PROJECTION_LIMITS.rootsPerWorld}`);
+  }
+  if (!unique(projection.roots.map((root) => root.id))) fail(scope, '空间权势根基 ID 重复');
+  for (const root of projection.roots) auditSpatialPowerRoot(world, root, scope);
+  return {
+    capitalPulseChecks: auditCapitalPoliticalPulses(world, projection, courtsByPolityId, scope),
+    spatialRootChecks: projection.roots.length,
+  };
+}
+
+function auditWorld(profile: MapProfile, seed: string, world: WorldState): {
+  activePeak: number;
+  courtSeatPeak: number;
+  spatialRootCount: number;
+  projectionChecks: number;
+  capitalPulseChecks: number;
+} {
   const scope = scoped(profile, seed, world.turn);
   const violations = validateWorld(world);
   if (violations.length > 0) {
@@ -441,16 +810,30 @@ function auditWorld(profile: MapProfile, seed: string, world: WorldState): { act
   }
   const activePeak = auditFactionIdentity(world, facts, scope);
   const beforeProjection = serializeWorld(world);
+  const beforeProjectionHash = world.hash;
   let courtSeatPeak = 0;
   let projectionChecks = 0;
+  const courtsByPolityId = new Map<string, CourtProjectionView>();
   for (const polity of world.polities.filter((item) => item.alive).sort((left, right) => stableCompare(left.id, right.id))) {
     const court = projectCourt(world, polity.id);
+    courtsByPolityId.set(polity.id, court);
     projectionChecks += 1;
     courtSeatPeak = Math.max(courtSeatPeak, court.seats.length);
     auditCourtProjection(world, polity.id, court, facts, scope);
   }
-  if (serializeWorld(world) !== beforeProjection) fail(scope, 'projectCourt改写了权威世界');
-  return { activePeak, courtSeatPeak, projectionChecks };
+  const politicalMap = projectPoliticalMap(world, 'active');
+  projectionChecks += 1;
+  const politicalChecks = auditPoliticalMapProjection(world, politicalMap, courtsByPolityId, scope);
+  if (serializeWorld(world) !== beforeProjection || world.hash !== beforeProjectionHash) {
+    fail(scope, '朝堂或政治地图投影改写了权威世界/hash');
+  }
+  return {
+    activePeak,
+    courtSeatPeak,
+    spatialRootCount: politicalChecks.spatialRootChecks,
+    projectionChecks,
+    capitalPulseChecks: politicalChecks.capitalPulseChecks,
+  };
 }
 
 function run(profile: MapProfile, seed: string, withAudit: boolean): AuditRun {
@@ -459,8 +842,11 @@ function run(profile: MapProfile, seed: string, withAudit: boolean): AuditRun {
   let splitSave = '';
   let peakActiveFactions = 0;
   let peakCourtSeats = 0;
+  let peakSpatialRoots = 0;
   let validationChecks = 0;
   let projectionChecks = 0;
+  let capitalPulseChecks = 0;
+  let spatialRootChecks = 0;
   for (let step = 0; step <= turns; step += 1) {
     sequence.push(politicalFingerprint(world));
     if (world.turn === splitTurn) splitSave = serializeWorld(world);
@@ -470,11 +856,25 @@ function run(profile: MapProfile, seed: string, withAudit: boolean): AuditRun {
       projectionChecks += result.projectionChecks;
       peakActiveFactions = Math.max(peakActiveFactions, result.activePeak);
       peakCourtSeats = Math.max(peakCourtSeats, result.courtSeatPeak);
+      peakSpatialRoots = Math.max(peakSpatialRoots, result.spatialRootCount);
+      capitalPulseChecks += result.capitalPulseChecks;
+      spatialRootChecks += result.spatialRootCount;
     }
     if (step < turns) world = advanceWorld(world);
   }
   if (!splitSave) throw new Error(`未取得T${splitTurn}政治审计存档`);
-  return { world, sequence, splitSave, peakActiveFactions, peakCourtSeats, validationChecks, projectionChecks };
+  return {
+    world,
+    sequence,
+    splitSave,
+    peakActiveFactions,
+    peakCourtSeats,
+    peakSpatialRoots,
+    validationChecks,
+    projectionChecks,
+    capitalPulseChecks,
+    spatialRootChecks,
+  };
 }
 
 function transitionCounts(facts: readonly SimulationFact[]): TransitionCounts {
@@ -546,10 +946,13 @@ for (const profile of profiles) {
       activeFactions: first.world.factions.filter((faction) => faction.active).length,
       peakActiveFactions: first.peakActiveFactions,
       peakCourtSeats: first.peakCourtSeats,
+      peakSpatialRoots: first.peakSpatialRoots,
       lifecycle: transitionCounts(facts),
       relations: relationCounts(facts),
       validationChecks: first.validationChecks,
       projectionChecks: first.projectionChecks,
+      capitalPulseChecks: first.capitalPulseChecks,
+      spatialRootChecks: first.spatialRootChecks,
       replayExact,
       resumeExact,
     });
@@ -567,6 +970,8 @@ const aggregate = samples.reduce((sum, sample) => ({
   ended: sum.ended + sample.lifecycle.ended,
   relationsFormed: sum.relationsFormed + sample.relations.allianceFormed + sample.relations.rivalryFormed,
   projectionChecks: sum.projectionChecks + sample.projectionChecks,
+  capitalPulseChecks: sum.capitalPulseChecks + sample.capitalPulseChecks,
+  spatialRootChecks: sum.spatialRootChecks + sample.spatialRootChecks,
 }), {
   worlds: 0,
   factions: 0,
@@ -578,14 +983,18 @@ const aggregate = samples.reduce((sum, sample) => ({
   ended: 0,
   relationsFormed: 0,
   projectionChecks: 0,
+  capitalPulseChecks: 0,
+  spatialRootChecks: 0,
 });
 
 if (aggregate.formed === 0) fail('aggregate', '固定样本没有建立任何权威派系');
 if (aggregate.relationsFormed === 0) fail('aggregate', '固定样本没有形成任何有 Fact 的派系关系');
 if (aggregate.projectionChecks === 0) fail('aggregate', '没有执行任何朝堂投影真实性检查');
+if (aggregate.capitalPulseChecks === 0) fail('aggregate', '没有核验任何首都朝局脉搏');
+if (aggregate.spatialRootChecks === 0) fail('aggregate', '固定样本没有形成任何可核验的空间权势根基');
 
 console.log(JSON.stringify({
-  phase: 'POL02/POL03 political identity and court gate',
+  phase: 'POL02-POL05 political identity, court and map gate',
   scope: {
     profiles: profiles.map((profile) => `${profile.id}@${profile.revision}`),
     seeds,

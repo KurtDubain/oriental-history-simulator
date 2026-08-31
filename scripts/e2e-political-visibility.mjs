@@ -2,24 +2,58 @@ import assert from 'node:assert/strict';
 import { mkdir, rm } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { getMapProfile } from '../src/maps/index';
+import { layoutMapMarkers } from '../src/view/map-marker-layout';
+import { createMapViewportTransform } from '../src/view/map-scene-geometry';
 
 const PORT = Number(process.env.POLITICAL_VISIBILITY_E2E_PORT ?? 4198);
 const externalUrl = process.env.POLITICAL_VISIBILITY_E2E_URL;
 const APP_URL = externalUrl ?? `http://127.0.0.1:${PORT}`;
 const ARTIFACT_DIR = 'output/political-visibility-e2e';
-const TARGET_POLITY_ID = 'p_yan';
 const TARGET_TURN = 4;
 const MOBILE_DOSSIER_MAX_WIDTH = 840;
 const MOBILE_SEAT_MAX_WIDTH = 720;
 const SCENARIO_FILTER = process.env.POLITICAL_VISIBILITY_E2E_SCENARIO;
 
 const SCENARIOS = Object.freeze([
-  { slug: 'desktop-1440x900', viewport: { width: 1440, height: 900 } },
-  { slug: 'mobile-wide-640x900', viewport: { width: 640, height: 900 } },
-  { slug: 'mobile-390x844', viewport: { width: 390, height: 844 } },
+  {
+    slug: 'private-desktop-1440x900',
+    viewport: { width: 1440, height: 900 },
+    mapProfileId: 'private-v03',
+    targetPolityId: 'p_yan',
+    seed: 'POL05-朝堂舆图-心中山河',
+  },
+  {
+    slug: 'private-mobile-wide-640x900',
+    viewport: { width: 640, height: 900 },
+    mapProfileId: 'private-v03',
+    targetPolityId: 'p_yan',
+    seed: 'POL05-朝堂舆图-心中山河',
+  },
+  {
+    slug: 'private-mobile-390x844',
+    viewport: { width: 390, height: 844 },
+    mapProfileId: 'private-v03',
+    targetPolityId: 'p_yan',
+    seed: 'POL05-朝堂舆图-心中山河',
+  },
+  {
+    slug: 'contest-desktop-1440x900',
+    viewport: { width: 1440, height: 900 },
+    mapProfileId: 'contest-v01',
+    targetPolityId: 'p_linyuan',
+    seed: 'POL05-朝堂舆图-云海八荒',
+  },
+  {
+    slug: 'contest-mobile-390x844',
+    viewport: { width: 390, height: 844 },
+    mapProfileId: 'contest-v01',
+    targetPolityId: 'p_linyuan',
+    seed: 'POL05-朝堂舆图-云海八荒',
+  },
 ].filter((scenario) => !SCENARIO_FILTER || scenario.slug === SCENARIO_FILTER));
 
-assert.ok(SCENARIOS.length > 0, `未知 POL03 E2E 场景：${SCENARIO_FILTER}`);
+assert.ok(SCENARIOS.length > 0, `未知 POL05 E2E 场景：${SCENARIO_FILTER}`);
 
 const CENTRAL_OFFICES = new Set(['君主', '宰辅', '枢密使', '廷臣']);
 
@@ -68,6 +102,96 @@ async function activate(locator, scenario) {
   else await locator.click();
 }
 
+async function activateCanvasPoint(page, scenario, point) {
+  if (scenario.viewport.width <= MOBILE_DOSSIER_MAX_WIDTH) {
+    await page.touchscreen.tap(point.x, point.y);
+  } else {
+    await page.mouse.click(point.x, point.y);
+  }
+}
+
+function politicalMarkerIds(markers) {
+  return markers.map((marker) => marker.id);
+}
+
+function commaSeparatedAttribute(value) {
+  return value ? value.split(',').filter(Boolean) : [];
+}
+
+async function mapMarkerScreenPoint(page, markerId) {
+  const viewport = await page.evaluate(() => {
+    const current = JSON.parse(window.render_game_to_text());
+    const political = current.interface?.politicalMap;
+    const host = document.querySelector('.world-map');
+    const canvas = document.querySelector('.world-map__canvas');
+    if (!political || !(host instanceof HTMLElement) || !(canvas instanceof HTMLCanvasElement)) return null;
+    const rect = canvas.getBoundingClientRect();
+    return {
+      mapProfileId: current.mapProfile.id,
+      political,
+      camera: current.interface.mapViewport,
+      width: canvas.clientWidth,
+      height: canvas.clientHeight,
+      rect: { left: rect.left, top: rect.top, width: rect.width, height: rect.height },
+      focusX: Number.parseFloat(host.dataset.focusOffsetX ?? '0') || 0,
+      focusY: Number.parseFloat(host.dataset.focusOffsetY ?? '0') || 0,
+    };
+  });
+  if (!viewport) return null;
+
+  const profile = getMapProfile(viewport.mapProfileId);
+  const entries = [
+    ...viewport.political.visiblePulses.map((marker) => ({
+      id: marker.id,
+      kind: 'capitalPulse',
+      position: { x: marker.position[0], y: marker.position[1] },
+      magnitude: marker.power,
+      label: marker.label,
+      targetKind: marker.target.kind,
+      targetId: marker.target.id,
+      polityId: marker.polityId,
+      factionId: marker.factionId ?? undefined,
+      tone: marker.tone,
+    })),
+    ...viewport.political.visibleRoots.map((marker) => ({
+      id: marker.id,
+      kind: 'powerRoot',
+      position: { x: marker.position[0], y: marker.position[1] },
+      magnitude: marker.value,
+      label: marker.label,
+      targetKind: marker.target.kind,
+      targetId: marker.target.id,
+      polityId: marker.polityId,
+      factionId: marker.factionId,
+      rootKind: marker.category,
+    })),
+  ];
+  const projectPoint = (point) => {
+    const region = profile.simulation.regions.find((item) => (
+      Math.abs(item.x - point.x) < 0.001 && Math.abs(item.y - point.y) < 0.001
+    ));
+    const regionSite = region ? profile.presentation.regionDisplaySites[region.id] : null;
+    if (regionSite) return { x: regionSite.x, y: regionSite.y };
+    const seaZone = profile.simulation.seaZones.find((item) => (
+      Math.abs(item.x - point.x) < 0.001 && Math.abs(item.y - point.y) < 0.001
+    ));
+    const seaCenter = seaZone ? profile.presentation.seaZoneDisplayCenters[seaZone.id] : null;
+    return seaCenter ? { x: seaCenter.x, y: seaCenter.y } : point;
+  };
+  const projected = entries.map((marker) => ({ ...marker, position: projectPoint(marker.position) }));
+  const transform = createMapViewportTransform(viewport.width, viewport.height, 8, viewport.camera);
+  const layout = layoutMapMarkers(projected, transform)
+    .find((item) => item.marker.id === markerId);
+  if (!layout) return null;
+  return {
+    x: viewport.rect.left
+      + (layout.point.x + viewport.focusX) * viewport.rect.width / Math.max(1, viewport.width),
+    y: viewport.rect.top
+      + (layout.point.y + viewport.focusY) * viewport.rect.height / Math.max(1, viewport.height),
+    radius: layout.radius,
+  };
+}
+
 function assertObserverInvariant(current, baseline, detail) {
   assert.equal(current.time.turn, baseline.time.turn, `${detail}不得推进季度`);
   assert.equal(
@@ -96,9 +220,13 @@ async function createWorld(page, scenario) {
   });
   await page.goto(APP_URL, { waitUntil: 'networkidle' });
   await page.waitForFunction(() => typeof window.render_game_to_text === 'function');
-  const privateMap = page.locator('input[name="world-map-profile"][value="private-v03"]');
-  if (await privateMap.count()) await privateMap.click();
-  await page.getByLabel('世界种子').fill('POL03-朝堂能见度');
+  const mapProfile = page.locator(`input[name="world-map-profile"][value="${scenario.mapProfileId}"]`);
+  assert.equal(await mapProfile.count(), 1, `${scenario.slug} 开局应提供目标地图`);
+  await mapProfile.click();
+  await page.waitForFunction((profileId) => (
+    document.querySelector(`input[name="world-map-profile"][value="${profileId}"]`)?.checked === true
+  ), scenario.mapProfileId);
+  await page.getByLabel('世界种子').fill(scenario.seed);
   await page.locator('#start-world').click();
   await page.waitForSelector('.world-map__canvas');
 
@@ -109,12 +237,86 @@ async function createWorld(page, scenario) {
 
   const baseline = await snapshot(page);
   assert.equal(baseline.time.turn, TARGET_TURN, `${scenario.slug} 应推进到关系可见的固定季度`);
-  assert.equal(baseline.mapProfile.id, 'private-v03');
+  assert.equal(baseline.mapProfile.id, scenario.mapProfileId);
   assert.ok(
-    baseline.polities.some((polity) => polity.id === TARGET_POLITY_ID),
+    baseline.polities.some((polity) => polity.id === scenario.targetPolityId),
     `${scenario.slug} 固定世界必须保留目标政权`,
   );
   return baseline;
+}
+
+async function assertPoliticalMapOverview(page, scenario, baseline) {
+  const political = baseline.interface?.politicalMap;
+  assert.ok(political?.active, `${scenario.slug} 默认疆界层必须公开政治舆图投影`);
+  assert.equal(political.focusedPolityId, null, `${scenario.slug} 未入朝局前不得偷选政权`);
+  assert.equal(political.focusedFactionId, null, `${scenario.slug} 未入朝局前不得偷选派系`);
+  assert.equal(political.courtEntryActive, false);
+  assert.deepEqual(political.visibleRoots, [], `${scenario.slug} 未聚焦派系前不得洒满根基印记`);
+  assert.equal(
+    political.visiblePulses.length,
+    baseline.polities.length,
+    `${scenario.slug} 每个存续政权应有且仅有一枚都城朝局印记`,
+  );
+  assert.deepEqual(
+    [...new Set(political.visiblePulses.map((pulse) => pulse.polityId))].sort(),
+    baseline.polities.map((polity) => polity.id).sort(),
+    `${scenario.slug} 都城印记必须覆盖所有存续政权且不重复`,
+  );
+  for (const pulse of political.visiblePulses) {
+    assert.deepEqual(pulse.target, { kind: 'country', id: pulse.polityId });
+    assert.ok(pulse.status?.trim(), `${scenario.slug} ${pulse.id} 必须给出具体朝局判断`);
+    assert.ok(pulse.summary?.trim(), `${scenario.slug} ${pulse.id} 必须给出具体实据摘要`);
+  }
+
+  const map = page.locator('.world-map');
+  assert.equal(await map.getAttribute('data-overlay'), 'political');
+  assert.deepEqual(
+    commaSeparatedAttribute(await map.getAttribute('data-political-pulse-ids')),
+    politicalMarkerIds(political.visiblePulses),
+    `${scenario.slug} Canvas 都城印记顺序必须与文本投影一致`,
+  );
+  assert.equal(await map.getAttribute('data-political-root-ids'), null);
+  assert.equal(await map.getAttribute('data-political-focus-polity-id'), null);
+  assert.equal(await map.getAttribute('data-political-focus-faction-id'), null);
+  assertObserverInvariant(await snapshot(page), baseline, `${scenario.slug} 查看都城朝局印记`);
+}
+
+async function expandMobileCountryInspector(page, scenario, inspector) {
+  if (scenario.viewport.width > MOBILE_DOSSIER_MAX_WIDTH) return;
+  const mode = await inspector.getAttribute('data-mobile-mode');
+  assert.ok(mode === 'quick' || mode === 'full', `${scenario.slug} 移动档案必须声明速览/完整模式`);
+  if (mode === 'quick') await activate(page.getByTestId('map-quick-look-details'), scenario);
+  await page.waitForFunction(() => (
+    document.querySelector('.observer-inspector[data-kind="country"]')?.getAttribute('data-mobile-mode') === 'full'
+  ));
+}
+
+async function openCountryCourtFromCapitalPulse(page, scenario, baseline) {
+  const pulse = baseline.interface.politicalMap.visiblePulses
+    .find((item) => item.polityId === scenario.targetPolityId);
+  assert.ok(pulse, `${scenario.slug} 目标政权必须有都城朝局印记`);
+  const point = await mapMarkerScreenPoint(page, pulse.id);
+  assert.ok(point, `${scenario.slug} 必须能解析都城朝局印记的屏幕坐标`);
+  await activateCanvasPoint(page, scenario, point);
+  const selected = await waitForState(
+    page,
+    (current, polityId) => current.interface?.selected?.kind === 'country'
+      && current.interface.selected.id === polityId
+      && current.interface.politicalMap?.courtEntryActive === true,
+    scenario.targetPolityId,
+  );
+  assert.equal(selected.interface.selected.initialTab, 'court');
+  assertObserverInvariant(selected, baseline, `${scenario.slug} 点都城印记直达朝局`);
+
+  const inspector = page.locator('.observer-inspector[data-kind="country"]');
+  await inspector.waitFor({ state: 'visible' });
+  await expandMobileCountryInspector(page, scenario, inspector);
+  const courtTab = inspector.locator('[data-inspector-tab="court"]');
+  assert.equal(await courtTab.getAttribute('aria-selected'), 'true', `${scenario.slug} 都城印记必须直接打开朝局页`);
+  const court = inspector.getByTestId('court-projection');
+  await court.waitFor({ state: 'visible' });
+  await waitForAnimations(court);
+  return { inspector, court, selected: await snapshot(page) };
 }
 
 async function openPolityRoster(page, scenario) {
@@ -131,28 +333,20 @@ async function openPolityRoster(page, scenario) {
 
 async function openCountryCourt(page, scenario, baseline) {
   const roster = await openPolityRoster(page, scenario);
-  const row = roster.locator(`[data-roster-id="${TARGET_POLITY_ID}"]`);
+  const row = roster.locator(`[data-roster-id="${scenario.targetPolityId}"]`);
   assert.equal(await row.count(), 1, `${scenario.slug} 列国卷必须存在目标政权`);
   await activate(row, scenario);
   await waitForState(
     page,
     (current, polityId) => current.interface?.selected?.kind === 'country'
       && current.interface.selected.id === polityId,
-    TARGET_POLITY_ID,
+    scenario.targetPolityId,
   );
 
   const inspector = page.locator('.observer-inspector[data-kind="country"]');
   await inspector.waitFor();
   if (scenario.viewport.width <= MOBILE_DOSSIER_MAX_WIDTH) {
-    const mode = await inspector.getAttribute('data-mobile-mode');
-    assert.ok(mode === 'quick' || mode === 'full', `${scenario.slug} 移动档案必须声明速览/完整模式`);
-    if (mode === 'quick') {
-      const details = page.getByTestId('map-quick-look-details');
-      await activate(details, scenario);
-    }
-    await page.waitForFunction(() => (
-      document.querySelector('.observer-inspector[data-kind="country"]')?.getAttribute('data-mobile-mode') === 'full'
-    ));
+    await expandMobileCountryInspector(page, scenario, inspector);
   } else {
     const closeRoster = roster.getByRole('button', { name: /关闭天下列国/ });
     if (await closeRoster.isVisible().catch(() => false)) await closeRoster.click();
@@ -166,7 +360,7 @@ async function openCountryCourt(page, scenario, baseline) {
   const selected = await waitForState(
     page,
     (current, polityId) => current.interface?.selectedDetail?.court?.polityId === polityId,
-    TARGET_POLITY_ID,
+    scenario.targetPolityId,
   );
   assertObserverInvariant(selected, baseline, `${scenario.slug} 打开国家朝局`);
   return { inspector, court, selected };
@@ -186,7 +380,7 @@ async function visibleAttributeValues(locator, attribute) {
 async function assertProjectionAlignment(page, scenario, court, selected) {
   const projection = selected.interface.selectedDetail?.court;
   assert.ok(projection, `${scenario.slug} render_game_to_text 必须公开朝堂投影`);
-  assert.equal(projection.polityId, TARGET_POLITY_ID);
+  assert.equal(projection.polityId, scenario.targetPolityId);
   assert.ok(projection.seats.length > 0, `${scenario.slug} 朝堂必须至少有一个实际在任席位`);
   assert.ok(
     projection.seats.every((seat) => CENTRAL_OFFICES.has(seat.office)),
@@ -462,6 +656,160 @@ async function exerciseSeatHolderRoundTrip(page, scenario, baseline, court, sele
   return returned;
 }
 
+async function closeVisibleInspector(page, scenario) {
+  const inspector = page.locator('.observer-inspector:visible');
+  if (!await inspector.count()) return;
+  const quick = scenario.viewport.width <= MOBILE_DOSSIER_MAX_WIDTH
+    && await inspector.getAttribute('data-mobile-mode') === 'quick';
+  const close = quick
+    ? inspector.getByTestId('map-quick-look').getByRole('button', { name: '收起', exact: true })
+    : inspector.locator('[data-inspector-close]');
+  assert.equal(await close.count(), 1, `${scenario.slug} 地图对象档案必须可返回舆图`);
+  await activate(close, scenario);
+  await inspector.waitFor({ state: 'detached' });
+}
+
+async function assertMapFitsViewport(page, scenario, detail) {
+  const layout = await page.evaluate(() => {
+    const map = document.querySelector('.world-map');
+    const canvas = document.querySelector('.world-map__canvas');
+    const metrics = (element) => element ? {
+      clientWidth: element.clientWidth,
+      scrollWidth: element.scrollWidth,
+      left: element.getBoundingClientRect().left,
+      right: element.getBoundingClientRect().right,
+    } : null;
+    return {
+      viewportWidth: innerWidth,
+      documentWidth: document.documentElement.scrollWidth,
+      map: metrics(map),
+      canvas: metrics(canvas),
+    };
+  });
+  assert.ok(layout.documentWidth <= layout.viewportWidth + 1, `${scenario.slug} ${detail}不得引发页面横滚动`);
+  for (const [name, metrics] of [['舆图', layout.map], ['Canvas', layout.canvas]]) {
+    assert.ok(metrics, `${scenario.slug} ${name}必须存在`);
+    assert.ok(metrics.scrollWidth <= metrics.clientWidth + 1, `${scenario.slug} ${name}不得内溢出`);
+    assert.ok(metrics.left >= -1 && metrics.right <= layout.viewportWidth + 1, `${scenario.slug} ${name}必须落在视口内`);
+  }
+}
+
+async function chooseMapOverlay(page, scenario, overlayId) {
+  await activate(page.locator('[data-navigation-entry="layers"]'), scenario);
+  const sheet = page.locator('#observer-layer-sheet');
+  await sheet.waitFor({ state: 'visible' });
+  const layer = sheet.locator(`[data-layer-id="${overlayId}"]`);
+  assert.equal(await layer.count(), 1, `${scenario.slug} 叠层菜单必须提供 ${overlayId}`);
+  await activate(layer, scenario);
+  await waitForState(page, (current, expected) => current.interface?.overlay === expected, overlayId);
+}
+
+async function exerciseFactionMapRoots(page, scenario, baseline, court, selected) {
+  const dominant = selected.interface.selectedDetail.court.factionPositions[0];
+  assert.ok(dominant, `${scenario.slug} 目标朝局必须有首位派系`);
+  await activate(court.locator(`[data-court-rank="${dominant.factionId}"]`), scenario);
+  const rootsTrigger = court.locator(`[data-court-map-roots="${dominant.factionId}"]`);
+  assert.equal(await rootsTrigger.count(), 1, `${scenario.slug} 派系详情必须提供“舆图看根基”`);
+  await activate(rootsTrigger, scenario);
+  await page.locator('.observer-inspector[data-kind="country"]').waitFor({ state: 'detached' });
+
+  const focused = await waitForState(
+    page,
+    (current, expected) => current.interface?.overlay === 'political'
+      && current.interface.politicalMap?.focusedPolityId === expected.polityId
+      && current.interface.politicalMap?.focusedFactionId === expected.factionId
+      && current.interface.politicalMap.visibleRoots.length > 0,
+    { polityId: scenario.targetPolityId, factionId: dominant.factionId },
+  );
+  assertObserverInvariant(focused, baseline, `${scenario.slug} 在舆图展开派系根基`);
+  const political = focused.interface.politicalMap;
+  assert.equal(political.visiblePulses.length, baseline.polities.length, `${scenario.slug} 展开根基后不得丢失都城印记`);
+  assert.ok(political.visibleRoots.length > 0, `${scenario.slug} 固定派系必须有真实空间根基`);
+  const targetKindByCategory = {
+    regional_governance: 'region',
+    army_command: 'army',
+    fleet_command: 'fleet',
+  };
+  for (const root of political.visibleRoots) {
+    assert.equal(root.polityId, scenario.targetPolityId);
+    assert.equal(root.factionId, dominant.factionId);
+    assert.equal(root.target.kind, targetKindByCategory[root.category], `${scenario.slug} ${root.label} 必须指向同类权威对象`);
+    assert.ok(root.target.id, `${scenario.slug} ${root.label} 不得指向空对象`);
+    assert.ok(root.detail?.trim(), `${scenario.slug} ${root.label} 必须说明掌握根基的具体人与事`);
+  }
+
+  const map = page.locator('.world-map');
+  assert.deepEqual(
+    commaSeparatedAttribute(await map.getAttribute('data-political-pulse-ids')),
+    politicalMarkerIds(political.visiblePulses),
+    `${scenario.slug} 聚焦后都城印记 DOM/文本必须一致`,
+  );
+  assert.deepEqual(
+    commaSeparatedAttribute(await map.getAttribute('data-political-root-ids')),
+    politicalMarkerIds(political.visibleRoots),
+    `${scenario.slug} 派系根基 DOM/文本必须一致`,
+  );
+  assert.equal(await map.getAttribute('data-political-focus-polity-id'), scenario.targetPolityId);
+  assert.equal(await map.getAttribute('data-political-focus-faction-id'), dominant.factionId);
+  await assertMapFitsViewport(page, scenario, '派系根基层');
+  await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-map-roots.png`, fullPage: false });
+
+  const preferredTargetKinds = scenario.viewport.width <= MOBILE_DOSSIER_MAX_WIDTH
+    ? ['region', 'army', 'fleet']
+    : ['army', 'fleet', 'region'];
+  const targetRoot = preferredTargetKinds
+    .map((kind) => political.visibleRoots.find((root) => root.target.kind === kind))
+    .find(Boolean);
+  assert.ok(targetRoot, `${scenario.slug} 必须有可点的州治、军令或水师根基`);
+  const point = await mapMarkerScreenPoint(page, targetRoot.id);
+  assert.ok(point, `${scenario.slug} 必须能解析根基印记的屏幕坐标`);
+  await activateCanvasPoint(page, scenario, point);
+  await page.waitForTimeout(320);
+  const opened = await snapshot(page);
+  assert.deepEqual(
+    { kind: opened.interface?.selected?.kind, id: opened.interface?.selected?.id },
+    targetRoot.target,
+    `${scenario.slug} 根基印记必须打开其权威对象`,
+  );
+  assertObserverInvariant(opened, baseline, `${scenario.slug} 根基印记打开真实对象档案`);
+  const inspectorKind = targetRoot.target.kind === 'region' ? 'region' : 'system';
+  await page.locator(`.observer-inspector[data-kind="${inspectorKind}"]`).waitFor({ state: 'visible' });
+  await closeVisibleInspector(page, scenario);
+
+  const pulseIds = politicalMarkerIds(political.visiblePulses);
+  const rootIds = politicalMarkerIds(political.visibleRoots);
+  await chooseMapOverlay(page, scenario, 'food');
+  const hidden = await snapshot(page);
+  assertObserverInvariant(hidden, baseline, `${scenario.slug} 切离疆界层`);
+  assert.equal(hidden.interface.politicalMap.active, false);
+  assert.deepEqual(hidden.interface.politicalMap.visiblePulses, []);
+  assert.deepEqual(hidden.interface.politicalMap.visibleRoots, []);
+  assert.equal(await map.getAttribute('data-political-pulse-ids'), null);
+  assert.equal(await map.getAttribute('data-political-root-ids'), null);
+
+  await chooseMapOverlay(page, scenario, 'political');
+  const restored = await waitForState(
+    page,
+    (current, expected) => current.interface.politicalMap?.active === true
+      && current.interface.politicalMap.visiblePulses.length === expected.pulseCount
+      && current.interface.politicalMap.visibleRoots.length === expected.rootCount,
+    { pulseCount: pulseIds.length, rootCount: rootIds.length },
+  );
+  assertObserverInvariant(restored, baseline, `${scenario.slug} 切回疆界层`);
+  assert.deepEqual(politicalMarkerIds(restored.interface.politicalMap.visiblePulses), pulseIds);
+  assert.deepEqual(politicalMarkerIds(restored.interface.politicalMap.visibleRoots), rootIds);
+  assert.deepEqual(
+    commaSeparatedAttribute(await map.getAttribute('data-political-pulse-ids')),
+    pulseIds,
+  );
+  assert.deepEqual(
+    commaSeparatedAttribute(await map.getAttribute('data-political-root-ids')),
+    rootIds,
+  );
+  await assertMapFitsViewport(page, scenario, '疆界层恢复');
+  return restored;
+}
+
 async function verifyScenario(browser, scenario) {
   const context = await browser.newContext({
     viewport: scenario.viewport,
@@ -474,16 +822,17 @@ async function verifyScenario(browser, scenario) {
 
   try {
     const baseline = await createWorld(page, scenario);
-    const opened = await openCountryCourt(page, scenario, baseline);
+    await assertPoliticalMapOverview(page, scenario, baseline);
+    const opened = await openCountryCourtFromCapitalPulse(page, scenario, baseline);
     await assertProjectionAlignment(page, scenario, opened.court, opened.selected);
     await exerciseFocusAndTrace(page, scenario, baseline, opened.court, opened.selected);
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-court.png`, fullPage: false });
     const seatReturned = await exerciseSeatHolderRoundTrip(page, scenario, baseline, opened.court, opened.selected);
     const returned = await exerciseLeaderRoundTrip(page, scenario, baseline, seatReturned.court, seatReturned.selected);
     await assertProjectionAlignment(page, scenario, returned.court, returned.selected);
-    const final = await snapshot(page);
-    assertObserverInvariant(final, baseline, `${scenario.slug} POL03 完整观察链`);
-    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-returned.png`, fullPage: false });
+    const final = await exerciseFactionMapRoots(page, scenario, baseline, returned.court, returned.selected);
+    assertObserverInvariant(final, baseline, `${scenario.slug} POL03–POL05 完整观察链`);
+    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-restored.png`, fullPage: false });
     assert.deepEqual(browserErrors, [], `${scenario.slug} 不得产生 console.error 或 pageerror`);
   } finally {
     await context.close();
@@ -502,7 +851,7 @@ let browser = null;
 try {
   browser = await chromium.launch({ headless: true });
   for (const scenario of SCENARIOS) await verifyScenario(browser, scenario);
-  process.stdout.write(`POL03 political visibility E2E passed: turn ${TARGET_TURN} × ${SCENARIOS.length} viewports.\n`);
+  process.stdout.write(`POL03–POL05 political visibility E2E passed: turn ${TARGET_TURN} × ${SCENARIOS.length} map/viewport scenarios.\n`);
 } finally {
   await browser?.close();
   await server?.close();

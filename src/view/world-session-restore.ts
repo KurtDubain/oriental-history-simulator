@@ -30,6 +30,7 @@ export interface RestoredWorldSession {
   seed: string;
   mapProfileId: MapProfileId;
   selection: Selection;
+  focusedPoliticalFactionId: null;
   navigation: ObserverNavigationState;
 }
 
@@ -107,6 +108,7 @@ export function restoreWorldSession(
     embodiment,
     seed: world.seed,
     mapProfileId: getMapProfileForContentVersion(world.mapContentVersion).id,
+    focusedPoliticalFactionId: null,
     selection: restoredPersonId
       ? { kind: 'person', id: restoredPersonId }
       : source !== 'create' && !compactViewport && defaultRegionId
