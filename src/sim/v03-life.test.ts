@@ -16,6 +16,7 @@ import {
 import { createAgencySystemState } from './agency/memory';
 import { createAgencyDecisionSystemState } from './agency/decision';
 import { createSituationSystemState } from './situations';
+import { createWorldArchiveState } from './archive';
 
 const goods = () => ({ '木材': 2_000, '铁器': 1_500, '马匹': 800, '盐': 1_500, '纺织品': 1_000, '奢侈品': 500 });
 const prices = () => ({ '粮食': 1, '木材': 2, '铁器': 4, '马匹': 5, '盐': 2, '纺织品': 3, '奢侈品': 7 });
@@ -103,6 +104,7 @@ function testWorld(): WorldState {
     families: [], relationships: [], factions: [], diplomacy: [], offices: [], backgroundPeople: [], commitments: [],
     tradeCorridors: [], navalOperations: [], shipbuildingProjects: [], pathogens: [], infections: [], practices: [], practiceStates: [],
     history: [], historyDigest: '', facts: [], factDigest: '', legacyArchiveBoundary: null, lastTurn: null,
+    archiveSystem: createWorldArchiveState(),
     situationSystem: createSituationSystemState(-1),
     agencySystem: createAgencySystemState(-1),
     agencyDecisionSystem: createAgencyDecisionSystemState(-1),

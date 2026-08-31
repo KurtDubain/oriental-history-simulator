@@ -14,6 +14,11 @@ import type {
   WorldState,
 } from '../sim/types';
 import {
+  findWorldHistoryEvent,
+  readWorldFacts,
+  readWorldHistory,
+} from '../sim/archive';
+import {
   projectCharacterAgency,
   toCharacterAgencyPlayerProjection,
   toPersonalMemoryPlayerViews,
@@ -104,13 +109,19 @@ function appointmentSummary(world: WorldState, item: CharacterState, fact: Extra
  * shown. Appointment Facts are included even though they deliberately have no
  * Chronicle projection.
  */
-export function toPersonExperienceRecords(world: WorldState, item: CharacterState): ArchiveRecord[] {
+export function toPersonExperienceRecords(
+  world: WorldState,
+  item: CharacterState,
+  readScope: 'all' | 'active' = 'all',
+): ArchiveRecord[] {
   const entries: PersonExperienceEntry[] = [];
   const knownEventIds = new Set<string>();
   const knownFactIds = new Set<string>();
   const biography = Array.isArray(item.biography) ? item.biography : [];
-  const eventById = new Map(world.history.map((event) => [event.id, event]));
-  const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
+  const history = readScope === 'all' ? readWorldHistory(world) : world.history;
+  const facts = readScope === 'all' ? readWorldFacts(world) : world.facts;
+  const eventById = new Map(history.map((event) => [event.id, event]));
+  const factById = new Map(facts.map((fact) => [fact.id, fact]));
 
   for (const fact of biography) {
     const source = biographySource(item, fact, eventById, factById);
@@ -139,7 +150,7 @@ export function toPersonExperienceRecords(world: WorldState, item: CharacterStat
     });
   }
 
-  for (const event of world.history) {
+  for (const event of history) {
     if (!event.actorIds.includes(item.id) || knownEventIds.has(event.id)) continue;
     entries.push({
       turn: event.turn,
@@ -149,7 +160,7 @@ export function toPersonExperienceRecords(world: WorldState, item: CharacterStat
     for (const sourceFactId of event.sourceFactIds) knownFactIds.add(sourceFactId);
   }
 
-  const appointmentFacts = world.facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }> => (
+  const appointmentFacts = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }> => (
     (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended')
     && factNamesCharacter(fact, item.id)
   ));
@@ -602,7 +613,7 @@ function currentTerminalCommandRequest(
   if (commandAchieved) {
     const appointmentEventId = commandAppointmentEventId(world, actor);
     const appointmentEvent = appointmentEventId
-      ? world.history.find((event) => event.id === appointmentEventId)
+      ? findWorldHistoryEvent(world, appointmentEventId)
       : undefined;
     return {
       id: actor.goal.id,
@@ -787,6 +798,7 @@ export function toPersonInspector(
         && fact.payload.holderId === item.id;
     }),
     3,
+    'active',
   ).map(toHistoricalSceneView);
   const agency = {
     ...projectedAgency,
@@ -816,7 +828,7 @@ export function toPersonInspector(
   const currentStep = agency.currentPlanSteps.find((step) => step.status === 'available');
   const coreDesires = agency.desires.map((desire) => desire.label);
   const relationships = projectPersonRelationships(world, item);
-  const experiences = toPersonExperienceRecords(world, item).slice(-12).reverse();
+  const experiences = toPersonExperienceRecords(world, item, 'active').slice(-12).reverse();
   return {
     id: item.id,
     name: item.name,

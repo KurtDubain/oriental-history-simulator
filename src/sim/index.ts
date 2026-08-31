@@ -40,3 +40,4 @@ export * from './types';
 export * from './facts';
 export * from './situations';
 export * from './agency';
+export * from './archive';

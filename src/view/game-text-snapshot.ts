@@ -13,6 +13,7 @@ import {
   isV03InterventionEvent,
   type WorldState,
 } from '../sim';
+import { findWorldHistoryEvent } from '../sim/archive';
 import { APP_VERSION } from '../version';
 import {
   familyRoster,
@@ -261,7 +262,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     if (system) selectedDetail = system;
   }
   const selectedEvent = options.selectedEventId
-    ? world.history.find((event) => event.id === options.selectedEventId)
+    ? findWorldHistoryEvent(world, options.selectedEventId)
     : undefined;
   const selectedEventDetail = selectedEvent ? {
     id: selectedEvent.id,
@@ -335,6 +336,14 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     coordinates: `map world coordinates use origin top-left, x rightward, y downward, range ${mapProfile.presentation.width}x${mapProfile.presentation.height}`,
     time: { turn: world.turn, year: world.year, season: world.season },
     deterministicWorldHash: world.hash,
+    archive: {
+      coldThroughTurn: world.archiveSystem?.blocks.length
+        ? world.archiveSystem.archivedThroughTurn
+        : null,
+      blockCount: world.archiveSystem?.blocks.length ?? 0,
+      activeFactCount: world.facts.length,
+      activeEventCount: world.history.length,
+    },
     runtimePerformance: getRuntimePerformanceSnapshot(),
     seed: world.seed,
     playback: { running: options.running, speed: options.speed },

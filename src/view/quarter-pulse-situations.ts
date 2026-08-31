@@ -105,7 +105,7 @@ function currentSituationScene(
   turn: number,
 ): HistoricalScene | undefined {
   const current = reportFactIds(world, turn);
-  return projectSituationHistoricalScenes(world, situation, 3, turn)
+  return projectSituationHistoricalScenes(world, situation, 3, turn, 'active')
     .find((scene) => (
       scene.turn === turn
       && scene.sourceFactIds.some((id) => current.has(id))

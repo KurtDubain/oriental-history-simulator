@@ -10,6 +10,12 @@ import { createSituationSystemState } from './situations';
 import { createAgencySystemState } from './agency/memory';
 import { createAgencyDecisionSystemState } from './agency/decision';
 import { findMapProfileForContentVersion } from '../maps';
+import {
+  compactWorldArchive,
+  createWorldArchiveState,
+  normalizeWorldArchiveState,
+  validateWorldArchiveIntegrity,
+} from './archive';
 
 function migrateV02Systems(world: WorldState): void {
   (world as unknown as { schemaVersion: number }).schemaVersion = 3;
@@ -126,7 +132,18 @@ export function deserializeWorld(serialized: string): WorldState {
   const world = parsed as unknown as WorldState;
   if (world.hash !== computeWorldHash(world)) throw new Error('存档哈希校验失败，内容可能已损坏或被篡改');
   if (originalVersion === 4) {
-    if (!Array.isArray(world.facts) || world.factDigest !== factDigestOf(world.facts)) {
+    if (!Array.isArray(world.facts)) {
+      throw new Error('事实档案摘要校验失败，内容可能已损坏或被篡改');
+    }
+    if (world.archiveSystem) {
+      const archiveIssues = validateWorldArchiveIntegrity(world);
+      if (archiveIssues.some((issue) => issue.code === 'archive.fact.digest')) {
+        throw new Error('事实档案摘要校验失败，内容可能已损坏或被篡改');
+      }
+      if (archiveIssues.length > 0) {
+        throw new Error(`历史冷档案校验失败：${archiveIssues[0]?.message ?? '旧卷不完整'}`);
+      }
+    } else if (world.factDigest !== factDigestOf(world.facts)) {
       throw new Error('事实档案摘要校验失败，内容可能已损坏或被篡改');
     }
   }
@@ -209,6 +226,7 @@ export function deserializeWorld(serialized: string): WorldState {
   }
   if (legacyBoundary) {
     migrateLegacyFacts(world, legacyBoundary);
+    world.archiveSystem = createWorldArchiveState(legacyBoundary);
     migrated = true;
   }
   if (!world.situationSystem || typeof world.situationSystem !== 'object') {
@@ -264,6 +282,13 @@ export function deserializeWorld(serialized: string): WorldState {
     factsMigrated = true;
   }
   if (factsMigrated) world.factDigest = factDigestOf(world.facts);
+  if (!world.archiveSystem) {
+    normalizeWorldArchiveState(world);
+    compactWorldArchive(world);
+    migrated = true;
+  } else {
+    normalizeWorldArchiveState(world);
+  }
   if (migrated) world.hash = computeWorldHash(world);
   const violations = validateWorld(world);
   if (violations.length > 0) {

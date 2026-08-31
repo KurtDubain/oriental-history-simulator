@@ -4,6 +4,12 @@ import type {
   Season,
   WorldState,
 } from '../sim/types';
+import {
+  readWorldHistory,
+  readWorldHistoryRelatedFacets,
+  readWorldTerritoryDeltas,
+  summarizeWorldHistory,
+} from '../sim/archive';
 
 export const HISTORY_EVENT_CATEGORIES = [
   '世界',
@@ -86,6 +92,14 @@ function emptyCategoryCounts(): Record<EventCategory, number> {
   return Object.fromEntries(HISTORY_EVENT_CATEGORIES.map((category) => [category, 0])) as Record<EventCategory, number>;
 }
 
+function completeCategoryCounts(
+  counts: Readonly<Partial<Record<EventCategory, number>>>,
+): Record<EventCategory, number> {
+  const complete = emptyCategoryCounts();
+  for (const category of HISTORY_EVENT_CATEGORIES) complete[category] = counts[category] ?? 0;
+  return complete;
+}
+
 function isHistoricalPolityExtant(world: WorldState, polityId: string, turn: number): boolean {
   const polity = world.polities.find((item) => item.id === polityId);
   if (!polity || polity.foundedTurn > turn) return false;
@@ -110,43 +124,36 @@ export function reconstructHistoricalTerritory(
   let skippedControllerChanges = 0;
   const rawFacts = (world as unknown as { facts?: unknown }).facts;
   const hasFactArchive = Array.isArray(rawFacts);
-  const facts: unknown[] = hasFactArchive ? rawFacts : [];
   const boundary = hasFactArchive && world.legacyArchiveBoundary ? world.legacyArchiveBoundary : null;
+  const legacyEventCount = hasFactArchive ? boundary?.historyEventCount ?? 0 : world.history.length;
+  const legacyEvents = world.history.slice(0, legacyEventCount);
+  const territory = hasFactArchive
+    ? readWorldTerritoryDeltas(world, { throughTurn: world.turn })
+    : { deltas: [], skippedFactIds: [] };
+  const activeFactById = new Map((hasFactArchive ? world.facts : []).map((fact) => [fact.id, fact]));
 
   // Schema 4 territory facts are authoritative. Chronicle events linked to
   // them are deliberately not replayed, preventing one control transfer from
   // being reversed twice merely because its prose was also projected.
-  for (let factIndex = facts.length - 1; factIndex >= 0; factIndex -= 1) {
-    const candidate = facts[factIndex];
-    if (!candidate || typeof candidate !== 'object') {
+  for (let index = territory.deltas.length - 1; index >= 0; index -= 1) {
+    const delta = territory.deltas[index];
+    if (delta.turn <= turn) continue;
+    if (!regionIds.has(delta.regionId)) {
       skippedControllerChanges += 1;
       continue;
     }
-    const fact = candidate as Record<string, unknown>;
-    if (fact.kind !== 'territory_control_changed') continue;
-    if (typeof fact.turn !== 'number' || fact.turn <= turn) continue;
-    const payload = fact.payload && typeof fact.payload === 'object'
-      ? fact.payload as Record<string, unknown>
-      : null;
-    if (
-      !payload
-      || typeof payload.regionId !== 'string'
-      || !regionIds.has(payload.regionId)
-      || typeof payload.previousControllerId !== 'string'
-      || typeof payload.nextControllerId !== 'string'
-    ) {
-      skippedControllerChanges += 1;
-      continue;
-    }
-    controllerByRegionId[payload.regionId] = payload.previousControllerId;
+    controllerByRegionId[delta.regionId] = delta.previousControllerId;
     reversedControllerChanges += 1;
   }
+  skippedControllerChanges += territory.skippedFactIds.filter((factId) => {
+    const fact = activeFactById.get(factId);
+    return fact && fact.turn > turn;
+  }).length;
 
   const reverseLegacyEvents = !hasFactArchive || (boundary !== null && turn < boundary.turn);
   if (reverseLegacyEvents) {
-    const legacyEventCount = boundary?.historyEventCount ?? world.history.length;
-    for (let eventIndex = Math.min(legacyEventCount, world.history.length) - 1; eventIndex >= 0; eventIndex -= 1) {
-      const event = world.history[eventIndex];
+    for (let eventIndex = legacyEvents.length - 1; eventIndex >= 0; eventIndex -= 1) {
+      const event = legacyEvents[eventIndex];
       if (event.turn <= turn) continue;
 
       for (let deltaIndex = event.stateDeltas.length - 1; deltaIndex >= 0; deltaIndex -= 1) {
@@ -178,35 +185,17 @@ export function reconstructHistoricalTerritory(
     }))
     .sort((left, right) => right.regionCount - left.regionCount || left.name.localeCompare(right.name, 'zh-CN'));
 
-  const categoryCountsThroughTurn = emptyCategoryCounts();
-  const categoryCountsAtTurn = emptyCategoryCounts();
-  let eventsThroughTurn = 0;
-  let eventsAtTurn = 0;
-  let majorEventsThroughTurn = 0;
-  let majorEventsAtTurn = 0;
-  let controllerChangesThroughTurn = facts.filter((candidate) => {
-    if (!candidate || typeof candidate !== 'object') return false;
-    const fact = candidate as Record<string, unknown>;
-    return fact.kind === 'territory_control_changed' && typeof fact.turn === 'number' && fact.turn <= turn;
+  const historySummary = summarizeWorldHistory(world, turn);
+  let controllerChangesThroughTurn = territory.deltas.filter((delta) => delta.turn <= turn).length;
+  controllerChangesThroughTurn += territory.skippedFactIds.filter((factId) => {
+    const fact = activeFactById.get(factId);
+    return fact && fact.turn <= turn;
   }).length;
-
-  for (const [eventIndex, event] of world.history.entries()) {
-    if (event.turn > turn) continue;
-    eventsThroughTurn += 1;
-    categoryCountsThroughTurn[event.category] += 1;
-    if (event.importance >= 4) majorEventsThroughTurn += 1;
-    const isLegacyProjection = !hasFactArchive
-      || (boundary !== null && eventIndex < boundary.historyEventCount);
-    if (isLegacyProjection) {
-      controllerChangesThroughTurn += event.stateDeltas.filter(
-        (delta) => delta.entityType === 'region' && delta.field === 'controllerId',
-      ).length;
-    }
-    if (event.turn !== turn) continue;
-    eventsAtTurn += 1;
-    categoryCountsAtTurn[event.category] += 1;
-    if (event.importance >= 4) majorEventsAtTurn += 1;
-  }
+  controllerChangesThroughTurn += legacyEvents
+    .filter((event) => event.turn <= turn)
+    .reduce((total, event) => total + event.stateDeltas.filter(
+      (delta) => delta.entityType === 'region' && delta.field === 'controllerId',
+    ).length, 0);
 
   const date = historyTurnDate(turn);
   return {
@@ -216,13 +205,13 @@ export function reconstructHistoricalTerritory(
     controllerByRegionId,
     extantPolities,
     historyStats: {
-      eventsThroughTurn,
-      eventsAtTurn,
-      majorEventsThroughTurn,
-      majorEventsAtTurn,
+      eventsThroughTurn: historySummary.eventCount,
+      eventsAtTurn: historySummary.eventsAtTurn,
+      majorEventsThroughTurn: historySummary.majorEventCount,
+      majorEventsAtTurn: historySummary.majorEventsAtTurn,
       controllerChangesThroughTurn,
-      categoryCountsThroughTurn,
-      categoryCountsAtTurn,
+      categoryCountsThroughTurn: completeCategoryCounts(historySummary.categoryCounts),
+      categoryCountsAtTurn: completeCategoryCounts(historySummary.categoryCountsAtTurn),
     },
     reversedControllerChanges,
     skippedControllerChanges,
@@ -279,7 +268,7 @@ export function filterHistoryEvents(
   const polityNames = new Map(world.polities.map((polity) => [polity.id, `${polity.name} ${polity.shortName}`]));
   const regionNames = new Map(world.regions.map((region) => [region.id, region.name]));
 
-  return world.history
+  return readWorldHistory(world)
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => {
       if (event.turn > throughTurn || event.importance < minimumImportance) return false;
@@ -294,24 +283,10 @@ export function filterHistoryEvents(
 }
 
 export function buildHistoryRelatedEntities(world: WorldState): HistoryRelatedEntityOption[] {
-  const counts = new Map<string, number>();
-  const add = (seen: Set<string>, kind: HistoryRelatedKind, id: string) => {
-    const key = `${kind}:${id}`;
-    if (seen.has(key)) return;
-    seen.add(key);
-    counts.set(key, (counts.get(key) ?? 0) + 1);
-  };
-  for (const event of world.history) {
-    const seen = new Set<string>();
-    event.actorIds.forEach((id) => add(seen, 'character', id));
-    event.polityIds.forEach((id) => add(seen, 'polity', id));
-    event.regionIds.forEach((id) => add(seen, 'region', id));
-    for (const reference of event.causes.flatMap((cause) => cause.refs ?? [])) {
-      if (reference.entityType === 'character' || reference.entityType === 'polity' || reference.entityType === 'region') {
-        add(seen, reference.entityType, reference.entityId);
-      }
-    }
-  }
+  const counts = new Map(readWorldHistoryRelatedFacets(world).map((facet) => [
+    `${facet.kind}:${facet.id}`,
+    facet.eventCount,
+  ]));
 
   const options: HistoryRelatedEntityOption[] = [];
   for (const character of world.characters) {

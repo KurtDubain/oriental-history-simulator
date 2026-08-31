@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.13.0',
+    date: '2026-08-31',
+    title: '旧卷入匣，来由不失',
+    items: [
+      '世界每四年收纳一卷久远史料，只保留最近十六年的记录和尚未成卷的旧季，长期自动保存、导出和季度推进不再反复搬运全部旧事。',
+      '旧卷无损保留具体事件、原因、结果与人物关联，并能发现缺卷或损坏；旧存档先验真再迁移，不补造历史事实。',
+      '史册、人物传、家史、国史、结案局势和历史疆域均能翻检冷卷；长纪年分批展开，续推结果与未收卷世界完全一致。',
+    ],
+  },
+  {
     version: '1.12.2',
     date: '2026-08-30',
     title: '一卷一页，来处可返',

@@ -104,6 +104,7 @@ import {
   availableMandate,
   createWorld,
   deserializeWorld,
+  findWorldHistoryEvent,
   isV03InterventionEvent,
   serializeWorld,
   measureRuntimeValidation,
@@ -1654,10 +1655,10 @@ export function App() {
     ? []
     : quarterPulseProjection.highlightedRegionIds;
   const selectedHistoryEvent = useMemo(() => (
-    world && selectedEventId ? world.history.find((event) => event.id === selectedEventId) ?? null : null
+    world && selectedEventId ? findWorldHistoryEvent(world, selectedEventId) ?? null : null
   ), [selectedEventId, world]);
   const archiveDossier = useMemo<ArchiveDossier | null>(() => {
-    if (!world || !selection) return null;
+    if (!archiveOpen || !world || !selection) return null;
     if (selection.kind === 'country') {
       const item = world.polities.find((candidate) => candidate.id === selection.id);
       return item ? toCountryArchive(world, item) : null;
@@ -1675,7 +1676,7 @@ export function App() {
       ) : null;
     }
     return null;
-  }, [agencyShadowBranchId, agencyShadowLedger, selection, world]);
+  }, [agencyShadowBranchId, agencyShadowLedger, archiveOpen, selection, world]);
 
   const rosterConfig = useMemo(() => {
     if (activeView === 'powers' && powerRosterSection === 'polities') return {
@@ -2592,7 +2593,6 @@ export function App() {
         onImport={handleImport}
         onCancel={world ? () => setStartOpen(false) : undefined}
       />
-
       {toast ? <div className="observer-toast" role="status">{toast}</div> : null}
     </>
   );

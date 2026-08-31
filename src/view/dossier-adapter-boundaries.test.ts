@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { createWorld, serializeWorld } from '../sim';
+import { clearWorldArchiveDecodeCache, compactWorldArchive } from '../sim/archive';
 import {
   familyRoster as familyRosterFromBarrel,
   militaryRoster as militaryRosterFromBarrel,
@@ -52,5 +53,69 @@ describe('dossier adapter boundaries', () => {
     expect(familyRoster(world)).toEqual(familyRosterFromBarrel(world));
     expect(militaryRoster(world)).toEqual(militaryRosterFromBarrel(world));
     expect(serializeWorld(world)).toBe(before);
+  });
+
+  it('keeps cold person, family and polity records visible through every dossier boundary', () => {
+    const world = createWorld('冷卷对象史');
+    const person = world.characters.find((candidate) => candidate.familyId !== null) ?? world.characters[0];
+    const personFamily = world.families.find((candidate) => candidate.id === person.familyId)
+      ?? world.families.find((candidate) => candidate.memberIds.includes(person.id));
+    const country = world.polities.find((candidate) => candidate.id === person.polityId) ?? world.polities[0];
+    if (!personFamily) throw new Error('expected a family for the cold dossier fixture');
+    const coldEvent = {
+      ...world.history[0],
+      id: 'event_000002',
+      turn: 2,
+      year: 1,
+      season: '秋' as const,
+      kind: 'cold_dossier_record',
+      title: `${person.name}入朝议事`,
+      summary: `${person.name}代表${personFamily.name}参与${country.name}朝议。`,
+      actorIds: [person.id],
+      polityIds: [country.id],
+      sourceFactIds: [],
+    };
+    person.biography.push({
+      id: 'bio_cold_dossier_record',
+      turn: coldEvent.turn,
+      kind: '入朝议事',
+      summary: coldEvent.summary,
+      importance: coldEvent.importance,
+      eventId: coldEvent.id,
+      factId: null,
+    });
+    world.history.push(coldEvent);
+    world.turn = 80;
+    world.year = 21;
+    world.season = '春';
+    compactWorldArchive(world);
+
+    expect(world.history.some((event) => event.id === coldEvent.id)).toBe(false);
+    expect(toPersonExperienceRecords(world, person).some((record) => record.eventId === coldEvent.id)).toBe(true);
+    expect(toPersonArchive(world, person).records.some((record) => record.eventId === coldEvent.id)).toBe(true);
+    expect(toFamilyArchive(world, personFamily).records.some((record) => record.eventId === coldEvent.id)).toBe(true);
+    expect(toCountryArchive(world, country).records.some((record) => record.eventId === coldEvent.id)).toBe(true);
+  });
+
+  it('keeps ordinary person, family and polity inspectors on the active history window', () => {
+    const world = createWorld('冷卷不阻地图速览');
+    const person = world.characters.find((candidate) => candidate.familyId !== null) ?? world.characters[0];
+    const personFamily = world.families.find((candidate) => candidate.id === person.familyId)
+      ?? world.families.find((candidate) => candidate.memberIds.includes(person.id));
+    const country = world.polities.find((candidate) => candidate.id === person.polityId) ?? world.polities[0];
+    if (!personFamily) throw new Error('expected a family for the active dossier fixture');
+    world.turn = 80;
+    world.year = 21;
+    world.season = '春';
+    compactWorldArchive(world);
+    const coldBlock = world.archiveSystem.blocks[0];
+    expect(coldBlock).toBeDefined();
+    if (!coldBlock) return;
+    coldBlock.payloadBase64 = `!${coldBlock.payloadBase64.slice(1)}`;
+    clearWorldArchiveDecodeCache();
+
+    expect(() => toPersonInspector(world, person)).not.toThrow();
+    expect(() => toFamilyInspector(world, personFamily)).not.toThrow();
+    expect(() => toCountryInspector(world, country)).not.toThrow();
   });
 });

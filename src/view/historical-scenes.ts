@@ -1,5 +1,6 @@
 import type { SimulationFact, StateDelta, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations';
+import { readWorldFacts, readWorldHistory } from '../sim/archive';
 import { historyTurnDate } from './v1-history';
 
 export interface FactNarrative {
@@ -22,6 +23,8 @@ export interface HistoricalScene {
   regionIds: readonly string[];
   importance: number;
 }
+
+export type HistoricalSceneReadScope = 'all' | 'active';
 
 function stableCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -52,8 +55,13 @@ function armyName(world: WorldState, id: string, recordedName?: string): string 
   return world.armies.find((item) => item.id === id)?.name ?? recordedName ?? '旧日所部';
 }
 
-function factHistoryIds(world: WorldState, factIds: ReadonlySet<string>): string[] {
-  return world.history
+function factHistoryIds(
+  world: WorldState,
+  factIds: ReadonlySet<string>,
+  readScope: HistoricalSceneReadScope,
+): string[] {
+  const history = readScope === 'all' ? readWorldHistory(world) : world.history;
+  return history
     .filter((event) => event.sourceFactIds.some((id) => factIds.has(id)))
     .sort((left, right) => right.turn - left.turn || stableCompare(right.id, left.id))
     .map((event) => event.id)
@@ -227,6 +235,7 @@ function sceneFromFacts(
   facts: readonly SimulationFact[],
   narrative: FactNarrative,
   result = '',
+  readScope: HistoricalSceneReadScope = 'all',
 ): HistoricalScene {
   const ordered = [...facts].sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
   const latest = ordered.at(-1) as SimulationFact;
@@ -242,7 +251,7 @@ function sceneFromFacts(
     result: cleanResult,
     shortText: `${narrative.title}：${summary}${cleanResult ? ` ${cleanResult}` : ''}`,
     sourceFactIds: [...factIds].sort(stableCompare),
-    historyEventIds: factHistoryIds(world, factIds),
+    historyEventIds: factHistoryIds(world, factIds, readScope),
     actorIds: unique(ordered.flatMap((fact) => fact.actorIds)),
     polityIds: unique(ordered.flatMap((fact) => fact.polityIds)),
     regionIds: unique(ordered.flatMap((fact) => fact.regionIds)),
@@ -250,7 +259,11 @@ function sceneFromFacts(
   };
 }
 
-function agencyScene(world: WorldState, facts: readonly SimulationFact[]): HistoricalScene {
+function agencyScene(
+  world: WorldState,
+  facts: readonly SimulationFact[],
+  readScope: HistoricalSceneReadScope,
+): HistoricalScene {
   const support = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'agency_support_resolved' }> => fact.kind === 'agency_support_resolved');
   const submitted = facts.find((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_submitted' }> => fact.kind === 'agency_intent_submitted');
   const resolution = facts.find((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_resolved' }> => fact.kind === 'agency_intent_resolved');
@@ -276,7 +289,7 @@ function agencyScene(world: WorldState, facts: readonly SimulationFact[]): Histo
     return sceneFromFacts(world, `scene:agency:${actorId}:${anchor.turn}:${anchor.id}`, facts, {
       title: narrative.title,
       summary: `${supportClause}；${actor}眼下仍未正式递交军令请求。`,
-    });
+    }, '', readScope);
   }
   const resolutionCopy = resolution ? projectFactNarrative(world, resolution) : null;
   const requestClause = `${actor}随后向${polityName(world, submitted?.payload.polityId ?? resolution?.payload.polityId ?? anchor.polityIds[0] ?? '')}朝廷请领${army}军令`;
@@ -286,10 +299,15 @@ function agencyScene(world: WorldState, facts: readonly SimulationFact[]): Histo
   return sceneFromFacts(world, `scene:agency:${actorId}:${submitted?.payload.goalId ?? resolution?.payload.goalId ?? anchor.id}`, facts, {
     title: resolutionCopy?.title ?? `${actor}正式请掌${army}`,
     summary,
-  }, result);
+  }, result, readScope);
 }
 
-function warScene(world: WorldState, facts: readonly SimulationFact[], key: string): HistoricalScene {
+function warScene(
+  world: WorldState,
+  facts: readonly SimulationFact[],
+  key: string,
+  readScope: HistoricalSceneReadScope,
+): HistoricalScene {
   const start = facts.find((fact): fact is Extract<SimulationFact, { kind: 'war_started' }> => fact.kind === 'war_started');
   const end = facts.find((fact): fact is Extract<SimulationFact, { kind: 'war_ended' }> => fact.kind === 'war_ended');
   const battle = facts.find((fact): fact is Extract<SimulationFact, { kind: 'battle' }> => fact.kind === 'battle');
@@ -301,9 +319,9 @@ function warScene(world: WorldState, facts: readonly SimulationFact[], key: stri
     const result = transfers.length
       ? transfers.map((fact) => `${regionName(world, fact.payload.regionId)}随即由${polityName(world, fact.payload.previousControllerId)}转入${polityName(world, fact.payload.nextControllerId)}`).join('；') + '。'
       : '战线控制本季没有随会战立即改变。';
-    return sceneFromFacts(world, `scene:war:${key}`, facts, battleCopy, result);
+    return sceneFromFacts(world, `scene:war:${key}`, facts, battleCopy, result, readScope);
   }
-  return sceneFromFacts(world, `scene:war:${key}`, facts, base);
+  return sceneFromFacts(world, `scene:war:${key}`, facts, base, '', readScope);
 }
 
 function warKey(fact: SimulationFact): string | null {
@@ -312,11 +330,14 @@ function warKey(fact: SimulationFact): string | null {
   return null;
 }
 
-function collectAgencyChain(world: WorldState, resolution: Extract<SimulationFact, { kind: 'agency_intent_resolved' }>): SimulationFact[] {
-  const byId = new Map(world.facts.map((fact) => [fact.id, fact]));
+function collectAgencyChain(
+  availableFacts: readonly SimulationFact[],
+  resolution: Extract<SimulationFact, { kind: 'agency_intent_resolved' }>,
+): SimulationFact[] {
+  const byId = new Map(availableFacts.map((fact) => [fact.id, fact]));
   const submission = byId.get(resolution.payload.submissionFactId);
   const sourceFacts = submission?.sourceFactIds.map((id) => byId.get(id)).filter((fact): fact is SimulationFact => Boolean(fact)) ?? [];
-  const appointmentFacts = world.facts.filter((fact) => (
+  const appointmentFacts = availableFacts.filter((fact) => (
     (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended')
     && fact.sourceFactIds.includes(resolution.id)
   ));
@@ -332,12 +353,14 @@ export function projectHistoricalScenes(
   world: WorldState,
   inputFacts: readonly SimulationFact[],
   maximum = 3,
+  readScope: HistoricalSceneReadScope = 'all',
 ): HistoricalScene[] {
   const inputIds = new Set(inputFacts.map((fact) => fact.id));
   const consumed = new Set<string>();
   const scenes: HistoricalScene[] = [];
   const facts = [...new Map(inputFacts.map((fact) => [fact.id, fact])).values()]
     .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
+  const availableFacts = readScope === 'all' ? readWorldFacts(world) : world.facts;
 
   // Identity actions are observer envelopes around an Agency domain Fact.
   // Let the concrete support/request scene own the story instead of showing a
@@ -350,22 +373,22 @@ export function projectHistoricalScenes(
   }
 
   for (const resolution of facts.filter((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_resolved' }> => fact.kind === 'agency_intent_resolved')) {
-    const chain = collectAgencyChain(world, resolution);
+    const chain = collectAgencyChain(availableFacts, resolution);
     chain.forEach((fact) => consumed.add(fact.id));
-    scenes.push(agencyScene(world, chain));
+    scenes.push(agencyScene(world, chain, readScope));
   }
   for (const submission of facts.filter((fact): fact is Extract<SimulationFact, { kind: 'agency_intent_submitted' }> => fact.kind === 'agency_intent_submitted' && !consumed.has(fact.id))) {
-    const byId = new Map(world.facts.map((fact) => [fact.id, fact]));
+    const byId = new Map(availableFacts.map((fact) => [fact.id, fact]));
     const chain = [
       ...submission.sourceFactIds.map((id) => byId.get(id)).filter((fact): fact is SimulationFact => fact?.kind === 'agency_support_resolved'),
       submission,
     ];
     chain.forEach((fact) => consumed.add(fact.id));
-    scenes.push(agencyScene(world, chain));
+    scenes.push(agencyScene(world, chain, readScope));
   }
   for (const support of facts.filter((fact) => fact.kind === 'agency_support_resolved' && !consumed.has(fact.id))) {
     consumed.add(support.id);
-    scenes.push(agencyScene(world, [support]));
+    scenes.push(agencyScene(world, [support], readScope));
   }
 
   const warGroups = new Map<string, SimulationFact[]>();
@@ -380,12 +403,12 @@ export function projectHistoricalScenes(
     consumed.add(fact.id);
   }
   for (const [key, group] of [...warGroups.entries()].sort(([left], [right]) => stableCompare(left, right))) {
-    scenes.push(warScene(world, group, key));
+    scenes.push(warScene(world, group, key, readScope));
   }
 
   for (const fact of facts) {
     if (consumed.has(fact.id) || fact.kind === 'situation_milestone') continue;
-    scenes.push(sceneFromFacts(world, `scene:fact:${fact.id}`, [fact], projectFactNarrative(world, fact)));
+    scenes.push(sceneFromFacts(world, `scene:fact:${fact.id}`, [fact], projectFactNarrative(world, fact), '', readScope));
   }
 
   return scenes
@@ -410,6 +433,7 @@ export function projectSituationHistoricalScenes(
   situation: SituationState,
   maximum = 3,
   throughTurn: number | null = null,
+  readScope: HistoricalSceneReadScope = 'all',
 ): HistoricalScene[] {
   const lastTurn = throughTurn ?? situation.resolvedTurn ?? situation.lastUpdatedTurn;
   const directIds = new Set([
@@ -417,7 +441,8 @@ export function projectSituationHistoricalScenes(
     ...situation.milestoneFactIds,
     ...(situation.resolution?.resultFactIds ?? []),
   ]);
-  const selected = world.facts.filter((fact) => {
+  const availableFacts = readScope === 'all' ? readWorldFacts(world) : world.facts;
+  const selected = availableFacts.filter((fact) => {
     if (fact.turn < situation.startedTurn || fact.turn > lastTurn) return false;
     if (directIds.has(fact.id) || fact.sourceFactIds.some((id) => directIds.has(id))) return true;
     if (situation.type === 'war_progress') return warKey(fact) === situation.scopeKey;
@@ -428,5 +453,5 @@ export function projectSituationHistoricalScenes(
     return ['character_death', 'appointment_started', 'appointment_ended']
       .includes(fact.kind) && factTouchesSituation(fact, situation);
   });
-  return projectHistoricalScenes(world, selected, maximum);
+  return projectHistoricalScenes(world, selected, maximum, readScope);
 }

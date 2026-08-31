@@ -3,6 +3,7 @@ import {
   advanceWorld,
   advanceWorldBy,
   createWorld,
+  readWorldHistory,
   serializeWorld,
   validateWorld,
   type CommodityKind,
@@ -258,6 +259,9 @@ for (const seed of seeds) {
   const serialized = serializeWorld(world);
   const saveMiB = Buffer.byteLength(serialized, 'utf8') / 1024 / 1024;
   const powers = maritimePowers(world);
+  // Release totals span the whole run, including immutable records that have
+  // moved out of the active window into compressed cold-history blocks.
+  const fullHistory = readWorldHistory(world);
   if (tradeShipments === 0) fail(seed, world.turn, '没有形成任何实际贸易Shipment');
   if (seaShipments === 0) fail(seed, world.turn, '没有任何Shipment使用海上航道');
   if (migrationFlows === 0 || migrationPeople === 0) fail(seed, world.turn, '没有形成任何实际迁徙Shipment');
@@ -274,13 +278,13 @@ for (const seed of seeds) {
     seaShipments,
     migrationFlows,
     migrationPeople,
-    outbreakEvents: world.history.filter((event) => event.kind === 'outbreak_detected').length,
-    diseaseImportEvents: world.history.filter((event) => event.kind === 'disease_imported').length,
+    outbreakEvents: fullHistory.filter((event) => event.kind === 'outbreak_detected').length,
+    diseaseImportEvents: fullHistory.filter((event) => event.kind === 'disease_imported').length,
     importedExposures,
     practicePrototypes: world.practiceStates.filter((practice) => practice.prototypeTurn !== null).length,
-    tradeTreatyEvents: world.history.filter((event) => event.kind === 'trade_treaty_formed').length,
-    tributeEvents: world.history.filter((event) => event.kind === 'tribute_imposed').length,
-    peaceEvents: world.history.filter((event) => event.kind === 'peace').length,
+    tradeTreatyEvents: fullHistory.filter((event) => event.kind === 'trade_treaty_formed').length,
+    tributeEvents: fullHistory.filter((event) => event.kind === 'tribute_imposed').length,
+    peaceEvents: fullHistory.filter((event) => event.kind === 'peace').length,
     maritimePowers: powers,
     saveMiB: Number(saveMiB.toFixed(3)),
   });

@@ -13,7 +13,7 @@ import {
   UsersRound,
   X,
 } from 'lucide-react';
-import { useEffect, useId, useRef } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import '../styles/historical-archive.css';
 
 export type ArchiveEntityKind =
@@ -91,6 +91,8 @@ const KIND_ICON = {
   migration: Route,
 } satisfies Record<ArchiveEntityKind, typeof Landmark>;
 
+const INITIAL_RECORD_COUNT = 36;
+
 export function HistoricalArchive({
   open,
   dossier,
@@ -104,7 +106,12 @@ export function HistoricalArchive({
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
+  const [visibleRecordCount, setVisibleRecordCount] = useState(INITIAL_RECORD_COUNT);
   onCloseRef.current = onClose;
+
+  useEffect(() => {
+    if (open) setVisibleRecordCount(INITIAL_RECORD_COUNT);
+  }, [dossier?.id, open]);
 
   useEffect(() => {
     if (!open || !dossier) return undefined;
@@ -149,6 +156,8 @@ export function HistoricalArchive({
 
   if (!open || !dossier) return null;
   const KindIcon = KIND_ICON[dossier.kind];
+  const visibleRecords = dossier.records.slice(0, visibleRecordCount);
+  const hiddenRecordCount = Math.max(0, dossier.records.length - visibleRecords.length);
 
   return (
     <div
@@ -199,25 +208,36 @@ export function HistoricalArchive({
               <div>
                 <h3 id="archive-chronology-title">纪年 · 截至本季</h3>
                 {dossier.records.length ? (
-                  <ol>
-                    {dossier.records.map((record) => (
-                      <li key={record.id} data-major={record.importance >= 4 || undefined} data-history-entry-id={record.id}>
-                        <span>{record.date}</span>
-                        {record.eventId && onSelectEvent ? (
-                          <button type="button" data-event-id={record.eventId} onClick={() => onSelectEvent(record.eventId!)}>
-                            <strong>{record.title}</strong>
-                            <small>{record.summary}</small>
-                            <span className="history-archive__cause"><GitBranch size={12} aria-hidden="true" />为何如此</span>
-                          </button>
-                        ) : (
-                          <div>
-                            <strong>{record.title}</strong>
-                            <small>{record.summary}</small>
-                          </div>
-                        )}
-                      </li>
-                    ))}
-                  </ol>
+                  <>
+                    <ol>
+                      {visibleRecords.map((record) => (
+                        <li key={record.id} data-major={record.importance >= 4 || undefined} data-history-entry-id={record.id}>
+                          <span>{record.date}</span>
+                          {record.eventId && onSelectEvent ? (
+                            <button type="button" data-event-id={record.eventId} onClick={() => onSelectEvent(record.eventId!)}>
+                              <strong>{record.title}</strong>
+                              <small>{record.summary}</small>
+                              <span className="history-archive__cause"><GitBranch size={12} aria-hidden="true" />为何如此</span>
+                            </button>
+                          ) : (
+                            <div>
+                              <strong>{record.title}</strong>
+                              <small>{record.summary}</small>
+                            </div>
+                          )}
+                        </li>
+                      ))}
+                    </ol>
+                    {hiddenRecordCount > 0 ? (
+                      <button
+                        type="button"
+                        className="history-archive__more-records"
+                        onClick={() => setVisibleRecordCount((count) => count + INITIAL_RECORD_COUNT)}
+                      >
+                        继续展卷 · 尚有 {hiddenRecordCount} 条
+                      </button>
+                    ) : null}
+                  </>
                 ) : (
                   <p className="history-archive__empty">尚无可系于确切年月的记载。</p>
                 )}

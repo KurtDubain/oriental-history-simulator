@@ -2,6 +2,7 @@ import type { LegacyArchiveBoundary, SimulationFact } from './facts/types';
 import type { SituationSystemState } from './situations/types';
 import type { AgencySystemState } from './agency/memory';
 import type { AgencyDecisionSystemState } from './agency/decision';
+import type { WorldArchiveSystemState } from './archive/state-types';
 import type {
   Climate,
   MapContentVersion,
@@ -800,6 +801,7 @@ export interface WorldState {
   facts: SimulationFact[];
   factDigest: string;
   legacyArchiveBoundary: LegacyArchiveBoundary | null;
+  archiveSystem: WorldArchiveSystemState;
   situationSystem: SituationSystemState;
   agencySystem: AgencySystemState;
   agencyDecisionSystem: AgencyDecisionSystemState;

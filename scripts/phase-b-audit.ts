@@ -4,6 +4,7 @@ import {
   deserializeWorld,
   measureFullValidation,
   measureRuntimeValidation,
+  readWorldFacts,
   serializeWorld,
   stableHash,
   type SimulationFact,
@@ -68,7 +69,7 @@ function factWarId(fact: SimulationFact): string | null {
 
 function auditMilestoneFact(world: WorldState, fact: Extract<SimulationFact, { kind: 'situation_milestone' }>): string[] {
   const failures: string[] = [];
-  const factById = new Map(world.facts.map((item) => [item.id, item]));
+  const factById = new Map(readWorldFacts(world).map((item) => [item.id, item]));
   if (fact.sourceFactIds.length === 0) failures.push(`${fact.id}没有来源事实`);
   for (const sourceFactId of fact.sourceFactIds) {
     const source = factById.get(sourceFactId);
@@ -138,8 +139,12 @@ function auditMilestoneFact(world: WorldState, fact: Extract<SimulationFact, { k
 
 function auditWarLifecycleFacts(world: WorldState): string[] {
   const failures: string[] = [];
-  const starts = world.facts.filter((fact) => fact.kind === 'war_started');
-  const ends = world.facts.filter((fact) => fact.kind === 'war_ended');
+  // The active arrays intentionally retain only the hot history window. Phase B
+  // audits the complete authoritative war lifecycle, so its evidence source must
+  // include sealed cold blocks as well as active records.
+  const facts = readWorldFacts(world);
+  const starts = facts.filter((fact) => fact.kind === 'war_started');
+  const ends = facts.filter((fact) => fact.kind === 'war_ended');
   for (const war of world.wars) {
     const matchingStarts = starts.filter((fact) => fact.payload.warId === war.id);
     const matchingEnds = ends.filter((fact) => fact.payload.warId === war.id);

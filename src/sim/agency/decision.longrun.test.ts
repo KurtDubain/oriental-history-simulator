@@ -4,6 +4,7 @@ import {
   ARMY_COMMAND_CHANGE_COOLDOWN_TURNS,
   COMMAND_CHANGE_PARTICIPANT_COOLDOWN_TURNS,
   createWorld,
+  readWorldFacts,
   validateAgencyDecisionSystemState,
 } from '../index';
 
@@ -33,10 +34,11 @@ it('keeps natural independent-command decisions present but chronicle-readable o
     let world = createWorld(seed);
     for (let turn = 0; turn < 80; turn += 1) world = advanceWorld(world);
     expect(validateAgencyDecisionSystemState(world), `${seed}留下了无法回收的目标状态`).toEqual([]);
-    const submitted = world.facts.filter((fact) => fact.kind === 'agency_intent_submitted').length;
-    const resolutions = world.facts.filter((fact) => fact.kind === 'agency_intent_resolved');
-    const supportActions = world.facts.filter((fact) => fact.kind === 'agency_support_resolved');
-    for (const submission of world.facts.filter((fact) => fact.kind === 'agency_intent_submitted')) {
+    const facts = readWorldFacts(world);
+    const submitted = facts.filter((fact) => fact.kind === 'agency_intent_submitted').length;
+    const resolutions = facts.filter((fact) => fact.kind === 'agency_intent_resolved');
+    const supportActions = facts.filter((fact) => fact.kind === 'agency_support_resolved');
+    for (const submission of facts.filter((fact) => fact.kind === 'agency_intent_submitted')) {
       expect(submission.sourceFactIds.some((factId) => supportActions.some((support) => (
         support.id === factId
         && support.payload.actorId === submission.payload.actorId
@@ -92,15 +94,16 @@ it('keeps decision slots and command succession healthy across a 240-quarter gen
     }
   }
 
-  const lateSubmissions = world.facts.filter((fact) => (
+  const facts = readWorldFacts(world);
+  const lateSubmissions = facts.filter((fact) => (
     fact.kind === 'agency_intent_submitted' && fact.turn > 120
   ));
   expect(lateGoalIds.size).toBeGreaterThan(0);
   expect(lateSubmissions.length).toBeGreaterThan(0);
   expect(validateAgencyDecisionSystemState(world)).toEqual([]);
 
-  const executions = world.facts.filter((fact): fact is Extract<
-    typeof world.facts[number],
+  const executions = facts.filter((fact): fact is Extract<
+    typeof facts[number],
     { kind: 'agency_intent_resolved' }
   > => fact.kind === 'agency_intent_resolved' && fact.payload.outcome === 'executed');
   const lastByArmy = new Map<string, number>();

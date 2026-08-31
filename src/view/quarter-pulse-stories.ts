@@ -136,7 +136,7 @@ function currentFactStories(world: WorldState): QuarterPulseEventStory[] {
   const facts = world.facts.filter((fact) => fact.turn === report.turn && reportFactIds.has(fact.id));
   const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
   const historyById = new Map(world.history.map((event) => [event.id, event]));
-  return projectHistoricalScenes(world, facts, facts.length)
+  return projectHistoricalScenes(world, facts, facts.length, 'active')
     .map((scene) => {
       const sourceFactIds = uniqueSorted(scene.sourceFactIds.filter((id) => {
         const fact = factById.get(id);

@@ -144,4 +144,3 @@ export function eventArchiveRecord(item: HistoryEvent): ArchiveRecord {
     eventId: item.id,
   };
 }
-

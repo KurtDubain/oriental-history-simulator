@@ -1,6 +1,7 @@
 import type { ArchiveDossier } from '../components/HistoricalArchive';
 import type { FamilyInspectorData } from '../components/Inspector';
 import type { CharacterState, FamilyState, HistoryEvent, WorldState } from '../sim/types';
+import { readWorldHistory } from '../sim/archive';
 import {
   character,
   compact,
@@ -74,7 +75,7 @@ export function toFamilyArchive(world: WorldState, item: FamilyState): ArchiveDo
   const founder = character(world, item.founderId);
   const head = character(world, item.headId);
   const owner = polity(world, item.polityId);
-  const relatedEvents = world.history.filter((event) => familyEvent(item, event));
+  const relatedEvents = readWorldHistory(world).filter((event) => familyEvent(item, event));
   const records = [
     { turn: item.foundedTurn, record: { id: `${item.id}-founded`, date: turnLabel(item.foundedTurn), title: `${item.name}立族`, summary: `${founder?.name ?? '先祖'}被后世奉为家族始祖。`, importance: 3 } },
     ...relatedEvents.map((event) => ({ turn: event.turn, record: eventArchiveRecord(event) })),
@@ -107,4 +108,3 @@ export function toFamilyArchive(world: WorldState, item: FamilyState): ArchiveDo
     ]).slice(0, 10),
   };
 }
-

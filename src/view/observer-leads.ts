@@ -539,7 +539,7 @@ function situationEvidence(
   state: SituationState,
   resolvedEcho: boolean,
 ): readonly [string, string] {
-  const scene = projectSituationHistoricalScenes(world, state, 1)[0];
+  const scene = projectSituationHistoricalScenes(world, state, 1, null, 'active')[0];
   if (scene) {
     return [
       `${scene.dateLabel} · ${scene.title}`,

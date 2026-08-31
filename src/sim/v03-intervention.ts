@@ -125,7 +125,7 @@ function appendEvent(world: WorldState, input: InterventionEventInput): HistoryE
     situationIds: [],
   };
   world.history.push(event);
-  world.historyDigest = world.history.length === 1
+  world.historyDigest = world.historyDigest.length === 0
     ? stableHash(event)
     : stableHash([world.historyDigest, event]);
   return event;

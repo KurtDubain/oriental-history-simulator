@@ -52,4 +52,25 @@ describe('HistoricalArchive reading layer', () => {
     }));
     expect(markup).toBe('');
   });
+
+  it('opens a long chronology in bounded leaves instead of mounting the whole archive', () => {
+    const records = Array.from({ length: 40 }, (_, index) => ({
+      id: `record-${index}`,
+      date: `第 ${index + 1} 年 · 春`,
+      title: `史事 ${index + 1}`,
+      summary: `第 ${index + 1} 条具体记载`,
+      importance: 2,
+      eventId: `event-${index}`,
+    }));
+    const markup = renderToStaticMarkup(createElement(HistoricalArchive, {
+      open: true,
+      dossier: { ...dossier, records },
+      onClose: () => undefined,
+      onSelectEvent: () => undefined,
+    }));
+
+    expect(markup).toContain('data-history-entry-id="record-35"');
+    expect(markup).not.toContain('data-history-entry-id="record-36"');
+    expect(markup).toContain('继续展卷 · 尚有 4 条');
+  });
 });

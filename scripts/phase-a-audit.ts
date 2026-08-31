@@ -3,6 +3,8 @@ import {
   createWorld,
   measureFullValidation,
   measureRuntimeValidation,
+  readWorldFacts,
+  readWorldHistory,
   SIMULATION_SYSTEM_PHASES,
   serializeWorld,
   type SimulationSystemPhase,
@@ -85,13 +87,17 @@ function undefinedPaths(value: unknown, path: string, output: string[] = []): st
 }
 
 function checkFactLinks(previous: WorldState, next: WorldState): void {
-  const appendedFacts = next.facts.slice(previous.facts.length);
+  const previousFacts = readWorldFacts(previous);
+  const nextFacts = readWorldFacts(next);
+  const appendedFacts = nextFacts.slice(previousFacts.length);
   const invalidPaths = undefinedPaths(appendedFacts, 'facts');
   if (invalidPaths.length) fail(next.seed, next.turn, `Fact含undefined：${invalidPaths.slice(0, 4).join(', ')}`);
   const appendedFactIds = new Set(appendedFacts.map((fact) => fact.id));
-  for (const event of next.history.slice(previous.history.length)) {
+  const previousHistory = readWorldHistory(previous);
+  const nextHistory = readWorldHistory(next);
+  for (const event of nextHistory.slice(previousHistory.length)) {
     for (const factId of event.sourceFactIds) {
-      if (!appendedFactIds.has(factId) && !next.facts.some((fact) => fact.id === factId)) {
+      if (!appendedFactIds.has(factId) && !nextFacts.some((fact) => fact.id === factId)) {
         fail(next.seed, next.turn, `${event.id}引用未知事实${factId}`);
       }
     }
@@ -114,11 +120,13 @@ for (const seed of seeds) {
     serializationTimings.push(serializationMs);
     const saveMiB = Buffer.byteLength(serialized, 'utf8') / 1024 / 1024;
     if (saveMiB > maximumSaveMiB) fail(seed, world.turn, `存档${saveMiB.toFixed(2)}MiB超过${maximumSaveMiB}MiB`);
+    const facts = readWorldFacts(world);
+    const history = readWorldHistory(world);
     checkpoints.push({
       turn: world.turn,
       yearsElapsed: Number((world.turn / 4).toFixed(2)),
-      facts: world.facts.length,
-      chronicleEntries: world.history.length,
+      facts: facts.length,
+      chronicleEntries: history.length,
       saveMiB: Number(saveMiB.toFixed(3)),
       serializationMs: Number(serializationMs.toFixed(3)),
     });
@@ -162,18 +170,20 @@ for (const seed of seeds) {
 
   const saveMiB = checkpoints.at(-1)?.saveMiB ?? 0;
 
-  const battleFacts = world.facts.filter((fact) => fact.kind === 'battle').length;
-  const battleChronicleEntries = world.history.filter((event) => event.kind === 'battle').length;
+  const facts = readWorldFacts(world);
+  const history = readWorldHistory(world);
+  const battleFacts = facts.filter((fact) => fact.kind === 'battle').length;
+  const battleChronicleEntries = history.filter((event) => event.kind === 'battle').length;
   if (battleChronicleEntries > battleFacts) fail(seed, world.turn, '公开战役数超过真实 BattleFact 数');
   samples.push({
     seed,
     turn: world.turn,
     hash: world.hash,
-    facts: world.facts.length,
-    chronicleEntries: world.history.length,
+    facts: facts.length,
+    chronicleEntries: history.length,
     battleFacts,
     battleChronicleEntries,
-    factChronicleRatio: Number((world.facts.length / Math.max(1, world.history.length)).toFixed(3)),
+    factChronicleRatio: Number((facts.length / Math.max(1, history.length)).toFixed(3)),
     saveMiB,
     checkpoints,
   });

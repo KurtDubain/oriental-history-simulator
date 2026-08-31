@@ -11,6 +11,7 @@ import {
 } from '../sim/situations';
 import type { SimulationFact } from '../sim/facts/types';
 import type { DeltaValue, StateDelta, WorldState } from '../sim/types';
+import { readWorldFacts, readWorldHistory } from '../sim/archive';
 import { historyTurnDate } from './v1-history';
 import {
   projectFactNarrative,
@@ -338,7 +339,7 @@ type FactHistoryIndex = ReadonlyMap<string, readonly string[]>;
 
 function buildFactHistoryIndex(world: WorldState): FactHistoryIndex {
   const index = new Map<string, string[]>();
-  for (const event of world.history) {
+  for (const event of readWorldHistory(world)) {
     for (const factId of event.sourceFactIds) {
       const eventIds = index.get(factId) ?? [];
       if (eventIds.length < 2 && !eventIds.includes(event.id)) eventIds.push(event.id);
@@ -425,8 +426,9 @@ function projectTimeline(
   situation: SituationState,
   milestoneFacts: readonly Extract<SimulationFact, { kind: 'situation_milestone' }>[],
   historyByFact: FactHistoryIndex,
+  availableFacts: readonly SimulationFact[],
 ): SituationDetailTimelineItem[] {
-  const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
+  const factById = new Map(availableFacts.map((fact) => [fact.id, fact]));
   const changeByKey = new Map(situation.recentChanges.map((change) => [`${change.turn}:${change.kind}`, change]));
   const milestoneItems = milestoneFacts.map((fact) => {
     const kind: SituationRecentChange['kind'] = fact.payload.transition === 'formed'
@@ -516,9 +518,9 @@ function warFactMatches(fact: SimulationFact, warId: string): boolean {
 }
 
 function evidenceFacts(
-  world: WorldState,
   situation: SituationState,
   milestoneFacts: readonly Extract<SimulationFact, { kind: 'situation_milestone' }>[],
+  availableFacts: readonly SimulationFact[],
 ): { facts: SimulationFact[]; missingFactIds: string[] } {
   const directIds = unique([
     ...situation.causalFactIds,
@@ -527,7 +529,7 @@ function evidenceFacts(
     ...milestoneFacts.map((fact) => fact.id),
     ...milestoneFacts.flatMap((fact) => fact.sourceFactIds),
   ]);
-  const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
+  const factById = new Map(availableFacts.map((fact) => [fact.id, fact]));
   const missingFactIds = directIds.filter((id) => !factById.has(id));
   const selected = new Map<string, SimulationFact>();
   for (const id of directIds) {
@@ -535,7 +537,7 @@ function evidenceFacts(
     if (fact) selected.set(id, fact);
   }
   if (situation.type === 'war_progress') {
-    for (const fact of world.facts) {
+    for (const fact of availableFacts) {
       if (warFactMatches(fact, situation.scopeKey)) selected.set(fact.id, fact);
     }
   }
@@ -613,13 +615,14 @@ function directoryItem(situation: SituationState, world: WorldState): SituationD
 export function projectSituationDetail(world: WorldState, situation: SituationState): SituationDetailProjection {
   const item = projectSituationSnapshotItem(situation, world);
   const drivers = driverProjection(situation);
+  const allFacts = readWorldFacts(world);
   const historyByFact = buildFactHistoryIndex(world);
-  const milestoneFacts = world.facts
+  const milestoneFacts = allFacts
     .filter((fact): fact is Extract<SimulationFact, { kind: 'situation_milestone' }> => (
       fact.kind === 'situation_milestone' && fact.payload.situationId === situation.id
     ))
     .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
-  const evidenceSelection = evidenceFacts(world, situation, milestoneFacts);
+  const evidenceSelection = evidenceFacts(situation, milestoneFacts, allFacts);
   const evidence = evidenceSelection.facts.map((fact) => projectFact(world, fact, historyByFact));
   const resultFactIds = [...(situation.resolution?.resultFactIds ?? [])];
   const resultFactIdSet = new Set(resultFactIds);
@@ -640,9 +643,10 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
   const durationTurns = Math.max(1, (endTurn ?? situation.lastUpdatedTurn) - situation.startedTurn + 1);
   const durationLabel = durationTurns < 4 ? `${durationTurns}季` : `${Math.floor(durationTurns / 4)}年${durationTurns % 4 ? `${durationTurns % 4}季` : ''}`;
   const scenes = projectSituationHistoricalScenes(world, situation, 3);
-  const timeline = projectTimeline(world, situation, milestoneFacts, historyByFact);
+  const timeline = projectTimeline(world, situation, milestoneFacts, historyByFact, allFacts);
   const latestTimeline = timeline.at(-1);
-  const missingResultFacts = resultFactIds.filter((id) => !world.facts.some((fact) => fact.id === id));
+  const allFactIds = new Set(allFacts.map((fact) => fact.id));
+  const missingResultFacts = resultFactIds.filter((id) => !allFactIds.has(id));
   const coverageNotes = [
     '形成时只封存压力、参与者指纹与证据指纹，未保存的制度、人口和财富起点不可倒推。',
     `里程碑最多展示 ${MAX_SITUATION_DETAIL_TIMELINE} 条，事实证据最多展示 ${MAX_SITUATION_DETAIL_FACTS} 条。`,

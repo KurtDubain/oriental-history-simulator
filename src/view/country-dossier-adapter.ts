@@ -1,6 +1,7 @@
 import type { CountryInspectorData, SystemInspectorData } from '../components/Inspector';
 import type { ArchiveDossier } from '../components/HistoricalArchive';
 import type { PolityState, WorldState } from '../sim/types';
+import { readWorldHistory } from '../sim/archive';
 import {
   calculateCharacterPowerPosition,
   calculateFactionPowerLedger,
@@ -69,6 +70,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
       && ['agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'local_governance_resolved', 'appointment_started', 'appointment_ended'].includes(fact.kind)
     )),
     3,
+    'active',
   ).map(toHistoricalSceneView);
   const diplomacy = worldDiplomacy(world)
     .filter((relation) => relation.polityAId === item.id || relation.polityBId === item.id)
@@ -148,7 +150,7 @@ export function toCountryArchive(world: WorldState, item: PolityState): ArchiveD
   const inspector = toCountryInspector(world, item);
   const ruler = character(world, item.rulerId);
   const rulingFamily = family(world, item.rulingFamilyId);
-  const records = world.history.filter((event) => event.polityIds.includes(item.id)).map(eventArchiveRecord);
+  const records = readWorldHistory(world).filter((event) => event.polityIds.includes(item.id)).map(eventArchiveRecord);
   const factionSentence = inspector.factions?.length
     ? `${inspector.factions.map((faction) => `${faction.name}主张${faction.agenda}`).join('；')}。其中${inspector.factions[0].name}权势最盛。`
     : '朝中尚未形成足以被史家命名的稳定派系，权力更多系于具体官职与个人。';
@@ -181,4 +183,3 @@ export function toCountryArchive(world: WorldState, item: PolityState): ArchiveD
     ]).slice(0, 10),
   };
 }
-

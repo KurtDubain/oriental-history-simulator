@@ -58,6 +58,11 @@ import { refreshFactionPowerLedgers } from './politics/power-ledger';
 import { getDateForTurn } from './calendar';
 import { computeWorldHash } from './world-hash';
 import {
+  cloneWorldArchiveState,
+  compactWorldArchive,
+  createWorldArchiveState,
+} from './archive';
+import {
   type ArmyState,
   type CharacterState,
   type EventCause,
@@ -510,6 +515,7 @@ export function createWorld(
     facts: [],
     factDigest: stableHash([]),
     legacyArchiveBoundary: null,
+    archiveSystem: createWorldArchiveState(),
     situationSystem: createSituationSystemState(-1),
     agencySystem: createAgencySystemState(-1),
     agencyDecisionSystem: createAgencyDecisionSystemState(-1),
@@ -2927,6 +2933,7 @@ function cloneWorld(world: WorldState): WorldState {
     })),
     history: [...world.history],
     facts: [...world.facts],
+    archiveSystem: cloneWorldArchiveState(world.archiveSystem),
     situationSystem: structuredClone(world.situationSystem),
     agencySystem: structuredClone(world.agencySystem),
     agencyDecisionSystem: structuredClone(world.agencyDecisionSystem),
@@ -3069,6 +3076,7 @@ export function advanceWorldDetailed(
     const nextDate = getDateForTurn(world.turn);
     world.year = nextDate.year;
     world.season = nextDate.season;
+    compactWorldArchive(world);
   });
   const { systems, elapsedMs: systemsMs } = pipeline.finish();
   const hashStartedAt = now();

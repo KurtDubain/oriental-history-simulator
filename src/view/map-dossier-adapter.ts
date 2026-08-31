@@ -195,5 +195,3 @@ export function toRegionInspector(world: WorldState, item: RegionState): RegionI
           : '地方生产与统治秩序目前维持在可控范围。',
   };
 }
-
-

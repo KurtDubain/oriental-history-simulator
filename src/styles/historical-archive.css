@@ -295,6 +295,25 @@
   transform: translateY(0);
 }
 
+.history-archive__more-records {
+  width: 100%;
+  min-height: 44px;
+  margin-top: 10px;
+  border: 1px solid var(--observer-line);
+  color: var(--observer-vermilion-dark);
+  font-family: var(--observer-serif);
+  font-size: 11px;
+  letter-spacing: 0.05em;
+  background: color-mix(in srgb, var(--observer-paper) 84%, transparent);
+  cursor: pointer;
+}
+
+.history-archive__more-records:hover,
+.history-archive__more-records:focus-visible {
+  border-color: var(--observer-vermilion);
+  background: var(--observer-paper-bright);
+}
+
 .history-archive__empty {
   color: var(--observer-ink-faint) !important;
 }

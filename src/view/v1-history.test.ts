@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { createWorld } from '../sim';
+import {
+  archiveDecodeCacheEntryCount,
+  clearWorldArchiveDecodeCache,
+  compactWorldArchive,
+  createWorldArchiveState,
+} from '../sim/archive';
 import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
 import {
   buildHistoryRelatedEntities,
@@ -241,5 +247,50 @@ describe('V1 history search', () => {
     const encoded = encodeHistoryRelatedEntity({ kind: 'character', id: person.id });
     expect(decodeHistoryRelatedEntity(encoded)).toEqual({ kind: 'character', id: person.id });
     expect(decodeHistoryRelatedEntity('army:a_1')).toBeNull();
+  });
+
+  it('searches cold Chronicle and rewinds cold territory Facts after active arrays are trimmed', () => {
+    const world = historyWorld();
+    const firstPolity = world.polities[0];
+    const secondPolity = world.polities[1];
+    const person = world.characters[0];
+    const region = world.regions.find((item) => item.controllerId === firstPolity.id) ?? world.regions[0];
+    const capture = territoryFact('fact_000002', 2, region.id, firstPolity.id, secondPolity.id);
+    const recapture = territoryFact('fact_000070', 70, region.id, secondPolity.id, firstPolity.id);
+    const coldEvent = historyEvent('event_000002', 2, {
+      category: '军事',
+      title: `${person.name}夺取${region.name}`,
+      actorIds: [person.id],
+      polityIds: [firstPolity.id, secondPolity.id],
+      regionIds: [region.id],
+      sourceFactIds: [capture.id],
+    });
+    const hotEvent = historyEvent('event_000070', 70, {
+      category: '军事',
+      title: `${region.name}复归旧主`,
+      polityIds: [firstPolity.id, secondPolity.id],
+      regionIds: [region.id],
+      sourceFactIds: [recapture.id],
+    });
+    world.turn = 80;
+    world.year = 21;
+    world.season = '春';
+    world.facts = [capture, recapture];
+    world.history = [coldEvent, hotEvent];
+    world.archiveSystem = createWorldArchiveState();
+    region.controllerId = firstPolity.id;
+    compactWorldArchive(world);
+
+    expect(world.facts.some((fact) => fact.id === capture.id)).toBe(false);
+    expect(world.history.some((event) => event.id === coldEvent.id)).toBe(false);
+    expect(filterHistoryEvents(world, { query: `${person.name} 夺取` }).map((event) => event.id))
+      .toEqual([coldEvent.id]);
+    clearWorldArchiveDecodeCache();
+    expect(buildHistoryRelatedEntities(world).find((option) => (
+      option.kind === 'character' && option.id === person.id
+    ))?.eventCount).toBe(1);
+    expect(reconstructHistoricalTerritory(world, 3).controllerByRegionId[region.id]).toBe(secondPolity.id);
+    expect(reconstructHistoricalTerritory(world, 0).controllerByRegionId[region.id]).toBe(firstPolity.id);
+    expect(archiveDecodeCacheEntryCount()).toBe(0);
   });
 });

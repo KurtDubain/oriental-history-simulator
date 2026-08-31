@@ -23,12 +23,16 @@ import {
 } from 'react';
 import type { EventCategory, HistoryEvent, WorldState } from '../sim/types';
 import {
+  queryWorldHistory,
+  type WorldHistoryQueryCursor,
+  type WorldHistoryQueryFilters,
+} from '../sim/archive';
+import {
   HISTORY_EVENT_CATEGORIES,
   buildHistoryRelatedEntities,
   clampHistoryTurn,
   decodeHistoryRelatedEntity,
   encodeHistoryRelatedEntity,
-  filterHistoryEvents,
   historyTurnDate,
   reconstructHistoricalTerritory,
   type HistoricalTerritoryView,
@@ -39,6 +43,24 @@ import '../styles/history-workbench.css';
 import { APP_VERSION } from '../version';
 
 const PAGE_SIZE = 72;
+
+interface HistoryScanState {
+  identity: object | null;
+  events: HistoryEvent[];
+  cursor: WorldHistoryQueryCursor | null;
+  exhausted: boolean;
+}
+
+function cursorKey(cursor: WorldHistoryQueryCursor | null): string {
+  return cursor ? [
+    cursor.signature,
+    cursor.phase,
+    cursor.activeOffset,
+    cursor.blockIndex,
+    cursor.blockOffset,
+    cursor.legacyOffset,
+  ].join(':') : 'end';
+}
 
 const ENTITY_GROUPS: ReadonlyArray<{ kind: HistoryRelatedKind; label: string }> = [
   { kind: 'character', label: '人物' },
@@ -98,6 +120,12 @@ export function HistoryWorkbench({
   );
   const [page, setPage] = useState(0);
   const [activeEventIndex, setActiveEventIndex] = useState(0);
+  const [scanState, setScanState] = useState<HistoryScanState>({
+    identity: null,
+    events: [],
+    cursor: null,
+    exhausted: true,
+  });
   const deferredQuery = useDeferredValue(query);
   onCloseRef.current = onClose;
 
@@ -109,17 +137,39 @@ export function HistoryWorkbench({
   );
   const relatedOptions = useMemo(() => open ? buildHistoryRelatedEntities(world) : [], [open, world]);
   const relatedEntity = useMemo(() => decodeHistoryRelatedEntity(relatedValue), [relatedValue]);
-  const filteredEvents = useMemo(() => open ? filterHistoryEvents(world, {
-      query: deferredQuery,
-      categories: category === 'all' ? [] : [category],
-      minimumImportance,
-      relatedEntity,
-      throughTurn: selectedTurn,
-    }) : [],
-  [category, deferredQuery, minimumImportance, open, relatedEntity, selectedTurn, world]);
-  const pageCount = Math.max(1, Math.ceil(filteredEvents.length / PAGE_SIZE));
-  const safePage = Math.min(page, pageCount - 1);
-  const visibleEvents = filteredEvents.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const historyFilters = useMemo<WorldHistoryQueryFilters>(() => ({
+    query: deferredQuery,
+    categories: category === 'all' ? [] : [category],
+    minimumImportance,
+    relatedEntity,
+    throughTurn: selectedTurn,
+  }), [category, deferredQuery, minimumImportance, relatedEntity, selectedTurn]);
+  const queryIdentity = useMemo(() => ({ world, historyFilters, open }), [historyFilters, open, world]);
+  const firstSlice = useMemo(() => open ? queryWorldHistory(world, {
+    ...historyFilters,
+    limit: PAGE_SIZE,
+    maxColdBlocks: 0,
+  }) : { events: [], nextCursor: null, exhausted: true }, [historyFilters, open, world]);
+  const activeScan = scanState.identity === queryIdentity ? scanState : {
+    identity: queryIdentity,
+    events: firstSlice.events,
+    cursor: firstSlice.nextCursor,
+    exhausted: firstSlice.exhausted,
+  };
+  const loadedPageCount = Math.max(1, Math.ceil(activeScan.events.length / PAGE_SIZE));
+  const safePage = activeScan.exhausted ? Math.min(page, loadedPageCount - 1) : page;
+  const requestedEventCount = (safePage + 1) * PAGE_SIZE;
+  const queryPending = query !== deferredQuery;
+  const scanningOlder = open
+    && !queryPending
+    && !activeScan.exhausted
+    && activeScan.cursor !== null
+    && activeScan.events.length < requestedEventCount;
+  const visibleEvents = activeScan.events.slice(safePage * PAGE_SIZE, (safePage + 1) * PAGE_SIZE);
+  const pageFilled = activeScan.events.length >= requestedEventCount;
+  const canReadOlder = pageFilled && (
+    !activeScan.exhausted || activeScan.events.length > requestedEventCount
+  );
   const subjectNamesByEvent = useMemo(() => new Map(
     visibleEvents.map((event) => [event.id, eventSubjectNames(world, event)]),
   ), [visibleEvents, world]);
@@ -142,10 +192,53 @@ export function HistoryWorkbench({
   }, [initialRelatedEntity?.id, initialRelatedEntity?.kind, open]);
 
   useEffect(() => {
+    setScanState({
+      identity: queryIdentity,
+      events: firstSlice.events,
+      cursor: firstSlice.nextCursor,
+      exhausted: firstSlice.exhausted,
+    });
+  }, [firstSlice, queryIdentity]);
+
+  useEffect(() => {
     setPage(0);
     setActiveEventIndex(0);
     eventButtonRefs.current = [];
   }, [category, minimumImportance, query, relatedValue, selectedTurn]);
+
+  useEffect(() => {
+    if (!scanningOlder || !activeScan.cursor) return undefined;
+    const sourceCursor = activeScan.cursor;
+    const sourceCursorKey = cursorKey(sourceCursor);
+    let cancelled = false;
+    const timer = window.setTimeout(() => {
+      const slice = queryWorldHistory(world, {
+        ...historyFilters,
+        cursor: sourceCursor,
+        limit: Math.max(1, requestedEventCount - activeScan.events.length),
+        maxColdBlocks: 1,
+      });
+      if (cancelled) return;
+      setScanState((current) => {
+        if (current.identity !== queryIdentity || cursorKey(current.cursor) !== sourceCursorKey) return current;
+        return {
+          identity: queryIdentity,
+          events: [...current.events, ...slice.events],
+          cursor: slice.nextCursor,
+          exhausted: slice.exhausted,
+        };
+      });
+    }, 0);
+    return () => {
+      cancelled = true;
+      window.clearTimeout(timer);
+    };
+  }, [activeScan.cursor, activeScan.events.length, historyFilters, queryIdentity, requestedEventCount, scanningOlder, world]);
+
+  useEffect(() => {
+    if (!activeScan.exhausted) return;
+    setPage((current) => Math.min(current, loadedPageCount - 1));
+  }, [activeScan.exhausted, loadedPageCount]);
 
   useEffect(() => {
     setActiveEventIndex(0);
@@ -349,18 +442,28 @@ export function HistoryWorkbench({
           <main
             className="history-workbench__records"
             aria-labelledby="history-workbench-results"
-            aria-busy={query !== deferredQuery || undefined}
+            aria-busy={queryPending || scanningOlder || undefined}
           >
             <header>
               <div>
                 <span>截至 {date.label}</span>
-                <h3 id="history-workbench-results">{filteredEvents.length} 件匹配史事</h3>
+                <h3 id="history-workbench-results">
+                  {activeScan.exhausted
+                    ? `${activeScan.events.length} 件匹配史事`
+                    : `已找到${activeScan.events.length}件，仍在翻检旧卷`}
+                </h3>
               </div>
-              {pageCount > 1 ? <small>第 {safePage + 1} / {pageCount} 页</small> : null}
+              {safePage > 0 || canReadOlder ? <small>第 {safePage + 1} 页</small> : null}
             </header>
 
             <p className="history-workbench__result-status" role="status" aria-live="polite">
-              {query !== deferredQuery ? '正在检索史册。' : `${filteredEvents.length} 件结果；按上下方向键可逐条阅读。`}
+              {queryPending
+                ? '正在核对检索词。'
+                : scanningOlder
+                  ? `已找到${activeScan.events.length}件，正在翻检更早的旧卷。`
+                  : activeScan.exhausted
+                    ? `共 ${activeScan.events.length} 件结果；按上下方向键可逐条阅读。`
+                    : `已找到${activeScan.events.length}件，仍在翻检旧卷；读完本页可继续往前。`}
             </p>
 
             {visibleEvents.length ? (
@@ -402,18 +505,22 @@ export function HistoryWorkbench({
             ) : (
               <div className="history-workbench__empty">
                 <Search size={24} aria-hidden="true" />
-                <strong>史卷中未找到相合记载</strong>
-                <p>尝试缩短关键词、降低重要度，或回到更晚的季度。</p>
+                <strong>{queryPending || scanningOlder ? '正在翻检旧卷' : '史卷中未找到相合记载'}</strong>
+                <p>{queryPending || scanningOlder
+                  ? '更早的记载会逐卷呈上。'
+                  : '尝试缩短关键词、降低重要度，或回到更晚的季度。'}</p>
               </div>
             )}
 
-            {pageCount > 1 ? (
+            {safePage > 0 || canReadOlder ? (
               <nav className="history-workbench__pagination" aria-label="史事结果翻页">
                 <button type="button" disabled={safePage === 0} onClick={() => setPage((current) => Math.max(0, current - 1))}>
                   <ChevronLeft size={14} aria-hidden="true" />较新一页
                 </button>
-                <span>{safePage * PAGE_SIZE + 1}–{Math.min((safePage + 1) * PAGE_SIZE, filteredEvents.length)} / {filteredEvents.length}</span>
-                <button type="button" disabled={safePage >= pageCount - 1} onClick={() => setPage((current) => Math.min(pageCount - 1, current + 1))}>
+                <span>{visibleEvents.length
+                  ? `${safePage * PAGE_SIZE + 1}–${safePage * PAGE_SIZE + visibleEvents.length}${activeScan.exhausted ? ` / ${activeScan.events.length}` : ''}`
+                  : `正在翻检第 ${safePage + 1} 页`}</span>
+                <button type="button" disabled={!canReadOlder} onClick={() => setPage((current) => current + 1)}>
                   较早一页<ChevronRight size={14} aria-hidden="true" />
                 </button>
               </nav>

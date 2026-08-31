@@ -15,6 +15,7 @@ import type { SituationRecentChange } from './situations/types';
 import type { HistoryEvent, InvariantViolation, SimulationFact, WorldState } from './types';
 import { validateRuntimeEmbodiedActions } from './validation/embodiment';
 import { findMapProfileForContentVersion } from '../maps';
+import { findActiveWorldFact, readWorldFacts, readWorldHistory, validateWorldArchiveIntegrity } from './archive';
 
 export type RuntimeEntityKind =
   | 'region'
@@ -705,8 +706,10 @@ export function deriveRuntimeTurnArtifacts(
   previous: WorldState,
   next: WorldState,
 ): RuntimeTurnArtifacts {
-  const appendedFacts = next.facts.slice(previous.facts.length);
-  const appendedEvents = next.history.slice(previous.history.length);
+  const appendedFactCount = Math.max(0, next.counters.fact - previous.counters.fact);
+  const appendedEventCount = Math.max(0, next.counters.event - previous.counters.event);
+  const appendedFacts = appendedFactCount > 0 ? next.facts.slice(-appendedFactCount) : [];
+  const appendedEvents = appendedEventCount > 0 ? next.history.slice(-appendedEventCount) : [];
   const practiceStateIds = new Set([
     ...previous.practiceStates.map((state) => state.id),
     ...next.practiceStates.map((state) => state.id),
@@ -943,19 +946,9 @@ export function validateTurnRuntime(
     push(violations, 'runtime.date', `推进后应为${expectedDate.year}年${expectedDate.season}`);
   }
 
-  const historyStart = previous.history.length;
-  if (next.history.length < historyStart) {
-    push(violations, 'runtime.history-truncated', '季度推进截断了既有史册');
-  }
-  if (historyStart > 0 && next.history.length >= historyStart) {
-    const previousTail = previous.history[historyStart - 1] as HistoryEvent;
-    const nextPrefixTail = next.history[historyStart - 1] as HistoryEvent;
-    if (stableHash(previousTail) !== stableHash(nextPrefixTail)) {
-      push(violations, 'runtime.history-prefix', '季度推进改写了既有史册尾部', previousTail.id);
-    }
-  }
-  const appendedEvents = next.history.slice(historyStart);
-  if (next.counters.event !== previous.counters.event + appendedEvents.length) {
+  const appendedEventCount = next.counters.event - previous.counters.event;
+  const appendedEvents = appendedEventCount > 0 ? next.history.slice(-appendedEventCount) : [];
+  if (appendedEventCount < 0 || appendedEvents.length !== appendedEventCount) {
     push(violations, 'runtime.event-counter', '事件计数器与本季新增事件数不一致');
   }
   const appendedEventIds = appendedEvents.map((event) => event.id);
@@ -978,17 +971,9 @@ export function validateTurnRuntime(
     push(violations, 'runtime.history-digest', '本季增量事件与历史摘要不一致');
   }
 
-  const factStart = previous.facts.length;
-  if (next.facts.length < factStart) push(violations, 'runtime.facts-truncated', '季度推进截断了既有事实档案');
-  if (factStart > 0 && next.facts.length >= factStart) {
-    const previousFactTail = previous.facts[factStart - 1] as SimulationFact;
-    const nextFactPrefixTail = next.facts[factStart - 1] as SimulationFact;
-    if (stableHash(previousFactTail) !== stableHash(nextFactPrefixTail)) {
-      push(violations, 'runtime.fact-prefix', '季度推进改写了既有事实档案尾部', previousFactTail.id);
-    }
-  }
-  const appendedFacts = next.facts.slice(factStart);
-  if (next.counters.fact !== previous.counters.fact + appendedFacts.length) {
+  const appendedFactCount = next.counters.fact - previous.counters.fact;
+  const appendedFacts = appendedFactCount > 0 ? next.facts.slice(-appendedFactCount) : [];
+  if (appendedFactCount < 0 || appendedFacts.length !== appendedFactCount) {
     push(violations, 'runtime.fact-counter', '事实计数器与本季新增事实数不一致');
   }
   const appendedFactIds = appendedFacts.map((fact) => fact.id);
@@ -1012,7 +997,7 @@ export function validateTurnRuntime(
   const runtimeFactById = (factId: string): SimulationFact | undefined => {
     if (!/^fact_\d+$/.test(factId)) return undefined;
     const candidate = next.facts[numericIdSuffix(factId) - 1];
-    return candidate?.id === factId ? candidate : undefined;
+    return candidate?.id === factId ? candidate : findActiveWorldFact(next, factId);
   };
   // Resolve only the bounded Facts reachable from retained decision accounts;
   // never rebuild a map for the append-only archive during a live quarter.
@@ -1362,6 +1347,19 @@ export function measureRuntimeValidation(
 
 export function validateWorldFull(world: WorldState): InvariantViolation[] {
   const violations: InvariantViolation[] = [];
+  for (const issue of validateWorldArchiveIntegrity(world)) {
+    push(violations, issue.code, issue.message, issue.recordId ?? issue.blockId);
+  }
+  let facts: SimulationFact[];
+  let history: HistoryEvent[];
+  try {
+    facts = readWorldFacts(world);
+    history = readWorldHistory(world);
+  } catch (error) {
+    push(violations, 'archive.read', error instanceof Error ? error.message : '旧卷无法读取');
+    return violations;
+  }
+  const fullWorld = world.facts === facts && world.history === history ? world : { ...world, facts, history };
   if (world.schemaVersion !== 4) push(violations, 'schema.version', `不支持的存档版本 ${String(world.schemaVersion)}`);
   if (!world.seed) push(violations, 'seed.empty', '世界种子不能为空');
   if (!isWholeNonNegative(world.turn)) push(violations, 'clock.turn', '世界回合必须为非负安全整数');
@@ -1378,8 +1376,8 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     ['character', world.characters.map((item) => item.id)],
     ['army', world.armies.map((item) => item.id)],
     ['war', world.wars.map((item) => item.id)],
-    ['event', world.history.map((item) => item.id)],
-    ['fact', world.facts.map((item) => item.id)],
+    ['event', history.map((item) => item.id)],
+    ['fact', facts.map((item) => item.id)],
     ['family', world.families.map((item) => item.id)],
     ['faction', world.factions.map((item) => item.id)],
     ['relationship', world.relationships.map((item) => item.id)],
@@ -1409,8 +1407,8 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     ['army', world.armies.map((item) => item.id), 0],
     ['polity', world.polities.map((item) => item.id), world.polities.length],
     ['war', world.wars.map((item) => item.id), world.wars.length],
-    ['event', world.history.map((item) => item.id), world.history.length],
-    ['fact', world.facts.map((item) => item.id), world.facts.length],
+    ['event', history.map((item) => item.id), history.length],
+    ['fact', facts.map((item) => item.id), facts.length],
     ['family', world.families.map((item) => item.id), world.families.length],
     ['faction', world.factions.map((item) => item.id), world.factions.length],
     ['relationship', world.relationships.map((item) => item.id), world.relationships.length],
@@ -1441,12 +1439,12 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   const familyById = new Map(world.families.map((family) => [family.id, family]));
   const factionById = new Map(world.factions.map((faction) => [faction.id, faction]));
   const warById = new Map(world.wars.map((war) => [war.id, war]));
-  const eventById = new Map(world.history.map((event) => [event.id, event]));
-  const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
+  const eventById = new Map(history.map((event) => [event.id, event]));
+  const factById = new Map(facts.map((fact) => [fact.id, fact]));
 
   const warStartsById = new Map<string, Extract<SimulationFact, { kind: 'war_started' }>[]>();
   const warEndsById = new Map<string, Extract<SimulationFact, { kind: 'war_ended' }>[]>();
-  for (const fact of world.facts) {
+  for (const fact of facts) {
     if (fact.kind === 'war_started') {
       const facts = warStartsById.get(fact.payload.warId) ?? [];
       facts.push(fact);
@@ -1482,25 +1480,25 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       `局势系统应停在回合${world.turn - 1}，实际${world.situationSystem.lastReducedTurn}`,
     );
   }
-  for (const message of validateAgencySystemState(world)) {
+  for (const message of validateAgencySystemState(fullWorld)) {
     push(violations, 'agency.memory-state', message);
   }
-  for (const message of validateAgencyDecisionStateFromReferences(world, (factId) => factById.get(factId))) {
+  for (const message of validateAgencyDecisionStateFromReferences(fullWorld, (factId) => factById.get(factId))) {
     push(violations, 'agency.decision-state', message);
   }
-  const firstAgencyIntentTurn = world.facts.reduce((earliest, fact) => (
+  const firstAgencyIntentTurn = facts.reduce((earliest, fact) => (
     fact.kind === 'agency_intent_submitted' ? Math.min(earliest, fact.turn) : earliest
   ), Number.POSITIVE_INFINITY);
-  const agencyDecisionEvents = world.history.filter((event) => (
+  const agencyDecisionEvents = history.filter((event) => (
     event.kind !== 'deputy_promoted'
     || (Number.isFinite(firstAgencyIntentTurn) && event.turn >= firstAgencyIntentTurn)
   ));
   validateAgencyIntentArchive({
     codePrefix: 'fact',
-    facts: world.facts,
+    facts,
     getFactById: (factId) => factById.get(factId),
     events: agencyDecisionEvents,
-    world,
+    world: fullWorld,
     requireEveryPromotionOwned: true,
     enforceCurrentSnapshot: false,
   }, violations);
@@ -2225,7 +2223,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   }
 
   let previousFactTurn = -1;
-  for (const fact of world.facts) {
+  for (const fact of facts) {
     if (fact.turn < previousFactTurn || fact.turn < 0 || fact.turn >= Math.max(1, world.turn)) {
       push(violations, 'fact.turn-order', `${fact.id}回合时间无效或事实未按时间排序`, fact.id);
     }
@@ -2305,7 +2303,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       }
     }
   }
-  const expectedFactDigest = world.facts.reduce(
+  const expectedFactDigest = facts.reduce(
     (digest, fact) => stableHash([digest, fact]),
     stableHash([]),
   );
@@ -2315,7 +2313,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   // lossy projection (for example, most non-winter battles are unpublished),
   // so they cannot be used as career evidence.
   const firstDeputyBattleTurn = new Map<string, number>();
-  for (const fact of world.facts) {
+  for (const fact of facts) {
     if (fact.kind !== 'battle') continue;
     for (const force of [fact.payload.attacker, ...fact.payload.defenders]) {
       if (!force.deputyCommanderId) continue;
@@ -2328,7 +2326,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
 
   if (world.legacyArchiveBoundary) {
     const boundary = world.legacyArchiveBoundary;
-    const boundaryDigest = world.history.slice(0, boundary.historyEventCount).reduce(
+    const boundaryDigest = history.slice(0, boundary.historyEventCount).reduce(
       (digest, event, index) => {
         const { sourceFactIds: _sourceFactIds, situationIds: _situationIds, ...legacyEvent } = event;
         void _sourceFactIds;
@@ -2341,7 +2339,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       || boundary.turn < 0
       || boundary.turn > world.turn
       || boundary.historyEventCount < 0
-      || boundary.historyEventCount > world.history.length
+      || boundary.historyEventCount > history.length
       || boundary.historyDigest.length === 0
       || boundary.historyDigest !== boundaryDigest) {
       push(violations, 'fact.legacy-boundary', '旧档事实边界无效');
@@ -2349,7 +2347,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   }
 
   let previousEventTurn = -1;
-  for (const [eventIndex, event] of world.history.entries()) {
+  for (const [eventIndex, event] of history.entries()) {
     for (const actorId of event.actorIds) {
       if (actorId && !characterById.has(actorId)) push(violations, 'event.actor', `${event.id}引用未知人物${actorId}`, event.id);
     }
@@ -2426,7 +2424,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   }
 
   const legacyHistoryCount = world.legacyArchiveBoundary?.historyEventCount ?? 0;
-  const expectedHistoryDigest = world.history.slice(legacyHistoryCount).reduce(
+  const expectedHistoryDigest = history.slice(legacyHistoryCount).reduce(
     (digest, event, index) => (
       legacyHistoryCount === 0 && index === 0 ? stableHash(event) : stableHash([digest, event])
     ),
@@ -2441,7 +2439,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   }
 
   if (world.lastTurn) {
-    const boundaryInterventions = world.history.filter((event) => (
+    const boundaryInterventions = history.filter((event) => (
       event.turn === world.turn && event.kind.startsWith('observer_intervention_')
     ));
     const boundaryDelta = (field: string, entityType?: string): number => boundaryInterventions.reduce(
@@ -2460,10 +2458,10 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     const reportEventIds = new Set(world.lastTurn.eventIds);
     if (reportEventIds.size !== world.lastTurn.eventIds.length) push(violations, 'last-turn.events-duplicate', '最近季度事件ID重复');
     for (const eventId of reportEventIds) {
-      const event = world.history.find((item) => item.id === eventId);
+      const event = history.find((item) => item.id === eventId);
       if (!event || event.turn !== world.lastTurn.turn) push(violations, 'last-turn.event', `最近季度引用无效事件${eventId}`);
     }
-    const expectedEventIds = world.history
+    const expectedEventIds = history
       .filter((event) => event.turn === world.lastTurn?.turn && event.kind !== 'world_created')
       .map((event) => event.id);
     if (JSON.stringify(expectedEventIds) !== JSON.stringify(world.lastTurn.eventIds)) {
@@ -2475,7 +2473,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       const fact = factById.get(factId);
       if (!fact || fact.turn !== world.lastTurn.turn) push(violations, 'last-turn.fact', `最近季度引用无效事实${factId}`);
     }
-    const expectedFactIds = world.facts
+    const expectedFactIds = facts
       .filter((fact) => fact.turn === world.lastTurn?.turn)
       .map((fact) => fact.id);
     if (JSON.stringify(expectedFactIds) !== JSON.stringify(world.lastTurn.factIds)) {
@@ -2612,7 +2610,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
         push(violations, 'logistics.capacity-snapshot', `${usage.routeId}账本运力与地图定义不一致`, usage.routeId);
       }
       for (const armyId of usage.armyIds) {
-        if (!world.armies.some((army) => army.id === armyId) && !world.history.some((event) => event.actorIds.includes(armyId))) {
+        if (!world.armies.some((army) => army.id === armyId) && !history.some((event) => event.actorIds.includes(armyId))) {
           // Armies may be destroyed later in the same turn; their reservation remains a valid historical fact.
           if (!armyId.startsWith('a_')) push(violations, 'logistics.army', `${usage.routeId}引用无效军团${armyId}`, usage.routeId);
         }

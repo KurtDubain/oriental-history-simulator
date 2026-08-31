@@ -76,7 +76,11 @@ export function stableStringify(value: unknown): string {
 }
 
 export function stableHash(value: unknown): string {
-  const canonical = stableStringify(value);
+  return stableHashCanonical(stableStringify(value));
+}
+
+/** Hashes text that has already been produced by stableStringify. */
+export function stableHashCanonical(canonical: string): string {
   const first = hashString(canonical).toString(16).padStart(8, '0');
   const second = hashString(`history-war\u241f${canonical}`).toString(16).padStart(8, '0');
   return `${first}${second}`;

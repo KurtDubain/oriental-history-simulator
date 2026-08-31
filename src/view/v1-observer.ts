@@ -433,7 +433,7 @@ function milestoneCandidateTitle(
   situation: SituationState,
   fact: Extract<SimulationFact, { kind: 'situation_milestone' }>,
 ): string {
-  const scene = projectSituationHistoricalScenes(world, situation, 1, fact.turn)[0];
+  const scene = projectSituationHistoricalScenes(world, situation, 1, fact.turn, 'active')[0];
   if (scene) return scene.title;
   const title = situationPauseTitle(world, situation);
   if (fact.payload.transition === 'formed') return `${title}开始显形`;

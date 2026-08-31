@@ -8,6 +8,7 @@ import {
   createWorld,
   deserializeWorld,
   focusObserver,
+  readWorldHistory,
   serializeWorld,
   stableHash,
   toggleFollow,
@@ -718,9 +719,10 @@ describe('V0.3 deterministic history simulation', () => {
     expect(world.polities
       .filter((polity) => polity.id.startsWith('p_rebel_') && polity.eliminatedTurn !== null)
       .every((polity) => Number(polity.eliminatedTurn) > polity.foundedTurn)).toBe(true);
-    const battle = world.history.find((event) => event.kind === 'battle');
+    const history = readWorldHistory(world);
+    const battle = history.find((event) => event.kind === 'battle');
     expect(battle?.causes.find((cause) => cause.label === '结算前补给士气')?.evidence).toContain('结算前攻方补给');
-    expect(world.history.filter((event) => event.kind === 'quarter_summary')).toHaveLength(200);
-    expect(world.history.every((event) => event.causes.length > 0)).toBe(true);
+    expect(history.filter((event) => event.kind === 'quarter_summary')).toHaveLength(200);
+    expect(history.every((event) => event.causes.length > 0)).toBe(true);
   }, 45_000);
 });

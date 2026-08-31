@@ -110,6 +110,7 @@ export default defineConfig({
             || normalized.includes('/node_modules/react-dom/')
             || normalized.includes('/node_modules/scheduler/')
           ) return 'framework';
+          if (normalized.includes('/node_modules/fflate/')) return 'compression';
           if (normalized.includes('/src/maps/')) return 'maps';
           if (normalized.includes('/src/sim/')) return 'simulation';
           return undefined;

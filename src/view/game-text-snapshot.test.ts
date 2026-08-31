@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { DEFAULT_MAP_PROFILE_ID, getMapProfile } from '../maps';
 import { advanceWorld, createWorld, serializeWorld } from '../sim';
+import { compactWorldArchive } from '../sim/archive';
 import { familyRoster, militaryRoster, polityRoster } from './adapters';
 import { DEFAULT_MAP_CAMERA } from './map-scene-geometry';
 import {
@@ -245,5 +246,49 @@ describe('render_game_to_text projection boundary', () => {
     expect(new Set(snapshot.interface.quarterPulse.stories.map((story) => story.id)).size)
       .toBe(snapshot.interface.quarterPulse.storyCount);
     expect(serializeWorld(world)).toBe(before);
+  });
+
+  it('resolves a selected cold event without copying cold history into the text snapshot', () => {
+    const world = createWorld('TRIM01-冷卷文本');
+    const coldEvent = {
+      ...world.history[0],
+      id: 'event_z_cold_selected',
+      turn: 2,
+      year: 1,
+      season: '秋' as const,
+      category: '政治' as const,
+      kind: 'cold_selected_event',
+      title: '旧年朝议封存',
+      summary: '这条记录已经进入冷卷。',
+    };
+    world.history.push(coldEvent);
+    world.turn = 80;
+    world.year = 21;
+    world.season = '春';
+    compactWorldArchive(world);
+    expect(world.history.some((event) => event.id === coldEvent.id)).toBe(false);
+
+    const snapshot = JSON.parse(makeTextSnapshot(world, options({
+      selectedEventId: coldEvent.id,
+    }))) as {
+      archive: {
+        coldThroughTurn: number | null;
+        blockCount: number;
+        activeFactCount: number;
+        activeEventCount: number;
+      };
+      interface: { selectedEvent: { id: string; title: string } | null };
+      recentHistory: Array<{ id: string }>;
+    };
+
+    expect(snapshot.interface.selectedEvent).toMatchObject({ id: coldEvent.id, title: coldEvent.title });
+    expect(snapshot.archive).toMatchObject({
+      coldThroughTurn: 15,
+      blockCount: 1,
+      activeFactCount: world.facts.length,
+      activeEventCount: world.history.length,
+    });
+    expect(snapshot.recentHistory.some((event) => event.id === coldEvent.id)).toBe(false);
+    expect(JSON.stringify(snapshot).match(/这条记录已经进入冷卷。/gu)).toHaveLength(1);
   });
 });

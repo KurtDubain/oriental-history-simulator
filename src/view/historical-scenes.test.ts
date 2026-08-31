@@ -6,6 +6,8 @@ import {
   createWorld,
   projectCharacterEmbodiedActions,
 } from '../sim';
+import { compactWorldArchive } from '../sim/archive';
+import type { SimulationFact } from '../sim/types';
 import {
   projectHistoricalScenes,
   projectSituationHistoricalScenes,
@@ -99,5 +101,57 @@ describe('NAR01/NAR02 concrete historical scenes', () => {
     expect(scene.shortText).toContain(new Intl.NumberFormat('zh-CN').format(fact.payload.treasurySpent));
     expect(scene.shortText).toMatch(/动荡由\d+降至\d+/u);
     expect(scene.shortText).not.toMatch(/人物行动|行动结果|阶段转折|结构信号/u);
+  });
+
+  it('links an exact cold Fact scene back to cold Chronicle while active mode stays hot-only', () => {
+    const world = createWorld('冷卷事实场面');
+    const person = world.characters[0];
+    const fact: SimulationFact = {
+      id: 'fact_000002',
+      turn: 2,
+      year: 1,
+      season: '秋',
+      kind: 'character_death',
+      category: '人口',
+      importance: 4,
+      actorIds: [person.id],
+      polityIds: [person.polityId],
+      regionIds: [person.locationRegionId],
+      causes: [{ label: '寿数已尽', role: '触发', weight: 1, evidence: '测试冷卷记录' }],
+      stateDeltas: [{ entityType: 'character', entityId: person.id, field: 'alive', before: true, after: false }],
+      sourceFactIds: [],
+      payload: {
+        characterId: person.id,
+        age: person.age,
+        role: person.role,
+        health: person.health,
+        diseaseId: person.activeDiseaseId,
+      },
+    };
+    const coldEvent = {
+      ...world.history[0],
+      id: 'event_000002',
+      turn: fact.turn,
+      year: fact.year,
+      season: fact.season,
+      category: fact.category,
+      kind: fact.kind,
+      title: `${person.name}去世`,
+      summary: `史册记录${person.name}生平至此。`,
+      actorIds: [...fact.actorIds],
+      polityIds: [...fact.polityIds],
+      regionIds: [...fact.regionIds],
+      sourceFactIds: [fact.id],
+    };
+    world.facts.push(fact);
+    world.history.push(coldEvent);
+    world.turn = 80;
+    world.year = 21;
+    world.season = '春';
+    compactWorldArchive(world);
+
+    expect(world.facts.some((item) => item.id === fact.id)).toBe(false);
+    expect(projectHistoricalScenes(world, [fact], 1)[0].historyEventIds).toEqual([coldEvent.id]);
+    expect(projectHistoricalScenes(world, [fact], 1, 'active')[0].historyEventIds).toEqual([]);
   });
 });
