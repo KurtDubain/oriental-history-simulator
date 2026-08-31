@@ -10,7 +10,7 @@ import {
   Waves,
   X,
 } from 'lucide-react';
-import { useEffect, useId, useRef } from 'react';
+import { useId, useRef } from 'react';
 import settingsArtwork from '../assets/settings-mountains-v1.jpg';
 import {
   createObserverInterfaceSettings,
@@ -19,6 +19,7 @@ import {
   type ObserverInterfaceSettings,
   type ObserverMotionPreference,
 } from '../view/observer-interface-settings';
+import { useDialogLayer } from './useDialogLayer';
 import '../styles/settings-panel.css';
 
 export interface SettingsPanelProps {
@@ -70,44 +71,15 @@ export function SettingsPanel({
   const descriptionId = useId();
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   const safeSettings = normalizeObserverInterfaceSettings(settings);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const previouslyFocused = returnFocusTo ?? (document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null);
-    const frame = requestAnimationFrame(() => closeRef.current?.focus());
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      ));
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      cancelAnimationFrame(frame);
-      document.removeEventListener('keydown', handleKeyDown);
-      previouslyFocused?.focus({ preventScroll: true });
-    };
-  }, [open, returnFocusTo]);
+  useDialogLayer({
+    open,
+    containerRef: dialogRef,
+    initialFocusRef: closeRef,
+    onClose,
+    returnFocusTo,
+  });
 
   if (!open) return null;
 
@@ -130,14 +102,14 @@ export function SettingsPanel({
     <div className="settings-layer" data-motion={safeSettings.motion}>
       <button
         type="button"
-        className="settings-layer__backdrop"
+        className="settings-layer__backdrop observer-dialog-backdrop"
         tabIndex={-1}
         aria-label="关闭设置"
         onClick={onClose}
       />
       <aside
         ref={dialogRef}
-        className="settings-panel"
+        className="settings-panel observer-dialog-surface"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

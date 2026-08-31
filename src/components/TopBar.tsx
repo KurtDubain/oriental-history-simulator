@@ -111,6 +111,7 @@ export function TopBar({
         <button
           type="button"
           className="observer-icon-button observer-time-controls__toggle"
+          disabled={!canAdvance && !isRunning}
           aria-label={isRunning ? '暂停自动推演' : '开始自动推演'}
           aria-pressed={isRunning}
           onClick={onToggleRunning}

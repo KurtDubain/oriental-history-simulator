@@ -18,6 +18,7 @@ import type {
   SituationWorkbenchProjection,
 } from '../view/situation-detail';
 import type { SituationParticipantGroupKey } from '../view/situation-snapshot';
+import { useDialogLayer } from './useDialogLayer';
 import '../styles/situation-workbench.css';
 
 export interface SituationWorkbenchProps {
@@ -69,45 +70,17 @@ export function SituationWorkbench({
   const dialogRef = useRef<HTMLElement>(null);
   const titleRef = useRef<HTMLHeadingElement>(null);
   const readerRef = useRef<HTMLElement>(null);
-  const onCloseRef = useRef(onClose);
   const [mobileDirectoryOpen, setMobileDirectoryOpen] = useState(false);
-  onCloseRef.current = onClose;
   const hasSelectedSituation = Boolean(projection?.selected);
 
-  useEffect(() => {
-    if (!open || !hasSelectedSituation) return undefined;
-    const previouslyFocused = returnFocusTo ?? (
-      document.activeElement instanceof HTMLElement ? document.activeElement : null
-    );
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]):not([tabindex="-1"]), summary, [href], [tabindex]:not([tabindex="-1"])',
-      ));
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      if (previouslyFocused && shouldRestoreFocus?.() !== false) {
-        queueMicrotask(() => previouslyFocused.focus());
-      }
-    };
-  }, [hasSelectedSituation, open, returnFocusTo, shouldRestoreFocus]);
+  useDialogLayer({
+    open: open && hasSelectedSituation,
+    containerRef: dialogRef,
+    initialFocusRef: titleRef,
+    onClose,
+    returnFocusTo,
+    shouldRestoreFocus,
+  });
 
   useEffect(() => {
     if (!open || !projection?.selected) return undefined;
@@ -135,14 +108,14 @@ export function SituationWorkbench({
     >
       <button
         type="button"
-        className="situation-workbench-layer__backdrop"
+        className="situation-workbench-layer__backdrop observer-dialog-backdrop"
         tabIndex={-1}
         aria-label="关闭持续局势"
         onClick={onClose}
       />
       <section
         ref={dialogRef}
-        className="situation-workbench"
+        className="situation-workbench observer-dialog-surface"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

@@ -20,6 +20,21 @@
   --observer-chronicle-height: 90px;
 }
 
+/* Shared blocking-page interaction contract. Individual pages keep their own
+   visual composition while inheriting safe-area scroll and backdrop behavior. */
+.observer-dialog-surface {
+  --observer-dialog-safe-top: var(--observer-safe-top);
+  --observer-dialog-safe-bottom: var(--observer-safe-bottom);
+  scroll-padding-top: max(12px, var(--observer-dialog-safe-top));
+  scroll-padding-bottom: max(18px, var(--observer-dialog-safe-bottom));
+  overscroll-behavior: contain;
+}
+
+.observer-dialog-backdrop {
+  touch-action: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
 .observer-app {
   position: relative;
   display: grid;
@@ -3492,6 +3507,14 @@ button.observer-causal-chain__evidence:hover {
     width: 100vw;
     max-width: 100vw;
     border-left: 0;
+  }
+
+  .observer-causal-drawer__header {
+    padding-top: calc(14px + var(--observer-dialog-safe-top));
+  }
+
+  .observer-causal-drawer__body {
+    padding-bottom: calc(30px + var(--observer-dialog-safe-bottom));
   }
 
   .observer-causal-drawer__header .observer-icon-button {

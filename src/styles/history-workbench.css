@@ -711,12 +711,13 @@
 
 @media (max-width: 700px) {
   .history-workbench-layer {
-    padding: 0;
+    padding: var(--observer-safe-top) 0 var(--observer-safe-bottom);
+    background: var(--observer-paper-bright, #f1ead9);
   }
 
   .history-workbench {
     width: 100vw;
-    height: 100dvh;
+    height: calc(100dvh - var(--observer-dialog-safe-top) - var(--observer-dialog-safe-bottom));
     border: 0;
   }
 
@@ -814,7 +815,7 @@
 
   .history-workbench__records {
     display: block;
-    padding: 0 14px;
+    padding: 0 14px max(20px, var(--observer-dialog-safe-bottom));
     overflow: visible;
   }
 

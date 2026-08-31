@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.15.0',
+    date: '2026-08-31',
+    title: '开卷有序，去处可返',
+    items: [
+      '世界书页、收藏、史册、对象史卷、持续局势与何故抽屉改由同一受控页面栈管理；同一时刻只显示一个阻塞卷页，Escape 可按原路返回。',
+      '打开阅读页和工具会可靠停表；已关闭的异步创建或读取不会稍后夺走当前世界，读图导览仍只推进一季。',
+      '阻塞卷页统一焦点、关闭、遮罩与移动安全区规则，四档视口已验证无横向溢出与 44px 关键触控；世界结果、hash 与存档格式保持不变。',
+    ],
+  },
+  {
     version: '1.14.0',
     date: '2026-08-31',
     title: '名簿有序，缘由可寻',

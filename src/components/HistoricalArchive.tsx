@@ -14,6 +14,7 @@ import {
   X,
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
+import { useDialogLayer } from './useDialogLayer';
 import '../styles/historical-archive.css';
 
 export type ArchiveEntityKind =
@@ -105,54 +106,20 @@ export function HistoricalArchive({
   const titleId = useId();
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
   const [visibleRecordCount, setVisibleRecordCount] = useState(INITIAL_RECORD_COUNT);
-  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (open) setVisibleRecordCount(INITIAL_RECORD_COUNT);
   }, [dossier?.id, open]);
 
-  useEffect(() => {
-    if (!open || !dossier) return undefined;
-    const previouslyFocused = returnFocusTo ?? (document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null);
-    const frame = requestAnimationFrame(() => closeRef.current?.focus());
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      ));
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      cancelAnimationFrame(frame);
-      document.removeEventListener('keydown', handleKeyDown);
-      if (previouslyFocused) {
-        queueMicrotask(() => {
-          if (shouldRestoreFocus?.() !== false) previouslyFocused.focus();
-        });
-      }
-    };
-  }, [open, returnFocusTo, shouldRestoreFocus]);
+  useDialogLayer({
+    open: open && Boolean(dossier),
+    containerRef: dialogRef,
+    initialFocusRef: closeRef,
+    onClose,
+    returnFocusTo,
+    shouldRestoreFocus,
+  });
 
   if (!open || !dossier) return null;
   const KindIcon = KIND_ICON[dossier.kind];
@@ -168,14 +135,14 @@ export function HistoricalArchive({
     >
       <button
         type="button"
-        className="history-archive-layer__backdrop"
+        className="history-archive-layer__backdrop observer-dialog-backdrop"
         aria-label="关闭当前史卷"
         tabIndex={-1}
         onClick={onClose}
       />
       <article
         ref={dialogRef}
-        className="history-archive"
+        className="history-archive observer-dialog-surface"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

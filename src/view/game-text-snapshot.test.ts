@@ -9,33 +9,24 @@ import {
   makeTextSnapshot,
 } from './game-text-snapshot';
 import { createObserverInterfaceSettings } from './observer-interface-settings';
+import { createObserverNavigationState } from './observer-navigation';
 import type { SnapshotOptions } from './observer-shell-contract';
 import { createRosterDiscoveryStates, createRosterVisibleCounts, ROSTER_PAGE_SIZE } from './roster-discovery';
 import { createAgencyShadowLedger } from './v1-agency-shadow';
 
 function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
   return {
-    startOpen: false,
+    navigation: createObserverNavigationState({ layers: [] }),
     selectedMapProfileId: DEFAULT_MAP_PROFILE_ID,
     running: false,
     speed: 1,
-    view: 'world',
-    powerRosterSection: 'polities',
     rosterDiscovery: createRosterDiscoveryStates(),
     rosterVisibleCounts: createRosterVisibleCounts(),
     overlay: 'political',
     selection: null,
-    selectedEventId: null,
-    archiveOpen: false,
-    mandateOpen: false,
-    observerDeskOpen: false,
-    settingsOpen: false,
     interfaceSettings: createObserverInterfaceSettings(),
     audioState: 'silent',
     fullscreen: false,
-    historyWorkbenchOpen: false,
-    situationWorkbenchOpen: false,
-    selectedSituationId: null,
     observerLeadProjection: null,
     historicalTurn: null,
     watchedCount: 0,
@@ -45,9 +36,7 @@ function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
     pauseRule: null,
     pauseSituationId: null,
     pauseSituationTrigger: null,
-    collectionOpen: false,
     worldSaveCount: 0,
-    primerOpen: false,
     primerStep: 'terrain',
     mapCamera: { ...DEFAULT_MAP_CAMERA },
     mapLod: 'overview',
@@ -66,69 +55,79 @@ describe('render_game_to_text projection boundary', () => {
   it.each([
     [
       'evidence',
-      {
-        selectedEventId: 'event-1',
-        archiveOpen: true,
-        situationWorkbenchOpen: true,
-        historyWorkbenchOpen: true,
-      },
+      createObserverNavigationState({ layers: [{ kind: 'event', eventId: 'event-1' }] }),
     ],
     [
       'entity',
-      {
-        selectedEventId: null,
-        archiveOpen: true,
-        situationWorkbenchOpen: true,
-        historyWorkbenchOpen: true,
-      },
+      createObserverNavigationState({
+        layers: [{ kind: 'archive', subject: { kind: 'person', id: 'person-1' } }],
+      }),
     ],
     [
       'situation',
-      {
-        selectedEventId: null,
-        archiveOpen: false,
-        situationWorkbenchOpen: true,
-        historyWorkbenchOpen: true,
-      },
+      createObserverNavigationState({
+        layers: [{ kind: 'situations', situationId: 'situation-1' }],
+      }),
     ],
     [
       'chronicle',
-      {
-        selectedEventId: null,
-        archiveOpen: false,
-        situationWorkbenchOpen: false,
-        historyWorkbenchOpen: true,
-      },
+      createObserverNavigationState({ view: 'chronicle', layers: [] }),
     ],
     [
       'quarter',
-      {
-        selectedEventId: null,
-        archiveOpen: false,
-        situationWorkbenchOpen: false,
-        historyWorkbenchOpen: false,
-      },
+      createObserverNavigationState({ layers: [] }),
     ],
-  ] as const)('derives the %s history-reading layer without adding observer state', (expected, inputs) => {
-    const before = JSON.stringify(inputs);
+  ] as const)('derives the %s history-reading layer without adding observer state', (expected, navigation) => {
+    const before = JSON.stringify(navigation);
 
-    expect(deriveHistoryReadingLayer(inputs)).toBe(expected);
-    expect(JSON.stringify(inputs)).toBe(before);
+    expect(deriveHistoryReadingLayer(navigation)).toBe(expected);
+    expect(JSON.stringify(navigation)).toBe(before);
   });
 
   it('publishes the active history-reading layer without mutating the world', () => {
     const world = createWorld('TRIM01-四层阅读', DEFAULT_MAP_PROFILE_ID);
     const before = serializeWorld(world);
     const snapshot = JSON.parse(makeTextSnapshot(world, options({
-      archiveOpen: true,
-      situationWorkbenchOpen: true,
-      historyWorkbenchOpen: true,
+      navigation: createObserverNavigationState({
+        layers: [{ kind: 'archive', subject: { kind: 'person', id: world.characters[0].id } }],
+      }),
     }))) as {
       interface: { historyReadingLayer: string };
     };
 
     expect(snapshot.interface.historyReadingLayer).toBe('entity');
     expect(serializeWorld(world)).toBe(before);
+  });
+
+  it('publishes the bounded return journey behind an evidence page', () => {
+    const world = createWorld('TRIM01-因果返回链', DEFAULT_MAP_PROFILE_ID);
+    const personId = world.characters[0].id;
+    const eventId = world.history[0].id;
+    const archiveSnapshot = JSON.parse(makeTextSnapshot(world, options({
+      navigation: createObserverNavigationState({
+        layers: [
+          { kind: 'archive', subject: { kind: 'person', id: personId } },
+          { kind: 'event', eventId },
+        ],
+      }),
+    }))) as { interface: { navigationJourney: object[] } };
+    const situationSnapshot = JSON.parse(makeTextSnapshot(world, options({
+      navigation: createObserverNavigationState({
+        layers: [
+          { kind: 'situations', situationId: 'situation-1' },
+          { kind: 'event', eventId },
+        ],
+      }),
+    }))) as { interface: { navigationJourney: object[] } };
+
+    expect(archiveSnapshot.interface.navigationJourney).toEqual([
+      { kind: 'archive', subject: { kind: 'person', id: personId } },
+      { kind: 'event', eventId },
+    ]);
+    expect(situationSnapshot.interface.navigationJourney).toEqual([
+      { kind: 'situations', situationId: 'situation-1' },
+      { kind: 'event', eventId },
+    ]);
   });
 
   it.each([
@@ -140,8 +139,11 @@ describe('render_game_to_text projection boundary', () => {
     const before = serializeWorld(world);
     const expected = projectRoster(world);
     const snapshot = JSON.parse(makeTextSnapshot(world, options({
-      view: 'powers',
-      powerRosterSection,
+      navigation: createObserverNavigationState({
+        view: 'powers',
+        powerRosterSection,
+        layers: [],
+      }),
     }))) as {
       deterministicWorldHash: string;
       interface: {
@@ -178,7 +180,7 @@ describe('render_game_to_text projection boundary', () => {
     };
     const expected = projectRosterCollection(world, 'people', state);
     const snapshot = JSON.parse(makeTextSnapshot(world, options({
-      view: 'people',
+      navigation: createObserverNavigationState({ view: 'people', layers: [] }),
       rosterDiscovery: { ...baseStates, people: state },
     }))) as {
       deterministicWorldHash: string;
@@ -215,7 +217,9 @@ describe('render_game_to_text projection boundary', () => {
   });
 
   it('projects the start page from observer options without requiring a world', () => {
-    const snapshot = JSON.parse(makeTextSnapshot(null, options({ startOpen: true }))) as {
+    const snapshot = JSON.parse(makeTextSnapshot(null, options({
+      navigation: createObserverNavigationState(),
+    }))) as {
       mode: string;
       mapProfile: { id: string; revision: number };
       settings: { soundEnabled: boolean; audioState: string };
@@ -227,6 +231,34 @@ describe('render_game_to_text projection boundary', () => {
       revision: getMapProfile(DEFAULT_MAP_PROFILE_ID).revision,
     });
     expect(snapshot.settings).toMatchObject({ soundEnabled: false, audioState: 'silent' });
+  });
+
+  it('reports only the visible collection layer while the start page waits underneath', () => {
+    const navigation = createObserverNavigationState({
+      layers: [{ kind: 'start' }, { kind: 'collection' }],
+    });
+    const startSnapshot = JSON.parse(makeTextSnapshot(null, options({ navigation }))) as {
+      seedInputVisible: boolean;
+      collectionOpen: boolean;
+      navigationJourney: object[];
+    };
+    const world = createWorld('架构-收藏返回链', DEFAULT_MAP_PROFILE_ID);
+    const worldSnapshot = JSON.parse(makeTextSnapshot(world, options({ navigation }))) as {
+      mode: string;
+      worldCreation: object | null;
+      observer: { collectionOpen: boolean };
+    };
+
+    expect(startSnapshot).toMatchObject({
+      seedInputVisible: false,
+      collectionOpen: true,
+      navigationJourney: [{ kind: 'start' }, { kind: 'collection' }],
+    });
+    expect(worldSnapshot).toMatchObject({
+      mode: 'observing',
+      worldCreation: null,
+      observer: { collectionOpen: true },
+    });
   });
 
   it('projects a selected object without mutating or re-hashing the authoritative world', () => {
@@ -267,7 +299,9 @@ describe('render_game_to_text projection boundary', () => {
     const visible = JSON.parse(makeTextSnapshot(world, options())) as {
       interface: { settings: { soundPromptVisible: boolean } };
     };
-    const behindRoster = JSON.parse(makeTextSnapshot(world, options({ view: 'powers' }))) as typeof visible;
+    const behindRoster = JSON.parse(makeTextSnapshot(world, options({
+      navigation: createObserverNavigationState({ view: 'powers', layers: [] }),
+    }))) as typeof visible;
     const behindInspector = JSON.parse(makeTextSnapshot(world, options({
       selection: { kind: 'region', id: world.regions[0].id },
     }))) as typeof visible;
@@ -324,7 +358,9 @@ describe('render_game_to_text projection boundary', () => {
     expect(world.history.some((event) => event.id === coldEvent.id)).toBe(false);
 
     const snapshot = JSON.parse(makeTextSnapshot(world, options({
-      selectedEventId: coldEvent.id,
+      navigation: createObserverNavigationState({
+        layers: [{ kind: 'event', eventId: coldEvent.id }],
+      }),
     }))) as {
       archive: {
         coldThroughTurn: number | null;

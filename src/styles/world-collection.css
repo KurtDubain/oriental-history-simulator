@@ -53,7 +53,7 @@
 .world-collection__header {
   display: grid;
   grid-row: 1;
-  grid-template-columns: 46px minmax(0, 1fr) auto 38px;
+  grid-template-columns: 46px minmax(0, 1fr) auto 44px;
   align-items: center;
   gap: 13px;
   padding: 18px 20px 16px;
@@ -114,8 +114,8 @@
 
 .world-collection__header > button {
   display: grid;
-  width: 34px;
-  height: 34px;
+  width: 44px;
+  height: 44px;
   padding: 0;
   place-items: center;
   border: 0;
@@ -500,19 +500,20 @@
 
 @media (max-width: 760px) {
   .world-collection-layer {
-    padding: 0;
+    padding: var(--observer-safe-top) 0 var(--observer-safe-bottom);
+    background: var(--observer-paper-bright, #f1ead9);
   }
 
   .world-collection {
     width: 100%;
-    height: 100dvh;
+    height: calc(100dvh - var(--observer-dialog-safe-top) - var(--observer-dialog-safe-bottom));
     max-height: none;
     border-width: 3px 0 0;
     border-radius: 0;
   }
 
   .world-collection__header {
-    grid-template-columns: 38px minmax(0, 1fr) auto 34px;
+    grid-template-columns: 38px minmax(0, 1fr) auto 44px;
     gap: 8px;
     padding: 13px 12px 11px;
   }
@@ -591,7 +592,7 @@
   }
 
   .world-collection__footer {
-    padding: 8px 12px;
+    padding: 8px 12px max(8px, var(--observer-dialog-safe-bottom));
   }
 }
 

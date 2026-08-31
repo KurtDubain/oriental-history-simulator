@@ -114,11 +114,7 @@ import {
   type V03InterventionAction,
   type WorldState,
 } from './sim';
-import {
-  DEFAULT_MAP_PROFILE_ID,
-  getMapProfileForContentVersion,
-  type MapProfileId,
-} from './maps';
+import { DEFAULT_MAP_PROFILE_ID, type MapProfileId } from './maps';
 import {
   projectRosterDirectory,
   rosterScopeFor,
@@ -151,7 +147,6 @@ import {
 import { projectSituationWorkbench } from './view/situation-detail';
 import { projectQuarterPulse } from './view/quarter-pulse-stories';
 import {
-  OBSERVER_DESK_STORAGE_KEY,
   applyObserverEventAlerts,
   completeObserverGuideStep,
   createObserverDeskSettings,
@@ -159,7 +154,6 @@ import {
   historyEventToPauseCandidate,
   observerGuideProgress,
   observerWatchKey,
-  parseObserverDeskSettings,
   removeObserverWatch,
   serializeObserverDeskSettings,
   setObserverWatchAlert,
@@ -195,7 +189,6 @@ import {
   leaveEmbodimentObserverState,
   queueEmbodiedObserverAction,
   reanchorEmbodimentObserverState,
-  restoreEmbodimentObserverState,
   serializeEmbodimentObserverState,
   type EmbodimentObserverState,
 } from './view/embodiment-observer';
@@ -212,23 +205,31 @@ import {
   watchItemForSelection,
   watchItemForSituation,
 } from './view/observer-selection';
-import type {
-  PowerRosterSection,
-  Selection,
-  SnapshotOptions,
-} from './view/observer-shell-contract';
+import type { Selection, SnapshotOptions } from './view/observer-shell-contract';
 import { shouldShowObserverSoundInvitation } from './view/observer-interface-settings';
 import { useObserverInterface } from './view/use-observer-interface';
+import { useObserverNavigation } from './view/use-observer-navigation';
+import {
+  observerLayerIsOpen,
+  observerNavigationIsBlocking,
+} from './view/observer-navigation';
+import {
+  useObserverPlayback,
+  type ObserverAdvanceSource,
+} from './view/use-observer-playback';
 import { useRosterDiscovery } from './view/use-roster-discovery';
 import { useRosterDossierFlow } from './view/use-roster-dossier-flow';
+import { useWorldSessionController } from './view/use-world-session-controller';
+import {
+  MAP_PRIMER_STORAGE_KEY,
+  observerStorageKey,
+  restoreWorldSession,
+  type OpenWorldSource,
+} from './view/world-session-restore';
 import './styles/app.css';
-
-type AdvanceSource = 'manual' | 'auto';
-type OpenWorldSource = 'create' | 'continue' | 'import' | 'collection';
 
 const DEFAULT_SEED = '沧衡-甲子';
 const BASE_AUTOPLAY_INTERVAL = 1_800;
-const MAP_PRIMER_STORAGE_KEY = 'canghai-map-primer-complete-v1';
 
 function quarterHistoryCue(events: ReadonlyArray<WorldState['history'][number]>): AudioCue | null {
   if (events.some((event) => (
@@ -269,18 +270,6 @@ function assertValidRuntimeTurn(previous: WorldState, candidate: WorldState): Wo
   return candidate;
 }
 
-function observerStorageKey(seed: string, mapContentVersion?: string): string {
-  const worldKey = mapContentVersion
-    ? `${encodeURIComponent(mapContentVersion)}:${encodeURIComponent(seed)}`
-    : encodeURIComponent(seed);
-  return `${OBSERVER_DESK_STORAGE_KEY}:${worldKey}`;
-}
-
-function supportsLegacyObserverStorage(mapContentVersion: string): boolean {
-  return getMapProfileForContentVersion(mapContentVersion)
-    .compatibility.legacyPartialRegionVersions.length > 0;
-}
-
 function availableCollectionSlot(prefix: string, saves: WorldSaveSummary[]): string {
   const occupied = new Set(saves.filter((save) => !save.isAutosave).map((save) => save.slot));
   for (let index = 1; index <= 99; index += 1) {
@@ -294,16 +283,30 @@ export function App() {
   const [world, setWorld] = useState<WorldState | null>(null);
   const [seed, setSeed] = useState(DEFAULT_SEED);
   const [selectedMapProfileId, setSelectedMapProfileId] = useState<MapProfileId>(DEFAULT_MAP_PROFILE_ID);
-  const [startOpen, setStartOpen] = useState(true);
   const [hasSave, setHasSave] = useState(false);
-  const [startBusy, setStartBusy] = useState(false);
   const [startError, setStartError] = useState<string | null>(null);
   const [fatalError, setFatalError] = useState<string | null>(null);
   const [toast, setToast] = useState<string | null>(null);
-  const [running, setRunning] = useState(false);
-  const [speed, setSpeed] = useState<PlaybackSpeed>(1);
-  const [activeView, setActiveView] = useState<ObserverView>('world');
-  const [powerRosterSection, setPowerRosterSection] = useState<PowerRosterSection>('polities');
+  const advanceRef = useRef<(source: ObserverAdvanceSource) => boolean>(() => false);
+  const playback = useObserverPlayback(advanceRef, BASE_AUTOPLAY_INTERVAL);
+  const navigation = useObserverNavigation();
+  const session = useWorldSessionController();
+  const startBusy = session.isBusy('start');
+  const collectionSessionBusy = session.isBusy('collection');
+  const { running, speed } = playback;
+  const { activeView, powerRosterSection, selectedEventId } = navigation;
+  const startOpen = navigation.isLayerInJourney('start');
+  const primerOpen = navigation.isLayerOpen('primer');
+  const archiveOpen = navigation.isLayerOpen('archive');
+  const mandateOpen = navigation.isLayerOpen('mandate');
+  const observerDeskOpen = navigation.isLayerOpen('observer-desk');
+  const situationWorkbenchOpen = navigation.isLayerOpen('situations');
+  const collectionOpen = navigation.isLayerOpen('collection');
+  const settingsOpen = navigation.isLayerOpen('settings');
+  const historyWorkbenchOpen = navigation.isPageVisible('chronicle');
+  const selectedSituationId = navigation.topLayer?.kind === 'situations'
+    ? navigation.topLayer.situationId
+    : null;
   const [overlay, setOverlay] = useState<MapOverlay>('political');
   const [mapCamera, setMapCamera] = useState<MapCamera>(() => ({ ...DEFAULT_MAP_CAMERA }));
   const [mapLod, setMapLod] = useState<MapLodLevel>('overview');
@@ -313,19 +316,10 @@ export function App() {
   const [selection, setSelection] = useState<Selection>(null);
   const { returnTarget: rosterDossierReturn, enteredFromRoster: rosterDossierEntry, compactPresentation: compactRosterDossier, begin: beginRosterDossier, clear: clearRosterDossier, returnToRoster } = useRosterDossierFlow(activeView, powerRosterSection);
   useEffect(() => { setMobileInspectorExpanded(Boolean(rosterDossierReturn)); }, [rosterDossierReturn]);
-  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [focusedArmyId, setFocusedArmyId] = useState<string | null>(null);
-  const [primerOpen, setPrimerOpen] = useState(false);
   const [primerStep, setPrimerStep] = useState<MapPrimerStep>('terrain');
-  const [archiveOpen, setArchiveOpen] = useState(false);
-  const [resumeArchiveAfterEvent, setResumeArchiveAfterEvent] = useState(false);
-  const [mandateOpen, setMandateOpen] = useState(false);
   const [mandateBusy, setMandateBusy] = useState(false);
   const [mandateMessage, setMandateMessage] = useState<MandateMessage | null>(null);
-  const [observerDeskOpen, setObserverDeskOpen] = useState(false);
-  const [situationWorkbenchOpen, setSituationWorkbenchOpen] = useState(false);
-  const [selectedSituationId, setSelectedSituationId] = useState<string | null>(null);
-  const [resumeSituationAfterEvent, setResumeSituationAfterEvent] = useState(false);
   const [observerSettings, setObserverSettings] = useState<ObserverDeskSettings>(() => createObserverDeskSettings());
   const followed = useMemo(
     () => new Set(observerSettings.watchlist.map((item) => observerWatchKey(item.kind, item.id))),
@@ -333,12 +327,10 @@ export function App() {
   );
   const [pauseMatch, setPauseMatch] = useState<ObserverPauseMatch | null>(null);
   const [historicalView, setHistoricalView] = useState<HistoricalTerritoryView | null>(null);
-  const [resumeHistoryAfterEvent, setResumeHistoryAfterEvent] = useState(false);
-  const [collectionOpen, setCollectionOpen] = useState(false);
   const [collectionBusy, setCollectionBusy] = useState(false);
+  const [worldStartInitialFocus, setWorldStartInitialFocus] = useState<'primary' | 'collection'>('primary');
   const [worldSaves, setWorldSaves] = useState<WorldSaveSummary[]>([]);
   const [mobileToolsOpen, setMobileToolsOpen] = useState(false);
-  const [settingsOpen, setSettingsOpen] = useState(false);
   const [agencyShadowLedger, setAgencyShadowLedger] = useState<AgencyShadowLedger>(() => createAgencyShadowLedger());
   const [agencyShadowBranchId, setAgencyShadowBranchId] = useState<string | null>(null);
   const [embodimentObserver, setEmbodimentObserver] = useState<EmbodimentObserverState>(() => createEmbodimentObserverState());
@@ -384,12 +376,9 @@ export function App() {
 
   const worldRef = useRef<WorldState | null>(null);
   const worldShellRef = useRef<HTMLElement>(null);
-  const runningRef = useRef(false);
-  const speedRef = useRef<PlaybackSpeed>(1);
-  const clockAccumulatorRef = useRef(0);
-  const externalClockUntilRef = useRef(0);
   const advancingRef = useRef(false);
   const archiveReturnFocusRef = useRef<HTMLElement | null>(null);
+  const causalReturnFocusRef = useRef<HTMLElement | null>(null);
   const archiveFocusRestoreAllowedRef = useRef(false);
   const mandateTriggerRef = useRef<HTMLButtonElement>(null);
   const observerDeskTriggerRef = useRef<HTMLButtonElement>(null);
@@ -404,8 +393,8 @@ export function App() {
   const mobileToolsTriggerRef = useRef<HTMLButtonElement>(null);
   const settingsTriggerRef = useRef<HTMLButtonElement>(null);
   const collectionReturnFocusRef = useRef<HTMLElement | null>(null);
+  const worldStartReturnFocusRef = useRef<HTMLElement | null>(null);
   const observerSettingsRef = useRef(observerSettings);
-  const advanceRef = useRef<(source: AdvanceSource) => boolean>(() => false);
   const primerAdvanceDoneRef = useRef(false);
   const primerNewestEventIdRef = useRef<string | null>(null);
   const reactCommitStartedAtRef = useRef<{ startedAt: number; turn: number } | null>(null);
@@ -439,27 +428,17 @@ export function App() {
     world ? deriveObserverLeadProjection(world, observerSettings.leadContinuity) : null
   ), [observerSettings.leadContinuity, world]);
   const currentSnapshotOptions: SnapshotOptions = {
-    startOpen,
+    navigation: navigation.state,
     selectedMapProfileId,
     running,
     speed,
-    view: activeView,
-    powerRosterSection,
     rosterDiscovery: rosterDiscovery.states,
     rosterVisibleCounts: rosterDiscovery.visibleCounts,
     overlay,
     selection,
-    selectedEventId,
-    archiveOpen,
-    mandateOpen,
-    observerDeskOpen,
-    settingsOpen,
     interfaceSettings,
     audioState: settingsAudioState,
     fullscreen,
-    historyWorkbenchOpen: activeView === 'chronicle',
-    situationWorkbenchOpen,
-    selectedSituationId,
     observerLeadProjection,
     historicalTurn: historicalView?.turn ?? null,
     watchedCount: observerSettings.watchlist.length,
@@ -469,9 +448,7 @@ export function App() {
     pauseRule: pauseMatch?.rule ?? null,
     pauseSituationId: pauseMatch?.situationId ?? null,
     pauseSituationTrigger: pauseMatch?.situationTrigger ?? null,
-    collectionOpen,
     worldSaveCount: worldSaves.length,
-    primerOpen,
     primerStep,
     mapCamera,
     mapLod,
@@ -733,8 +710,8 @@ export function App() {
 
   useEffect(() => {
     if (!worldShellRef.current) return;
-    worldShellRef.current.inert = startOpen || archiveOpen || mandateOpen || observerDeskOpen || settingsOpen || situationWorkbenchOpen || collectionOpen || primerOpen || activeView === 'chronicle';
-  }, [activeView, archiveOpen, collectionOpen, mandateOpen, observerDeskOpen, primerOpen, settingsOpen, situationWorkbenchOpen, startOpen, world]);
+    worldShellRef.current.inert = navigation.blocking;
+  }, [navigation.blocking, world]);
 
   const openWorld = useCallback((
     nextWorld: WorldState,
@@ -744,22 +721,13 @@ export function App() {
     clearRosterDossier(); rosterDiscovery.reset(); resetRuntimePerformanceMetrics();
     const validWorld = assertValidWorld(nextWorld);
     resetAutosaveCoordinator(source === 'continue' ? validWorld.turn : 0);
-    const defaultRegionId = validWorld.regions.find((region) => (
-      validWorld.polities.some((polity) => polity.alive && polity.capitalRegionId === region.id)
-    ))?.id ?? validWorld.regions[0]?.id;
-    let restoredObserver = createObserverDeskSettings();
-    try {
-      const currentObserver = localStorage.getItem(
-        observerStorageKey(validWorld.seed, validWorld.mapContentVersion),
-      );
-      const legacyObserver = supportsLegacyObserverStorage(validWorld.mapContentVersion)
-        ? localStorage.getItem(observerStorageKey(validWorld.seed))
-        : null;
-      restoredObserver = parseObserverDeskSettings(currentObserver ?? legacyObserver);
-    } catch {
-      // Continue with safe defaults when localStorage is unavailable.
-    }
-    restoredObserver = completeObserverGuideStep(restoredObserver, 'world-opened');
+    const restoredSession = restoreWorldSession(
+      validWorld,
+      source,
+      localStorage,
+      window.matchMedia('(max-width: 760px)').matches,
+    );
+    const restoredObserver = restoredSession.observerSettings;
     observerSettingsRef.current = restoredObserver;
     setObserverSettings(restoredObserver);
     try {
@@ -793,83 +761,35 @@ export function App() {
     } catch {
       resetAgencyShadowAtWorld(validWorld);
     }
-    let restoredEmbodiment = createEmbodimentObserverState(validWorld);
-    if (source === 'continue' || source === 'collection') {
-      try {
-        restoredEmbodiment = restoreEmbodimentObserverState(
-          validWorld,
-          localStorage.getItem(
-            embodimentObserverStorageKey(validWorld.seed, validWorld.mapContentVersion),
-          ) ?? (
-            supportsLegacyObserverStorage(validWorld.mapContentVersion)
-              ? localStorage.getItem(embodimentObserverStorageKey(validWorld.seed))
-              : null
-          ),
-        );
-      } catch {
-        restoredEmbodiment = createEmbodimentObserverState(validWorld);
-      }
-    }
     commitWorld(validWorld, source === 'continue' || source === 'collection' ? 'restore' : 'reset');
-    commitEmbodiedObserver(restoredEmbodiment);
-    setSeed(validWorld.seed);
-    setSelectedMapProfileId(getMapProfileForContentVersion(validWorld.mapContentVersion).id);
-    const compactViewport = window.matchMedia('(max-width: 760px)').matches;
-    const restoredPersonId = restoredEmbodiment.activeActor?.id
-      ?? (restoredEmbodiment.closure
-        && validWorld.characters.some((item) => item.id === restoredEmbodiment.closure?.actorId)
-        ? restoredEmbodiment.closure.actorId
-        : null);
-    setSelection(restoredPersonId
-      ? { kind: 'person', id: restoredPersonId }
-      : source !== 'create' && !compactViewport && defaultRegionId
-        ? { kind: 'region', id: defaultRegionId }
-        : null);
-    setSelectedEventId(null);
-    setArchiveOpen(false);
-    setMandateOpen(false);
-    setObserverDeskOpen(false);
-    setSettingsOpen(false);
-    setSituationWorkbenchOpen(false);
-    setSelectedSituationId(null);
-    setResumeSituationAfterEvent(false);
-    setCollectionOpen(false);
+    commitEmbodiedObserver(restoredSession.embodiment);
+    setSeed(restoredSession.seed);
+    setSelectedMapProfileId(restoredSession.mapProfileId);
+    setSelection(restoredSession.selection);
+    navigation.reset(restoredSession.navigation);
     setMandateMessage(null);
-    setResumeArchiveAfterEvent(false);
     archiveFocusRestoreAllowedRef.current = false;
     setFocusedArmyId(null);
     setPauseMatch(null);
     setHistoricalView(null);
-    setResumeHistoryAfterEvent(false);
-    setPowerRosterSection('polities');
-    setActiveView(restoredPersonId ? 'people' : 'world');
     setOverlay('political');
     setMapCamera({ ...DEFAULT_MAP_CAMERA });
     setMapCameraKey((current) => current + 1);
-    setStartOpen(false);
     setStartError(null);
     setFatalError(null);
-    let primerPreviouslyCompleted = false;
-    try {
-      primerPreviouslyCompleted = localStorage.getItem(MAP_PRIMER_STORAGE_KEY) === '1';
-    } catch {
-      // If preferences cannot be read, showing the short primer is the safer first-run behavior.
-    }
     primerAdvanceDoneRef.current = false;
     primerNewestEventIdRef.current = null;
     setPrimerStep('terrain');
-    setPrimerOpen(source === 'create' && validWorld.turn === 0 && !primerPreviouslyCompleted);
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
-  }, [clearRosterDossier, commitAgencyShadow, commitEmbodiedObserver, commitWorld, resetAgencyShadowAtWorld, resetAutosaveCoordinator, rosterDiscovery.reset]);
+    playback.pause();
+  }, [clearRosterDossier, commitAgencyShadow, commitEmbodiedObserver, commitWorld, navigation, playback, resetAgencyShadowAtWorld, resetAutosaveCoordinator, rosterDiscovery]);
 
   const handleCreate = useCallback(async () => {
-    setStartBusy(true);
+    const ticket = session.begin('start');
     setStartError(null);
     try {
       const nextWorld = createWorld(seed.trim(), selectedMapProfileId);
       const saves = await listWorldSaves();
+      if (!session.isCurrent(ticket)) return;
       const unavailableAutosave = saves.find((save) => save.isAutosave && save.status === 'incompatible');
       if (unavailableAutosave) {
         const namedCount = saves.filter((save) => !save.isAutosave).length;
@@ -885,44 +805,49 @@ export function App() {
           recoverySlot,
           `${unavailableAutosave.label.slice(0, 64)} · 待补地图`,
         );
+        if (!session.isCurrent(ticket)) return;
         await refreshWorldSaves();
-        setToast('已先把缺少地图的自动续写收藏留底，原世界没有丢失。');
+        if (session.isCurrent(ticket)) setToast('已先把缺少地图的自动续写收藏留底，原世界没有丢失。');
       }
-      openWorld(nextWorld, 'create');
+      session.commit(ticket, () => openWorld(nextWorld, 'create'));
     } catch (error) {
-      setStartError(error instanceof Error ? error.message : '无法创建世界。');
+      if (session.isCurrent(ticket)) setStartError(error instanceof Error ? error.message : '无法创建世界。');
     } finally {
-      setStartBusy(false);
+      session.finish(ticket);
     }
-  }, [openWorld, refreshWorldSaves, seed, selectedMapProfileId]);
+  }, [openWorld, refreshWorldSaves, seed, selectedMapProfileId, session]);
 
   const handleContinue = useCallback(async () => {
-    setStartBusy(true);
+    const ticket = session.begin('start');
     setStartError(null);
     try {
       const saved = await loadWorld();
       if (!saved) throw new Error('没有找到可续读的本地史册。');
-      openWorld(deserializeWorld(saved.payload), 'continue', agencyShadowRestoreToken('autosave'));
+      const restored = deserializeWorld(saved.payload);
+      session.commit(ticket, () => openWorld(restored, 'continue', agencyShadowRestoreToken('autosave')));
     } catch (error) {
-      setStartError(error instanceof Error ? error.message : '无法读取本地史册。');
+      if (session.isCurrent(ticket)) setStartError(error instanceof Error ? error.message : '无法读取本地史册。');
     } finally {
-      setStartBusy(false);
+      session.finish(ticket);
     }
-  }, [openWorld]);
+  }, [openWorld, session]);
 
   const handleImport = useCallback(async (file: File) => {
-    setStartBusy(true);
+    const ticket = session.begin('start');
     setStartError(null);
     try {
       const payload = await readWorldFile(file);
-      openWorld(deserializeWorld(payload), 'import');
-      setToast('已导入史册，因果记录与世界状态均已恢复。');
+      const restored = deserializeWorld(payload);
+      session.commit(ticket, () => {
+        openWorld(restored, 'import');
+        setToast('已导入史册，因果记录与世界状态均已恢复。');
+      });
     } catch (error) {
-      setStartError(error instanceof Error ? error.message : '该文件无法作为史册读取。');
+      if (session.isCurrent(ticket)) setStartError(error instanceof Error ? error.message : '该文件无法作为史册读取。');
     } finally {
-      setStartBusy(false);
+      session.finish(ticket);
     }
-  }, [openWorld]);
+  }, [openWorld, session]);
 
   const handleManualSave = useCallback(async () => {
     const current = worldRef.current;
@@ -949,20 +874,16 @@ export function App() {
   }, [refreshWorldSaves, resetAutosaveCoordinator]);
 
   const handleOpenMandate = useCallback(() => {
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
-    setSelectedEventId(null);
+    playback.pause();
     setMandateMessage(null);
-    setMandateOpen(true);
+    navigation.openLayer({ kind: 'mandate' });
     gameAudio.play('open', 0.58);
-  }, []);
+  }, [navigation, playback]);
 
   const handleCloseMandate = useCallback(() => {
-    setMandateOpen(false);
+    navigation.closeTopLayer();
     gameAudio.play('close', 0.48);
-    window.setTimeout(() => mandateTriggerRef.current?.focus(), 0);
-  }, []);
+  }, [navigation]);
 
   const handleApplyMandate = useCallback(async (action: V03InterventionAction): Promise<boolean> => {
     const current = worldRef.current;
@@ -1036,14 +957,12 @@ export function App() {
   }, []);
 
   const handleOpenCollection = useCallback(async () => {
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
-    setSelectedEventId(null);
+    playback.pause();
+    if (startOpen) setWorldStartInitialFocus('collection');
     collectionReturnFocusRef.current = document.activeElement instanceof HTMLElement
       ? document.activeElement
       : null;
-    setCollectionOpen(true);
+    navigation.openLayer({ kind: 'collection' }, startOpen);
     gameAudio.play('open', 0.58);
     setCollectionBusy(true);
     try {
@@ -1053,17 +972,13 @@ export function App() {
     } finally {
       setCollectionBusy(false);
     }
-  }, [refreshWorldSaves]);
+  }, [navigation, playback, refreshWorldSaves, startOpen]);
 
   const handleCloseCollection = useCallback(() => {
-    setCollectionOpen(false);
+    session.cancel('collection');
+    navigation.closeTopLayer();
     gameAudio.play('close', 0.48);
-    requestAnimationFrame(() => {
-      const trigger = collectionTriggerRef.current
-        ?? document.querySelector<HTMLElement>('#open-world-collection');
-      trigger?.focus({ preventScroll: true });
-    });
-  }, []);
+  }, [navigation, session]);
 
   const handleSaveCurrentToCollection = useCallback(async (label: string) => {
     const current = worldRef.current;
@@ -1097,9 +1012,10 @@ export function App() {
   }, [commitAgencyShadow, refreshWorldSaves, selection]);
 
   const handleLoadCollectionSlot = useCallback(async (slot: string) => {
-    setCollectionBusy(true);
+    const ticket = session.begin('collection');
     try {
       const saved = await loadWorldFromSlot(slot);
+      if (!session.isCurrent(ticket)) return;
       if (!saved) throw new Error('该世界槽位已经不存在。');
       // Authenticate the target before touching the current autosave. This is
       // essential for missing-map saves: a failed load must never overwrite the
@@ -1108,15 +1024,18 @@ export function App() {
       const restoredWorld = deserializeWorld(saved.payload);
       if (slot !== AUTOSAVE_SLOT) {
         const pendingSave = await autosaveCoordinatorRef.current?.flush('pause');
+        if (!session.isCurrent(ticket)) return;
         if (pendingSave?.status === 'failed') throw pendingSave.error;
       }
-      openWorld(restoredWorld, 'collection', agencyShadowRestoreToken(slot));
-      setToast(`已读取“${saved.label ?? '世界存档'}”。`);
-      await refreshWorldSaves();
+      session.commit(ticket, () => {
+        openWorld(restoredWorld, 'collection', agencyShadowRestoreToken(slot));
+        setToast(`已读取“${saved.label ?? '世界存档'}”。`);
+      });
+      if (session.isCurrent(ticket)) await refreshWorldSaves();
     } finally {
-      setCollectionBusy(false);
+      session.finish(ticket);
     }
-  }, [openWorld, refreshWorldSaves]);
+  }, [openWorld, refreshWorldSaves, session]);
 
   const handleRenameCollectionSlot = useCallback(async (slot: string, label: string) => {
     setCollectionBusy(true);
@@ -1180,28 +1099,39 @@ export function App() {
     }
   }, [commitAgencyShadow, refreshWorldSaves]);
 
-  const handleNewWorldMenu = useCallback(async () => {
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
+  const handleNewWorldMenu = useCallback(async (returnFocusTo?: HTMLElement | null) => {
+    playback.pause();
+    setWorldStartInitialFocus('primary');
+    worldStartReturnFocusRef.current = returnFocusTo
+      ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
+    const ticket = session.begin('start');
+    navigation.openLayer({ kind: 'start' });
+    setStartError(null);
     const current = worldRef.current;
     if (current) {
       try {
         const result = await autosaveCoordinatorRef.current?.flush('pause');
+        if (!session.isCurrent(ticket)) return;
         if (result?.status === 'failed') throw result.error;
         setHasSave(true);
       } catch {
         // The in-memory world remains intact and can still be exported.
       }
     }
-    setSettingsOpen(false);
-    setStartOpen(true);
-    setStartError(null);
-  }, []);
+    session.finish(ticket);
+  }, [navigation, playback, session]);
 
-  const advanceOne = useCallback((source: AdvanceSource): boolean => {
+  const advanceOne = useCallback((source: ObserverAdvanceSource): boolean => {
     const current = worldRef.current;
-    if (!current || advancingRef.current) return false;
+    const primerAdvance = source === 'primer' && navigation.topLayer?.kind === 'primer';
+    if (
+      !current
+      || advancingRef.current
+      || fatalError
+      || historicalView
+      || (navigation.blocking && !primerAdvance)
+      || (source === 'primer' && !primerAdvance)
+    ) return false;
     advancingRef.current = true;
     try {
       const oldHistoryLength = current.history.length;
@@ -1267,7 +1197,7 @@ export function App() {
       if (nextEmbodiment.closure && nextEmbodiment.closure !== embodimentBeforeAdvance.closure) {
         const closureActorExists = next.characters.some((item) => item.id === nextEmbodiment.closure?.actorId);
         if (closureActorExists) {
-          clearRosterDossier(); setActiveView('people');
+          clearRosterDossier(); navigation.goToView('people');
           setSelection({ kind: 'person', id: nextEmbodiment.closure.actorId });
         }
       }
@@ -1290,48 +1220,19 @@ export function App() {
         : null;
       setPauseMatch(matchedPause);
       if (matchedPause) {
-        runningRef.current = false;
-        setRunning(false);
-        clockAccumulatorRef.current = 0;
+        playback.pause();
         setToast(`${matchedPause.reason}：${matchedPause.eventTitle}。自动推演已暂停。`);
       }
       return true;
     } catch (error) {
-      runningRef.current = false;
-      setRunning(false);
+      playback.pause();
       setFatalError(error instanceof Error ? error.message : '世界推演发生未知错误。');
       return false;
     } finally {
       advancingRef.current = false;
     }
-  }, [clearRosterDossier, commitAgencyShadow, commitWorld, resetAgencyShadowAtWorld, selection]);
+  }, [clearRosterDossier, commitAgencyShadow, commitWorld, fatalError, historicalView, navigation, playback, resetAgencyShadowAtWorld, selection]);
   advanceRef.current = advanceOne;
-
-  const driveClock = useCallback((milliseconds: number) => {
-    if (!runningRef.current || milliseconds <= 0) return;
-    clockAccumulatorRef.current += Math.min(milliseconds, 60_000);
-    let steps = 0;
-    while (runningRef.current && steps < 32) {
-      const interval = BASE_AUTOPLAY_INTERVAL / speedRef.current;
-      if (clockAccumulatorRef.current < interval) break;
-      clockAccumulatorRef.current -= interval;
-      if (!advanceRef.current('auto')) break;
-      steps += 1;
-    }
-  }, [commitEmbodiedObserver]);
-
-  useEffect(() => {
-    let animationFrame = 0;
-    let lastTime = performance.now();
-    const tick = (now: number) => {
-      const elapsed = Math.min(250, Math.max(0, now - lastTime));
-      lastTime = now;
-      if (now >= externalClockUntilRef.current) driveClock(elapsed);
-      animationFrame = requestAnimationFrame(tick);
-    };
-    animationFrame = requestAnimationFrame(tick);
-    return () => cancelAnimationFrame(animationFrame);
-  }, [driveClock]);
 
   useEffect(() => {
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -1341,7 +1242,7 @@ export function App() {
         || ['INPUT', 'TEXTAREA', 'SELECT', 'BUTTON', 'A'].includes(event.target.tagName)
       )) return;
       const options = snapshotOptionsRef.current;
-      if (options.primerOpen) return;
+      if (observerLayerIsOpen(options.navigation, 'primer')) return;
       const key = event.key.toLowerCase();
       if (key === 'f') {
         event.preventDefault();
@@ -1349,73 +1250,56 @@ export function App() {
         else void document.documentElement.requestFullscreen();
         return;
       }
-      if (
-        options.startOpen
-        || options.archiveOpen
-        || options.mandateOpen
-        || options.observerDeskOpen
-        || options.settingsOpen
-        || options.situationWorkbenchOpen
-        || options.collectionOpen
-        || options.historyWorkbenchOpen
-        || options.historicalTurn !== null
-        || options.selectedEventId
-      ) return;
+      if (observerNavigationIsBlocking(options.navigation) || options.historicalTurn !== null) return;
       if (key === 'n') {
         event.preventDefault();
         advanceRef.current('manual');
       } else if (key === ' ') {
         event.preventDefault();
-        setRunning((current) => {
-          const next = !current;
-          runningRef.current = next;
-          if (!next) clockAccumulatorRef.current = 0;
-          return next;
-        });
+        if (!fatalError) playback.toggle();
       } else if (key === 'h') {
         event.preventDefault();
-        runningRef.current = false;
-        setRunning(false);
-        clockAccumulatorRef.current = 0;
-        clearRosterDossier(); setActiveView('chronicle');
+        playback.pause();
+        clearRosterDossier(); navigation.goToView('chronicle');
       }
     };
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [clearRosterDossier]);
+  }, [clearRosterDossier, fatalError, navigation, playback]);
 
   useEffect(() => {
     window.render_game_to_text = () => makeTextSnapshot(worldRef.current, snapshotOptionsRef.current);
     window.advanceTime = (milliseconds: number) => {
-      externalClockUntilRef.current = performance.now() + 1_000;
-      driveClock(Math.max(0, milliseconds));
+      playback.advanceExternalClock(milliseconds);
     };
     return () => {
       delete window.render_game_to_text;
       delete window.advanceTime;
     };
-  }, [driveClock]);
+  }, [playback]);
 
   const handleToggleRunning = useCallback(() => {
+    if (fatalError) {
+      setToast('推演已停止；当前世界仍可保存或导出。');
+      return;
+    }
     if (historicalView) {
       setToast('正在回望旧季；请先“回到当下”再继续推演。');
       return;
     }
+    if (navigation.blocking) {
+      setToast('请先收起当前书页，再继续推演。');
+      return;
+    }
     setPauseMatch(null);
     gameAudio.play('select', 0.42);
-    setRunning((current) => {
-      const next = !current;
-      runningRef.current = next;
-      if (!next) clockAccumulatorRef.current = 0;
-      return next;
-    });
-  }, [historicalView]);
+    playback.toggle();
+  }, [fatalError, historicalView, navigation.blocking, playback]);
 
   const handleSpeedChange = useCallback((nextSpeed: PlaybackSpeed) => {
     gameAudio.play('select', 0.38);
-    speedRef.current = nextSpeed;
-    setSpeed(nextSpeed);
-  }, []);
+    playback.changeSpeed(nextSpeed);
+  }, [playback]);
 
   const commitObserverSettings = useCallback((nextSettings: ObserverDeskSettings) => {
     observerSettingsRef.current = nextSettings;
@@ -1432,6 +1316,26 @@ export function App() {
     commitObserverSettings(completeObserverGuideStep(observerSettingsRef.current, step));
   }, [commitObserverSettings]);
 
+  const openCausalEvent = useCallback((
+    eventId: string,
+    preserveCurrent = false,
+    returnFocusTo: HTMLElement | null = document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null,
+  ): boolean => {
+    const current = worldRef.current;
+    if (!current || !findWorldHistoryEvent(current, eventId)) {
+      setToast('这条史事已经不在当前可读卷页中。');
+      return false;
+    }
+    playback.pause();
+    causalReturnFocusRef.current = returnFocusTo;
+    navigation.openEvent(eventId, preserveCurrent);
+    completeGuideStep('cause-traced');
+    gameAudio.play('open', 0.58);
+    return true;
+  }, [completeGuideStep, navigation, playback]);
+
   const handleOverlayChange = useCallback((nextOverlay: MapOverlay) => {
     gameAudio.play('select', 0.46);
     setOverlay(nextOverlay);
@@ -1444,26 +1348,21 @@ export function App() {
 
   const handleOpenMapPrimer = useCallback(() => {
     if (!worldRef.current) return;
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
-    setSelectedEventId(null);
-    setArchiveOpen(false);
-    setMandateOpen(false);
-    setObserverDeskOpen(false);
-    setCollectionOpen(false);
-    setResumeArchiveAfterEvent(false);
-    setResumeHistoryAfterEvent(false);
+    playback.pause();
     archiveFocusRestoreAllowedRef.current = false;
     setHistoricalView(null);
-    clearRosterDossier(); setActiveView('world');
+    clearRosterDossier();
     primerAdvanceDoneRef.current = false;
     primerNewestEventIdRef.current = null;
     setPrimerStep('terrain');
     if (document.activeElement instanceof HTMLElement) document.activeElement.blur();
-    setPrimerOpen(true);
+    navigation.reset({
+      view: 'world',
+      powerRosterSection,
+      layers: [{ kind: 'primer' }],
+    });
     gameAudio.play('open', 0.6);
-  }, [clearRosterDossier]);
+  }, [clearRosterDossier, navigation, playback, powerRosterSection]);
 
   const handleCloseMapPrimer = useCallback((_reason: MapPrimerCloseReason) => {
     try {
@@ -1471,25 +1370,26 @@ export function App() {
     } catch {
       // Primer completion is a preference only; storage failures must not block the world.
     }
-    setPrimerOpen(false);
+    navigation.closeTopLayer();
     gameAudio.play('close', 0.46);
-  }, []);
+  }, [navigation]);
 
-  const handlePrimerAdvance = useCallback(() => {
-    if (primerAdvanceDoneRef.current) return;
+  const handlePrimerAdvance = useCallback((): boolean => {
+    if (primerAdvanceDoneRef.current) return false;
     const current = worldRef.current;
-    if (!current) return;
+    if (!current) return false;
     const oldHistoryLength = current.history.length;
-    if (!advanceRef.current('manual')) return;
+    if (!advanceRef.current('primer')) return false;
     primerAdvanceDoneRef.current = true;
     const next = worldRef.current;
-    if (!next) return;
+    if (!next) return false;
     const newEvents = next.history.slice(oldHistoryLength);
     const newestMeaningful = [...newEvents].reverse().find((event) => event.importance >= 3 && event.causes.length > 0)
       ?? [...newEvents].reverse().find((event) => event.causes.length > 0)
       ?? newEvents.at(-1)
       ?? null;
     primerNewestEventIdRef.current = newestMeaningful?.id ?? null;
+    return true;
   }, []);
 
   const handlePrimerOpenWhy = useCallback(() => {
@@ -1503,60 +1403,49 @@ export function App() {
       setToast('这一季没有留下可追溯的重大史事，可继续推进后再查看。');
       return;
     }
-    completeGuideStep('cause-traced');
-    setResumeArchiveAfterEvent(false);
-    setResumeHistoryAfterEvent(false);
-    setSelectedEventId(eventId);
-  }, [completeGuideStep]);
+    openCausalEvent(
+      eventId,
+      false,
+      document.querySelector<HTMLCanvasElement>('.world-map__canvas'),
+    );
+  }, [openCausalEvent]);
 
   const handleViewChange = useCallback((nextView: ObserverView) => {
     if (nextView === 'chronicle') {
-      runningRef.current = false;
-      setRunning(false);
-      clockAccumulatorRef.current = 0;
-      setSelectedEventId(null);
+      playback.pause();
       gameAudio.play('open', 0.64);
     } else {
       gameAudio.play('select', 0.44);
     }
-    clearRosterDossier(); setActiveView(nextView);
-  }, [clearRosterDossier]);
+    clearRosterDossier(); navigation.goToView(nextView);
+  }, [clearRosterDossier, navigation, playback]);
 
   const handleCloseHistoryWorkbench = useCallback(() => {
-    setActiveView('world');
-    window.setTimeout(() => historyTriggerRef.current?.focus(), 0);
-  }, []);
+    navigation.goToView('world');
+  }, [navigation]);
 
   const handleOpenObserverDesk = useCallback(() => {
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
-    setSelectedEventId(null);
-    setObserverDeskOpen(true);
+    playback.pause();
+    navigation.openLayer({ kind: 'observer-desk' });
     gameAudio.play('open', 0.58);
-  }, []);
+  }, [navigation, playback]);
 
   const handleCloseObserverDesk = useCallback(() => {
-    setObserverDeskOpen(false);
+    navigation.closeTopLayer();
     gameAudio.play('close', 0.48);
-    window.setTimeout(() => observerDeskTriggerRef.current?.focus(), 0);
-  }, []);
+  }, [navigation]);
 
   const handleOpenSettings = useCallback(() => {
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
-    setSelectedEventId(null);
+    playback.pause();
     setMobileToolsOpen(false);
-    setSettingsOpen(true);
+    navigation.openLayer({ kind: 'settings' });
     gameAudio.play('open', 0.58);
-  }, []);
+  }, [navigation, playback]);
 
   const handleCloseSettings = useCallback(() => {
-    setSettingsOpen(false);
+    navigation.closeTopLayer();
     gameAudio.play('close', 0.48);
-    window.setTimeout(() => settingsTriggerRef.current?.focus(), 0);
-  }, []);
+  }, [navigation]);
 
   const handlePreviewSound = useCallback(() => {
     void previewSound().then((ready) => {
@@ -1565,9 +1454,7 @@ export function App() {
   }, [previewSound]);
 
   const handleApplyAppUpdate = useCallback(async () => {
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
+    playback.pause();
     const coordinator = autosaveCoordinatorRef.current;
     if (worldRef.current && coordinator) {
       const result = await coordinator.flush('pause');
@@ -1578,16 +1465,14 @@ export function App() {
     }
     window.location.reload();
     return true;
-  }, []);
+  }, [playback]);
 
   const handleHistoricalTurnChange = useCallback((turn: number, view: HistoricalTerritoryView) => {
     const current = worldRef.current;
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
+    playback.pause();
     setOverlay('political');
     setHistoricalView(current && turn < current.turn ? view : null);
-  }, []);
+  }, [playback]);
 
   const handleResetHistoricalView = useCallback(() => {
     setHistoricalView(null);
@@ -1654,17 +1539,18 @@ export function App() {
     world && selectedEventId ? findWorldHistoryEvent(world, selectedEventId) ?? null : null
   ), [selectedEventId, world]);
   const archiveDossier = useMemo<ArchiveDossier | null>(() => {
-    if (!archiveOpen || !world || !selection) return null;
-    if (selection.kind === 'country') {
-      const item = world.polities.find((candidate) => candidate.id === selection.id);
+    const subject = navigation.topLayer?.kind === 'archive' ? navigation.topLayer.subject : null;
+    if (!archiveOpen || !world || !subject) return null;
+    if (subject.kind === 'country') {
+      const item = world.polities.find((candidate) => candidate.id === subject.id);
       return item ? toCountryArchive(world, item) : null;
     }
-    if (selection.kind === 'family') {
-      const item = world.families?.find((candidate) => candidate.id === selection.id);
+    if (subject.kind === 'family') {
+      const item = world.families?.find((candidate) => candidate.id === subject.id);
       return item ? toFamilyArchive(world, item) : null;
     }
-    if (selection.kind === 'person') {
-      const item = world.characters.find((candidate) => candidate.id === selection.id);
+    if (subject.kind === 'person') {
+      const item = world.characters.find((candidate) => candidate.id === subject.id);
       return item ? toPersonArchive(
         world,
         item,
@@ -1672,13 +1558,13 @@ export function App() {
       ) : null;
     }
     return null;
-  }, [agencyShadowBranchId, agencyShadowLedger, archiveOpen, selection, world]);
+  }, [agencyShadowBranchId, agencyShadowLedger, archiveOpen, navigation.topLayer, world]);
 
   const handlePowerRosterSectionChange = useCallback((id: string) => {
     if (id !== 'polities' && id !== 'families' && id !== 'military') return;
     gameAudio.play('select', 0.42);
-    setPowerRosterSection(id);
-  }, []);
+    navigation.setPowerRosterSection(id);
+  }, [navigation]);
 
   const handleCloseRoster = useCallback(() => {
     const returnTarget = activeView === 'powers'
@@ -1686,10 +1572,10 @@ export function App() {
       : activeView === 'people'
         ? peopleTriggerRef.current
         : null;
-    clearRosterDossier(); setActiveView('world');
+    clearRosterDossier(); navigation.goToView('world');
     gameAudio.play('close', 0.4);
     window.setTimeout(() => returnTarget?.focus(), 0);
-  }, [activeView, clearRosterDossier]);
+  }, [activeView, clearRosterDossier, navigation]);
 
   const handleRosterSelect = useCallback((id: string) => {
     const current = worldRef.current;
@@ -1716,37 +1602,35 @@ export function App() {
       else if (fleet) setSelection({ kind: 'fleet', id: fleet.id });
       return;
     }
-    if (activeView === 'chronicle') setSelectedEventId(id);
   }, [activeView, beginRosterDossier, powerRosterSection]);
 
   const handleSelectArchiveEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
     gameAudio.play('select', 0.44);
-    setSelectedEventId(null);
     setSelection({ kind, id });
+    navigation.closeAllLayers();
     if (rosterDossierReturn) return; clearRosterDossier();
     if (kind === 'country' || kind === 'family') {
-      setPowerRosterSection(kind === 'country' ? 'polities' : 'families');
-      setActiveView('powers');
+      navigation.goToView('powers', kind === 'country' ? 'polities' : 'families');
     } else {
-      setActiveView(kind === 'person' ? 'people' : 'world');
+      navigation.goToView(kind === 'person' ? 'people' : 'world');
     }
-  }, [clearRosterDossier, rosterDossierReturn]);
+  }, [clearRosterDossier, navigation, rosterDossierReturn]);
 
   const handleSelectArchiveLink = useCallback((kind: ArchiveEntityKind, id: string) => {
-    archiveFocusRestoreAllowedRef.current = false; setArchiveOpen(false); setResumeArchiveAfterEvent(false);
+    archiveFocusRestoreAllowedRef.current = false;
     handleSelectArchiveEntity(kind, id);
-    window.setTimeout(() => document.querySelector<HTMLElement>('.observer-inspector')?.focus({ preventScroll: true }), 0);
+    window.setTimeout(() => {
+      const inspector = document.querySelector<HTMLElement>('.observer-inspector');
+      const rosterReturn = inspector?.querySelector<HTMLButtonElement>('[data-inspector-return="roster"]');
+      (rosterReturn ?? inspector)?.focus({ preventScroll: true });
+    }, 0);
   }, [handleSelectArchiveEntity]);
 
   const handleSelectScopedEvent = useCallback((eventId: string) => {
     gameAudio.play('open', 0.58);
     archiveFocusRestoreAllowedRef.current = false;
-    setResumeSituationAfterEvent(false);
-    setResumeArchiveAfterEvent(archiveOpen);
-    setArchiveOpen(false);
-    setSelectedEventId(eventId);
-    completeGuideStep('cause-traced');
-  }, [archiveOpen, completeGuideStep]);
+    openCausalEvent(eventId, archiveOpen || situationWorkbenchOpen);
+  }, [archiveOpen, openCausalEvent, situationWorkbenchOpen]);
 
   const shouldRestoreSituationFocus = useCallback(() => situationFocusRestoreAllowedRef.current, []);
 
@@ -1759,15 +1643,12 @@ export function App() {
     situationReturnFocusRef.current = returnFocusTo
       ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     situationFocusRestoreAllowedRef.current = true;
-    const projection = projectSituationWorkbench(current, preferredSituationId ?? selectedSituationId);
-    setSelectedSituationId(projection.selectedId);
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
-    setSituationWorkbenchOpen(true);
-    setResumeSituationAfterEvent(false);
+    const projection = projectSituationWorkbench(current, preferredSituationId);
+    if (!projection.selectedId || !projection.selected) return;
+    playback.pause();
+    navigation.openLayer({ kind: 'situations', situationId: projection.selectedId });
     gameAudio.play('open', 0.64);
-  }, [selectedSituationId]);
+  }, [navigation, playback]);
 
   const handleRosterReasonSelect = useCallback((reason: RosterReason) => {
     if (reason.target.kind === 'event') {
@@ -1783,27 +1664,19 @@ export function App() {
 
   const handleCloseSituationWorkbench = useCallback(() => {
     situationFocusRestoreAllowedRef.current = true;
-    setSituationWorkbenchOpen(false);
-    setResumeSituationAfterEvent(false);
+    navigation.closeTopLayer();
     gameAudio.play('close', 0.48);
-  }, []);
+  }, [navigation]);
 
   const handleSelectSituationEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
     situationFocusRestoreAllowedRef.current = false;
-    setSituationWorkbenchOpen(false);
-    setResumeSituationAfterEvent(false);
     handleSelectArchiveEntity(kind, id);
   }, [handleSelectArchiveEntity]);
 
   const handleSelectSituationHistory = useCallback((eventId: string) => {
     situationFocusRestoreAllowedRef.current = false;
-    setSituationWorkbenchOpen(false);
-    setResumeSituationAfterEvent(true);
-    setResumeArchiveAfterEvent(false);
-    setResumeHistoryAfterEvent(false);
-    setSelectedEventId(eventId);
-    completeGuideStep('cause-traced');
-  }, [completeGuideStep]);
+    openCausalEvent(eventId, true);
+  }, [openCausalEvent]);
 
   const handleEnterEmbodiment = useCallback((characterId: string) => {
     const current = worldRef.current;
@@ -1812,9 +1685,7 @@ export function App() {
       setToast('此人已经无法入世。');
       return;
     }
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
+    playback.pause();
     const nextState = enterEmbodimentObserverState(embodimentObserverRef.current, current, character.id);
     if (!nextState) {
       setToast('此人已经无法入世。');
@@ -1822,7 +1693,7 @@ export function App() {
     }
     commitEmbodiedObserver(nextState);
     gameAudio.play('open', 0.48);
-  }, [commitEmbodiedObserver]);
+  }, [commitEmbodiedObserver, playback]);
 
   const handleLeaveEmbodiment = useCallback(() => {
     const current = worldRef.current;
@@ -1841,9 +1712,7 @@ export function App() {
       setToast(option?.unavailableReason ?? '此事眼下已经不能进行。');
       return;
     }
-    runningRef.current = false;
-    setRunning(false);
-    clockAccumulatorRef.current = 0;
+    playback.pause();
     const nextState = queueEmbodiedObserverAction(embodimentObserverRef.current, current, option.command);
     if (!nextState) {
       setToast('此事眼下已经不能进行。');
@@ -1851,7 +1720,7 @@ export function App() {
     }
     commitEmbodiedObserver(nextState);
     gameAudio.play('action_submit', 0.72);
-  }, [commitEmbodiedObserver]);
+  }, [commitEmbodiedObserver, playback]);
 
   const handleCancelEmbodiedAction = useCallback(() => {
     const current = worldRef.current;
@@ -1868,11 +1737,14 @@ export function App() {
     gameAudio.play('close', 0.38);
     setSelection(null);
     setMobileInspectorExpanded(false);
-    if (rosterTarget) { setActiveView(rosterTarget.view); if (rosterTarget.section) setPowerRosterSection(rosterTarget.section); return; }
+    if (rosterTarget) {
+      navigation.goToView(rosterTarget.view, rosterTarget.section ?? undefined);
+      return;
+    }
     window.setTimeout(() => {
       document.querySelector<HTMLCanvasElement>('.world-map__canvas')?.focus({ preventScroll: true });
     }, 0);
-  }, [returnToRoster]);
+  }, [navigation, returnToRoster]);
 
   const inspector = useMemo<ReactNode>(() => {
     if (!world || !selection) return null;
@@ -1895,7 +1767,8 @@ export function App() {
       onOpenArchive: selection.kind === 'country' || selection.kind === 'family' || selection.kind === 'person' ? () => {
         archiveReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         archiveFocusRestoreAllowedRef.current = true;
-        setArchiveOpen(true);
+        playback.pause();
+        navigation.openLayer({ kind: 'archive', subject: selection });
         gameAudio.play('open', 0.62);
       } : undefined,
       onSelectEntity: handleSelectArchiveEntity,
@@ -1956,7 +1829,9 @@ export function App() {
     handleSelectArchiveEntity,
     handleSelectScopedEvent,
     mobileInspectorExpanded,
+    navigation,
     pendingEmbodiedAction,
+    playback,
     rosterDossierEntry,
     rosterDossierReturn,
     selection,
@@ -1964,12 +1839,8 @@ export function App() {
   ]);
 
   const selectQuarterEvent = useCallback((eventId: string) => {
-    gameAudio.play('open', 0.58);
-    setResumeArchiveAfterEvent(false);
-    setResumeSituationAfterEvent(false);
-    setSelectedEventId(eventId);
-    completeGuideStep('cause-traced');
-  }, [completeGuideStep]);
+    openCausalEvent(eventId);
+  }, [openCausalEvent]);
 
   const selectQuarterLedger = useCallback((ledger: QuarterPulseLedger) => {
     handleOverlayChange(ledger === 'population' ? 'population' : ledger === 'food' ? 'food' : 'trade');
@@ -1991,12 +1862,11 @@ export function App() {
     if (item.kind === 'situation') {
       const current = worldRef.current;
       if (!current?.situationSystem.situations.some((situation) => situation.id === item.id)) {
-        setObserverDeskOpen(false);
+        navigation.closeTopLayer();
         setPauseMatch(null);
         setToast('这条局势已折入冷档案，当前卷宗不再保留可展开正文。');
         return;
       }
-      setObserverDeskOpen(false);
       setPauseMatch(null);
       handleOpenSituationWorkbench(item.id, observerDeskTriggerRef.current);
       return;
@@ -2004,7 +1874,7 @@ export function App() {
     const current = worldRef.current;
     const nextSelection = { kind: item.kind, id: item.id } as Selection;
     if (!current || !selectedEntityLabel(current, nextSelection)) {
-      setObserverDeskOpen(false);
+      navigation.closeTopLayer();
       setPauseMatch(null);
       setToast(`“${item.label}”已退出当下舆图；关注记录仍保留在观察台。`);
       return;
@@ -2012,23 +1882,21 @@ export function App() {
     if (item.kind === 'army' || item.kind === 'fleet') setFocusedArmyId(item.id);
     clearRosterDossier(); setSelection(nextSelection);
     if (item.kind === 'country' || item.kind === 'family') {
-      setPowerRosterSection(item.kind === 'country' ? 'polities' : 'families');
-      setActiveView('powers');
+      navigation.goToView('powers', item.kind === 'country' ? 'polities' : 'families');
     } else {
-      setActiveView(item.kind === 'person' ? 'people' : 'world');
+      navigation.goToView(item.kind === 'person' ? 'people' : 'world');
     }
-    setObserverDeskOpen(false);
     setPauseMatch(null);
-  }, [clearRosterDossier, handleOpenSituationWorkbench]);
+  }, [clearRosterDossier, handleOpenSituationWorkbench, navigation]);
 
   const handleInspectObserverLead = useCallback((lead: ObserverLead) => {
     if (!lead.situationId) gameAudio.play('select', 0.52);
     setPauseMatch(null);
     setOverlay(lead.overlay);
     clearRosterDossier(); setSelection(lead.target);
-    setActiveView('world');
+    navigation.goToView('world');
     if (lead.situationId) handleOpenSituationWorkbench(lead.situationId);
-  }, [clearRosterDossier, handleOpenSituationWorkbench]);
+  }, [clearRosterDossier, handleOpenSituationWorkbench, navigation]);
 
   const handleToggleObserverLead = useCallback((lead: ObserverLead) => {
     const current = worldRef.current;
@@ -2060,7 +1928,6 @@ export function App() {
       match.situationId,
       false,
     ));
-    setObserverDeskOpen(false);
     handleOpenSituationWorkbench(match.situationId, observerDeskTriggerRef.current);
   }, [commitObserverSettings, handleOpenSituationWorkbench]);
 
@@ -2072,22 +1939,19 @@ export function App() {
       return;
     }
     if (step === 'quarter-advanced') {
-      setObserverDeskOpen(false);
+      navigation.closeTopLayer();
       requestAnimationFrame(() => advanceRef.current('manual'));
       return;
     }
     if (step === 'overlay-switched') {
       handleOverlayChange('trade');
-      setObserverDeskOpen(false);
+      navigation.closeTopLayer();
       return;
     }
     if (step === 'cause-traced') {
       const event = current.history.at(-1);
       if (event) {
-        completeGuideStep(step);
-        setResumeSituationAfterEvent(false);
-        setSelectedEventId(event.id);
-        setObserverDeskOpen(false);
+        openCausalEvent(event.id);
       }
       return;
     }
@@ -2097,8 +1961,8 @@ export function App() {
     if (!item) return;
     commitObserverSettings(upsertObserverWatch(observerSettingsRef.current, item));
     clearRosterDossier(); setSelection(target);
-    setActiveView('world');
-  }, [clearRosterDossier, commitObserverSettings, completeGuideStep, handleOverlayChange, selection]);
+    navigation.goToView('world');
+  }, [clearRosterDossier, commitObserverSettings, completeGuideStep, handleOverlayChange, navigation, openCausalEvent, selection]);
 
   const mandateTarget = useMemo<MandateTarget | null>(() => {
     if (!world || !selection) return null;
@@ -2129,6 +1993,21 @@ export function App() {
     ? worldSaves.find((save) => save.status === 'ready' && save.hash === world.hash)?.slot
     : undefined;
   const namedWorldSaveCount = worldSaves.filter((save) => !save.isAutosave).length;
+  const handleCloseCausalEvent = useCallback(() => {
+    const parent = navigation.state.layers.at(-2);
+    if (parent?.kind === 'archive') archiveFocusRestoreAllowedRef.current = true;
+    if (parent?.kind === 'situations') situationFocusRestoreAllowedRef.current = true;
+    navigation.closeTopLayer();
+  }, [navigation]);
+  const handleSelectSituation = useCallback((situationId: string) => {
+    const current = worldRef.current;
+    if (!current?.situationSystem.situations.some((item) => item.id === situationId)) return;
+    navigation.replaceTopLayer({ kind: 'situations', situationId });
+  }, [navigation]);
+  const handleCancelWorldStart = useCallback(() => {
+    session.cancel('start');
+    navigation.closeTopLayer();
+  }, [navigation, session]);
   const rosterSelectedId = activeView === 'powers' && powerRosterSection === 'polities' && selection?.kind === 'country'
     ? selection.id
     : activeView === 'powers' && powerRosterSection === 'families' && selection?.kind === 'family'
@@ -2155,7 +2034,7 @@ export function App() {
           data-motion={interfaceSettings.motion}
           data-interface-density={interfaceSettings.interfaceDensity}
           data-map-atmosphere={interfaceSettings.mapAtmosphere || undefined}
-          aria-hidden={startOpen || archiveOpen || mandateOpen || observerDeskOpen || settingsOpen || situationWorkbenchOpen || collectionOpen || primerOpen || activeView === 'chronicle' || undefined}
+          aria-hidden={navigation.blocking || undefined}
         >
           <TopBar
             title="沧衡纪"
@@ -2165,7 +2044,7 @@ export function App() {
             turn={world.turn}
             isRunning={running}
             speed={speed}
-            canAdvance={!fatalError && !historicalView}
+            canAdvance={!fatalError && !historicalView && !navigation.blocking}
             onToggleRunning={handleToggleRunning}
             onAdvance={() => advanceOne('manual')}
             onSpeedChange={handleSpeedChange}
@@ -2215,7 +2094,7 @@ export function App() {
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
                 clearRosterDossier(); setSelection({ kind: 'region', id });
-                setActiveView('world');
+                navigation.goToView('world');
               }}
               onSelectObject={(kind, id) => {
                 gameAudio.play('select', 0.52);
@@ -2223,7 +2102,7 @@ export function App() {
                 setMobileInspectorExpanded(false);
                 if (kind === 'army' || kind === 'fleet') setFocusedArmyId(id);
                 clearRosterDossier(); setSelection({ kind, id });
-                setActiveView('world');
+                navigation.goToView('world');
               }}
             />
 
@@ -2334,7 +2213,20 @@ export function App() {
                   <Download size={16} aria-hidden="true" />
                 </button>
                 <span className="observer-world-tools__rule" aria-hidden="true" />
-                <button type="button" onClick={() => { setMobileToolsOpen(false); handleNewWorldMenu(); }} aria-label="返回世界书页" title="新纪、续读或导入">
+                <button
+                  type="button"
+                  onClick={() => {
+                    const returnFocusTo = mobileToolsOpen
+                      ? mobileToolsTriggerRef.current
+                      : document.activeElement instanceof HTMLElement
+                        ? document.activeElement
+                        : null;
+                    setMobileToolsOpen(false);
+                    handleNewWorldMenu(returnFocusTo);
+                  }}
+                  aria-label="返回世界书页"
+                  title="新纪、续读或导入"
+                >
                   <RotateCcw size={16} aria-hidden="true" />
                 </button>
               </div>
@@ -2419,46 +2311,28 @@ export function App() {
             onSelectLedger={selectQuarterLedger}
           />
 
-          <CausalDrawer
-            open={Boolean(selectedHistoryEvent)}
-            event={selectedHistoryEvent ? toCausalEvent(world, selectedHistoryEvent) : null}
-            onClose={() => {
-              setSelectedEventId(null);
-              if (resumeArchiveAfterEvent) {
-                archiveFocusRestoreAllowedRef.current = true;
-                setArchiveOpen(true);
-                setResumeArchiveAfterEvent(false);
-              } else if (resumeHistoryAfterEvent) {
-                setActiveView('chronicle');
-                setResumeHistoryAfterEvent(false);
-              } else if (resumeSituationAfterEvent) {
-                situationFocusRestoreAllowedRef.current = true;
-                setSituationWorkbenchOpen(true);
-                setResumeSituationAfterEvent(false);
-              }
-            }}
-            onInspectEvidence={inspectEvidence}
-            onSelectReference={(reference: CausalReference) => {
-              archiveFocusRestoreAllowedRef.current = false;
-              setResumeArchiveAfterEvent(false);
-              setResumeHistoryAfterEvent(false);
-              setResumeSituationAfterEvent(false);
-              setSelectedEventId(null);
-              handleSelectArchiveEntity(reference.kind, reference.id);
-            }}
-            onSelectSubject={(kind, id) => {
-              archiveFocusRestoreAllowedRef.current = false;
-              setResumeArchiveAfterEvent(false);
-              setResumeHistoryAfterEvent(false);
-              setResumeSituationAfterEvent(false);
-              setSelectedEventId(null);
-              handleSelectArchiveEntity(kind, id);
-            }}
-          />
         </main>
       ) : (
         <main className="observer-boot-underlay" aria-hidden="true" />
       )}
+
+      <CausalDrawer
+        open={Boolean(selectedHistoryEvent)}
+        event={world && selectedHistoryEvent ? toCausalEvent(world, selectedHistoryEvent) : null}
+        onClose={handleCloseCausalEvent}
+        returnFocusTo={causalReturnFocusRef.current}
+        onInspectEvidence={inspectEvidence}
+        onSelectReference={(reference: CausalReference) => {
+          archiveFocusRestoreAllowedRef.current = false;
+          situationFocusRestoreAllowedRef.current = false;
+          handleSelectArchiveEntity(reference.kind, reference.id);
+        }}
+        onSelectSubject={(kind, id) => {
+          archiveFocusRestoreAllowedRef.current = false;
+          situationFocusRestoreAllowedRef.current = false;
+          handleSelectArchiveEntity(kind, id);
+        }}
+      />
 
       <MapPrimer
         open={primerOpen && Boolean(world)}
@@ -2476,8 +2350,7 @@ export function App() {
         dossier={archiveDossier}
         onClose={() => {
           archiveFocusRestoreAllowedRef.current = true;
-          setArchiveOpen(false);
-          setResumeArchiveAfterEvent(false);
+          navigation.closeTopLayer();
         }}
         onSelectEntity={handleSelectArchiveLink}
         onSelectEvent={handleSelectScopedEvent}
@@ -2503,15 +2376,11 @@ export function App() {
 
       {world ? (
         <HistoryWorkbench
-          open={activeView === 'chronicle'}
+          open={historyWorkbenchOpen}
           world={world}
           turn={historicalView?.turn ?? world.turn}
           onSelectEvent={(eventId) => {
-            completeGuideStep('cause-traced');
-            setResumeSituationAfterEvent(false);
-            setResumeHistoryAfterEvent(true);
-            setActiveView('world');
-            setSelectedEventId(eventId);
+            openCausalEvent(eventId, true);
           }}
           onTurnChange={handleHistoricalTurnChange}
           onClose={handleCloseHistoryWorkbench}
@@ -2524,7 +2393,7 @@ export function App() {
         open={situationWorkbenchOpen}
         projection={situationWorkbenchProjection}
         onClose={handleCloseSituationWorkbench}
-        onSelectSituation={setSelectedSituationId}
+        onSelectSituation={handleSelectSituation}
         onSelectEntity={handleSelectSituationEntity}
         onSelectHistoryEvent={handleSelectSituationHistory}
         returnFocusTo={situationReturnFocusRef.current}
@@ -2562,7 +2431,7 @@ export function App() {
         open={collectionOpen}
         saves={worldSaves}
         currentSlot={currentCollectionSlot}
-        busy={collectionBusy}
+        busy={collectionBusy || collectionSessionBusy}
         canSaveCurrent={Boolean(world)}
         onLoad={handleLoadCollectionSlot}
         onDelete={handleDeleteCollectionSlot}
@@ -2587,7 +2456,10 @@ export function App() {
         onOpenCollection={handleOpenCollection}
         collectionCount={namedWorldSaveCount}
         onImport={handleImport}
-        onCancel={world ? () => setStartOpen(false) : undefined}
+        onCancel={world ? handleCancelWorldStart : undefined}
+        initialFocus={worldStartInitialFocus}
+        returnFocusTo={worldStartReturnFocusRef.current}
+        shouldRestoreFocus={() => navigation.state.layers.length === 0}
       />
       {toast ? <div className="observer-toast" role="status">{toast}</div> : null}
     </>

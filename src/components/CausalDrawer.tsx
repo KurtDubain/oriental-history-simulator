@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { ArrowDown, GitBranch, Search, UsersRound, X } from 'lucide-react';
 import type { ArchiveEntityKind } from './HistoricalArchive';
+import { useDialogLayer } from './useDialogLayer';
 import '../styles/observer-ui.css';
 
 export type CausalRole = 'structure' | 'condition' | 'trigger' | 'choice' | 'outcome';
@@ -44,6 +45,7 @@ export interface CausalDrawerProps {
   onInspectEvidence?: (factor: CausalFactor) => void;
   onSelectSubject?: (kind: ArchiveEntityKind, id: string) => void;
   onSelectReference?: (reference: CausalReference) => void;
+  returnFocusTo?: HTMLElement | null;
 }
 
 const ROLE_LABELS: Record<CausalRole, string> = {
@@ -61,57 +63,21 @@ export function CausalDrawer({
   onInspectEvidence,
   onSelectSubject,
   onSelectReference,
+  returnFocusTo,
 }: CausalDrawerProps) {
   const titleId = useId();
   const drawerRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
   const [expandedFactorId, setExpandedFactorId] = useState<string | null>(null);
-  onCloseRef.current = onClose;
 
   useEffect(() => setExpandedFactorId(null), [event?.id]);
-
-  useEffect(() => {
-    if (!open || !event) return undefined;
-
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    closeRef.current?.focus();
-
-    const handleKeyDown = (keyboardEvent: KeyboardEvent) => {
-      if (keyboardEvent.key === 'Escape') {
-        keyboardEvent.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-
-      if (keyboardEvent.key !== 'Tab' || !drawerRef.current) return;
-
-      const focusable = Array.from(
-        drawerRef.current.querySelectorAll<HTMLElement>(
-          'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-        ),
-      );
-      if (!focusable.length) return;
-
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (keyboardEvent.shiftKey && document.activeElement === first) {
-        keyboardEvent.preventDefault();
-        last.focus();
-      } else if (!keyboardEvent.shiftKey && document.activeElement === last) {
-        keyboardEvent.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [event?.id, open]);
+  useDialogLayer({
+    open: open && Boolean(event),
+    containerRef: drawerRef,
+    initialFocusRef: closeRef,
+    onClose,
+    returnFocusTo,
+  });
 
   if (!open || !event) return null;
 
@@ -119,7 +85,7 @@ export function CausalDrawer({
     <div className="observer-causal-layer" data-history-layer="evidence" data-event-id={event.id}>
       <button
         type="button"
-        className="observer-causal-layer__backdrop"
+        className="observer-causal-layer__backdrop observer-dialog-backdrop"
         aria-label="关闭何故与证据"
         tabIndex={-1}
         onClick={onClose}
@@ -127,7 +93,7 @@ export function CausalDrawer({
       <aside
         id="observer-causal-drawer"
         ref={drawerRef}
-        className="observer-causal-drawer"
+        className="observer-causal-drawer observer-dialog-surface"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

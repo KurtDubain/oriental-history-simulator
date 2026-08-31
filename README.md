@@ -1,12 +1,14 @@
-# 沧衡纪：东方架空历史演化模拟器 v1.10.1
+# 沧衡纪：东方架空历史演化模拟器 v1.15.0
 
 一个纯前端、确定性的东方架空历史观察沙盒。你不直接统治国家，而是按季推进时间，观察人物欲望、家族传承、政治制度、资源流通、迁徙、疾病、知识、外交与战争共同写出的历史，并在少数节点用有限“天命”轻推世界。
 
 在线试玩：[oriental-history-simulator.vercel.app](https://oriental-history-simulator.vercel.app/)
 
-当前产品版本为 **1.10.1**，权威存档仍为 **schema 4**，两者彼此独立。开启新世界时可从两张固定舆图中选择：**82 州 / 10 海域的私人舆图**，或 **68 州 / 10 海域的完全架空参赛舆图“云海八荒”**。两者共用人物、家族、政治、经济、战争、海洋、Situation 与入世规则。
+当前产品版本为 **1.15.0**，权威存档仍为 **schema 4**，两者彼此独立。开启新世界时可从两张固定舆图中选择：**82 州 / 10 海域的私人舆图**，或 **68 州 / 10 海域的完全架空参赛舆图“云海八荒”**。两者共用人物、家族、政治、经济、战争、海洋、Situation 与入世规则。
 
 schema 4 将真实发生的 Simulation Fact 与面向玩家展示的 Chronicle 分开；军权危机、继承危机和战争进程都从真实事实形成、转阶段与结案。“当世三问”优先连续追踪这些局势，人物也会把战争、任免、婚姻和关键转折留在记忆、盘算与传记中。玩家可以随时入世一名人物，每季定下一项符合身份和处境的行动，再由同一模拟系统结算。
+
+v1.15.0 把世界书页、收藏、史册、对象史卷、持续局势与“何故与证据”收进同一受控页面栈。打开任一阻塞卷页会可靠停表，沿史卷或局势查看原因后可按原路返回；已经关闭的创建、续读、导入或收藏读取也不会稍后夺走当前世界。十种卷页共用焦点、Escape、遮罩和移动安全区规则，四档视口已验证单弹层、无横向溢出和关键 44px 触控。本版不改模拟、schema 4、旧档或世界 hash。
 
 v1.10.0 新增统一“设置”卷页、原创程序化东方声景与十类经合并的语义音效；四季纸色、水面、河流、海岸、海纹、选中和按下反馈也完成一轮收笔。声音默认关闭，所有声音、画面、动态和界面密度设置只属于观察者，不改变世界种子、季度、Fact、Chronicle 或世界哈希。
 
@@ -132,6 +134,7 @@ npm run build
 npm run build:contest
 npm run test:e2e
 npm run test:e2e:fux01
+npm run test:e2e:trim016
 npm run test:e2e:maps
 npm run test:e2e:contest
 npm run test:audit:maps
@@ -143,7 +146,7 @@ npm run test:audit:maps
 npm run test:release
 ```
 
-`test:release` 会依次执行单元/系统测试、个人版与参赛白名单构建、桌面 Chromium 试玩、390×844 与 640×900 移动舆图触控门、Phase A/B/C、人物 Agency、权势叙事、地方施政、双地图 80 季与 V0.3 长程审计。`npm run build:contest` 产出 `dist-contest/`：模块图会拒绝私人内容依赖，产物还会核对版本/allowlist 清单并扫描从私人 profile 派生的 328 项名称与 ID。`npm run test:e2e:contest` 另外验证参赛静态产物只提供公开地图，且遇到缺图旧档时不会覆盖原载荷。
+`test:release` 会依次执行单元/系统测试、个人版与参赛白名单构建、桌面 Chromium 试玩、1440/768/640/390 四档页面栈与移动安全区、390×844 与 640×900 移动舆图触控门、Phase A/B/C、人物 Agency、权势叙事、地方施政、双地图 80 季与 V0.3 长程审计。`npm run build:contest` 产出 `dist-contest/`：模块图会拒绝私人内容依赖，产物还会核对版本/allowlist 清单并扫描从私人 profile 派生的 328 项名称与 ID。`npm run test:e2e:contest` 另外验证参赛静态产物只提供公开地图，且遇到缺图旧档时不会覆盖原载荷。
 
 `npm run test:audit:architecture` 用 TypeScript AST 区分 runtime/type-only 依赖，对运行时环、跨层回写、热点文件预算和类型环债务增长直接失败。两种正式构建均限制单个 JavaScript 文件原始体积不超过 560 KiB、JavaScript gzip 总量不超过 410 KiB、CSS gzip 总量不超过 40 KiB。`main` 与 Pull Request 还会在 Node 22 环境中执行 `npm ci`、单测、架构门、双构建和关键浏览器链，失败时保留浏览器产物供复现。
 

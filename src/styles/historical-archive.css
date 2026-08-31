@@ -417,12 +417,12 @@
 
 @media (max-width: 760px) {
   .history-archive-layer {
-    padding: 8px;
+    padding: max(8px, var(--observer-safe-top)) 8px max(8px, var(--observer-safe-bottom));
   }
 
   .history-archive {
     width: calc(100vw - 16px);
-    max-height: calc(100dvh - 16px);
+    max-height: calc(100dvh - max(16px, var(--observer-dialog-safe-top) + var(--observer-dialog-safe-bottom)));
   }
 
   .history-archive__masthead {

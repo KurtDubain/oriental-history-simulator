@@ -28,6 +28,13 @@ import { projectEmbodimentTextSnapshot } from './embodiment-view';
 import { shouldShowObserverSoundInvitation } from './observer-interface-settings';
 import { agencyDossierOptions } from './observer-agency-projection';
 import { deriveObserverLeadProjection } from './observer-leads';
+import {
+  observerLayerIsOpen,
+  observerPageIsVisible,
+  selectedObserverEventId,
+  topObserverLayer,
+  type ObserverNavigationState,
+} from './observer-navigation';
 import { selectedEntityLabel } from './observer-selection';
 import { projectQuarterPulse } from './quarter-pulse-stories';
 import type { SnapshotOptions } from './observer-shell-contract';
@@ -49,15 +56,21 @@ const HISTORY_COLORS: Record<string, string> = {
 
 export type HistoryReadingLayer = 'evidence' | 'entity' | 'situation' | 'chronicle' | 'quarter';
 
-export function deriveHistoryReadingLayer(options: Pick<
-  SnapshotOptions,
-  'selectedEventId' | 'archiveOpen' | 'situationWorkbenchOpen' | 'historyWorkbenchOpen'
->): HistoryReadingLayer {
-  if (options.selectedEventId) return 'evidence';
-  if (options.archiveOpen) return 'entity';
-  if (options.situationWorkbenchOpen) return 'situation';
-  if (options.historyWorkbenchOpen) return 'chronicle';
+export function deriveHistoryReadingLayer(navigation: ObserverNavigationState): HistoryReadingLayer {
+  if (observerLayerIsOpen(navigation, 'event')) return 'evidence';
+  if (observerLayerIsOpen(navigation, 'archive')) return 'entity';
+  if (observerLayerIsOpen(navigation, 'situations')) return 'situation';
+  if (observerPageIsVisible(navigation, 'chronicle')) return 'chronicle';
   return 'quarter';
+}
+
+function projectNavigationJourney(navigation: ObserverNavigationState): object[] {
+  return navigation.layers.map((layer) => {
+    if (layer.kind === 'event') return { kind: layer.kind, eventId: layer.eventId };
+    if (layer.kind === 'situations') return { kind: layer.kind, situationId: layer.situationId };
+    if (layer.kind === 'archive') return { kind: layer.kind, subject: { ...layer.subject } };
+    return { kind: layer.kind };
+  });
 }
 
 function historyRoster(world: WorldState): RosterItem[] {
@@ -75,6 +88,21 @@ function historyRoster(world: WorldState): RosterItem[] {
 }
 
 export function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
+  const navigation = options.navigation;
+  const topLayer = topObserverLayer(navigation);
+  const startOpen = observerLayerIsOpen(navigation, 'start');
+  const collectionOpen = observerLayerIsOpen(navigation, 'collection');
+  const settingsOpen = observerLayerIsOpen(navigation, 'settings');
+  const primerOpen = observerLayerIsOpen(navigation, 'primer');
+  const archiveOpen = observerLayerIsOpen(navigation, 'archive');
+  const mandateOpen = observerLayerIsOpen(navigation, 'mandate');
+  const observerDeskOpen = observerLayerIsOpen(navigation, 'observer-desk');
+  const situationWorkbenchOpen = observerLayerIsOpen(navigation, 'situations');
+  const historyWorkbenchOpen = observerPageIsVisible(navigation, 'chronicle');
+  const selectedEventId = selectedObserverEventId(navigation);
+  const selectedSituationId = topLayer?.kind === 'situations' ? topLayer.situationId : null;
+  const view = navigation.view;
+  const powerRosterSection = navigation.powerRosterSection;
   if (!world) {
     const mapProfile = getMapProfile(options.selectedMapProfileId);
     return JSON.stringify({
@@ -91,10 +119,11 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         seaZones: profile.simulation.seaZones.length,
         polities: profile.simulation.polities.length,
       })),
-      seedInputVisible: options.startOpen,
-      collectionOpen: options.collectionOpen,
+      seedInputVisible: startOpen,
+      collectionOpen,
+      navigationJourney: projectNavigationJourney(navigation),
       settings: {
-        open: options.settingsOpen,
+        open: settingsOpen,
         soundEnabled: options.interfaceSettings.sound.enabled,
         soundPromptVisible: false,
         motion: options.interfaceSettings.motion,
@@ -103,7 +132,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         audioState: options.audioState,
       },
       worldSaveCount: options.worldSaveCount,
-      primerOpen: options.primerOpen,
+      primerOpen,
       primerStep: options.primerStep,
       actions: ['开启新纪', '续读旧史', '世界收藏', '导入史册'],
     });
@@ -260,8 +289,8 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     const system = toSystemInspector(world, options.selection.kind, options.selection.id);
     if (system) selectedDetail = system;
   }
-  const selectedEvent = options.selectedEventId
-    ? findWorldHistoryEvent(world, options.selectedEventId)
+  const selectedEvent = selectedEventId
+    ? findWorldHistoryEvent(world, selectedEventId)
     : undefined;
   const selectedEventDetail = selectedEvent ? {
     id: selectedEvent.id,
@@ -277,12 +306,12 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     causes: selectedEvent.causes.map((cause) => ({ label: cause.label, role: cause.role, evidence: cause.evidence, refs: cause.refs ?? [] })),
     stateDeltas: selectedEvent.stateDeltas.slice(0, 12),
   } : null;
-  const rosterScope = rosterScopeFor(options.view, options.powerRosterSection);
+  const rosterScope = rosterScopeFor(view, powerRosterSection);
   const rosterProjection = rosterScope
     ? projectRosterCollection(world, rosterScope, options.rosterDiscovery[rosterScope], options.watchlist)
     : null;
   const visibleRoster = rosterProjection?.items
-    ?? (options.view === 'chronicle' ? historyRoster(world) : []);
+    ?? (view === 'chronicle' ? historyRoster(world) : []);
   const visibleRosterLimit = rosterScope ? options.rosterVisibleCounts[rosterScope] : 60;
   const topFlows = (options.historicalTurn === null ? toMapFlows(world, options.overlay) : []).map((flow) => ({
     id: flow.id,
@@ -305,18 +334,18 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
   const focusLeadProjection = options.observerLeadProjection
     ?? deriveObserverLeadProjection(world);
   const focusLeads = focusLeadProjection.leads;
-  const situationWorkbench = options.situationWorkbenchOpen
-    ? projectSituationWorkbench(world, options.selectedSituationId)
+  const situationWorkbench = situationWorkbenchOpen
+    ? projectSituationWorkbench(world, selectedSituationId)
     : null;
   const selectedCreationProfile = getMapProfile(options.selectedMapProfileId);
   return JSON.stringify({
-    mode: options.startOpen ? 'world-menu' : 'observing',
+    mode: startOpen ? 'world-menu' : 'observing',
     productVersion: APP_VERSION,
     appUpdate: getAppUpdateState(),
     worldSchemaVersion: world.schemaVersion,
     mapContentVersion: world.mapContentVersion,
     mapProfile: { id: mapProfile.id, revision: mapProfile.revision, name: mapProfile.name },
-    worldCreation: options.startOpen ? {
+    worldCreation: startOpen ? {
       selectedMapProfile: {
         id: selectedCreationProfile.id,
         revision: selectedCreationProfile.revision,
@@ -343,10 +372,10 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     seed: world.seed,
     playback: { running: options.running, speed: options.speed },
     observer: {
-      deskOpen: options.observerDeskOpen,
-      historyWorkbenchOpen: options.historyWorkbenchOpen,
-      situationWorkbenchOpen: options.situationWorkbenchOpen,
-      selectedSituationId: situationWorkbench?.selectedId ?? options.selectedSituationId,
+      deskOpen: observerDeskOpen,
+      historyWorkbenchOpen,
+      situationWorkbenchOpen,
+      selectedSituationId: situationWorkbench?.selectedId ?? selectedSituationId,
       selectedSituation: situationWorkbench?.selected ? {
         id: situationWorkbench.selected.id,
         type: situationWorkbench.selected.type,
@@ -384,9 +413,9 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       lastPauseRule: options.pauseRule,
       lastPauseSituationId: options.pauseSituationId,
       lastPauseSituationTrigger: options.pauseSituationTrigger,
-      collectionOpen: options.collectionOpen,
+      collectionOpen,
       worldSaveCount: options.worldSaveCount,
-      primerOpen: options.primerOpen,
+      primerOpen,
       primerStep: options.primerStep,
       focusLeads: focusLeads.map((lead) => ({
         id: lead.id,
@@ -440,16 +469,17 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       })),
     },
     interface: {
-      historyReadingLayer: deriveHistoryReadingLayer(options),
-      view: options.view,
-      powerRosterSection: options.powerRosterSection,
+      historyReadingLayer: deriveHistoryReadingLayer(navigation),
+      navigationJourney: projectNavigationJourney(navigation),
+      view,
+      powerRosterSection,
       overlay: options.overlay,
       settings: {
-        open: options.settingsOpen,
+        open: settingsOpen,
         soundEnabled: options.interfaceSettings.sound.enabled,
         soundPromptVisible: shouldShowObserverSoundInvitation(options.interfaceSettings, {
           turn: world.turn,
-          worldViewActive: options.view === 'world' && options.historicalTurn === null,
+          worldViewActive: view === 'world' && options.historicalTurn === null,
           selectionOpen: options.selection !== null,
         }),
         motion: options.interfaceSettings.motion,
@@ -489,10 +519,10 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         : 'closed',
       mapGestureActive: options.mapGestureActive,
       selected,
-      selectedEventId: options.selectedEventId,
-      archiveOpen: options.archiveOpen,
-      mandateOpen: options.mandateOpen,
-      primerOpen: options.primerOpen,
+      selectedEventId,
+      archiveOpen,
+      mandateOpen,
+      primerOpen,
       primerStep: options.primerStep,
       selectedDetail,
       selectedEvent: selectedEventDetail,
@@ -550,7 +580,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       importance: event.importance,
       causes: event.causes.map((cause) => cause.evidence),
     })),
-    visibleFamilies: options.view === 'powers' && options.powerRosterSection === 'families' ? families.slice(0, 60).map((item) => ({
+    visibleFamilies: view === 'powers' && powerRosterSection === 'families' ? families.slice(0, 60).map((item) => ({
       id: item.id,
       name: item.name,
       polity: polityName(item.polityId),

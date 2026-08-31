@@ -39,6 +39,7 @@ import {
   type HistoryRelatedEntityRef,
   type HistoryRelatedKind,
 } from '../view/v1-history';
+import { useDialogLayer } from './useDialogLayer';
 import '../styles/history-workbench.css';
 import { APP_VERSION } from '../version';
 
@@ -109,7 +110,6 @@ export function HistoryWorkbench({
   const dialogRef = useRef<HTMLElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const eventButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
-  const onCloseRef = useRef(onClose);
   const previousWorldTurnRef = useRef(world.turn);
   const [internalTurn, setInternalTurn] = useState(() => clampHistoryTurn(world, controlledTurn ?? world.turn));
   const [query, setQuery] = useState('');
@@ -127,7 +127,6 @@ export function HistoryWorkbench({
     exhausted: true,
   });
   const deferredQuery = useDeferredValue(query);
-  onCloseRef.current = onClose;
 
   const selectedTurn = clampHistoryTurn(world, controlledTurn ?? internalTurn);
   const date = historyTurnDate(selectedTurn);
@@ -245,42 +244,13 @@ export function HistoryWorkbench({
     eventButtonRefs.current = [];
   }, [safePage]);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const previouslyFocused = returnFocusTo ?? (
-      document.activeElement instanceof HTMLElement ? document.activeElement : null
-    );
-    const frame = requestAnimationFrame(() => searchRef.current?.focus());
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]):not([tabindex="-1"]), input:not([disabled]):not([tabindex="-1"]), select:not([disabled]):not([tabindex="-1"]), [href], [tabindex]:not([tabindex="-1"])',
-      ));
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      cancelAnimationFrame(frame);
-      document.removeEventListener('keydown', handleKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [open, returnFocusTo]);
+  useDialogLayer({
+    open,
+    containerRef: dialogRef,
+    initialFocusRef: searchRef,
+    onClose,
+    returnFocusTo,
+  });
 
   const changeTurn = useCallback((nextTurn: number) => {
     const next = clampHistoryTurn(world, nextTurn);
@@ -327,14 +297,14 @@ export function HistoryWorkbench({
     >
       <button
         type="button"
-        className="history-workbench-layer__backdrop"
+        className="history-workbench-layer__backdrop observer-dialog-backdrop"
         tabIndex={-1}
         aria-label="关闭天下史册"
         onClick={onClose}
       />
       <section
         ref={dialogRef}
-        className="history-workbench"
+        className="history-workbench observer-dialog-surface"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

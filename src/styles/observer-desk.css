@@ -752,9 +752,9 @@
   }
 
   .observer-desk {
-    top: 8px;
+    top: max(8px, var(--observer-dialog-safe-top));
     right: 8px;
-    bottom: 8px;
+    bottom: max(8px, var(--observer-dialog-safe-bottom));
     width: calc(100vw - 16px);
     border: 1px solid var(--observer-line-strong);
     box-shadow: 0 18px 60px rgb(30 29 25 / 31%);

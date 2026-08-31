@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { V03InterventionAction } from '../sim';
+import { useDialogLayer } from './useDialogLayer';
 import '../styles/mandate-panel.css';
 
 export interface MandateTarget {
@@ -67,35 +68,18 @@ export function MandatePanel({
     confirmDisasterRef.current = confirmDisaster;
   }, [confirmDisaster]);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const frame = requestAnimationFrame(() => closeRef.current?.focus());
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        if (confirmDisasterRef.current) setConfirmDisaster(false);
-        else onClose();
-        return;
-      }
-      if (event.key !== 'Tab' || !panelRef.current) return;
-      const focusable = Array.from(panelRef.current.querySelectorAll<HTMLElement>('button:not([disabled])'));
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last?.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first?.focus();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      cancelAnimationFrame(frame);
-      document.removeEventListener('keydown', handleKeyDown);
-      returnFocusTo?.focus();
-    };
-  }, [onClose, open, returnFocusTo]);
+  useDialogLayer({
+    open,
+    containerRef: panelRef,
+    initialFocusRef: closeRef,
+    onClose,
+    onEscape: () => {
+      if (!confirmDisasterRef.current) return false;
+      setConfirmDisaster(false);
+      return true;
+    },
+    returnFocusTo,
+  });
 
   if (!open) return null;
   const unavailable = usedThisTurn || available <= 0;
@@ -108,8 +92,8 @@ export function MandatePanel({
 
   return (
     <div className="mandate-layer">
-      <button type="button" className="mandate-layer__backdrop" tabIndex={-1} aria-label="关闭天意" onClick={onClose} />
-      <aside ref={panelRef} className="mandate-panel" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+      <button type="button" className="mandate-layer__backdrop observer-dialog-backdrop" tabIndex={-1} aria-label="关闭天意" onClick={onClose} />
+      <aside ref={panelRef} className="mandate-panel observer-dialog-surface" role="dialog" aria-modal="true" aria-labelledby={titleId}>
         <header className="mandate-panel__header">
           <div>
             <span><Sparkles size={13} aria-hidden="true" />轻拨天意</span>

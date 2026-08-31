@@ -1,8 +1,9 @@
 import { BookOpen, FileUp, Library, Sparkles, X } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useRef } from 'react';
 import { APP_VERSION } from '../version';
 import { listMapProfiles } from '../maps';
 import type { MapProfile, MapProfileId, MapPoint } from '../maps';
+import { useDialogLayer } from './useDialogLayer';
 import '../styles/world-start.css';
 
 const AVAILABLE_MAP_PROFILES = listMapProfiles();
@@ -29,6 +30,9 @@ export interface WorldStartProps {
   onImport: (file: File) => void;
   onCancel?: () => void;
   mapProfiles?: readonly MapProfile[];
+  initialFocus?: 'primary' | 'collection';
+  returnFocusTo?: HTMLElement | null;
+  shouldRestoreFocus?: () => boolean;
 }
 
 function polygonPoints(points: readonly MapPoint[]): string {
@@ -88,47 +92,23 @@ export function WorldStart({
   onImport,
   onCancel,
   mapProfiles = AVAILABLE_MAP_PROFILES,
+  initialFocus = 'primary',
+  returnFocusTo,
+  shouldRestoreFocus,
 }: WorldStartProps) {
   const dialogRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const primaryActionRef = useRef<HTMLButtonElement>(null);
-  const onCancelRef = useRef(onCancel);
-  onCancelRef.current = onCancel;
+  const collectionActionRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const previouslyFocused = document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null;
-    const focusFrame = requestAnimationFrame(() => primaryActionRef.current?.focus());
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape' && onCancelRef.current) {
-        event.preventDefault();
-        onCancelRef.current();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]):not([tabindex="-1"]), [href], [tabindex]:not([tabindex="-1"])',
-      ));
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      cancelAnimationFrame(focusFrame);
-      document.removeEventListener('keydown', handleKeyDown);
-      if (previouslyFocused) requestAnimationFrame(() => previouslyFocused.focus({ preventScroll: true }));
-    };
-  }, [open]);
+  useDialogLayer({
+    open,
+    containerRef: dialogRef,
+    initialFocusRef: initialFocus === 'collection' ? collectionActionRef : primaryActionRef,
+    onClose: onCancel,
+    returnFocusTo,
+    shouldRestoreFocus,
+  });
 
   if (!open) return null;
 
@@ -136,7 +116,7 @@ export function WorldStart({
     ?? mapProfiles[0];
 
   return (
-    <div ref={dialogRef} className="world-start" role="dialog" aria-modal="true" aria-labelledby="world-start-title">
+    <div ref={dialogRef} className="world-start observer-dialog-surface" role="dialog" aria-modal="true" aria-labelledby="world-start-title">
       <div className="world-start__grain" aria-hidden="true" />
       {onCancel ? (
         <button className="world-start__close" type="button" onClick={onCancel} aria-label="返回当前世界">
@@ -241,6 +221,7 @@ export function WorldStart({
           ) : null}
           {onOpenCollection ? (
             <button
+              ref={collectionActionRef}
               type="button"
               onClick={onOpenCollection}
               disabled={busy}

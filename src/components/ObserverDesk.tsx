@@ -10,10 +10,11 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useEffect, useId, useMemo, useRef, useState } from 'react';
+import { useId, useMemo, useRef, useState } from 'react';
 import { LATEST_APP_RELEASE } from '@app-changelog';
 import { appUpdateStatusText, type AppUpdateState } from '../infra/app-update';
 import { APP_VERSION } from '../version';
+import { useDialogLayer } from './useDialogLayer';
 import {
   OBSERVER_GUIDE_STEPS,
   normalizeObserverDeskSettings,
@@ -110,50 +111,19 @@ export function ObserverDesk({
   const descriptionId = useId();
   const dialogRef = useRef<HTMLElement>(null);
   const closeRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
-  onCloseRef.current = onClose;
   const safeSettings = useMemo(() => normalizeObserverDeskSettings(settings), [settings]);
   const progress = observerGuideProgress(safeSettings);
   const [updateBusy, setUpdateBusy] = useState(false);
   const updateAvailable = appUpdate.phase === 'available';
   const lastChecked = checkedAtLabel(appUpdate.checkedAt);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const previouslyFocused = returnFocusTo ?? (document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null);
-    const frame = requestAnimationFrame(() => closeRef.current?.focus());
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCloseRef.current();
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), select:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      ));
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      cancelAnimationFrame(frame);
-      document.removeEventListener('keydown', handleKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [open, returnFocusTo]);
+  useDialogLayer({
+    open,
+    containerRef: dialogRef,
+    initialFocusRef: closeRef,
+    onClose,
+    returnFocusTo,
+  });
 
   if (!open) return null;
 
@@ -180,14 +150,14 @@ export function ObserverDesk({
     <div className="observer-desk-layer">
       <button
         type="button"
-        className="observer-desk-layer__backdrop"
+        className="observer-desk-layer__backdrop observer-dialog-backdrop"
         tabIndex={-1}
         aria-label="关闭观察台"
         onClick={onClose}
       />
       <aside
         ref={dialogRef}
-        className="observer-desk"
+        className="observer-desk observer-dialog-surface"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

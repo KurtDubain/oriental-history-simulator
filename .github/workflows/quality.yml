@@ -58,6 +58,9 @@ jobs:
       - name: Run primary browser flow
         run: npm run test:e2e
 
+      - name: Run shell and browser state flow
+        run: npm run test:e2e:trim016
+
       - name: Run explainable roster browser flow
         run: npm run test:e2e:roster01
 

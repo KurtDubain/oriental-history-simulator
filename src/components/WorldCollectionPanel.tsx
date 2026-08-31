@@ -13,6 +13,7 @@ import {
 import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import type { WorldSaveSummary } from '../persistence/storage';
 import { MAX_LABEL_LENGTH, MAX_WORLD_SLOTS } from '../persistence/storage';
+import { useDialogLayer } from './useDialogLayer';
 import '../styles/world-collection.css';
 
 type MaybePromise = void | Promise<void>;
@@ -78,15 +79,12 @@ export function WorldCollectionPanel({
   const closeRef = useRef<HTMLButtonElement>(null);
   const createInputRef = useRef<HTMLInputElement>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
-  const onCloseRef = useRef(onClose);
   const modeRef = useRef<{ editing: EditingState; deleting: string | null }>({ editing: null, deleting: null });
   const [newLabel, setNewLabel] = useState('');
   const [editing, setEditing] = useState<EditingState>(null);
   const [deletingSlot, setDeletingSlot] = useState<string | null>(null);
   const [pendingAction, setPendingAction] = useState<string | null>(null);
   const [actionError, setActionError] = useState<string | null>(null);
-
-  onCloseRef.current = onClose;
   modeRef.current = { editing, deleting: deletingSlot };
 
   const orderedSaves = useMemo(() => [
@@ -113,44 +111,24 @@ export function WorldCollectionPanel({
     return () => cancelAnimationFrame(frame);
   }, [editing?.slot]);
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const previouslyFocused = returnFocusTo ?? (document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null);
-    const frame = requestAnimationFrame(() => closeRef.current?.focus());
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        if (modeRef.current.deleting) setDeletingSlot(null);
-        else if (modeRef.current.editing) setEditing(null);
-        else onCloseRef.current();
-        return;
+  useDialogLayer({
+    open,
+    containerRef: dialogRef,
+    initialFocusRef: closeRef,
+    onClose,
+    onEscape: () => {
+      if (modeRef.current.deleting) {
+        setDeletingSlot(null);
+        return true;
       }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), input:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      )).filter((element) => element.offsetParent !== null);
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
+      if (modeRef.current.editing) {
+        setEditing(null);
+        return true;
       }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      cancelAnimationFrame(frame);
-      document.removeEventListener('keydown', handleKeyDown);
-      queueMicrotask(() => previouslyFocused?.focus({ preventScroll: true }));
-    };
-  }, [open, returnFocusTo]);
+      return false;
+    },
+    returnFocusTo,
+  });
 
   if (!open) return null;
 
@@ -184,14 +162,14 @@ export function WorldCollectionPanel({
     <div className="world-collection-layer">
       <button
         type="button"
-        className="world-collection-layer__backdrop"
+        className="world-collection-layer__backdrop observer-dialog-backdrop"
         tabIndex={-1}
         aria-label="关闭世界收藏"
         onClick={onClose}
       />
       <section
         ref={dialogRef}
-        className="world-collection"
+        className="world-collection observer-dialog-surface"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}

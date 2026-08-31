@@ -10,6 +10,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useId, useRef, useState } from 'react';
 import type { MapOverlay } from './WorldMap';
+import { useDialogLayer } from './useDialogLayer';
 import '../styles/map-primer.css';
 
 export type MapPrimerStep = 'terrain' | 'situation' | 'history';
@@ -21,7 +22,7 @@ export interface MapPrimerProps {
   onStep: (step: MapPrimerStep) => void;
   onClose: (reason: MapPrimerCloseReason) => void;
   onSelectOverlay: (overlay: MapOverlay) => void;
-  onAdvance: () => void;
+  onAdvance: () => boolean | void;
   onOpenWhy?: () => void;
   returnFocusTo?: HTMLElement | null;
 }
@@ -140,49 +141,18 @@ export function MapPrimer({
   const descriptionId = useId();
   const dialogRef = useRef<HTMLElement>(null);
   const actionRef = useRef<HTMLButtonElement>(null);
-  const onCloseRef = useRef(onClose);
   const [historyAdvanced, setHistoryAdvanced] = useState(false);
-  onCloseRef.current = onClose;
 
   const stepIndex = Math.max(0, MAP_PRIMER_STEPS.findIndex((item) => item.id === currentStep));
   const step = MAP_PRIMER_STEPS[stepIndex];
 
-  useEffect(() => {
-    if (!open) return undefined;
-    const previouslyFocused = returnFocusTo ?? (document.activeElement instanceof HTMLElement
-      ? document.activeElement
-      : null);
-    const frame = requestAnimationFrame(() => actionRef.current?.focus());
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        onCloseRef.current('skipped');
-        return;
-      }
-      if (event.key !== 'Tab' || !dialogRef.current) return;
-      const focusable = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
-        'button:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
-      ));
-      if (!focusable.length) return;
-      const first = focusable[0];
-      const last = focusable[focusable.length - 1];
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault();
-        last.focus();
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault();
-        first.focus();
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => {
-      cancelAnimationFrame(frame);
-      document.removeEventListener('keydown', handleKeyDown);
-      previouslyFocused?.focus();
-    };
-  }, [open, returnFocusTo]);
+  useDialogLayer({
+    open,
+    containerRef: dialogRef,
+    initialFocusRef: actionRef,
+    onClose: () => onClose('skipped'),
+    returnFocusTo,
+  });
 
   useEffect(() => {
     if (!open || currentStep !== 'history') setHistoryAdvanced(false);
@@ -202,12 +172,11 @@ export function MapPrimer({
       return;
     }
     if (!historyAdvanced) {
-      onAdvance();
-      setHistoryAdvanced(true);
+      if (onAdvance() !== false) setHistoryAdvanced(true);
       return;
     }
-    onOpenWhy?.();
     onClose('completed');
+    onOpenWhy?.();
   };
 
   const primaryLabel = currentStep === 'history' && historyAdvanced
@@ -218,14 +187,14 @@ export function MapPrimer({
     <div className="map-primer-layer" data-map-primer>
       <button
         type="button"
-        className="map-primer-layer__backdrop"
+        className="map-primer-layer__backdrop observer-dialog-backdrop"
         tabIndex={-1}
         aria-label="跳过地图导览"
         onClick={() => onClose('skipped')}
       />
       <aside
         ref={dialogRef}
-        className="map-primer"
+        className="map-primer observer-dialog-surface"
         role="dialog"
         aria-modal="true"
         aria-labelledby={titleId}
