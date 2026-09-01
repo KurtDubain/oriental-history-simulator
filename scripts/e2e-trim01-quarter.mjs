@@ -138,8 +138,8 @@ async function assertQuarterProjection(page, scenario, current) {
     `${scenario.slug} 同一季不得重复 story id`,
   );
   assert.ok(
-    stories.every((story) => story.id && story.title && ['situation', 'event'].includes(story.kind)),
-    `${scenario.slug} 每件事必须有稳定 id、具体标题和合法类型`,
+    stories.every((story) => story.id && story.title && story.kind === 'event'),
+    `${scenario.slug} 每件事必须有稳定 id、具体标题，裸局势不得补进季报`,
   );
 
   assert.deepEqual(
@@ -242,20 +242,38 @@ async function assertEvidenceIdentity(page, scenario, sourceEventId, evidenceSta
   assert.equal(evidenceState.interface.selectedEventId, sourceEventId, `${scenario.slug} ${detail}的全文快照必须保留同一史事`);
 }
 
-async function exerciseQuarterSituationHistoryPath(page, scenario, baseline) {
-  const situationStory = page.locator(
-    '[data-testid="quarter-pulse"][data-history-layer="quarter"] [data-testid="quarter-pulse-situation"]',
+async function exerciseQuarterEventHistoryPath(page, scenario, baseline) {
+  const eventStory = page.locator(
+    '[data-testid="quarter-pulse"][data-history-layer="quarter"] [data-testid="quarter-pulse-event"]',
   ).first();
-  if (!(await situationStory.count())) return false;
+  if (!(await eventStory.count())) return false;
 
   await assertHistoryLayer(page, scenario, 'quarter', baseline, '从本季变化出发');
-  await assertTouchTarget(situationStory, scenario, '本季局势入口');
-  const situationId = await situationStory.getAttribute('data-situation-id');
-  assert.ok(situationId, `${scenario.slug} 本季局势必须携带稳定身份`);
-  await situationStory.click();
+  await assertTouchTarget(eventStory, scenario, '本季具体史事入口');
+  const sourceEventId = await eventStory.getAttribute('data-event-id');
+  await eventStory.click();
+  const evidenceState = await assertHistoryLayer(page, scenario, 'evidence', baseline, '从本季史事查看何故与证据');
+  await assertEvidenceIdentity(page, scenario, sourceEventId, evidenceState, '本季具体史事');
+
+  const evidenceClose = page.locator(`${HISTORY_LAYER_SELECTORS.evidence} .observer-causal-drawer__header button`);
+  await assertTouchTarget(evidenceClose, scenario, '本季史事返回入口');
+  await evidenceClose.click();
+  await assertHistoryLayer(page, scenario, 'quarter', baseline, '因果阅读后返回本季变化');
+  await page.waitForFunction((id) => document.activeElement?.getAttribute('data-event-id') === id, sourceEventId);
+  return true;
+}
+
+async function exerciseObserverSituationHistoryPath(page, scenario, baseline) {
+  const situationTrigger = page.locator('[data-situation-workbench-trigger="true"]');
+  if (!(await situationTrigger.count()) || !(await situationTrigger.isVisible())) return false;
+
+  await assertHistoryLayer(page, scenario, 'quarter', baseline, '从当世三问出发');
+  await assertTouchTarget(situationTrigger, scenario, '持续局势入口');
+  await situationTrigger.click();
 
   const situationState = await assertHistoryLayer(page, scenario, 'situation', baseline, '打开持续局势');
-  assert.equal(situationState.observer.selectedSituationId, situationId, `${scenario.slug} 季报必须直达同一局势`);
+  const situationId = situationState.observer.selectedSituationId;
+  assert.ok(situationId, `${scenario.slug} 持续局势入口必须选中稳定身份`);
 
   const workbench = page.locator(HISTORY_LAYER_SELECTORS.situation);
   let causalEntry = workbench.locator('.situation-workbench__timeline button').first();
@@ -289,7 +307,7 @@ async function exerciseQuarterSituationHistoryPath(page, scenario, baseline) {
   await assertTouchTarget(situationClose, scenario, '持续局势关闭入口');
   await situationClose.click();
   await assertHistoryLayer(page, scenario, 'quarter', baseline, '局势阅读后返回季报');
-  await page.waitForFunction((id) => document.activeElement?.getAttribute('data-situation-id') === id, situationId);
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-situation-workbench-trigger') === 'true');
   return true;
 }
 
@@ -855,6 +873,7 @@ async function verifyScenario(browser, scenario) {
     }
     await exerciseLayerPicker(page, scenario, initial);
     let previousDate = '';
+    let quarterEventPathCovered = false;
     let situationHistoryPathCovered = false;
     for (let turn = 1; turn <= QUARTERS; turn += 1) {
       await page.getByRole('button', { name: '推进至下一季', exact: true }).click();
@@ -866,12 +885,12 @@ async function verifyScenario(browser, scenario) {
       await assertQuarterProjection(page, scenario, current);
       await assertHighlightPulse(page, scenario, turn - 1, current.interface.quarterPulse);
       await assertNoPageOverflow(page, scenario);
-      if (!situationHistoryPathCovered) {
-        situationHistoryPathCovered = await exerciseQuarterSituationHistoryPath(page, scenario, current);
-      }
+      if (!quarterEventPathCovered) quarterEventPathCovered = await exerciseQuarterEventHistoryPath(page, scenario, current);
+      if (!situationHistoryPathCovered) situationHistoryPathCovered = await exerciseObserverSituationHistoryPath(page, scenario, current);
     }
 
-    assert.equal(situationHistoryPathCovered, true, `${scenario.slug} 八季内必须走通季报→局势→因果→返回`);
+    assert.equal(quarterEventPathCovered, true, `${scenario.slug} 八季内必须走通季报→具体史事→因果→返回`);
+    assert.equal(situationHistoryPathCovered, true, `${scenario.slug} 八季内必须走通三问→局势→具体因果→返回`);
 
     const browsingBaseline = await snapshot(page);
     await exerciseChronicleHistoryPath(page, scenario, browsingBaseline);

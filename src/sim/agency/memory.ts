@@ -697,9 +697,10 @@ export function toPersonalMemoryPlayerViews(world: WorldState, characterId: stri
   if (!character) return [];
   const state = world.agencySystem.characters.find((entry) => entry.characterId === characterId);
   if (!state) return [];
-  return state.memories.map((memory) => {
+  return state.memories.filter((memory) => !memory.kind.startsWith('situation_')).map((memory) => {
     const sourceEvent = [...world.history].reverse().find((event) => (
-      event.sourceFactIds.some((factId) => memory.sourceFactIds.includes(factId))
+      !event.kind.startsWith('situation_')
+      && event.sourceFactIds.some((factId) => memory.sourceFactIds.includes(factId))
     ));
     return {
       id: memory.id,

@@ -5,6 +5,7 @@ import {
   type ObserverLeadContinuityState,
 } from './observer-leads';
 import { projectSituationHistoricalScenes } from './historical-scenes';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 
 export const OBSERVER_DESK_STORAGE_KEY = 'canghai-observer-desk-v1';
 export const OBSERVER_DESK_SETTINGS_VERSION = 3 as const;
@@ -353,16 +354,10 @@ const SITUATION_TRIGGER_PRIORITY: Readonly<Record<ObserverSituationPauseTrigger,
 
 const SITUATION_TRIGGER_LABEL: Readonly<Record<ObserverSituationPauseTrigger, string>> = {
   formation: '形成',
-  'phase-change': '阶段变化',
+  'phase-change': '新的动向',
   'core-character-death': '核心人物死亡',
   resolution: '结案',
 };
-
-const SITUATION_PHASE_LABEL = {
-  emerging: '萌芽',
-  active: '发展',
-  critical: '临界',
-} as const;
 
 function stableCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -441,8 +436,7 @@ function milestoneCandidateTitle(
   const title = situationPauseTitle(world, situation);
   if (fact.payload.transition === 'formed') return `${title}开始显形`;
   if (fact.payload.transition === 'resolved') return `${title}告一段落`;
-  const phase = fact.payload.toPhase ? SITUATION_PHASE_LABEL[fact.payload.toPhase] : '未定';
-  return `${title}转入${phase}`;
+  return `${title}有了新的动向`;
 }
 
 function situationPauseCandidate(
@@ -486,11 +480,14 @@ export function worldToSituationPauseCandidates(world: WorldState): ObserverPaus
     const situation = situationById.get(fact.payload.situationId);
     if (!situation || !milestoneMatchesSituation(fact, situation, report.turn)) continue;
     const trigger = milestoneTrigger(fact);
+    const latestScene = projectSituationHistoricalScenes(world, situation, 1, fact.turn, 'active')[0];
+    const currentScene = latestScene?.turn === fact.turn ? latestScene : null;
+    if ((trigger === 'formation' || trigger === 'phase-change') && !currentScene) continue;
     const candidate = situationPauseCandidate(
       situation,
       trigger,
       fact,
-      milestoneCandidateTitle(world, situation, fact),
+      currentScene?.title ?? milestoneCandidateTitle(world, situation, fact),
     );
     candidates.set(candidate.id, candidate);
   }
@@ -572,6 +569,11 @@ export function historyEventToPauseCandidate(event: HistoryEvent): ObserverPause
     signals,
     refs: [...refs.values()],
   };
+}
+
+/** Situation bookkeeping stays authoritative but never enters generic player alerts. */
+export function historyEventsToPauseCandidates(events: readonly HistoryEvent[]): ObserverPauseCandidate[] {
+  return events.filter(isDefaultVisibleHistoryEvent).map(historyEventToPauseCandidate);
 }
 
 function matchingWatchItems(
@@ -660,7 +662,7 @@ export function evaluateObserverPause(
       };
     }
     if (normalized.pauseRules.wars && candidate.signals.includes('war')) {
-      return { eventId: candidate.id, eventTitle: candidate.title, rule: 'wars', reason: '战争态势发生变化', watchMatches };
+      return { eventId: candidate.id, eventTitle: candidate.title, rule: 'wars', reason: '出现新的战事记录', watchMatches };
     }
     if (normalized.pauseRules.powerTransfers && candidate.signals.includes('power-transfer')) {
       return { eventId: candidate.id, eventTitle: candidate.title, rule: 'powerTransfers', reason: '发生政变、继承或政权转移', watchMatches };

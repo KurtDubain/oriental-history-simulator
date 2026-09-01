@@ -222,6 +222,46 @@ describe('roster domain projection', () => {
     expect(archiveDecodeCacheEntryCount()).toBe(0);
   });
 
+  it('never promotes Situation bookkeeping as a clickable roster event', () => {
+    const world = advanceWorld(createWorld('名录只讲具体史事'));
+    const person = world.characters.find((item) => item.alive) ?? world.characters[0];
+    const wrappedEventId = 'event_situation_wrapper';
+    world.history.push({
+      id: wrappedEventId,
+      turn: world.turn,
+      year: world.year,
+      season: world.season,
+      category: '政治',
+      kind: 'situation_phase_changed',
+      title: `${person.name}所在局势转入临界`,
+      summary: '这是后台局势包装，不是人物行动。',
+      importance: 5,
+      actorIds: [person.id],
+      polityIds: [person.polityId],
+      regionIds: [person.locationRegionId],
+      causes: [],
+      evidence: [],
+      stateDeltas: [],
+      sourceFactIds: [],
+      situationIds: ['situation_test'],
+    });
+    if (!world.lastTurn) throw new Error('expected a settled turn report');
+    world.lastTurn = {
+      ...world.lastTurn,
+      eventIds: [...world.lastTurn.eventIds, wrappedEventId],
+    };
+
+    const directory = projectRosterDirectory(world);
+    const reasons = [
+      ...directory.people.items,
+      ...directory.polities.items,
+      ...directory.families.items,
+      ...directory.military.items,
+    ].map((item) => item.reason);
+    expect(reasons.some((reason) => reason?.target.kind === 'event' && reason.target.id === wrappedEventId)).toBe(false);
+    expect(world.history.some((item) => item.id === wrappedEventId)).toBe(true);
+  });
+
   it('maps shell views to roster scopes without hidden state', () => {
     expect(rosterScopeFor('people', 'military')).toBe('people');
     expect(rosterScopeFor('powers', 'families')).toBe('families');

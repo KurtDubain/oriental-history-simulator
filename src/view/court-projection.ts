@@ -10,6 +10,7 @@ import {
   recentFactionPowerMovements,
 } from '../sim/politics/power-ledger';
 import { readWorldFacts, readWorldHistory } from '../sim/archive';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 
 export type CourtAccessBand = 0 | 1 | 2;
 export type CourtRelationKind = 'allied' | 'opposed';
@@ -137,7 +138,8 @@ function positionLabel(band: CourtFactionPositionView['nearestBand']): CourtFact
 
 function createCourtEvidenceIndex(world: WorldState, scope: CourtEvidenceScope): CourtEvidenceIndex {
   const facts = scope === 'all' ? readWorldFacts(world) : world.facts;
-  const history = scope === 'all' ? readWorldHistory(world) : world.history;
+  const history = (scope === 'all' ? readWorldHistory(world) : world.history)
+    .filter(isDefaultVisibleHistoryEvent);
   const eventsBySourceFactId = new Map<string, WorldState['history'][number][]>();
   for (const event of history) {
     for (const sourceFactId of event.sourceFactIds) {

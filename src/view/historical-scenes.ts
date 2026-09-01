@@ -1,6 +1,7 @@
 import type { SimulationFact, StateDelta, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations';
 import { readWorldFacts, readWorldHistory } from '../sim/archive';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import { historyTurnDate } from './v1-history';
 
 export interface FactNarrative {
@@ -66,7 +67,7 @@ function factHistoryIds(
 ): string[] {
   const history = readScope === 'all' ? readWorldHistory(world) : world.history;
   return history
-    .filter((event) => event.sourceFactIds.some((id) => factIds.has(id)))
+    .filter((event) => isDefaultVisibleHistoryEvent(event) && event.sourceFactIds.some((id) => factIds.has(id)))
     .sort((left, right) => right.turn - left.turn || stableCompare(right.id, left.id))
     .map((event) => event.id)
     .slice(0, 4);

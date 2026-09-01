@@ -150,7 +150,7 @@ import {
   completeObserverGuideStep,
   createObserverDeskSettings,
   evaluateObserverPause,
-  historyEventToPauseCandidate,
+  historyEventsToPauseCandidates,
   observerGuideProgress,
   observerWatchKey,
   removeObserverWatch,
@@ -163,6 +163,7 @@ import {
   type ObserverPauseMatch,
   type ObserverWatchItem,
 } from './view/v1-observer';
+import { isDefaultVisibleHistoryEvent } from './view/history-visibility';
 import {
   AGENCY_SHADOW_STORAGE_KEY,
   advanceAgencyShadowBranch,
@@ -1209,14 +1210,15 @@ export function App() {
         }
       }
       const newEvents = next.history.slice(oldHistoryLength);
-      const historyCue = quarterHistoryCue(newEvents);
+      const visibleNewEvents = newEvents.filter(isDefaultVisibleHistoryEvent);
+      const historyCue = quarterHistoryCue(visibleNewEvents);
       const turnCue: AudioCue | null = embodiedActionResolved
         ? 'action_resolve'
         : historyCue ?? (source === 'manual' ? 'quarter' : null);
       if (turnCue) gameAudio.play(turnCue, source === 'manual' ? 0.76 : 0.5);
       const pauseCandidates = [
         ...worldToSituationPauseCandidates(next),
-        ...newEvents.map(historyEventToPauseCandidate),
+        ...historyEventsToPauseCandidates(newEvents),
       ];
       let nextObserverSettings = completeObserverGuideStep(observerSettingsRef.current, 'quarter-advanced');
       nextObserverSettings = applyObserverEventAlerts(nextObserverSettings, pauseCandidates);
@@ -1391,7 +1393,7 @@ export function App() {
     primerAdvanceDoneRef.current = true;
     const next = worldRef.current;
     if (!next) return false;
-    const newEvents = next.history.slice(oldHistoryLength);
+    const newEvents = next.history.slice(oldHistoryLength).filter(isDefaultVisibleHistoryEvent);
     const newestMeaningful = [...newEvents].reverse().find((event) => event.importance >= 3 && event.causes.length > 0)
       ?? [...newEvents].reverse().find((event) => event.causes.length > 0)
       ?? newEvents.at(-1)
@@ -1404,8 +1406,8 @@ export function App() {
     const current = worldRef.current;
     if (!current) return;
     const eventId = primerNewestEventIdRef.current
-      ?? [...current.history].reverse().find((event) => event.importance >= 3 && event.causes.length > 0)?.id
-      ?? current.history.at(-1)?.id
+      ?? [...current.history].reverse().find((event) => isDefaultVisibleHistoryEvent(event) && event.importance >= 3 && event.causes.length > 0)?.id
+      ?? [...current.history].reverse().find(isDefaultVisibleHistoryEvent)?.id
       ?? null;
     if (!eventId) {
       setToast('这一季没有留下可追溯的重大史事，可继续推进后再查看。');
@@ -2031,7 +2033,7 @@ export function App() {
       return;
     }
     if (step === 'cause-traced') {
-      const event = current.history.at(-1);
+      const event = [...current.history].reverse().find(isDefaultVisibleHistoryEvent);
       if (event) {
         openCausalEvent(event.id);
       }

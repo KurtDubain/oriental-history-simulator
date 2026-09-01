@@ -121,7 +121,7 @@ export function toCausalEvent(world: WorldState, item: HistoryEvent): CausalEven
     id: `${item.id}-cause-${index}`,
     role: factorRole(index, item.causes.length, cause.role),
     label: cause.label,
-    detail: cause.weight >= 0.7 ? '这是促成该结果的主导压力。' : '这一条件放大了行动发生或成功的可能。',
+    detail: cause.weight >= 0.7 ? '史实将其列为这件事的主要原因。' : '史实将其列为同季相关条件。',
     actor: (item.kind === 'world_created' && index === 0)
       || cause.role === '选择'
       || (!cause.role && index === item.causes.length - 1)

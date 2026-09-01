@@ -89,4 +89,27 @@ describe('HistoryWorkbench shell', () => {
     expect(markup).toContain('aria-busy="true"');
     expect(archiveDecodeCacheEntryCount()).toBe(0);
   });
+
+  it('shows concrete Chronicle records but hides Situation bookkeeping in the real workbench query', () => {
+    const world = createWorld('史册工作台去包装测试');
+    const wrapped = event('event_situation_wrapper', world.turn, '局势转入临界');
+    wrapped.kind = 'situation_phase_changed';
+    const concrete = event('event_concrete_action', world.turn, '苏令月调任开封');
+    concrete.kind = 'appointment';
+    world.history.push(wrapped, concrete);
+
+    const markup = renderToStaticMarkup(createElement(HistoryWorkbench, {
+      open: true,
+      world,
+      onSelectEvent: vi.fn(),
+      onTurnChange: vi.fn(),
+      onClose: vi.fn(),
+      onReset: vi.fn(),
+    }));
+
+    expect(markup).toContain('苏令月调任开封');
+    expect(markup).not.toContain('局势转入临界');
+    expect(markup).not.toContain('本季史事');
+    expect(markup).not.toContain('本季载录');
+  });
 });

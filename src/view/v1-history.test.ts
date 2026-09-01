@@ -178,6 +178,26 @@ describe('V1 history territory reconstruction', () => {
 });
 
 describe('V1 history search', () => {
+  it('keeps Situation detector milestones in authority but out of ordinary chronicles', () => {
+    const world = historyWorld();
+    const person = world.characters[0];
+    const concrete = historyEvent('concrete-court-action', 2, {
+      kind: 'court_action',
+      actorIds: [person.id],
+      title: `${person.name}正式上奏`,
+    });
+    const milestone = historyEvent('situation-phase', 2, {
+      kind: 'situation_phase_changed',
+      actorIds: [person.id],
+      title: '局势转入发展阶段',
+    });
+    world.history = [concrete, milestone];
+
+    expect(world.history).toContain(milestone);
+    expect(filterHistoryEvents(world).map((event) => event.id)).toEqual([concrete.id]);
+    expect(buildHistoryRelatedEntities(world).find((item) => item.kind === 'character' && item.id === person.id)?.eventCount).toBe(1);
+  });
+
   it('searches narrative, evidence and entity names, then combines causal filters', () => {
     const world = historyWorld();
     const person = world.characters[0];
@@ -287,6 +307,9 @@ describe('V1 history search', () => {
       .toEqual([coldEvent.id]);
     clearWorldArchiveDecodeCache();
     expect(buildHistoryRelatedEntities(world).find((option) => (
+      option.kind === 'character' && option.id === person.id
+    ))).toBeUndefined();
+    expect(buildHistoryRelatedEntities(world, 'archive-metadata').find((option) => (
       option.kind === 'character' && option.id === person.id
     ))?.eventCount).toBe(1);
     expect(reconstructHistoricalTerritory(world, 3).controllerByRegionId[region.id]).toBe(secondPolity.id);

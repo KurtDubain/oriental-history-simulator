@@ -10,6 +10,7 @@ import {
   readWorldTerritoryDeltas,
   summarizeWorldHistory,
 } from '../sim/archive';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 
 export const HISTORY_EVENT_CATEGORIES = [
   '世界',
@@ -271,6 +272,7 @@ export function filterHistoryEvents(
   return readWorldHistory(world)
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => {
+      if (!isDefaultVisibleHistoryEvent(event)) return false;
       if (event.turn > throughTurn || event.importance < minimumImportance) return false;
       if (categorySet.size > 0 && !categorySet.has(event.category)) return false;
       if (filters.relatedEntity && !eventReferencesEntity(event, filters.relatedEntity)) return false;
@@ -282,11 +284,33 @@ export function filterHistoryEvents(
     .map(({ event }) => event);
 }
 
-export function buildHistoryRelatedEntities(world: WorldState): HistoryRelatedEntityOption[] {
-  const counts = new Map(readWorldHistoryRelatedFacets(world).map((facet) => [
-    `${facet.kind}:${facet.id}`,
-    facet.eventCount,
-  ]));
+export function buildHistoryRelatedEntities(
+  world: WorldState,
+  source: 'visible-hot' | 'archive-metadata' = 'visible-hot',
+): HistoryRelatedEntityOption[] {
+  const counts = source === 'archive-metadata'
+    ? new Map(readWorldHistoryRelatedFacets(world).map((facet) => [
+        `${facet.kind}:${facet.id}`,
+        facet.eventCount,
+      ]))
+    : new Map<string, number>();
+  if (source === 'visible-hot') {
+    for (const event of world.history) {
+      if (!isDefaultVisibleHistoryEvent(event)) continue;
+      const related = new Set<string>();
+      for (const id of event.actorIds) related.add(`character:${id}`);
+      for (const id of event.polityIds) related.add(`polity:${id}`);
+      for (const id of event.regionIds) related.add(`region:${id}`);
+      for (const reference of event.causes.flatMap((cause) => cause.refs ?? [])) {
+        if (reference.entityType === 'character'
+          || reference.entityType === 'polity'
+          || reference.entityType === 'region') {
+          related.add(`${reference.entityType}:${reference.entityId}`);
+        }
+      }
+      for (const key of related) counts.set(key, (counts.get(key) ?? 0) + 1);
+    }
+  }
 
   const options: HistoryRelatedEntityOption[] = [];
   for (const character of world.characters) {

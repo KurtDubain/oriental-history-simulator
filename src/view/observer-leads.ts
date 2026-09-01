@@ -170,7 +170,7 @@ function derivePersonLead(world: WorldState): RankedLead {
       id: `lead-person-fallback:${region?.id ?? 'world'}`,
       slot: 'person',
       label: '人物线',
-      question: '下一位改变时代的人会从哪里出现？',
+      question: '当世有哪些人物已经被记名？',
       evidence: ['当世暂无记名人物', '地方仍在积累机会'],
       nextSignal: '留意新人物被推到历史前台',
       stage: '伏线',
@@ -185,21 +185,20 @@ function derivePersonLead(world: WorldState): RankedLead {
   const openlyRestive = person.rebellionReadiness >= 45
     || (person.rebellionReadiness >= 28 && person.ambition - person.loyalty >= 24);
   const commandsForces = Boolean(person.commandingArmyId || person.commandingFleetId || person.role === '将领');
-  const question = openlyRestive
-    ? `${person.name}会不会走向自立？`
-    : commandsForces
-      ? `${person.name}会成为名将，还是新的军阀？`
-      : `${person.name}能否把野心变成权位？`;
+  const question = commandsForces
+    ? `${person.name}现在掌着哪支兵马？`
+    : `${person.name}目前凭什么立足？`;
   const nextSignal = openlyRestive
     ? '留意拒令、割据或公开举兵'
     : commandsForces
       ? '留意新战功、主帅更替与军心归属'
       : '留意升迁、结盟与朝堂权力转移';
   const position = person.commandingArmyId
-    ? '掌军在手'
+    ? world.armies.find((item) => item.id === person.commandingArmyId)?.name ?? '掌军在手'
     : person.commandingFleetId
-      ? '统领水师'
+      ? world.fleets.find((item) => item.id === person.commandingFleetId)?.name ?? '统领水师'
       : `${person.role} · 影响${Math.round(person.influence)}`;
+  const location = regionName(world, person.locationRegionId);
 
   return {
     id: `lead-person:${person.id}`,
@@ -207,8 +206,8 @@ function derivePersonLead(world: WorldState): RankedLead {
     label: '人物线',
     question,
     evidence: [
-      `野心${Math.round(person.ambition)} · 忠诚${Math.round(person.loyalty)}`,
-      `${position} · 叛意${Math.round(person.rebellionReadiness)}`,
+      `${person.role} · ${person.age}岁 · 声望${Math.round(person.renown)}`,
+      `${position} · 现于${location}`,
     ],
     nextSignal,
     stage: stageFor(tension),
@@ -264,7 +263,7 @@ function derivePolityLead(world: WorldState): RankedLead {
       id: `lead-polity-fallback:${region?.id ?? 'world'}`,
       slot: 'polity',
       label: '国势线',
-      question: '下一座朝廷会在何处形成？',
+      question: '天下眼下由哪些政权治理？',
       evidence: ['天下暂无成形政权', '地方秩序仍在重组'],
       nextSignal: '留意新政权建立与首都出现',
       stage: '临界',
@@ -283,14 +282,14 @@ function derivePolityLead(world: WorldState): RankedLead {
   const war = winner.war;
   const enemyId = war ? (war.attackerId === polity.id ? war.defenderId : war.attackerId) : null;
   const question = war
-    ? `${polity.name}能否撑过与${polityName(world, enemyId ?? '')}的战争？`
+    ? `${polity.name}眼下与谁交兵？`
     : winner.successionPressure >= 58
-      ? `${polity.name}能否安稳度过下一次权力交接？`
+      ? `${polity.name}的君位眼下由谁维系？`
       : polity.legitimacy < 58 || polity.authority < 55
-        ? `${polity.name}的朝廷还能压住地方吗？`
-        : `${polity.name}会继续兴盛，还是先从内部失衡？`;
+        ? `${polity.name}眼下能调动多少地方？`
+        : `${polity.name}眼下靠什么维持秩序？`;
   const secondEvidence = war
-    ? `战争疲惫${Math.round(polity.warWeariness)} · 战争耗竭${Math.round(war.exhaustion)}`
+    ? `正与${polityName(world, enemyId ?? '')}交兵 · 疲惫${Math.round(polity.warWeariness)} · 耗竭${Math.round(war.exhaustion)}`
     : winner.successionPressure >= 58
       ? `${ruler?.name ?? '君位空悬'} · ${ruler ? `${ruler.age}岁 · 健康${Math.round(ruler.health)}` : '继承未定'}`
       : faction
@@ -331,7 +330,7 @@ function warLead(world: WorldState, war: WarState): RankedLead {
     id: `lead-tension-war:${war.id}`,
     slot: 'tension',
     label: '天下矛盾',
-    question: `${attacker}与${defender}，谁会先打破僵局？`,
+    question: `${attacker}与${defender}目前打到哪里？`,
     evidence: [
       `战局 ${Math.round(war.attackerScore)} : ${Math.round(war.defenderScore)}`,
       `${war.goal}之战 · 耗竭${Math.round(war.exhaustion)}`,
@@ -372,7 +371,7 @@ function outbreakLead(world: WorldState, infection: DiseaseHostState): RankedLea
     id: `lead-tension-outbreak:${infection.id}`,
     slot: 'tension',
     label: '天下矛盾',
-    question: `${pathogen?.name ?? '疫病'}会从${hostName}继续外溢吗？`,
+    question: `${hostName}眼下有多少人染病？`,
     evidence: [
       `染病${compact.format(infection.infectious)} · 潜伏${compact.format(infection.exposed)}`,
       `传播${Math.round((pathogen?.transmissibility ?? 0) * 100)}% · 输入来源${infection.recentSources.length}`,
@@ -403,8 +402,8 @@ function diplomacyLead(world: WorldState, relation: DiplomacyState): RankedLead 
     slot: 'tension',
     label: '天下矛盾',
     question: relation.status === '联盟'
-      ? `${a}与${b}的盟约会先从哪里裂开？`
-      : `${a}与${b}会走到开战那一步吗？`,
+      ? `${a}与${b}眼下如何结盟？`
+      : `${a}与${b}眼下是什么关系？`,
     evidence: [
       `威胁${Math.round(maximumThreat)} · 积怨${Math.round(relation.grievance)}`,
       `信任${Math.round(relation.trust)} · 贸易依存${Math.round(relation.tradeDependency)}`,
@@ -427,7 +426,7 @@ function seaLead(zone: SeaZoneState): RankedLead {
     id: `lead-tension-sea:${zone.id}`,
     slot: 'tension',
     label: '天下矛盾',
-    question: `${zone.name}会成为下一处海权争夺点吗？`,
+    question: `${zone.name}眼下由谁通航或争夺？`,
     evidence: [
       `航流${compact.format(zone.traffic)} · 海盗${Math.round(zone.piracy)}`,
       `${zone.contested ? '多方争夺' : '海权未定'} · 港口${zone.portRegionIds.length}`,
@@ -449,7 +448,7 @@ function regionLead(region: RegionState): RankedLead {
     id: `lead-tension-region:${region.id}`,
     slot: 'tension',
     label: '天下矛盾',
-    question: `${region.name}的压力会先引发逃亡，还是反抗？`,
+    question: `${region.name}眼下发生了什么？`,
     evidence: [
       `动荡${Math.round(region.unrest)} · 破坏${Math.round(region.devastation)}`,
       `粮食可支${(region.food / Math.max(1, region.population)).toFixed(1)}季 · 战略${Math.round(region.strategicValue)}`,
@@ -504,10 +503,10 @@ function situationQuestion(item: SituationSnapshotItem, state: SituationState, r
   const core = participant(item, 'coreCharacterIds')?.label ?? '这名将领';
   const polity = participant(item, 'polityIds')?.label ?? '该政权';
   if (item.type === 'military_power_crisis') {
-    return `${core}手中的军权，会归于朝廷还是孕育新的势力？`;
+    return `${core}现在掌着什么兵权？`;
   }
   if (item.type === 'inheritance_crisis') {
-    return `${polity}的继承秩序，会安稳落定还是引发权力重组？`;
+    return `${polity}的继承问题现在卡在哪里？`;
   }
   if (item.type === 'court_power_struggle') {
     const rootKeys = new Set([
@@ -524,9 +523,9 @@ function situationQuestion(item: SituationSnapshotItem, state: SituationState, r
       .slice(0, 3)
       .map((entry) => entry.label);
     const rootCopy = actualRoots.length > 0 ? actualRoots.join('、') : '已登记的权势根基';
-    return `${polity}的君主与实力派，谁能凭${rootCopy}左右朝局？`;
+    return `${polity}眼下谁凭${rootCopy}左右朝局？`;
   }
-  return `${item.title.replace(/的战争进程$/u, '')}，战局会如何收束？`;
+  return `${item.title.replace(/的战争进程$/u, '')}，目前打到哪里？`;
 }
 
 function situationTarget(
@@ -559,10 +558,20 @@ function situationEvidence(
 ): readonly [string, string] {
   const scene = projectSituationHistoricalScenes(world, state, 1, null, 'active')[0];
   if (scene) {
-    return [
-      `${scene.dateLabel} · ${scene.title}`,
-      scene.result || scene.summary,
-    ];
+    const evidence = [scene.summary.trim(), scene.result.trim()]
+      .filter((line, index, lines) => Boolean(line) && lines.indexOf(line) === index);
+    const sceneEntities = [
+      ...scene.actorIds.map((id) => world.characters.find((character) => character.id === id)?.name),
+      ...scene.polityIds.map((id) => world.polities.find((polity) => polity.id === id)?.name),
+      ...scene.regionIds.map((id) => world.regions.find((region) => region.id === id)?.name),
+    ].filter((label, index, labels): label is string => Boolean(label) && labels.indexOf(label) === index);
+    const participantEntities = item.participants
+      .flatMap((group) => group.entities.map((entity) => entity.label))
+      .filter((label, index, labels) => labels.indexOf(label) === index);
+    const context = (sceneEntities.length ? sceneEntities : participantEntities).slice(0, 3);
+    if (evidence.length < 2 && context.length) evidence.push(`相关各方 · ${context.join('、')}`);
+    if (evidence.length < 2) evidence.push(`始于${historyTurnDate(item.startedTurn).label} · ${item.typeLabel}`);
+    return [evidence[0], evidence[1]];
   }
   if (resolvedEcho) {
     return [
@@ -575,14 +584,18 @@ function situationEvidence(
     .map((entry) => entry.label)
     .filter((label, index, all) => all.indexOf(label) === index)
     .slice(0, 2);
-  if (labels.length < 2) labels.push(`${item.phaseLabel}阶段 · 张力${item.tension}`);
-  if (labels.length < 2) labels.push('结构信号仍在持续');
+  const core = participant(item, 'coreCharacterIds')?.label;
+  const polity = participant(item, 'polityIds')?.label;
+  if (labels.length < 2) labels.push([core, polity].filter(Boolean).join(' · ') || `始于${historyTurnDate(item.startedTurn).label}`);
+  if (labels.length < 2) labels.push('本季没有新的具名行动');
   return [labels[0], labels[1]];
 }
 
-function situationRecentChange(item: SituationSnapshotItem): string {
-  if (!item.latestChange) return `自${historyTurnDate(item.startedTurn).label}起持续积累，最近没有新的阶段转折`;
-  return `${historyTurnDate(item.latestChange.turn).label} · ${item.latestChange.label}`;
+function situationRecentChange(world: WorldState, state: SituationState): string {
+  const scene = projectSituationHistoricalScenes(world, state, 1, null, 'active')[0];
+  if (scene) return `${scene.dateLabel} · ${scene.title}`;
+  if (state.status === 'resolved') return `已以“${situationOutcomeLabel(state.resolution?.outcomeKey ?? '')}”结案`;
+  return '本季无新动作';
 }
 
 function situationRank(state: SituationState, item: SituationSnapshotItem, order: number): number {
@@ -625,7 +638,7 @@ function situationCandidate(
     displayMode: resolvedEcho ? 'resolution_echo' : 'tracking',
     startedTurn: state.startedTurn,
     startedLabel: historyTurnDate(state.startedTurn).label,
-    recentChange: situationRecentChange(item),
+    recentChange: situationRecentChange(world, state),
     arbitrationReason: resolvedEcho ? 'resolution_echo' : 'situation_priority',
     rankScore: situationRank(state, item, order),
     editorial: {
@@ -726,29 +739,28 @@ function personLeadForId(world: WorldState, id: string): RankedLead | null {
   const openlyRestive = person.rebellionReadiness >= 45
     || (person.rebellionReadiness >= 28 && person.ambition - person.loyalty >= 24);
   const commandsForces = Boolean(person.commandingArmyId || person.commandingFleetId || person.role === '将领');
-  const question = openlyRestive
-    ? `${person.name}会不会走向自立？`
-    : commandsForces
-      ? `${person.name}会成为名将，还是新的军阀？`
-      : `${person.name}能否把野心变成权位？`;
+  const question = commandsForces
+    ? `${person.name}现在掌着哪支兵马？`
+    : `${person.name}目前凭什么立足？`;
   const nextSignal = openlyRestive
     ? '留意拒令、割据或公开举兵'
     : commandsForces
       ? '留意新战功、主帅更替与军心归属'
       : '留意升迁、结盟与朝堂权力转移';
   const position = person.commandingArmyId
-    ? '掌军在手'
+    ? world.armies.find((item) => item.id === person.commandingArmyId)?.name ?? '掌军在手'
     : person.commandingFleetId
-      ? '统领水师'
+      ? world.fleets.find((item) => item.id === person.commandingFleetId)?.name ?? '统领水师'
       : `${person.role} · 影响${Math.round(person.influence)}`;
+  const location = regionName(world, person.locationRegionId);
   return {
     id: `lead-person:${person.id}`,
     slot: 'person',
     label: '人物线',
     question,
     evidence: [
-      `野心${Math.round(person.ambition)} · 忠诚${Math.round(person.loyalty)}`,
-      `${position} · 叛意${Math.round(person.rebellionReadiness)}`,
+      `${person.role} · ${person.age}岁 · 声望${Math.round(person.renown)}`,
+      `${position} · 现于${location}`,
     ],
     nextSignal,
     stage: stageFor(tension),
@@ -787,14 +799,14 @@ function polityLeadForId(world: WorldState, id: string): RankedLead | null {
     .sort((left, right) => right.power * right.cohesion - left.power * left.cohesion || stableCompare(left.id, right.id))[0];
   const enemyId = war ? (war.attackerId === polity.id ? war.defenderId : war.attackerId) : null;
   const question = war
-    ? `${polity.name}能否撑过与${polityName(world, enemyId ?? '')}的战争？`
+    ? `${polity.name}眼下与谁交兵？`
     : successionPressure >= 58
-      ? `${polity.name}能否安稳度过下一次权力交接？`
+      ? `${polity.name}的君位眼下由谁维系？`
       : polity.legitimacy < 58 || polity.authority < 55
-        ? `${polity.name}的朝廷还能压住地方吗？`
-        : `${polity.name}会继续兴盛，还是先从内部失衡？`;
+        ? `${polity.name}眼下能调动多少地方？`
+        : `${polity.name}眼下靠什么维持秩序？`;
   const secondEvidence = war
-    ? `战争疲惫${Math.round(polity.warWeariness)} · 战争耗竭${Math.round(war.exhaustion)}`
+    ? `正与${polityName(world, enemyId ?? '')}交兵 · 疲惫${Math.round(polity.warWeariness)} · 耗竭${Math.round(war.exhaustion)}`
     : successionPressure >= 58
       ? `${ruler?.name ?? '君位空悬'} · ${ruler ? `${ruler.age}岁 · 健康${Math.round(ruler.health)}` : '继承未定'}`
       : faction

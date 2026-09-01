@@ -14,6 +14,7 @@ import type { SimulationFact } from '../sim/facts/types';
 import type { DeltaValue, StateDelta, WorldState } from '../sim/types';
 import { readWorldFacts, readWorldHistory } from '../sim/archive';
 import { historyTurnDate } from './v1-history';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import {
   projectFactNarrative,
   projectHistoricalScenes,
@@ -158,6 +159,7 @@ export interface SituationDetailProjection {
   durationLabel: string;
   playerSummary: string[];
   currentChange: string;
+  recentDeltas: SituationDetailDelta[];
   nextWatch: string;
   outcome: null | {
     key: string;
@@ -358,6 +360,7 @@ type FactHistoryIndex = ReadonlyMap<string, readonly string[]>;
 function buildFactHistoryIndex(world: WorldState): FactHistoryIndex {
   const index = new Map<string, string[]>();
   for (const event of readWorldHistory(world)) {
+    if (!isDefaultVisibleHistoryEvent(event)) continue;
     for (const factId of event.sourceFactIds) {
       const eventIds = index.get(factId) ?? [];
       if (eventIds.length < 2 && !eventIds.includes(event.id)) eventIds.push(event.id);
@@ -563,32 +566,11 @@ function evidenceFacts(
   return { facts: boundChronological(ordered, MAX_SITUATION_DETAIL_FACTS), missingFactIds };
 }
 
-const COURT_POWER_ROOT_SIGNAL_KEYS = new Set([
-  'challenger_central_office',
-  'challenger_regional_office',
-  'challenger_military_command',
-  'challenger_family_renown',
-  'challenger_alliance_support',
-  'challenger_cohesion',
-]);
-
-function courtPowerRootLabels(drivers: readonly SituationDetailDriver[]): string[] {
-  return drivers
-    .filter((driver) => (
-      driver.direction === 'drives'
-      && COURT_POWER_ROOT_SIGNAL_KEYS.has(driver.key)
-    ))
-    .sort((left, right) => Math.abs(right.contribution) - Math.abs(left.contribution) || stableCompare(left.key, right.key))
-    .slice(0, 3)
-    .map((driver) => driver.label);
-}
-
-function outcomeSummary(situation: SituationState, label: string, courtRoots: readonly string[] = []): string {
+function outcomeSummary(situation: SituationState, label: string): string {
   if (situation.type === 'war_progress') return `这场战争以“${label}”收束；胜负与停战理由只取自战争结案事实。`;
   if (situation.type === 'inheritance_crisis') return `继承秩序以“${label}”收束；结果由同季任免、死亡或政权存续事实共同确认。`;
   if (situation.type === 'court_power_struggle') {
-    const roots = courtRoots.length > 0 ? `${courtRoots.join('、')}的积累与` : '';
-    return `这场朝堂权斗以“${label}”收束；结果由${roots}同季派系变动与朝堂行动事实确认。`;
+    return `这场朝堂权斗以“${label}”收束；结果由同季派系变动与朝堂行动事实确认。`;
   }
   return `军权矛盾以“${label}”收束；卷宗只陈述已发生的任免、死亡或结构消散，不推断人物谋反意图。`;
 }
@@ -596,51 +578,43 @@ function outcomeSummary(situation: SituationState, label: string, courtRoots: re
 function playerSummary(
   situation: SituationState,
   item: SituationSnapshotItem,
-  drivers: readonly SituationDetailDriver[],
   durationLabel: string,
   outcomeLabel: string | null,
-  scenes: readonly HistoricalScene[],
 ): string[] {
   const core = item.participants.find((group) => group.key === 'coreCharacterIds')?.entities[0]?.label;
   const polity = item.participants.find((group) => group.key === 'polityIds')?.entities[0]?.label;
-  const preferredDriver = publicDrivers(drivers).find((driver) => driver.direction === 'drives');
-  const driving = preferredDriver?.label;
-  const restraint = drivers.find((driver) => driver.direction === 'restrains')?.label;
-  const latestScene = scenes[0]?.shortText;
-  const courtRoots = situation.type === 'court_power_struggle' ? courtPowerRootLabels(drivers) : [];
+  const courtParties = item.participants
+    .find((group) => group.key === 'factionIds')
+    ?.entities.slice(0, 2)
+    .map((entity) => entity.label)
+    .filter(Boolean) ?? [];
   if (situation.status === 'resolved') {
+    const resolvedSummary = situation.type === 'court_power_struggle'
+      ? `${courtParties.length > 0 ? courtParties.join('与') : core ?? '朝中各方'}在${polity ?? '该朝廷'}朝中的角力以“${outcomeLabel ?? '结构压力消散'}”收束；结果由同季派系变动与朝堂行动事实确认。`
+      : outcomeSummary(situation, outcomeLabel ?? '结构压力消散');
     return [
-      ...(latestScene ? [latestScene] : []),
       `${item.title}起于${dateLabel(situation.startedTurn)}，于${dateLabel(situation.resolvedTurn ?? situation.lastUpdatedTurn)}结案，历时${durationLabel}。`,
-      outcomeSummary(situation, outcomeLabel ?? '结构压力消散', courtRoots),
-    ].slice(0, 3);
+      resolvedSummary,
+    ];
   }
   if (situation.type === 'military_power_crisis') {
     return [
-      ...(latestScene ? [latestScene] : []),
-      `${core ?? '一名将领'}的实际军令、军中立足与${polity ?? '朝廷'}的约束正在形成持续张力；这不等同于人物已经决定叛乱。`,
-      driving ? `目前最值得注意的推动因素是“${driving}”${restraint ? `，而“${restraint}”仍在压住局势` : ''}。` : '现有结构证据仍在积累。',
+      `${core ?? '这名将领'}与${polity ?? '朝廷'}的军权争执尚未结案；现有事实还没有确认召回、交兵、削权或起兵的结果。`,
     ];
   }
   if (situation.type === 'inheritance_crisis') {
     return [
-      ...(latestScene ? [latestScene] : []),
-      `${polity ?? '该政权'}的继承次序、候选支持与中央执行能力尚未形成稳定闭环；卷宗不替任何候选人虚构意图。`,
-      driving ? `当前矛盾主要由“${driving}”推动${restraint ? `，“${restraint}”仍提供秩序约束` : ''}。` : '现有结构证据仍在积累。',
+      `${polity ?? '该政权'}的继承问题尚未结案；现有事实还没有确认新君、摄政或争位结果。`,
     ];
   }
   if (situation.type === 'court_power_struggle') {
-    const rootCopy = courtRoots.length > 0 ? courtRoots.join('、') : (driving ?? '已登记的权势根基');
+    const parties = courtParties.length > 0 ? courtParties.join('与') : core ?? '朝中各方';
     return [
-      ...(latestScene ? [latestScene] : []),
-      `${polity ?? '该朝廷'}朝中的较量目前落在${rootCopy}；这不等于任何人已经决定夺位。`,
-      driving ? `目前最能推动朝局的是“${driving}”${restraint ? `，“${restraint}”仍在限制其扩张` : ''}。` : '双方的实权根基仍在积累。',
+      `${parties}正在${polity ?? '该朝廷'}朝中角力；这场朝堂争执尚未结案，截至本季还没有发生足以确认夺位、清洗、妥协或失势结果的行动。`,
     ];
   }
   return [
-    ...(latestScene ? [latestScene] : []),
-    `${item.title}仍在延续，攻守方向来自同一条权威战争记录，战役与州域易手会继续改变局面。`,
-    driving ? `当前战线最重要的信号是“${driving}”${restraint ? `，而“${restraint}”正在抑制升级` : ''}。` : '战线暂时缺少新的决定性事实。',
+    `${item.title}尚未停战；现有事实还没有记录媾和、都城陷落或一方覆灭。`,
   ];
 }
 
@@ -674,7 +648,9 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
     ))
     .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
   const evidenceSelection = evidenceFacts(situation, milestoneFacts, allFacts);
-  const evidence = evidenceSelection.facts.map((fact) => projectFact(world, fact, historyByFact));
+  const evidence = evidenceSelection.facts
+    .filter((fact) => fact.kind !== 'situation_milestone')
+    .map((fact) => projectFact(world, fact, historyByFact));
   const resultFactIds = [...(situation.resolution?.resultFactIds ?? [])];
   const resultFactIdSet = new Set(resultFactIds);
   const consequences = evidence
@@ -695,7 +671,13 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
   const durationLabel = durationTurns < 4 ? `${durationTurns}季` : `${Math.floor(durationTurns / 4)}年${durationTurns % 4 ? `${durationTurns % 4}季` : ''}`;
   const scenes = projectSituationHistoricalScenes(world, situation, 3);
   const timeline = projectTimeline(world, situation, milestoneFacts, historyByFact, allFacts);
-  const latestTimeline = timeline.at(-1);
+  const latestScene = scenes[0];
+  const lastSettledTurn = world.lastTurn?.turn ?? Math.max(0, world.turn - 1);
+  const recentFactIds = new Set(latestScene?.sourceFactIds ?? []);
+  const recentDeltas = evidence
+    .filter((fact) => recentFactIds.has(fact.id))
+    .flatMap((fact) => fact.stateDeltas)
+    .slice(0, 4);
   const allFactIds = new Set(allFacts.map((fact) => fact.id));
   const missingResultFacts = resultFactIds.filter((id) => !allFactIds.has(id));
   const coverageNotes = [
@@ -724,12 +706,15 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
     endDateLabel: dateLabel(endTurn ?? situation.lastUpdatedTurn),
     durationTurns,
     durationLabel,
-    playerSummary: playerSummary(situation, item, drivers, durationLabel, outcomeLabel, scenes),
-    currentChange: scenes[0]
-      ? `${scenes[0].dateLabel}，${scenes[0].shortText}`
-      : latestTimeline
-      ? `${latestTimeline.dateLabel}，${latestTimeline.summary}`
-      : '尚无可公开的阶段转折。',
+    playerSummary: playerSummary(situation, item, durationLabel, outcomeLabel),
+    currentChange: latestScene && latestScene.turn === lastSettledTurn
+      ? latestScene.shortText
+      : latestScene
+        ? `本季无新动作；最近一件实事发生在${latestScene.dateLabel}：${latestScene.shortText}`
+      : situation.status === 'resolved' && outcomeLabel
+        ? `${dateLabel(situation.resolvedTurn ?? situation.lastUpdatedTurn)}，本案以“${outcomeLabel}”结案。`
+        : '本季无新动作；卷宗里还没有可确认的具名行动或明确结果。',
+    recentDeltas,
     nextWatch: item.nextSignal.label,
     outcome: outcomeKey ? {
       key: outcomeKey,

@@ -12,6 +12,7 @@ import {
   type ObserverLeadProjection,
   type ObserverLeadSlot,
 } from './observer-leads';
+import { projectSituationHistoricalScenes } from './historical-scenes';
 import { projectSituationSystemSnapshot } from './situation-snapshot';
 
 function targetExists(world: WorldState, kind: string, id: string): boolean {
@@ -157,6 +158,30 @@ describe('observer story leads', () => {
       if (lead.situationId) expect(world8.situationSystem.situations.some((item) => item.id === lead.situationId && item.status === 'open')).toBe(true);
       expect(targetExists(world8, lead.target.kind, lead.target.id)).toBe(true);
     }
+  });
+
+  it('uses a Situation scene headline once, then keeps its summary and concrete context as evidence', () => {
+    const world = fixedWorldsThrough(8).get(8) as WorldState;
+    const projection = deriveObserverLeadProjection(world);
+    const situationLeads = projection.leads.filter((lead) => lead.situationId);
+    let sceneLeadCount = 0;
+
+    expect(situationLeads.length).toBeGreaterThan(0);
+    for (const lead of situationLeads) {
+      const situation = world.situationSystem.situations.find((item) => item.id === lead.situationId);
+      if (!situation) throw new Error(`missing Situation ${lead.situationId}`);
+      const scene = projectSituationHistoricalScenes(world, situation, 1, null, 'active')[0];
+      if (!scene) continue;
+      sceneLeadCount += 1;
+      const headline = `${scene.dateLabel} · ${scene.title}`;
+
+      expect(lead.recentChange).toBe(headline);
+      expect(lead.evidence).not.toContain(headline);
+      expect(lead.evidence[0]).toBe(scene.summary);
+      expect(lead.evidence.every((line) => line.trim().length > 0)).toBe(true);
+      expect(new Set([lead.recentChange, ...lead.evidence]).size).toBe(3);
+    }
+    expect(sceneLeadCount).toBeGreaterThan(0);
   });
 
   it('is idempotent on the same turn and never mutates the authoritative world or hash', () => {

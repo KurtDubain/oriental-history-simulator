@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { advanceWorld, createWorld } from '../sim';
+import type { HistoryEvent, WorldState } from '../sim/types';
 import {
   MAX_QUARTER_PULSE_STORIES,
   projectQuarterPulse,
@@ -53,6 +54,35 @@ function situationStory(
     threadTitle: id,
     tension: importance,
     delta: 10,
+    ...patch,
+  };
+}
+
+function chronicleEvent(
+  world: WorldState,
+  id: string,
+  patch: Partial<HistoryEvent> = {},
+): HistoryEvent {
+  const report = world.lastTurn;
+  if (!report) throw new Error('expected an advanced world');
+  return {
+    id,
+    turn: report.turn,
+    year: report.year,
+    season: report.season,
+    category: '政治',
+    kind: 'court_action',
+    title: `${id}发生`,
+    summary: `${id}留下了可核对的当季记载。`,
+    importance: 3,
+    actorIds: [],
+    polityIds: [],
+    regionIds: [],
+    causes: [],
+    evidence: [],
+    stateDeltas: [],
+    sourceFactIds: [],
+    situationIds: [],
     ...patch,
   };
 }
@@ -131,7 +161,7 @@ describe('TRIM01 QuarterPulse story projection', () => {
     });
   });
 
-  it('uses a bare numerical trend only as one contextual fill after concrete events', () => {
+  it('never uses a bare numerical trend to fill space after concrete events', () => {
     const selected = selectQuarterPulseStories([
       situationStory('trend-ninety', 90),
       situationStory('trend-eighty', 80),
@@ -142,8 +172,65 @@ describe('TRIM01 QuarterPulse story projection', () => {
     expect(selected.map((story) => story.id)).toEqual([
       'event-three',
       'event-two',
-      'situation:trend-ninety',
     ]);
+  });
+
+  it('rejects unanchored maintenance chronicles while retaining Fact-, delta-, and named-action records', () => {
+    const base = advanceWorld(createWorld('TRIM02季度维护记录契约'));
+    const actor = base.characters[0];
+    const polity = base.polities.find((item) => item.id === actor.polityId) ?? base.polities[0];
+    const region = base.regions.find((item) => item.id === actor.locationRegionId) ?? base.regions[0];
+    const maintenance = chronicleEvent(base, 'chronicle-maintenance', {
+      kind: 'observer_index_maintenance',
+      title: '观察索引例行维护',
+      importance: 5,
+    });
+    const factBacked = chronicleEvent(base, 'chronicle-fact-backed', {
+      sourceFactIds: ['fact-recorded-elsewhere'],
+      importance: 4,
+    });
+    const deltaBacked = chronicleEvent(base, 'chronicle-delta-backed', {
+      stateDeltas: [{
+        entityType: 'world',
+        entityId: 'world',
+        field: 'seasonalMarker',
+        before: false,
+        after: true,
+      }],
+      importance: 3,
+    });
+    const namedAction = chronicleEvent(base, 'chronicle-named-action', {
+      title: `${actor.name}在${region.name}奉${polity.shortName || polity.name}之命议事`,
+      actorIds: [actor.id],
+      polityIds: [polity.id],
+      regionIds: [region.id],
+      importance: 2,
+    });
+    const events = [maintenance, factBacked, deltaBacked, namedAction];
+    const world: WorldState = {
+      ...base,
+      facts: [],
+      history: events,
+      lastTurn: {
+        ...base.lastTurn!,
+        factIds: [],
+        eventIds: events.map((event) => event.id),
+      },
+    };
+
+    const projection = projectQuarterPulse(world);
+
+    expect(projection.stories.map((story) => story.id)).toEqual([
+      factBacked.id,
+      deltaBacked.id,
+      namedAction.id,
+    ]);
+    expect(projection.stories).not.toContainEqual(expect.objectContaining({ id: maintenance.id }));
+    expect(projection.stories.find((story) => story.id === namedAction.id)).toMatchObject({
+      source: 'chronicle',
+      eventId: namedAction.id,
+      regionIds: [region.id],
+    });
   });
 
   it('uses stable story identity as the final tie-break regardless of candidate order', () => {
@@ -182,12 +269,7 @@ describe('TRIM01 QuarterPulse story projection', () => {
       const report = world.lastTurn;
       expect(report?.turn).toBe(turn - 1);
       expect(projection.stories.length).toBeLessThanOrEqual(MAX_QUARTER_PULSE_STORIES);
-      expect(projection.stories.filter((story) => (
-        story.kind === 'situation'
-        && story.basis === 'trend'
-        && story.sourceFactIds.length === 0
-        && story.historyEventIds.length === 0
-      )).length).toBeLessThanOrEqual(1);
+      expect(projection.stories.every((story) => story.kind === 'event')).toBe(true);
 
       const seenFacts = new Set<string>();
       const seenEvents = new Set<string>();

@@ -1,4 +1,4 @@
-import { Bookmark, BookmarkCheck, ChevronDown, Clock3, Crosshair, ScrollText } from 'lucide-react';
+import { Bookmark, BookmarkCheck, ChevronDown, Clock3, ScrollText } from 'lucide-react';
 import { useState } from 'react';
 import type { ObserverLead } from '../view/observer-leads';
 import '../styles/observer-leads.css';
@@ -98,7 +98,6 @@ export function ObserverLeads({
             <li
               key={lead.id}
               data-slot={lead.slot}
-              data-stage={lead.stage}
               data-source={lead.source ?? 'fallback'}
               data-lead-id={lead.id}
               data-situation-id={lead.situationId ?? undefined}
@@ -110,12 +109,11 @@ export function ObserverLeads({
               <button
                 type="button"
                 className="observer-leads__inspect"
-                aria-label={`${lead.label}：${lead.question}。${lead.evidence.join('；')}。接着看：${lead.nextSignal}。${lead.situationId ? '打开局势卷宗' : '查看对象'}`}
+                aria-label={`${lead.label}：${lead.question}。${lead.evidence.join('；')}。${lead.situationId ? '打开局势卷宗' : '查看对象'}`}
                 onClick={() => onInspect(lead)}
               >
                 <span className="observer-leads__meta">
                   <span>{lead.label}</span>
-                  <span data-stage={lead.stage}>{lead.stage}</span>
                 </span>
                 <strong data-testid="observer-lead-question">{lead.question}</strong>
                 {lead.situationId ? (
@@ -124,8 +122,7 @@ export function ObserverLeads({
                     始于{lead.startedLabel} · 延续{lead.trackingTurns ?? 1}季 · {lead.recentChange}
                   </span>
                 ) : null}
-                <span className="observer-leads__evidence">{lead.evidence.join(' · ')}</span>
-                <span className="observer-leads__next" data-testid="observer-lead-next"><Crosshair size={11} aria-hidden="true" />接下来 · {lead.nextSignal}</span>
+                <span className="observer-leads__evidence" data-testid="observer-lead-fact">{lead.evidence.join(' · ')}</span>
               </button>
               <button
                 type="button"

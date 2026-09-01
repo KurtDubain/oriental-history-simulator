@@ -39,6 +39,7 @@ import {
   type HistoryRelatedEntityRef,
   type HistoryRelatedKind,
 } from '../view/v1-history';
+import { DEFAULT_HIDDEN_HISTORY_KIND_PREFIXES } from '../view/history-visibility';
 import { useDialogLayer } from './useDialogLayer';
 import '../styles/history-workbench.css';
 import { APP_VERSION } from '../version';
@@ -142,6 +143,7 @@ export function HistoryWorkbench({
     minimumImportance,
     relatedEntity,
     throughTurn: selectedTurn,
+    excludedKindPrefixes: DEFAULT_HIDDEN_HISTORY_KIND_PREFIXES,
   }), [category, deferredQuery, minimumImportance, relatedEntity, selectedTurn]);
   const queryIdentity = useMemo(() => ({ world, historyFilters, open }), [historyFilters, open, world]);
   const firstSlice = useMemo(() => open ? queryWorldHistory(world, {
@@ -172,11 +174,6 @@ export function HistoryWorkbench({
   const subjectNamesByEvent = useMemo(() => new Map(
     visibleEvents.map((event) => [event.id, eventSubjectNames(world, event)]),
   ), [visibleEvents, world]);
-  const currentCategoryStats = useMemo(() => snapshot ? HISTORY_EVENT_CATEGORIES
-    .map((item) => ({ category: item, count: snapshot.historyStats.categoryCountsAtTurn[item] }))
-    .filter((item) => item.count > 0)
-    .sort((left, right) => right.count - left.count) : [], [snapshot]);
-
   useEffect(() => {
     if (controlledTurn === undefined) {
       const previousWorldTurn = previousWorldTurnRef.current;
@@ -395,7 +392,7 @@ export function HistoryWorkbench({
                     <optgroup key={group.kind} label={group.label}>
                       {options.map((option) => (
                         <option key={encodeHistoryRelatedEntity(option)} value={encodeHistoryRelatedEntity(option)}>
-                          {option.label} · {option.eventCount}
+                          {option.label}
                         </option>
                       ))}
                     </optgroup>
@@ -501,8 +498,6 @@ export function HistoryWorkbench({
             <div className="history-workbench__section-title"><MapPinned size={13} aria-hidden="true" />当季天下</div>
             <dl className="history-workbench__snapshot-counts">
               <div><dt>政权</dt><dd>{snapshot.extantPolities.length}</dd></div>
-              <div><dt>本季史事</dt><dd>{snapshot.historyStats.eventsAtTurn}</dd></div>
-              <div><dt>本季大事</dt><dd>{snapshot.historyStats.majorEventsAtTurn}</dd></div>
               <div><dt>累计易帜</dt><dd>{snapshot.historyStats.controllerChangesThroughTurn}</dd></div>
             </dl>
 
@@ -519,13 +514,6 @@ export function HistoryWorkbench({
                   ))}
                 </ol>
               ) : <p>此季没有可核验的存续政权。</p>}
-            </section>
-
-            <section className="history-workbench__quarter-categories" aria-labelledby="history-workbench-categories">
-              <h3 id="history-workbench-categories">本季载录</h3>
-              {currentCategoryStats.length ? currentCategoryStats.map((item) => (
-                <div key={item.category}><span>{item.category}</span><strong>{item.count}</strong></div>
-              )) : <p>这一季度尚无史事。</p>}
             </section>
 
             <footer data-confidence={snapshot.confidence}>

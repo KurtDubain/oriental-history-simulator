@@ -39,8 +39,9 @@ describe('Situation detail projection', () => {
     for (const situation of world.situationSystem.situations) {
       const detail = projectSituationDetail(world, situation);
       expect(detail.title).toMatch(/危机|战争进程|朝堂权斗/);
-      expect(detail.playerSummary.length).toBeGreaterThanOrEqual(2);
-      expect(detail.playerSummary.join('')).not.toMatch(/military_power_crisis|inheritance_crisis|war_progress|court_power_struggle|situation_/);
+      expect(detail.playerSummary.length).toBeGreaterThanOrEqual(1);
+      expect(detail.playerSummary.length).toBeLessThanOrEqual(2);
+      expect(`${detail.currentChange}${detail.playerSummary.join('')}`).not.toMatch(/military_power_crisis|inheritance_crisis|war_progress|court_power_struggle|situation_|持续张力|结构证据|推动因素|阶段转折/);
       expect(detail.nextWatch).toMatch(/[\u3400-\u9fff]/u);
       expect(detail.timeline.length).toBeLessThanOrEqual(MAX_SITUATION_DETAIL_TIMELINE);
       expect(detail.evidence.length).toBeLessThanOrEqual(MAX_SITUATION_DETAIL_FACTS);
@@ -115,7 +116,10 @@ describe('Situation detail projection', () => {
     const detail = projectSituationDetail(world, court);
     expect(detail.typeLabel).toBe('朝堂权斗');
     expect(detail.title).toBe(`${polity.shortName || polity.name}的朝堂权斗`);
-    expect(detail.playerSummary.join('')).toContain(detail.publicDrivers[0]?.label);
+    expect(detail.playerSummary.join('')).toContain(polity.shortName || polity.name);
+    expect(detail.playerSummary.join('')).toContain(factions[0].name);
+    expect(detail.playerSummary.join('')).toContain('结案');
+    expect(detail.playerSummary.join('')).not.toContain(detail.publicDrivers[0]?.label);
     expect(detail.nextWatch).toContain('任免');
     expect(detail.publicDrivers[0]?.label).toBe('实掌中枢官席');
     expect(detail.audit.template?.type).toBe('court_power_struggle');
@@ -132,6 +136,28 @@ describe('Situation detail projection', () => {
     expect(withoutChronicle.playerSummary).toEqual(withChronicle.playerSummary);
     expect(withoutChronicle.outcome).toEqual(withChronicle.outcome);
     expect(withoutChronicle.consequences).toEqual(withChronicle.consequences);
+  });
+
+  it('does not expose Situation wrapper events through Fact evidence links', () => {
+    const world = establishedWorld();
+    const situation = world.situationSystem.situations[0];
+    const baseline = projectSituationDetail(world, situation);
+    const evidenceFactId = baseline.evidence[0]?.id;
+    const template = world.history[0];
+    if (!evidenceFactId || !template) throw new Error('expected Situation evidence and Chronicle template');
+    const hiddenEventId = 'event_hidden_situation_milestone';
+    const projected = projectSituationDetail({
+      ...world,
+      history: [...world.history, {
+        ...template,
+        id: hiddenEventId,
+        kind: 'situation_phase_changed',
+        sourceFactIds: [evidenceFactId],
+      }],
+    }, situation);
+
+    expect(projected.evidence.flatMap((fact) => fact.historyEventIds)).not.toContain(hiddenEventId);
+    expect(projected.timeline.flatMap((item) => item.historyEventIds)).not.toContain(hiddenEventId);
   });
 
   it('builds a truthful result-Fact closure and marks missing evidence instead of inventing it', () => {
@@ -166,9 +192,9 @@ describe('Situation detail projection', () => {
     const detail = projectSituationDetail(world, resolved);
     expect(detail.status).toBe('resolved');
     expect(detail.outcome).toMatchObject({ label: '军职已经解除', resultFactIds: [resultFact.id] });
-    expect(detail.playerSummary).toHaveLength(3);
+    expect(detail.playerSummary).toHaveLength(2);
     expect(detail.playerSummary.join('')).toContain('历时');
-    expect(detail.playerSummary[0]).toMatch(/[㐀-鿿].*(受任|去职|之战|易手|去世|成婚|请|军令|支持)/u);
+    expect(detail.currentChange).toMatch(/[㐀-鿿].*(受任|去职|之战|易手|去世|成婚|请|军令|支持)/u);
     expect(detail.consequences.length).toBeGreaterThan(0);
     expect(new Set(detail.consequences.map((item) => item.factId))).toEqual(new Set([resultFact.id]));
     expect(detail.consequenceCoverage).toContain('直接');

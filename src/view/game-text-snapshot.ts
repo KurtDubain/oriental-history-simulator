@@ -26,6 +26,7 @@ import {
   worldPopulation,
 } from './adapters';
 import { projectEmbodimentTextSnapshot } from './embodiment-view';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import { shouldShowObserverSoundInvitation } from './observer-interface-settings';
 import { agencyDossierOptions } from './observer-agency-projection';
 import { deriveObserverLeadProjection } from './observer-leads';
@@ -77,6 +78,7 @@ function projectNavigationJourney(navigation: ObserverNavigationState): object[]
 
 function historyRoster(world: WorldState): RosterItem[] {
   return world.history
+    .filter(isDefaultVisibleHistoryEvent)
     .slice(-72)
     .reverse()
     .map((event) => ({
@@ -87,6 +89,40 @@ function historyRoster(world: WorldState): RosterItem[] {
       accent: HISTORY_COLORS[event.category],
       alert: event.importance >= 4,
     }));
+}
+
+function projectPlayerSituationDirectory(world: WorldState) {
+  const snapshot = toSituationSnapshot(world);
+  const projectItem = (item: (typeof snapshot.open)[number]) => ({
+    id: item.id,
+    type: item.type,
+    typeLabel: item.typeLabel,
+    title: item.title,
+    status: item.status,
+    statusLabel: item.statusLabel,
+    startedTurn: item.startedTurn,
+    lastUpdatedTurn: item.lastUpdatedTurn,
+    resolvedTurn: item.resolvedTurn,
+  });
+  return {
+    version: snapshot.version,
+    lastReducedTurn: snapshot.lastReducedTurn,
+    openCount: snapshot.openCount,
+    resolvedCount: snapshot.resolvedCount,
+    archivedResolvedCount: snapshot.archivedResolvedCount,
+    open: snapshot.open.map(projectItem),
+    recentResolved: snapshot.recentResolved.map(projectItem),
+  };
+}
+
+function playerSituationChange(
+  trigger: SnapshotOptions['pauseSituationTrigger'],
+): 'new-situation' | 'new-action' | 'core-character-death' | 'resolved' | null {
+  if (trigger === 'formation') return 'new-situation';
+  if (trigger === 'phase-change') return 'new-action';
+  if (trigger === 'core-character-death') return 'core-character-death';
+  if (trigger === 'resolution') return 'resolved';
+  return null;
 }
 
 export function makeTextSnapshot(world: WorldState | null, options: SnapshotOptions): string {
@@ -238,6 +274,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       traditions: item.traditions,
       marriageAlliances: item.marriageAllianceFamilyIds.map(familyName),
       historyEventIds: world.history
+        .filter(isDefaultVisibleHistoryEvent)
         .filter((event) => event.actorIds.some((id) => item.memberIds.includes(id))
           || event.stateDeltas.some((delta) => delta.entityType === 'family' && delta.entityId === item.id))
         .map((event) => event.id),
@@ -388,17 +425,18 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         type: situationWorkbench.selected.type,
         title: situationWorkbench.selected.title,
         status: situationWorkbench.selected.status,
-        phase: situationWorkbench.selected.phase,
         playerSummary: situationWorkbench.selected.playerSummary,
         currentChange: situationWorkbench.selected.currentChange,
-        nextWatch: situationWorkbench.selected.nextWatch,
+        recentDeltas: situationWorkbench.selected.recentDeltas,
         outcome: situationWorkbench.selected.outcome,
-        timeline: situationWorkbench.selected.timeline.map((item) => ({
-          turn: item.turn,
-          kind: item.kind,
-          label: item.label,
-          milestoneFactId: item.milestoneFactId,
-          historyEventIds: item.historyEventIds,
+        scenes: situationWorkbench.selected.scenes.map((scene) => ({
+          id: scene.id,
+          turn: scene.turn,
+          dateLabel: scene.dateLabel,
+          title: scene.title,
+          summary: scene.summary,
+          result: scene.result,
+          historyEventIds: scene.historyEventIds,
         })),
         evidenceFactIds: situationWorkbench.selected.evidence.map((fact) => fact.id),
         consequenceCount: situationWorkbench.selected.consequences.length,
@@ -419,7 +457,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       lastPauseReason: options.pauseReason,
       lastPauseRule: options.pauseRule,
       lastPauseSituationId: options.pauseSituationId,
-      lastPauseSituationTrigger: options.pauseSituationTrigger,
+      lastPauseSituationChange: playerSituationChange(options.pauseSituationTrigger),
       collectionOpen,
       worldSaveCount: options.worldSaveCount,
       primerOpen,
@@ -436,11 +474,10 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         trackingTurns: lead.trackingTurns ?? 1,
         recentChange: lead.recentChange ?? null,
         arbitrationReason: lead.arbitrationReason ?? 'legacy_fallback',
+        label: lead.label,
+        startedLabel: lead.startedLabel ?? null,
         question: lead.question,
-        stage: lead.stage,
-        tension: lead.tension,
         evidence: lead.evidence,
-        nextSignal: lead.nextSignal,
         target: lead.target,
         overlay: lead.overlay,
       })),
@@ -449,7 +486,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         lastArbitratedTurn: focusLeadProjection.continuity.lastTurn,
         slots: focusLeadProjection.continuity.slots.map((entry) => ({ ...entry })),
       },
-      situations: toSituationSnapshot(world),
+      situations: projectPlayerSituationDirectory(world),
       agencyContinuity: (() => {
         const branch = options.agencyShadowBranchId
           ? options.agencyShadowLedger.branches.find((item) => item.id === options.agencyShadowBranchId)
@@ -601,7 +638,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       activeWars: world.wars.filter((item) => item.active).length,
       population: worldPopulation(world),
     },
-    recentHistory: world.history.slice(-8).map((event) => ({
+    recentHistory: world.history.filter(isDefaultVisibleHistoryEvent).slice(-8).map((event) => ({
       id: event.id,
       date: `${event.year}年${event.season}`,
       title: event.title,

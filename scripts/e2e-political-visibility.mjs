@@ -209,18 +209,18 @@ function assertObserverInvariant(current, baseline, detail) {
   );
 }
 
-function situationParticipantGroup(situation, key) {
-  return situation.participants.find((group) => group.key === key)?.entities ?? [];
-}
-
 function selectCourtSituation(state, scenario) {
   const courts = state.observer.situations.open
     .filter((situation) => situation.type === 'court_power_struggle');
   assert.ok(courts.length > 0, `${scenario.slug} 固定世界必须自然形成朝堂权斗`);
   assert.ok(courts.length <= 3, `${scenario.slug} 朝堂权斗开放局势不得超过类型配额 3`);
-  return courts.find((situation) => (
-    situationParticipantGroup(situation, 'polityIds').some((item) => item.id === scenario.targetPolityId)
-  )) ?? courts[0];
+  const targetPolity = state.polities.find((polity) => polity.id === scenario.targetPolityId);
+  const polityLabels = targetPolity
+    ? [targetPolity.name, targetPolity.name.replace(/(?:国|朝|邦)$/u, '')].filter(Boolean)
+    : [];
+  return courts.find((situation) => polityLabels.some((label) => (
+    situation.title.includes(`${label}的`) || situation.title.startsWith(label)
+  ))) ?? courts[0];
 }
 
 async function assertMobileTapTarget(locator, scenario, label) {
@@ -1029,26 +1029,15 @@ async function exerciseFactionMapRoots(page, scenario, baseline, court, selected
 
 async function exerciseCourtSituationRoundTrip(page, scenario, baseline) {
   const situation = selectCourtSituation(baseline, scenario);
-  const polity = situationParticipantGroup(situation, 'polityIds')[0];
-  const politicalFocus = situation.politicalFocus?.find((link) => link.active && link.polityId === polity?.id)
-    ?? situation.politicalFocus?.find((link) => link.active);
-  const namedParticipants = [
-    ...situationParticipantGroup(situation, 'factionIds'),
-    ...situationParticipantGroup(situation, 'coreCharacterIds'),
-  ];
-  assert.ok(polity, `${scenario.slug} 朝堂权斗必须指向真实政权`);
-  assert.ok(politicalFocus, `${scenario.slug} 朝堂权斗必须公开可进入的真实派系`);
-  assert.ok(namedParticipants.length > 0, `${scenario.slug} 朝堂权斗必须有真实派系或人物`);
   assert.equal(situation.typeLabel, '朝堂权斗');
-  assert.match(situation.title, new RegExp(`${polity.label}.*朝堂权斗`));
-  assert.ok(
-    situation.evidence.filter((item) => item.role === 'structural').length >= 2,
-    `${scenario.slug} 朝堂权斗必须有至少两条结构实据`,
-  );
-  assert.ok(
-    situation.evidence.every((item) => item.refs.length > 0),
-    `${scenario.slug} 朝堂权斗实据必须指向权威对象或索引`,
-  );
+  assert.match(situation.title, /朝堂权斗/);
+  for (const hidden of ['participants', 'politicalFocus', 'evidence', 'phase', 'nextSignal']) {
+    assert.equal(
+      Object.hasOwn(situation, hidden),
+      false,
+      `${scenario.slug} 局势目录不得泄漏后台字段 ${hidden}`,
+    );
+  }
   assert.equal(baseline.interface.overlay, 'political', `${scenario.slug} 阅读朝局应从疆界政治层开始`);
 
   const shortcut = page.locator('[data-situation-workbench-trigger="true"]');
@@ -1083,30 +1072,65 @@ async function exerciseCourtSituationRoundTrip(page, scenario, baseline) {
   assert.equal(opened.interface.overlay, 'political', `${scenario.slug} 阅卷不得离开政治疆界层`);
   const detail = opened.observer.selectedSituation;
   assert.equal(detail.title, situation.title);
-  assert.ok(detail.playerSummary.length >= 2, `${scenario.slug} 朝堂权斗应有可读的当季摘要`);
+  assert.ok(detail.playerSummary.length >= 1, `${scenario.slug} 朝堂权斗应有一句明确的当季事实`);
+  for (const hidden of ['participants', 'politicalFocus', 'evidence', 'phase', 'nextSignal']) {
+    assert.equal(
+      Object.hasOwn(detail, hidden),
+      false,
+      `${scenario.slug} 文本快照不得泄漏卷宗后台字段 ${hidden}`,
+    );
+  }
+  const currentAction = (await workbench.getByTestId('situation-current-action').textContent()) ?? '';
   const concreteCopy = [
     ...detail.playerSummary,
-    detail.currentChange,
-    detail.nextWatch,
+    currentAction,
+    ...detail.scenes.flatMap((scene) => [scene.title, scene.summary, scene.result]),
   ].join(' ');
-  assert.match(concreteCopy, new RegExp(polity.label), `${scenario.slug} 朝局正文必须点明政权`);
-  assert.ok(
-    namedParticipants.some((item) => concreteCopy.includes(item.label)),
-    `${scenario.slug} 朝局正文必须点明真实派系或人物，不能只说“起源”与“转折”`,
-  );
-  assert.match(
-    detail.nextWatch,
-    /任免|军令|结盟|清洗|官席|地方/,
-    `${scenario.slug} 朝局后续看点必须是可观察的具体动作`,
+  assert.doesNotMatch(
+    concreteCopy,
+    /萌芽|发展|临界|张力|势头|推动因素/,
+    `${scenario.slug} 朝局可见正文不得用后台阶段代替实事`,
   );
   assert.match((await workbench.textContent()) ?? '', /朝堂权斗/);
-  assert.match((await workbench.textContent()) ?? '', new RegExp(polity.label));
+
+  const participantDisclosure = workbench.locator('[data-testid="situation-participants-disclosure"]');
+  assert.equal(await participantDisclosure.count(), 1, `${scenario.slug} 朝局卷宗应折叠收纳相关各方`);
+  const participantSummary = participantDisclosure.locator('summary').first();
+  await assertMobileTapTarget(participantSummary, scenario, '局势相关各方入口');
+  await activate(participantSummary, scenario);
+  await page.waitForFunction(() => document.querySelector('[data-testid="situation-participants-disclosure"]')?.hasAttribute('open'));
+  const participantGroups = await participantDisclosure.locator('dl > div').evaluateAll((groups) => (
+    groups.map((group) => ({
+      label: group.querySelector('dt')?.textContent?.replace(/\s+/g, ' ').trim() ?? '',
+      entities: [...group.querySelectorAll('dd > button, dd > span')]
+        .map((entity) => (
+          entity.querySelector('strong')?.textContent ?? entity.textContent ?? ''
+        ).replace(/\s+/g, ' ').trim())
+        .filter(Boolean),
+    }))
+  ));
+  const polityLabel = participantGroups.find((group) => group.label.includes('相关政权'))?.entities[0];
+  const namedParticipants = participantGroups
+    .filter((group) => group.label.includes('相关派系') || group.label.includes('核心人物'))
+    .flatMap((group) => group.entities);
+  assert.ok(polityLabel, `${scenario.slug} 朝堂权斗必须在公开卷宗中点明政权`);
+  assert.ok(namedParticipants.length > 0, `${scenario.slug} 朝堂权斗必须公开真实派系或人物`);
+  assert.match(concreteCopy, new RegExp(polityLabel), `${scenario.slug} 朝局正文必须点明政权`);
+  assert.ok(
+    namedParticipants.some((label) => concreteCopy.includes(label)),
+    `${scenario.slug} 朝局正文必须点明真实派系或人物，不能只说“起源”与“转折”`,
+  );
+  assert.match((await workbench.textContent()) ?? '', new RegExp(polityLabel));
   await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-court-situation.png`, fullPage: false });
 
-  const factionButton = workbench.locator(
-    `[data-court-focus-faction="${politicalFocus.factionId}"]`,
-  );
-  assert.equal(await factionButton.count(), 1, `${scenario.slug} 朝局卷宗应有 exact faction 入口`);
+  const factionButton = workbench.locator('[data-court-focus-faction]:not([disabled])').first();
+  assert.equal(await factionButton.count(), 1, `${scenario.slug} 朝局卷宗应有可进入的真实派系入口`);
+  const politicalFocus = {
+    polityId: await factionButton.getAttribute('data-court-focus-polity'),
+    factionId: await factionButton.getAttribute('data-court-focus-faction'),
+  };
+  assert.ok(politicalFocus.polityId, `${scenario.slug} 派系入口必须公开所属政权身份`);
+  assert.ok(politicalFocus.factionId, `${scenario.slug} 派系入口必须公开派系身份`);
   await assertMobileTapTarget(factionButton, scenario, '局势派系参与者入口');
   await activate(factionButton, scenario);
   await workbench.waitFor({ state: 'detached' });
@@ -1123,8 +1147,6 @@ async function exerciseCourtSituationRoundTrip(page, scenario, baseline) {
   assert.equal(courtState.interface.overlay, 'political');
   const courtScenario = { ...scenario, targetPolityId: politicalFocus.polityId };
   await assertProjectionAlignment(page, courtScenario, court, courtState);
-  const factionIds = new Set(situationParticipantGroup(situation, 'factionIds').map((item) => item.id));
-  assert.ok(factionIds.has(politicalFocus.factionId), `${scenario.slug} exact faction 必须来自 Situation participants`);
   assert.ok(
     courtState.interface.selectedDetail.court.factionPositions
       .some((item) => item.factionId === politicalFocus.factionId),

@@ -6,6 +6,7 @@ import type {
   PoliticalPowerResource,
 } from '../sim/politics/power-ledger';
 import type { HistoricalScene } from './historical-scenes';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 
 export const compact = new Intl.NumberFormat('zh-CN', {
   notation: 'compact',
@@ -60,7 +61,7 @@ export function turnLabel(turn: number) {
 
 export function sourceEventIdForFact(world: WorldState, factId: string): string | null {
   return [...world.history]
-    .filter((event) => event.sourceFactIds.includes(factId))
+    .filter((event) => isDefaultVisibleHistoryEvent(event) && event.sourceFactIds.includes(factId))
     .sort((left, right) => right.turn - left.turn || right.id.localeCompare(left.id))[0]?.id ?? null;
 }
 
@@ -139,7 +140,11 @@ export function scopedHistory(
   predicate: (event: HistoryEvent) => boolean,
   limit = 8,
 ) {
-  return world.history.filter(predicate).slice(-limit).reverse().map(historyRecord);
+  return world.history
+    .filter((event) => isDefaultVisibleHistoryEvent(event) && predicate(event))
+    .slice(-limit)
+    .reverse()
+    .map(historyRecord);
 }
 
 export function uniqueArchiveLinks(links: Array<ArchiveLink | null | undefined>) {

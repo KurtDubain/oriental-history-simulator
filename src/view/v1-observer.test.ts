@@ -12,6 +12,7 @@ import {
   createObserverDeskSettings,
   evaluateObserverPause,
   historyEventToPauseCandidate,
+  historyEventsToPauseCandidates,
   normalizeObserverDeskSettings,
   observerGuideProgress,
   parseObserverDeskSettings,
@@ -166,6 +167,38 @@ function deathFact(characterId: string, id = 'fact-death'): Extract<SimulationFa
     stateDeltas: [{ entityType: 'character', entityId: characterId, field: 'alive', before: true, after: false }],
     sourceFactIds: [],
     payload: { characterId, age: 63, role: '君主', health: 0, diseaseId: null },
+  };
+}
+
+function concreteSituationFact(
+  situation: SituationState,
+  id = 'fact-cause',
+): Extract<SimulationFact, { kind: 'appointment_started' }> {
+  return {
+    id,
+    turn: SETTLED_TURN,
+    year: 2,
+    season: '冬',
+    kind: 'appointment_started',
+    category: '政治',
+    importance: 3,
+    actorIds: [...situation.participants.coreCharacterIds],
+    polityIds: [...situation.participants.polityIds],
+    regionIds: [...situation.participants.regionIds],
+    causes: [],
+    stateDeltas: [],
+    sourceFactIds: [],
+    payload: {
+      appointmentId: `appointment:${id}`,
+      action: 'started',
+      officeKind: '军团主帅',
+      holderId: situation.participants.coreCharacterIds[0] ?? 'character-core',
+      polityId: situation.participants.polityIds[0] ?? 'polity-yan',
+      regionId: situation.participants.regionIds[0] ?? null,
+      armyId: null,
+      fleetId: null,
+      rank: 3,
+    },
   };
 }
 
@@ -348,7 +381,10 @@ describe('V1 observer desk persistence', () => {
     });
     const situation = situationState({ id: 'situation-a', milestoneFactIds: ['fact-formed-a'] });
     const fact = milestoneFact('fact-formed-a', situation, 'formed');
-    const [candidate] = worldToSituationPauseCandidates(worldWithSituationFacts([situation], [fact]));
+    const [candidate] = worldToSituationPauseCandidates(worldWithSituationFacts(
+      [situation],
+      [concreteSituationFact(situation), fact],
+    ));
     const alertedA = applyObserverEventAlerts(branchA, [candidate]);
     const alertedB = applyObserverEventAlerts(branchB, [candidate]);
 
@@ -369,6 +405,14 @@ describe('V1 observer desk persistence', () => {
 });
 
 describe('V1 observer pause decisions', () => {
+  it('keeps Situation bookkeeping out of generic watch and pause candidates', () => {
+    const wrapper = historyEvent({ id: 'event-wrapper', kind: 'situation_phase_changed', title: '局势转入临界' });
+    const concrete = historyEvent({ id: 'event-concrete', kind: 'appointment_started', title: '赵衡入朝任职' });
+
+    expect(historyEventsToPauseCandidates([wrapper, concrete]).map((candidate) => candidate.id))
+      .toEqual([concrete.id]);
+  });
+
   it('derives power-transfer signals and every watchable reference from history evidence', () => {
     const candidate = historyEventToPauseCandidate(historyEvent());
     expect(candidate.signals).toContain('power-transfer');
@@ -420,6 +464,41 @@ describe('V1 observer pause decisions', () => {
 });
 
 describe('C03/C04 authoritative Situation pause projection', () => {
+  it('does not pause on a bare detector milestone without a concrete same-quarter scene', () => {
+    const situation = situationState({ id: 'situation-bare', milestoneFactIds: ['fact-bare'] });
+    const fact = milestoneFact('fact-bare', situation, 'formed');
+
+    expect(worldToSituationPauseCandidates(worldWithSituationFacts([situation], [fact]))).toEqual([]);
+  });
+
+  it('does not reuse an older concrete scene to justify a bare current-quarter phase pause', () => {
+    const situation = situationState({
+      id: 'situation-old-scene',
+      startedTurn: SETTLED_TURN - 1,
+      phase: 'active',
+      phaseSinceTurn: SETTLED_TURN,
+      causalFactIds: ['fact-cause'],
+      milestoneFactIds: ['fact-old-scene-phase'],
+      recentChanges: [{
+        turn: SETTLED_TURN,
+        kind: 'phase_changed',
+        tension: 64,
+        fromPhase: 'emerging',
+        toPhase: 'active',
+        sourceFactIds: ['fact-cause'],
+      }],
+    });
+    const oldSceneFact = { ...concreteSituationFact(situation), turn: SETTLED_TURN - 1 };
+    const milestone = milestoneFact('fact-old-scene-phase', situation, 'phase_changed');
+    const world = worldWithSituationFacts(
+      [situation],
+      [oldSceneFact, milestone],
+      [milestone.id],
+    );
+
+    expect(worldToSituationPauseCandidates(world)).toEqual([]);
+  });
+
   it('uses lastTurn Fact ids instead of the next world cursor and rejects invalid Situation ids', () => {
     const valid = situationState({ id: 'situation-valid', milestoneFactIds: ['fact-valid'] });
     const validFact = milestoneFact('fact-valid', valid, 'formed');
@@ -434,8 +513,8 @@ describe('C03/C04 authoritative Situation pause projection', () => {
     const staleFact = { ...milestoneFact('fact-stale', valid, 'formed'), turn: SETTLED_TURN - 1 };
     const world = worldWithSituationFacts(
       [valid],
-      [validFact, unlistedFact, missingSituationFact, staleFact],
-      ['fact-valid', 'fact-missing-situation', 'fact-stale'],
+      [concreteSituationFact(valid), validFact, unlistedFact, missingSituationFact, staleFact],
+      ['fact-cause', 'fact-valid', 'fact-missing-situation', 'fact-stale'],
     );
     const before = JSON.stringify(world);
 
@@ -497,6 +576,7 @@ describe('C03/C04 authoritative Situation pause projection', () => {
     });
     const formed = situationState({ id: 'situation-formed', milestoneFactIds: ['fact-formed'] });
     const facts: SimulationFact[] = [
+      concreteSituationFact(formed),
       milestoneFact('fact-formed', formed, 'formed'),
       milestoneFact('fact-phase', phase, 'phase_changed'),
       deathFact(deceased.id),
@@ -559,7 +639,10 @@ describe('C03/C04 authoritative Situation pause projection', () => {
   it('pauses only an exactly watched Situation and never falls through generic rules', () => {
     const situation = situationState({ id: 'situation-exact', milestoneFactIds: ['fact-exact'] });
     const fact = milestoneFact('fact-exact', situation, 'formed');
-    const [candidate] = worldToSituationPauseCandidates(worldWithSituationFacts([situation], [fact]));
+    const [candidate] = worldToSituationPauseCandidates(worldWithSituationFacts(
+      [situation],
+      [concreteSituationFact(situation), fact],
+    ));
     const proxyWatch = upsertObserverWatch(createObserverDeskSettings(), {
       kind: 'person', id: 'character-core', label: '代理人物', detail: '', alert: false,
     });
@@ -647,7 +730,7 @@ describe('C03/C04 authoritative Situation pause projection', () => {
       },
     });
     const formationCandidate = worldToSituationPauseCandidates(worldWithSituationFacts(
-      [formed], [milestoneFact('fact-formed-priority', formed, 'formed')],
+      [formed], [concreteSituationFact(formed), milestoneFact('fact-formed-priority', formed, 'formed')],
     ))[0];
     const resolutionCandidate = worldToSituationPauseCandidates(worldWithSituationFacts(
       [resolved], [milestoneFact('fact-resolved-priority', resolved, 'resolved')],
@@ -670,9 +753,9 @@ describe('C03/C04 authoritative Situation pause projection', () => {
         milestoneFactIds: [`fact-${String(index).padStart(3, '0')}`],
       })
     ));
-    const facts = situations.map((situation, index) => (
+    const facts = [concreteSituationFact(situations[0]), ...situations.map((situation, index) => (
       milestoneFact(`fact-${String(index).padStart(3, '0')}`, situation, 'formed')
-    ));
+    ))];
     const world = worldWithSituationFacts(situations, facts);
     const before = JSON.stringify(world);
 

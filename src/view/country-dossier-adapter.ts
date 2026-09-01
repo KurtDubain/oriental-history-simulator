@@ -8,6 +8,7 @@ import {
 } from '../sim/politics/power-ledger';
 import { projectCourt } from './court-projection';
 import { projectHistoricalScenes } from './historical-scenes';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import {
   character,
   compact,
@@ -148,7 +149,9 @@ export function toCountryArchive(world: WorldState, item: PolityState): ArchiveD
   const inspector = toCountryInspector(world, item);
   const ruler = character(world, item.rulerId);
   const rulingFamily = family(world, item.rulingFamilyId);
-  const records = readWorldHistory(world).filter((event) => event.polityIds.includes(item.id)).map(eventArchiveRecord);
+  const records = readWorldHistory(world)
+    .filter((event) => isDefaultVisibleHistoryEvent(event) && event.polityIds.includes(item.id))
+    .map(eventArchiveRecord);
   const factionSentence = inspector.court?.summary
     ?? (inspector.factions?.length
       ? `${inspector.factions.map((faction) => `${faction.name}主张${faction.agenda}`).join('；')}。其中${inspector.factions[0].name}权势最盛。`

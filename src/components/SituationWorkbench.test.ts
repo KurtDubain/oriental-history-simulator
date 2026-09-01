@@ -6,7 +6,7 @@ import { projectSituationWorkbench } from '../view/situation-detail';
 import { SituationWorkbench } from './SituationWorkbench';
 
 describe('SituationWorkbench', () => {
-  it('renders the player, evidence, and collapsed audit layers from a real Situation', () => {
+  it('renders concrete facts without exposing detector stages or audit metrics', () => {
     const world = advanceWorldBy(createWorld('春战副将'), 8);
     const war = world.situationSystem.situations.find((item) => item.type === 'war_progress');
     if (!war) throw new Error('expected war Situation');
@@ -23,16 +23,22 @@ describe('SituationWorkbench', () => {
     expect(markup).toContain('role="dialog"');
     expect(markup).toContain('data-history-layer="situation"');
     expect(markup).toContain('持续局势');
-    expect(markup).toContain('眼下局面');
-    expect(markup).toContain('后续看点');
-    expect(markup).toContain('局势沿革');
+    expect(markup).toContain('最近实事');
+    expect(markup).toContain('此前实事');
+    expect(markup).toContain('相关各方');
+    expect(markup).toContain('data-testid="situation-current-action"');
+    expect(markup).toContain('data-testid="situation-participants-disclosure"');
     expect(markup).toContain('所据史实');
     expect(markup).toContain('为何如此');
     expect(markup).not.toContain('查明因果');
-    expect(markup).toContain('推演底账');
+    expect(markup).not.toContain('推演底账');
+    expect(markup).not.toContain('当前张力');
+    expect(markup).not.toContain('局势转入新阶段');
+    expect(markup).not.toContain('class="situation-workbench__phase"');
+    expect(markup).not.toContain('class="situation-workbench__audit"');
     expect(markup).toContain(projection.selected?.title ?? '');
-    expect(markup).toMatch(/<details class="situation-workbench__audit">/);
-    expect(markup).not.toMatch(/<details class="situation-workbench__audit" open/);
+    const sceneIds = [...markup.matchAll(/data-narrative-scene-id="([^"]+)"/g)].map((match) => match[1]);
+    expect(sceneIds).toHaveLength(new Set(sceneIds).size);
   });
 
   it('does not render a layer while closed', () => {
@@ -105,6 +111,7 @@ describe('SituationWorkbench', () => {
       onSelectCourtFaction: () => undefined,
     }));
 
+    expect(markup).toContain(`data-court-focus-polity="${polity.id}"`);
     expect(markup).toContain(`data-court-focus-faction="${faction.id}"`);
     expect(markup).toContain('看其朝局');
   });

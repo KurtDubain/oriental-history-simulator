@@ -41,7 +41,7 @@ describe('ObserverDesk Situation UI', () => {
     expect(markup).toContain('data-testid="observer-watch-open"');
     expect(markup).toContain('data-testid="observer-watch-remove"');
     expect(markup).toContain('>局势<');
-    expect(markup).toContain('里程碑');
+    expect(markup).toContain('新进展');
     expect(markup).toContain('data-alert-kind="situation-change"');
   });
 
@@ -58,11 +58,11 @@ describe('ObserverDesk Situation UI', () => {
 
     expect(markup).toContain('data-pause-rule="situationChanges"');
     expect(markup).toContain('关注局势关键变化');
-    expect(markup).toContain('形成、阶段变化、核心人物死亡与结案');
+    expect(markup).toContain('成形、新动向、核心人物死亡与结案');
     expect(markup).toContain('data-testid="observer-pause-open"');
     expect(markup).toContain('data-situation-id="situation_war"');
     expect(markup).toContain('data-situation-trigger="phase-change"');
-    expect(markup).toContain('局势里程碑，时间已停');
+    expect(markup).toContain('局势有新进展，时间已停');
     expect(markup).toContain('打开对应局势卷宗');
   });
 

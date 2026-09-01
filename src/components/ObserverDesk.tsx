@@ -86,7 +86,7 @@ interface PauseRuleDefinition {
 }
 
 const PAUSE_RULES: PauseRuleDefinition[] = [
-  { key: 'situationChanges', label: '关注局势关键变化', detail: '形成、阶段变化、核心人物死亡与结案' },
+  { key: 'situationChanges', label: '关注局势关键变化', detail: '成形、新动向、核心人物死亡与结案' },
   { key: 'wars', label: '战争', detail: '宣战、关键战役、都城陷落与媾和' },
   { key: 'powerTransfers', label: '政变与继承', detail: '宫变、篡立、摄政、继承与政权解体' },
   { key: 'outbreaks', label: '疾疫', detail: '疫病输入、暴发与重要人物染病' },
@@ -194,7 +194,7 @@ export function ObserverDesk({
                 aria-label={`${pauseMatch.reason}：${pauseMatch.eventTitle}，打开对应局势卷宗`}
                 onClick={() => onSelectPauseMatch(pauseMatch)}
               >
-                <span><strong>局势里程碑，时间已停</strong><small>{pauseMatch.reason} · {pauseMatch.eventTitle}</small></span>
+                <span><strong>局势有新进展，时间已停</strong><small>{pauseMatch.reason} · {pauseMatch.eventTitle}</small></span>
                 <ChevronRight size={14} aria-hidden="true" />
               </button>
             ) : (
@@ -234,11 +234,11 @@ export function ObserverDesk({
                       <span><strong>{item.label}</strong><small>{item.detail || '暂无补充记载'}</small></span>
                       {item.alert ? (
                         <i
-                          aria-label={item.kind === 'situation' ? '局势有新里程碑' : '有新动向'}
+                          aria-label={item.kind === 'situation' ? '局势有新进展' : '有新动向'}
                           data-alert-kind={item.kind === 'situation' ? 'situation-change' : 'new-history'}
                         >
                           <BellRing size={12} aria-hidden="true" />
-                          <span>{item.kind === 'situation' ? '里程碑' : '新动向'}</span>
+                          <span>{item.kind === 'situation' ? '新进展' : '新动向'}</span>
                         </i>
                       ) : <ChevronRight size={14} aria-hidden="true" />}
                     </button>

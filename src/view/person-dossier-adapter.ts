@@ -26,6 +26,7 @@ import {
 } from '../sim/agency';
 import { calculateCharacterPowerPosition } from '../sim/politics/power-ledger';
 import { projectHistoricalScenes } from './historical-scenes';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import {
   character,
   eventArchiveRecord,
@@ -130,7 +131,8 @@ export function toPersonExperienceRecords(
   const knownEventIds = new Set<string>();
   const knownFactIds = new Set<string>();
   const biography = Array.isArray(item.biography) ? item.biography : [];
-  const history = readScope === 'all' ? readWorldHistory(world) : world.history;
+  const history = (readScope === 'all' ? readWorldHistory(world) : world.history)
+    .filter(isDefaultVisibleHistoryEvent);
   const facts = readScope === 'all' ? readWorldFacts(world) : world.facts;
   const eventById = new Map(history.map((event) => [event.id, event]));
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
@@ -406,7 +408,7 @@ const COMMAND_PLAN_STEP_LABELS: Readonly<Record<string, string>> = {
 
 function commandSourceEventId(world: WorldState, sourceFactId: string): string | null {
   return [...world.history]
-    .filter((event) => event.sourceFactIds.includes(sourceFactId))
+    .filter((event) => isDefaultVisibleHistoryEvent(event) && event.sourceFactIds.includes(sourceFactId))
     .sort((left, right) => right.turn - left.turn || right.id.localeCompare(left.id))[0]?.id ?? null;
 }
 
@@ -595,7 +597,7 @@ function commandAppointmentEventId(
   actor: AgencyDecisionActor,
 ): string | null {
   return [...world.history]
-    .filter((event) => event.stateDeltas.some((delta) => (
+    .filter((event) => isDefaultVisibleHistoryEvent(event) && event.stateDeltas.some((delta) => (
       delta.entityType === 'army'
       && delta.entityId === actor.goal.targetArmyId
       && delta.field === 'commanderId'

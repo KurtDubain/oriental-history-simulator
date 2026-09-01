@@ -1,6 +1,7 @@
 import type { WorldState } from '../sim/types';
 import { compact } from './dossier-adapter-shared';
 import { toSystemInspector } from './map-dossier-adapter';
+import { projectSituationHistoricalScenes } from './historical-scenes';
 import { projectSituationSnapshotItem } from './situation-snapshot';
 import type { Selection } from './observer-shell-contract';
 import type { ObserverWatchItem } from './v1-observer';
@@ -54,11 +55,13 @@ export function watchItemForSituation(
   const situation = world.situationSystem.situations.find((item) => item.id === situationId);
   if (!situation) return null;
   const snapshot = projectSituationSnapshotItem(situation, world);
+  const scene = projectSituationHistoricalScenes(world, situation, 1, null, 'active')[0];
+  const status = situation.status === 'resolved' ? '已结案' : '持续追踪';
   return {
     kind: 'situation',
     id: situation.id,
     label: snapshot.title,
-    detail: `${snapshot.statusLabel} · ${snapshot.phaseLabel} · 张力${Math.round(snapshot.tension)}`,
+    detail: `${status} · ${scene ? `${scene.dateLabel} · ${scene.title}` : '本季无新动作'}`,
     alert: false,
   };
 }

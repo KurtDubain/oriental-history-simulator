@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.20.1',
+    date: '2026-09-01',
+    title: '局势讲事，不讲虚势',
+    items: [
+      '持续局势默认先讲人物、地点、行动与结果，不再用阶段、升降温或张力数值代替具体发生的事情。',
+      '局势沿革优先复用已有事实；没有新的具名行动或实际变化时会如实说明，不把后台压力变化包装成新闻。',
+      '阶段、张力与势头仍留在内部演算与测试诊断中，不再出现在普通卷宗；模拟规则、schema 4 存档、确定性与世界 hash 均保持不变。',
+    ],
+  },
+  {
     version: '1.20.0',
     date: '2026-09-01',
     title: '朝臣入局，一诺成盟',

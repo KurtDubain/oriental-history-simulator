@@ -1,10 +1,7 @@
-import type { WorldState } from '../sim/types';
+import type { HistoryEvent, WorldState } from '../sim/types';
 import { toChronicleEvent } from './history-causal-adapter';
 import { projectHistoricalScenes } from './historical-scenes';
-import {
-  projectQuarterPulseSituationCandidates,
-  type QuarterPulseSituationChange,
-} from './quarter-pulse-situations';
+import type { QuarterPulseSituationChange } from './quarter-pulse-situations';
 
 export const MAX_QUARTER_PULSE_STORIES = 3;
 
@@ -184,12 +181,23 @@ function chronicleFallbackStories(
   const eventIds = new Set(report.eventIds);
   const reportFactIds = new Set(report.factIds);
   const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
+  const characterIds = new Set(world.characters.map((character) => character.id));
+  const polityIds = new Set(world.polities.map((polity) => polity.id));
+  const regionIds = new Set(world.regions.map((region) => region.id));
+  const hasConcreteAnchor = (event: HistoryEvent): boolean => (
+    event.sourceFactIds.length > 0
+    || event.stateDeltas.length > 0
+    || event.actorIds.some((id) => characterIds.has(id))
+    || event.polityIds.some((id) => polityIds.has(id))
+    || event.regionIds.some((id) => regionIds.has(id))
+  );
   return world.history
     .filter((event) => (
       eventIds.has(event.id)
       && event.turn === report.turn
       && event.kind !== 'quarter_summary'
       && !event.kind.startsWith('situation_')
+      && hasConcreteAnchor(event)
       && !coveredEvents.has(event.id)
       && !event.sourceFactIds.some((id) => coveredFacts.has(id))
     ))
@@ -219,27 +227,6 @@ function chronicleFallbackStories(
     });
 }
 
-function situationStories(world: WorldState): QuarterPulseSituationStory[] {
-  return projectQuarterPulseSituationCandidates(world).map((change) => ({
-    id: `situation:${change.id}`,
-    kind: 'situation',
-    title: change.sceneTitle ?? change.title,
-    summary: change.detail,
-    importance: normalizedImportance(change.importance),
-    sourceFactIds: change.sourceFactIds,
-    historyEventIds: change.historyEventIds,
-    regionIds: change.regionIds,
-    situationId: change.id,
-    situationKind: change.kind,
-    kindLabel: change.kindLabel,
-    basis: change.basis,
-    typeLabel: change.typeLabel,
-    threadTitle: change.title,
-    tension: change.tension,
-    delta: change.delta,
-  }));
-}
-
 export function selectQuarterPulseStories(
   candidates: readonly QuarterPulseStory[],
   maximum = MAX_QUARTER_PULSE_STORIES,
@@ -259,11 +246,7 @@ export function selectQuarterPulseStories(
     } as QuarterPulseStory;
   });
   const concrete = representatives.filter(hasCurrentConcreteEvidence).sort(compareStories);
-  const contextualTrends = representatives.filter((story) => !hasCurrentConcreteEvidence(story)).sort(compareStories);
-  const selected = concrete.slice(0, limit);
-  const remaining = limit - selected.length;
-  if (remaining > 0 && contextualTrends.length) selected.push(contextualTrends[0]);
-  return selected;
+  return concrete.slice(0, limit);
 }
 
 export function projectQuarterPulse(world: WorldState): QuarterPulseProjection {
@@ -272,7 +255,6 @@ export function projectQuarterPulse(world: WorldState): QuarterPulseProjection {
   const coveredFacts = new Set(facts.flatMap((story) => story.sourceFactIds));
   const coveredEvents = new Set(facts.flatMap((story) => story.historyEventIds));
   const candidates: QuarterPulseStory[] = [
-    ...situationStories(world),
     ...facts,
     ...chronicleFallbackStories(world, coveredFacts, coveredEvents),
   ];

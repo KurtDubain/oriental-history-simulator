@@ -8,6 +8,7 @@ import type {
   RegionState,
   WorldState,
 } from '../sim/types';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 
 const compact = new Intl.NumberFormat('zh-CN', {
   notation: 'compact',
@@ -52,7 +53,11 @@ function scopedHistory(
   predicate: (event: HistoryEvent) => boolean,
   limit = 8,
 ) {
-  return world.history.filter(predicate).slice(-limit).reverse().map(historyRecord);
+  return world.history
+    .filter((event) => isDefaultVisibleHistoryEvent(event) && predicate(event))
+    .slice(-limit)
+    .reverse()
+    .map(historyRecord);
 }
 
 function foodSafetyRatio(item: RegionState) {

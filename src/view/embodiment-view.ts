@@ -8,6 +8,7 @@ import {
   type WorldState,
 } from '../sim';
 import type { EmbodimentClosure } from './embodiment-observer';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 
 export interface PersonEmbodiedActionView {
   actionId: string;
@@ -140,9 +141,10 @@ export function projectPersonEmbodimentView(
   ));
   const resultEvent = lastResult
     ? [...world.history].reverse().find((event) => (
-        event.sourceFactIds.includes(lastResult.id)
-        || (Boolean(lastResult.payload.domainFactId)
-          && event.sourceFactIds.includes(lastResult.payload.domainFactId as string))
+        isDefaultVisibleHistoryEvent(event)
+        && (event.sourceFactIds.includes(lastResult.id)
+          || (Boolean(lastResult.payload.domainFactId)
+            && event.sourceFactIds.includes(lastResult.payload.domainFactId as string)))
       ))
     : null;
 

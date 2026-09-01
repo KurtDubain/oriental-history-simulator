@@ -9,6 +9,7 @@ import {
   serializeWorld,
   stableHash,
   validateTurnRuntime,
+  type HistoryEvent,
   type SimulationFact,
   type WorldState,
 } from '../index';
@@ -18,10 +19,12 @@ import {
   MAX_PERSONAL_MEMORY_SOURCE_FACTS,
   MAX_PINNED_PERSONAL_MEMORIES,
   reducePersonalMemorySystem,
+  toPersonalMemoryPlayerViews,
 } from './memory';
 
 type BattleFact = Extract<SimulationFact, { kind: 'battle' }>;
 type AppointmentFact = Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }>;
+type SituationMilestoneFact = Extract<SimulationFact, { kind: 'situation_milestone' }>;
 
 function factId(index: number): string {
   return `fact_${String(index).padStart(7, '0')}`;
@@ -133,6 +136,60 @@ function appointmentFact(
       fleetId: null,
       rank,
     },
+  };
+}
+
+function situationMilestoneFact(world: WorldState, index: number, turn: number): SituationMilestoneFact {
+  const date = getDateForTurn(turn);
+  const character = world.characters[0];
+  const region = world.regions[0];
+  if (!character || !region) throw new Error('PersonalMemory fixture requires a character and region');
+  return {
+    id: factId(index),
+    turn,
+    year: date.year,
+    season: date.season,
+    kind: 'situation_milestone',
+    category: '政治',
+    importance: 4,
+    actorIds: [character.id],
+    polityIds: [character.polityId],
+    regionIds: [region.id],
+    causes: [],
+    stateDeltas: [],
+    sourceFactIds: [],
+    payload: {
+      situationId: 'situation_personal_memory',
+      situationType: 'court_power_struggle',
+      transition: 'formed',
+      fromPhase: null,
+      toPhase: 'emerging',
+      tension: 62,
+      momentum: 18,
+      outcomeKey: null,
+    },
+  };
+}
+
+function historyEventForFact(id: string, kind: string, fact: SimulationFact): HistoryEvent {
+  return {
+    id,
+    turn: fact.turn,
+    year: fact.year,
+    season: fact.season,
+    category: fact.category,
+    kind,
+    title: id,
+    summary: id,
+    importance: fact.importance,
+    actorIds: [...fact.actorIds],
+    polityIds: [...fact.polityIds],
+    regionIds: [...fact.regionIds],
+    causes: [...fact.causes],
+    evidence: [],
+    stateDeltas: [...fact.stateDeltas],
+    sourceFactIds: [fact.id],
+    situationIds: kind.startsWith('situation_') ? ['situation_personal_memory'] : [],
   };
 }
 
@@ -265,6 +322,36 @@ describe('C08 authoritative PersonalMemory', () => {
 
     expect(fromRewrittenChronicle).toEqual(baseline);
     expect(world.history[0]?.title).not.toBe(rewritten.history[0]?.title);
+  });
+
+  it('keeps Situation memories authoritative while hiding them and their Chronicle wrappers from the player view', () => {
+    const world = createWorld('personal-memory-player-projection');
+    const characterId = world.characters[0]?.id as string;
+    const battle = battleFact(world, 1, 0);
+    const milestone = situationMilestoneFact(world, 2, 0);
+    world.agencySystem = reducePersonalMemorySystem(world, 0, [battle, milestone]);
+
+    const concreteEvent = historyEventForFact('event_concrete_battle', 'battle', battle);
+    const wrapperEvent = historyEventForFact('event_situation_wrapper', 'situation_phase_changed', battle);
+    const milestoneEvent = historyEventForFact('event_situation_milestone', 'situation_formed', milestone);
+    world.history = [concreteEvent, wrapperEvent, milestoneEvent];
+    const authoritativeMemoryBefore = structuredClone(world.agencySystem);
+    const authoritativeHistoryBefore = structuredClone(world.history);
+    const saveBefore = serializeWorld(world);
+
+    const memories = memoriesFor(world, characterId);
+    const battleMemory = memories.find((memory) => memory.kind === 'battle_victory');
+    const situationMemory = memories.find((memory) => memory.kind === 'situation_formed');
+    const views = toPersonalMemoryPlayerViews(world, characterId);
+
+    expect(battleMemory).toBeDefined();
+    expect(situationMemory).toBeDefined();
+    expect(views.some((view) => view.id === situationMemory?.id)).toBe(false);
+    expect(views.find((view) => view.id === battleMemory?.id)?.sourceEventId).toBe(concreteEvent.id);
+    expect(views.every((view) => view.sourceEventId !== wrapperEvent.id && view.sourceEventId !== milestoneEvent.id)).toBe(true);
+    expect(world.agencySystem).toEqual(authoritativeMemoryBefore);
+    expect(world.history).toEqual(authoritativeHistoryBefore);
+    expect(serializeWorld(world)).toBe(saveBefore);
   });
 
   it('round-trips authoritative memories and continues with the same save and hash', () => {

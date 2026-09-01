@@ -207,28 +207,11 @@
   color: var(--observer-vermilion-dark, #79271f);
 }
 
-.observer-leads__meta > span[data-stage] {
-  padding: 2px 4px;
-  border: 1px solid rgb(80 75 64 / 15%);
-  background: rgb(255 251 239 / 40%);
-}
-
 .observer-leads__meta > span[data-source="situation"] {
   padding: 2px 4px;
   border: 1px solid rgb(126 42 34 / 20%);
   color: var(--observer-vermilion-dark, #79271f);
   background: rgb(156 53 43 / 7%);
-}
-
-.observer-leads__meta > span[data-stage="临界"] {
-  border-color: rgb(142 52 43 / 25%);
-  color: var(--observer-vermilion-dark, #79271f);
-  background: rgb(156 53 43 / 8%);
-}
-
-.observer-leads__meta > span:last-child {
-  margin-left: auto;
-  font-variant-numeric: tabular-nums;
 }
 
 .observer-leads__inspect > strong {
@@ -243,8 +226,7 @@
 }
 
 .observer-leads__evidence,
-.observer-leads__continuity,
-.observer-leads__next {
+.observer-leads__continuity {
   overflow: hidden;
   color: var(--observer-ink-faint, #858174);
   font-size: 8px;
@@ -261,18 +243,6 @@
 }
 
 .observer-leads__continuity svg {
-  flex: 0 0 auto;
-  color: var(--observer-vermilion-dark, #79271f);
-}
-
-.observer-leads__next {
-  display: flex;
-  align-items: center;
-  gap: 4px;
-  color: var(--observer-ink-soft, #656357);
-}
-
-.observer-leads__next svg {
   flex: 0 0 auto;
   color: var(--observer-vermilion-dark, #79271f);
 }
@@ -410,11 +380,14 @@
   }
 
   .observer-leads__list > li {
-    min-height: 68px;
+    min-height: 76px;
   }
 
   .observer-leads__evidence {
-    display: none;
+    display: block;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 }
 

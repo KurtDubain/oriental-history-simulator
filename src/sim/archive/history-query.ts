@@ -26,6 +26,8 @@ export interface WorldHistoryQueryFilters {
   minimumImportance?: number;
   relatedEntity?: WorldHistoryRelatedRef | null;
   throughTurn?: number;
+  /** Chronicle kinds beginning with one of these prefixes are skipped. */
+  excludedKindPrefixes?: readonly string[];
 }
 
 export interface WorldHistoryQueryCursor {
@@ -85,6 +87,7 @@ interface NormalizedHistoryFilters {
   minimumImportance: 1 | 2 | 3 | 4 | 5;
   related: WorldHistoryRelatedRef | null;
   throughTurn: number;
+  excludedKindPrefixes: string[];
 }
 
 function emptyImportanceCounts(): ArchiveImportanceCounts {
@@ -113,6 +116,9 @@ function normalizeFilters(
   const related = input.relatedEntity && input.relatedEntity.id
     ? { kind: input.relatedEntity.kind, id: input.relatedEntity.id }
     : null;
+  const excludedKindPrefixes = [...new Set(
+    (input.excludedKindPrefixes ?? []).map((prefix) => prefix.trim()).filter(Boolean),
+  )].sort(stableCompare);
   return {
     query,
     tokens: query.split(' ').filter(Boolean),
@@ -121,6 +127,7 @@ function normalizeFilters(
     minimumImportance,
     related,
     throughTurn: clampTurn(world, input.throughTurn),
+    excludedKindPrefixes,
   };
 }
 
@@ -200,6 +207,7 @@ function eventMatches(
   names: SearchNames | null,
 ): boolean {
   if (event.turn > filters.throughTurn || event.importance < filters.minimumImportance) return false;
+  if (filters.excludedKindPrefixes.some((prefix) => event.kind.startsWith(prefix))) return false;
   if (filters.categorySet.size > 0 && !filters.categorySet.has(event.category)) return false;
   if (filters.related && !eventReferences(event, filters.related)) return false;
   if (filters.tokens.length === 0) return true;
@@ -252,6 +260,7 @@ function querySignature(
     filters.minimumImportance,
     filters.related,
     filters.throughTurn,
+    filters.excludedKindPrefixes,
   ]);
 }
 

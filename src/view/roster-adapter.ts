@@ -26,6 +26,7 @@ import {
   type RosterScope,
 } from './roster-discovery';
 import { situationTypeLabel } from './situation-snapshot';
+import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import type { ObserverWatchItem } from './v1-observer';
 import {
   character,
@@ -186,7 +187,7 @@ function buildContext(world: WorldState, watchedRefs: readonly RosterWatchedRef[
   const currentEventIds = new Set(world.lastTurn?.eventIds ?? []);
   const currentFactIds = new Set(world.lastTurn?.factIds ?? []);
   const recentEvents = world.history
-    .filter((event) => event.kind !== 'world_created' && event.turn >= recentSince && (
+    .filter((event) => isDefaultVisibleHistoryEvent(event) && event.kind !== 'world_created' && event.turn >= recentSince && (
       event.importance >= 3
       || currentEventIds.has(event.id)
       || event.sourceFactIds.some((id) => currentFactIds.has(id))

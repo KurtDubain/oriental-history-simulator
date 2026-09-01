@@ -27,15 +27,10 @@ const SITUATION_TYPES_BY_LEAD_SLOT = Object.freeze({
   polity: Object.freeze(['inheritance_crisis', 'court_power_struggle']),
   tension: Object.freeze(['war_progress']),
 });
-const LEAD_STAGE_BY_SITUATION_PHASE = Object.freeze({
-  emerging: '伏线',
-  active: '升温',
-  critical: '临界',
-});
 const SITUATION_WATCH_SEED = '春战副将';
-const SITUATION_WATCH_TURN = 8;
+const SITUATION_WATCH_TURN = 4;
 const SITUATION_WATCH_SLOT = 'tension';
-const SITUATION_WATCH_EXPECTED_PAUSE_TURN = 10;
+const SITUATION_WATCH_EXPECTED_PAUSE_TURN = 6;
 const PRIVATE_MAP_CONTENT_VERSION = 'v03-82';
 
 const server = await createServer({
@@ -460,17 +455,11 @@ function auditSituationProjection(projection, requiredTypes) {
     assert.equal(situation.typeLabel, SITUATION_TYPE_LABELS[situation.type], `${situation.type}应公开中文类型名`);
     assertChineseSituationCopy(situation.title, `${situation.type}应公开中文标题`);
     assert.match(situation.title, new RegExp(situation.typeLabel), `${situation.type}标题应明示局势类型`);
-    assert.ok(['emerging', 'active', 'critical'].includes(situation.phase));
-    assert.ok(situation.tension >= 0 && situation.tension <= 100);
-    assert.ok(situation.evidence.filter((item) => item.role === 'structural').length >= 2, '正式局势应公开至少两条结构证据');
-    assert.ok(situation.evidence.every((item) => {
-      assertChineseSituationCopy(item.label, `${situation.type}证据应使用中文标签`);
-      assertChineseSituationCopy(item.roleLabel, `${situation.type}证据角色应使用中文标签`);
-      return item.refs.length > 0;
-    }), '局势证据必须保留结构化引用');
-    assert.ok(situation.causalFactIds.length > 0 && situation.milestoneFactIds.length > 0);
-    assertChineseSituationCopy(situation.nextSignal.label, `${situation.type}应公开中文观察线索`);
-    assert.ok(situation.nextSignal.refs.length > 0, `${situation.type}观察线索应保留结构化引用`);
+    assert.equal(situation.status, 'open');
+    assert.ok(situation.startedTurn <= situation.lastUpdatedTurn, '局势目录应保留可核验的起止季度');
+    for (const hidden of ['phase', 'tension', 'momentum', 'evidence', 'nextSignal', 'latestChange']) {
+      assert.equal(Object.hasOwn(situation, hidden), false, `默认文本局势不得公开 ${hidden}`);
+    }
   }
   for (const [type, budget] of Object.entries(SITUATION_OPEN_BUDGETS)) {
     assert.ok((openByType[type] ?? 0) <= budget, `${type}开放局势不得超过类型预算${budget}`);
@@ -506,7 +495,10 @@ function assertObserverLeadMilestone(state, expectedSources, label) {
     assert.equal(lead.selectedSinceTurn, continuity.selectedSinceTurn, `${label} ${lead.slot}应公开真实留任起点`);
     assert.equal(lead.retainThroughTurn, continuity.retainThroughTurn, `${label} ${lead.slot}应公开最短留任边界`);
     assert.equal(lead.trackingTurns, state.time.turn - lead.selectedSinceTurn + 1, `${label} ${lead.slot}追踪季数应可校验`);
-    assert.ok(lead.evidence.length === 2 && lead.nextSignal.length > 0, `${label} ${lead.slot}应保留两条证据与下一观察`);
+    assert.equal(lead.evidence.length, 2, `${label} ${lead.slot}应保留两条当前事实`);
+    assert.equal(Object.hasOwn(lead, 'stage'), false, `${label} ${lead.slot}不得公开检测阶段`);
+    assert.equal(Object.hasOwn(lead, 'tension'), false, `${label} ${lead.slot}不得公开张力值`);
+    assert.equal(Object.hasOwn(lead, 'nextSignal'), false, `${label} ${lead.slot}不得公开预测式下一观察`);
 
     if (lead.source === 'fallback') {
       assert.equal(lead.situationId, null, `${label} ${lead.slot}回退题不得伪造 Situation ID`);
@@ -524,17 +516,14 @@ function assertObserverLeadMilestone(state, expectedSources, label) {
       const resolved = state.observer.situations.recentResolved.find((item) => item.id === lead.situationId);
       assert.ok(resolved, `${label} ${lead.slot}的结案回声必须指向近期已结案局势`);
       assert.equal(resolved.type, lead.situationType, `${label} ${lead.slot}结案回声不得改变局势类型`);
-      assert.equal(lead.stage, '回响', `${label} ${lead.slot}结案后应明确进入回响阶段`);
       assert.equal(resolved.status, 'resolved', `${label} ${lead.slot}结案回声必须保留已结案状态`);
-      assert.ok(resolved.resolvedTurn !== null && resolved.milestoneFactIds.length > 0, `${label} ${lead.slot}结案回声必须反链权威里程碑`);
+      assert.ok(resolved.resolvedTurn !== null, `${label} ${lead.slot}结案回声必须保留结案季度`);
       continue;
     }
     assert.equal(lead.displayMode, 'tracking', `${label} ${lead.slot}的未结案局势应持续追踪`);
     const situation = state.observer.situations.open.find((item) => item.id === lead.situationId);
     assert.ok(situation, `${label} ${lead.slot}必须指向当前开放的局势`);
     assert.equal(situation.type, lead.situationType, `${label} ${lead.slot}题源与局势投影类型必须一致`);
-    assert.equal(lead.stage, LEAD_STAGE_BY_SITUATION_PHASE[situation.phase], `${label} ${lead.slot}阶段必须取自滞回后的 Situation phase`);
-    assert.equal(lead.tension, Math.round(situation.tension), `${label} ${lead.slot}张力必须取自 Situation`);
   }
 
   return leads;
@@ -664,12 +653,11 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   let workbenchState = await snapshot(page);
   assert.equal(workbenchState.observer.situationWorkbenchOpen, true, '持续局势必须拥有独立只读打开态');
   assert.ok(workbenchState.observer.selectedSituationId, '持续局势必须选中一条稳定 Situation');
-  assert.ok(workbenchState.observer.selectedSituation?.playerSummary.length >= 2, '默认读势层必须提供玩家语言摘要');
+  assert.ok(workbenchState.observer.selectedSituation?.playerSummary.length >= 1, '默认读势层必须提供一句明确事实');
   assert.equal(workbenchState.deterministicWorldHash, situationHash, '打开持续局势不得改变世界哈希');
   const workbench = page.locator('.situation-workbench');
-  const auditDetails = workbench.locator('.situation-workbench__audit');
-  assert.equal(await auditDetails.getAttribute('open'), null, 'Simulation Audit 默认必须折叠');
-  assert.equal(await auditDetails.getByText('Situation ID', { exact: true }).isVisible(), false, '默认画面不得泄漏调试 ID');
+  assert.equal(await workbench.locator('.situation-workbench__audit').count(), 0, '普通卷宗不应渲染推演底账');
+  assert.equal(await workbench.getByText('Situation ID', { exact: true }).count(), 0, '默认画面不得泄漏调试 ID');
   assert.ok(await workbench.locator('.situation-workbench__directory li > button').count() >= requiredTypes.length, '全卷目录应列出真实开放局势');
   await waitForVisualSettled(workbench);
   await page.screenshot({ path: `${ARTIFACT_DIR}/situation-workbench-desktop.png`, fullPage: true });
@@ -682,11 +670,6 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
     assert.notEqual(workbenchState.observer.selectedSituationId, firstSelected, '目录切换必须保留 Situation 身份');
     assert.equal(workbenchState.deterministicWorldHash, situationHash, '切换局势不得改变世界哈希');
   }
-  await auditDetails.locator('summary').click();
-  assert.notEqual(await auditDetails.getAttribute('open'), null, '高级审计应可按需展开');
-  assert.equal((await snapshot(page)).deterministicWorldHash, situationHash, '展开审计不得改变世界哈希');
-  await auditDetails.locator('summary').click();
-
   const causalButton = workbench.getByRole('button', { name: '为何如此' }).first();
   if (await causalButton.count()) {
     await causalButton.click();
@@ -731,14 +714,14 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   await page.click('#start-world');
   await page.waitForSelector('.world-map__canvas');
 
-  const turn8 = await advanceTo(page, SITUATION_WATCH_TURN);
-  const lead = turn8.observer.focusLeads.find((item) => item.slot === SITUATION_WATCH_SLOT);
-  assert.ok(lead?.situationId, '冻结种子 T8 的天下矛盾必须由真实 Situation 承载');
+  const turn4 = await advanceTo(page, SITUATION_WATCH_TURN);
+  const lead = turn4.observer.focusLeads.find((item) => item.slot === SITUATION_WATCH_SLOT);
+  assert.ok(lead?.situationId, '冻结种子 T4 的天下矛盾必须由真实 Situation 承载');
   const watchedSituationId = lead.situationId;
   assert.match(watchedSituationId, /^situation_\d+$/, '冻结种子应使用稳定的局势身份，不依赖其他检测器的全局排号');
-  const turn8Situation = situationFromSnapshot(turn8, watchedSituationId);
-  assert.equal(turn8Situation?.status, 'open');
-  assert.equal(turn8Situation?.phase, 'critical', '关注前的战争局势应处于临界阶段');
+  const turn4Situation = situationFromSnapshot(turn4, watchedSituationId);
+  assert.equal(turn4Situation?.status, 'open');
+  assert.equal(turn4Situation?.type, 'war_progress', '关注项必须是同一条真实战争进程');
 
   const leadRow = page.locator(
     `[data-testid="observer-lead"][data-situation-id="${watchedSituationId}"]`,
@@ -748,7 +731,7 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   await watchButton.waitFor();
   assert.equal(await watchButton.getAttribute('data-watch-kind'), 'situation');
   assert.equal(await watchButton.getAttribute('data-watch-key'), `situation:${watchedSituationId}`);
-  const hashBeforeWatch = turn8.deterministicWorldHash;
+  const hashBeforeWatch = turn4.deterministicWorldHash;
   await watchButton.click();
   const watched = await waitForSnapshot(page, (current) => current.observer.watchedCount === 1);
   assert.equal(watched.deterministicWorldHash, hashBeforeWatch, '关注 Situation 只能改变观察者设置');
@@ -837,9 +820,9 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   await page.getByRole('button', { name: '8 倍速推演' }).click();
   await page.getByRole('button', { name: '开始自动推演' }).click();
   await page.evaluate(() => window.advanceTime(225));
-  const turn9 = await waitForSnapshot(page, (current) => current.time.turn === 9 && current.playback.running === true);
-  assert.equal(turn9.observer.lastPauseReason, null, '被关注局势没有转折的 T9 不得误暂停');
-  assert.equal(situationFromSnapshot(turn9, watchedSituationId)?.phase, 'critical');
+  const turn5 = await waitForSnapshot(page, (current) => current.time.turn === 5 && current.playback.running === true);
+  assert.equal(turn5.observer.lastPauseReason, null, '被关注局势尚无新场面的 T5 不得误暂停');
+  assert.equal(situationFromSnapshot(turn5, watchedSituationId)?.status, 'open');
 
   await page.evaluate(() => window.advanceTime(225));
   const paused = await waitForSnapshot(page, (current, expected) => (
@@ -849,18 +832,15 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   ), { turn: SITUATION_WATCH_EXPECTED_PAUSE_TURN, situationId: watchedSituationId });
   assert.equal(paused.observer.lastPauseRule, 'situationChanges', '局势转折必须由 C04 规则暂停，不得冒充旧史事规则');
   assert.equal(paused.observer.lastPauseSituationId, watchedSituationId);
-  assert.equal(paused.observer.lastPauseSituationTrigger, 'phase-change');
-  assert.match(paused.observer.lastPauseReason, /局势|阶段|转折/);
+  assert.equal(paused.observer.lastPauseSituationChange, 'new-action');
+  assert.match(paused.observer.lastPauseReason, /局势|动向|战事|转折/);
   const pausedSituation = situationFromSnapshot(paused, watchedSituationId);
   assert.equal(pausedSituation?.status, 'open');
-  assert.equal(pausedSituation?.phase, 'active', '冻结种子应在局势由 critical 回落为 active 的精确季度停下');
-  assert.equal(pausedSituation?.latestChange?.kind, 'phase_changed');
-  assert.equal(pausedSituation?.latestChange?.turn, SITUATION_WATCH_EXPECTED_PAUSE_TURN - 1);
   const refreshedWatch = paused.observer.watchlist.find((item) => (
     item.kind === 'situation' && item.id === watchedSituationId
   ));
-  assert.match(refreshedWatch?.detail ?? '', /发展/, '关注簿应随权威局势刷新当前阶段');
-  assert.doesNotMatch(refreshedWatch?.detail ?? '', /临界/, '关注簿不得在转阶段后继续展示关注当季的旧阶段');
+  assert.match(refreshedWatch?.detail ?? '', /持续追踪/, '关注簿应随权威局势刷新最近事实');
+  assert.doesNotMatch(refreshedWatch?.detail ?? '', /萌芽|发展|临界|张力|势头/, '关注簿不得暴露内部阶段与走势量');
   await waitForLatestAutosave(page, paused);
 
   await deskTrigger.click();
@@ -868,7 +848,7 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   const pauseNote = desk.locator('.observer-desk__pause-note[data-pause-rule="situationChanges"]');
   await pauseNote.waitFor();
   const pauseNoteText = await pauseNote.textContent();
-  assert.match(pauseNoteText, /局势里程碑|局势关键变化/);
+  assert.match(pauseNoteText, /局势有新进展|局势关键变化/);
   assert.match(pauseNoteText, /时间已停/);
   const pauseOpen = pauseNote.locator(
     `[data-testid="observer-pause-open"][data-situation-id="${watchedSituationId}"][data-situation-trigger="phase-change"]`,
@@ -884,7 +864,12 @@ async function exerciseSituationWatchAndPause(browserInstance) {
       && current.observer.selectedSituation?.id === situationId
   ), watchedSituationId);
   assert.equal(opened.deterministicWorldHash, pausedHash, '从暂停原因阅卷不得改变世界哈希');
-  assert.equal(opened.observer.selectedSituation.phase, 'active');
+  const triggerScene = opened.observer.selectedSituation.scenes.find((scene) => (
+    scene.turn === SITUATION_WATCH_EXPECTED_PAUSE_TURN - 1
+  ));
+  assert.ok(triggerScene, '暂停卷宗必须含有同季具体场面，不能用裸阶段变化停表');
+  assert.ok(pauseNoteText.includes(triggerScene.title), '暂停说明必须直接点明同季具体场面');
+  assert.equal(Object.hasOwn(opened.observer.selectedSituation, 'phase'), false, '默认文本卷宗不得泄漏内部阶段');
   assert.equal(
     opened.observer.watchlist.find((item) => item.kind === 'situation' && item.id === watchedSituationId)?.alert,
     false,
@@ -901,7 +886,7 @@ async function exerciseSituationWatchAndPause(browserInstance) {
     seed: SITUATION_WATCH_SEED,
     situationId: watchedSituationId,
     pauseTurn: paused.time.turn,
-    trigger: paused.observer.lastPauseSituationTrigger,
+    trigger: paused.observer.lastPauseSituationChange,
   };
 }
 
@@ -1433,7 +1418,7 @@ try {
   assert.equal(situationPauseSample.seed, SITUATION_WATCH_SEED);
   assert.match(situationPauseSample.situationId, /^situation_\d+$/);
   assert.equal(situationPauseSample.pauseTurn, SITUATION_WATCH_EXPECTED_PAUSE_TURN);
-  assert.equal(situationPauseSample.trigger, 'phase-change');
+  assert.equal(situationPauseSample.trigger, 'new-action');
   await exerciseMapViewportDesktop(page);
   await exerciseObserverLeads(page, afterPrimer.deterministicWorldHash);
   await page.screenshot({ path: `${ARTIFACT_DIR}/geographic-world-map.png`, fullPage: true });
@@ -2196,7 +2181,6 @@ try {
     mobileSituation.locator('.situation-workbench__close'),
     mobileSituation.locator('.situation-workbench__directory-toggle'),
     mobileSituation.locator('.situation-workbench__evidence > summary'),
-    mobileSituation.locator('.situation-workbench__audit > summary'),
   ]) {
     const bounds = await locator.boundingBox();
     assert.ok(bounds && bounds.height >= 44 && bounds.width >= 44, '移动端局势操作目标不得小于44px');

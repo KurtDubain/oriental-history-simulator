@@ -368,6 +368,46 @@ describe('render_game_to_text projection boundary', () => {
     expect(serializeWorld(world)).toBe(before);
   });
 
+  it('keeps detector stages, pressure values, and predictions out of the player text snapshot', () => {
+    let world = createWorld('TRIM02-玩家文本不见推演底账');
+    for (let turn = 0; turn < 8; turn += 1) world = advanceWorld(world);
+    const situationId = world.situationSystem.situations.find((item) => item.status === 'open')?.id;
+    if (!situationId) throw new Error('expected an open Situation');
+    const snapshot = JSON.parse(makeTextSnapshot(world, options({
+      navigation: createObserverNavigationState({
+        layers: [{ kind: 'situations', situationId }],
+      }),
+    }))) as {
+      observer: {
+        focusLeads: Array<Record<string, unknown>>;
+        situations: { open: Array<Record<string, unknown>>; recentResolved: Array<Record<string, unknown>> };
+        selectedSituation: Record<string, unknown> | null;
+      };
+    };
+
+    for (const lead of snapshot.observer.focusLeads) {
+      expect(lead).not.toHaveProperty('stage');
+      expect(lead).not.toHaveProperty('tension');
+      expect(lead).not.toHaveProperty('nextSignal');
+    }
+    expect(snapshot.observer).not.toHaveProperty('lastPauseSituationTrigger');
+    for (const situation of [
+      ...snapshot.observer.situations.open,
+      ...snapshot.observer.situations.recentResolved,
+    ]) {
+      expect(situation).not.toHaveProperty('phase');
+      expect(situation).not.toHaveProperty('tension');
+      expect(situation).not.toHaveProperty('momentum');
+      expect(situation).not.toHaveProperty('nextSignal');
+      expect(situation).not.toHaveProperty('evidence');
+    }
+    expect(snapshot.observer.selectedSituation).not.toHaveProperty('phase');
+    expect(snapshot.observer.selectedSituation).not.toHaveProperty('nextWatch');
+    expect(snapshot.observer.selectedSituation).not.toHaveProperty('timeline');
+    expect(snapshot.observer.selectedSituation).toHaveProperty('currentChange');
+    expect(snapshot.observer.selectedSituation).toHaveProperty('scenes');
+  });
+
   it('resolves a selected cold event without copying cold history into the text snapshot', () => {
     const world = createWorld('TRIM01-冷卷文本');
     const coldEvent = {
@@ -412,5 +452,49 @@ describe('render_game_to_text projection boundary', () => {
     });
     expect(snapshot.recentHistory.some((event) => event.id === coldEvent.id)).toBe(false);
     expect(JSON.stringify(snapshot).match(/这条记录已经进入冷卷。/gu)).toHaveLength(1);
+  });
+
+  it('keeps Situation wrapper events out of ordinary text-snapshot history surfaces', () => {
+    const world = createWorld('TRIM02-机器文本可见边界');
+    const family = world.families[0];
+    const template = world.history[0];
+    const actorId = family?.memberIds[0];
+    if (!family || !template || !actorId) throw new Error('expected family, actor, and Chronicle template');
+    const hiddenEventId = 'event_hidden_situation_phase';
+    world.history.push({
+      ...template,
+      id: hiddenEventId,
+      turn: world.turn,
+      year: world.year,
+      season: world.season,
+      kind: 'situation_phase_changed',
+      title: '系统阶段包装记录',
+      actorIds: [actorId],
+      sourceFactIds: [],
+      stateDeltas: [{
+        entityType: 'family',
+        entityId: family.id,
+        field: 'politicalInfluence',
+        before: family.politicalInfluence,
+        after: family.politicalInfluence,
+        delta: 0,
+      }],
+    });
+
+    const chronicle = JSON.parse(makeTextSnapshot(world, options({
+      navigation: createObserverNavigationState({ view: 'chronicle', layers: [] }),
+    }))) as {
+      interface: { visibleRoster: Array<{ id: string }> };
+      recentHistory: Array<{ id: string }>;
+    };
+    const familySnapshot = JSON.parse(makeTextSnapshot(world, options({
+      selection: { kind: 'family', id: family.id },
+    }))) as {
+      interface: { selectedDetail: { historyEventIds: string[] } };
+    };
+
+    expect(chronicle.interface.visibleRoster.map((item) => item.id)).not.toContain(hiddenEventId);
+    expect(chronicle.recentHistory.map((item) => item.id)).not.toContain(hiddenEventId);
+    expect(familySnapshot.interface.selectedDetail.historyEventIds).not.toContain(hiddenEventId);
   });
 });

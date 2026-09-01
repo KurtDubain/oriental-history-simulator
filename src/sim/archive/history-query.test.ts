@@ -58,6 +58,8 @@ function historyEvent(
       ? 'world_created'
       : turn === 4 && slot === 0
         ? 'observer_intervention_support_character'
+        : slot === 1 && turn % 9 === 0
+          ? 'situation_phase_changed'
         : 'archive_query_test',
     title: isCauseOnly ? '密议孤证' : `第${turn}季史事${slot + 1}`,
     summary: `第${turn}季的可核验记载。`,
@@ -141,6 +143,7 @@ function queryWorld(options: { legacy?: boolean } = {}): WorldState {
   let legacyCount = 0;
   if (options.legacy) {
     appendEvent(0, 0);
+    appendEvent(0, 1);
     appendEvent(1, 0);
     appendEvent(2, 0);
     legacyCount = history.length;
@@ -217,6 +220,7 @@ function fullFilter(
     Number.isFinite(filters.minimumImportance) ? Math.floor(filters.minimumImportance as number) : 1,
   ));
   const categories = new Set(filters.categories ?? []);
+  const excludedKindPrefixes = (filters.excludedKindPrefixes ?? []).filter(Boolean);
   const tokens = normalizeText(filters.query ?? '').split(' ').filter(Boolean);
   const characterNames = new Map(world.characters.map((item) => [item.id, item.name]));
   const polityNames = new Map(world.polities.map((item) => [item.id, `${item.name} ${item.shortName}`]));
@@ -225,6 +229,7 @@ function fullFilter(
     .map((event, index) => ({ event, index }))
     .filter(({ event }) => {
       if (event.turn > throughTurn || event.importance < minimumImportance) return false;
+      if (excludedKindPrefixes.some((prefix) => event.kind.startsWith(prefix))) return false;
       if (categories.size > 0 && !categories.has(event.category)) return false;
       if (filters.relatedEntity && !references(event, filters.relatedEntity)) return false;
       if (tokens.length === 0) return true;
@@ -349,6 +354,7 @@ describe('world history cold-block query', () => {
       { relatedEntity: { kind: 'character', id: causeOnlyCharacter.id } },
       { query: '孤证密语' },
       { categories: ['军事'], minimumImportance: 3, throughTurn: 35 },
+      { excludedKindPrefixes: ['situation_'] },
     ];
     for (const filter of filters) {
       clearWorldArchiveDecodeCache();
@@ -358,6 +364,18 @@ describe('world history cold-block query', () => {
     const ids = drainQuery(world, {}, 1).map((event) => event.id);
     expect(new Set(ids).size).toBe(ids.length);
     expect(ids.slice(0, 2)).toEqual(fullFilter(world).slice(0, 2).map((event) => event.id));
+  });
+
+  it('excludes matching Chronicle kind prefixes across hot, cold and legacy pages', () => {
+    const world = queryWorld({ legacy: true });
+    const legacyEventCount = world.legacyArchiveBoundary?.historyEventCount ?? 0;
+    expect(readWorldHistory(world).slice(0, legacyEventCount).some((item) => item.kind.startsWith('situation_'))).toBe(true);
+    const visible = drainQuery(world, { excludedKindPrefixes: ['situation_'] }, 5);
+    expect(visible.map((item) => item.id)).toEqual(
+      fullFilter(world, { excludedKindPrefixes: ['situation_'] }).map((item) => item.id),
+    );
+    expect(visible.some((item) => item.kind.startsWith('situation_'))).toBe(false);
+    expect(readWorldHistory(world).some((item) => item.kind.startsWith('situation_'))).toBe(true);
   });
 
   it('skips impossible blocks by category, importance and cause-only related metadata', () => {

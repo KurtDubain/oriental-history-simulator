@@ -6,7 +6,7 @@ import { deriveObserverLeadProjection, deriveObserverLeads } from '../view/obser
 import { ObserverLeads, observerLeadTargetKey, observerLeadWatchKey } from './ObserverLeads';
 
 describe('ObserverLeads', () => {
-  it('renders three actionable, evidence-backed questions', () => {
+  it('renders three present-tense, evidence-backed questions without detector stages', () => {
     const leads = deriveObserverLeads(createWorld('当世三问-组件测试'));
     const markup = renderToStaticMarkup(createElement(ObserverLeads, {
       leads,
@@ -24,7 +24,11 @@ describe('ObserverLeads', () => {
     expect(markup).not.toContain('data-history-layer="situation"');
     expect(markup).toContain('当世三问');
     expect(markup.match(/data-testid="observer-lead"/g)).toHaveLength(3);
-    expect(markup).toContain('接着看');
+    expect(markup).not.toContain('接着看');
+    expect(markup).not.toContain('data-testid="observer-lead-next"');
+    expect(markup).not.toContain('data-stage=');
+    expect(markup).not.toMatch(/会不会|能否|还是/);
+    expect(markup.match(/data-testid="observer-lead-fact"/g)).toHaveLength(3);
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('查看持续局势');
     expect(markup).toContain('7 条局势');
@@ -68,5 +72,27 @@ describe('ObserverLeads', () => {
     expect(observerLeadWatchKey({ ...fallback, situationId: null })).toBe(
       `${fallback.target.kind}:${fallback.target.id}`,
     );
+  });
+
+  it('renders a tracked Situation headline once while retaining its evidence copy', () => {
+    let world = createWorld('春战副将');
+    let projection = deriveObserverLeadProjection(world);
+    while (world.turn < 8) {
+      const previousHash = world.hash;
+      world = advanceWorld(world);
+      projection = deriveObserverLeadProjection(world, projection.continuity, previousHash);
+    }
+    const lead = projection.leads.find((item) => item.situationId && item.recentChange?.includes(' · '));
+    if (!lead?.recentChange) throw new Error('expected a Situation lead with a concrete scene');
+    const markup = renderToStaticMarkup(createElement(ObserverLeads, {
+      leads: [lead],
+      watchedKeys: new Set<string>(),
+      onInspect: vi.fn(),
+      onToggleWatch: vi.fn(),
+    }));
+
+    expect(lead.evidence).not.toContain(lead.recentChange);
+    expect(markup.split(lead.recentChange).length - 1).toBe(1);
+    for (const evidence of lead.evidence) expect(markup).toContain(evidence);
   });
 });

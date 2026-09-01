@@ -355,7 +355,14 @@ async function followSituationFromDossier(page, scenario, baseline, inspector) {
   assert.equal(await watch.getAttribute('aria-pressed'), 'true', `${scenario.slug} 局势卷应显示已关注状态`);
   await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-situation-watched.png`, fullPage: false });
 
-  const participant = workbench.locator('.situation-workbench__participants button').first();
+  const participantDisclosure = workbench.locator('[data-testid="situation-participants-disclosure"]');
+  assert.equal(await participantDisclosure.count(), 1, `${scenario.slug} 局势卷必须提供折叠的相关各方`);
+  assert.equal(await participantDisclosure.getAttribute('open'), null, `${scenario.slug} 相关各方默认应折叠`);
+  const participantSummary = participantDisclosure.locator('summary').first();
+  await assertTouchTarget(participantSummary, scenario, '局势卷相关各方入口');
+  await activate(participantSummary, scenario);
+  await page.waitForFunction(() => document.querySelector('[data-testid="situation-participants-disclosure"]')?.hasAttribute('open'));
+  const participant = participantDisclosure.locator('button').first();
   assert.equal(await participant.count(), 1, `${scenario.slug} 局势卷必须给出可查看的核心人物`);
   await assertTouchTarget(participant, scenario, '局势卷人物入口');
   await activate(participant, scenario);

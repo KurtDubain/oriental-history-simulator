@@ -1,7 +1,7 @@
 {
   "name": "oriental-history-simulator",
   "private": true,
-  "version": "1.20.0",
+  "version": "1.20.1",
   "type": "module",
   "engines": {
     "node": ">=20 <23",
@@ -26,6 +26,7 @@
     "test:e2e:trim01": "node scripts/e2e-trim01-quarter.mjs",
     "test:e2e:trim016": "node scripts/e2e-trim016-shell.mjs",
     "test:e2e:trim018": "node scripts/e2e-trim018-acceptance.mjs",
+    "test:e2e:trim02": "node scripts/e2e-trim02-narrative.mjs",
     "test:e2e:roster01": "node scripts/e2e-roster01.mjs",
     "test:e2e:politics": "vite-node scripts/e2e-political-visibility.mjs",
     "test:e2e:relationships": "node scripts/e2e-person-relationships.mjs",
@@ -43,13 +44,14 @@
     "test:audit:agency-continuity": "vite-node scripts/phase-c-agency-continuity-audit.ts",
     "test:audit:agency-intent": "vite-node scripts/phase-c-intent-audit.ts",
     "test:audit:power-narrative": "vite-node scripts/power-narrative-audit.ts",
+    "test:audit:narrative": "vite-node scripts/trim02-narrative-audit.ts",
     "test:audit:politics": "vite-node scripts/politics-audit.ts",
     "test:audit:politics:deep": "vite-node scripts/politics-audit.ts --deep",
     "test:audit:local-governance": "vite-node scripts/local-governance-audit.ts",
     "test:audit:maps": "vite-node scripts/map-profile-audit.ts",
     "test:audit:archive": "vite-node scripts/archive-capacity-audit.ts",
     "test:audit:architecture": "vite-node scripts/architecture-baseline.ts",
-    "test:release": "npm run test:run && npm run test:audit:architecture && npm run build && npm run build:contest && npm run test:update && npm run test:e2e && npm run test:e2e:fux01 && npm run test:e2e:fux03 && npm run test:e2e:trim01 && npm run test:e2e:trim016 && npm run test:e2e:trim018 && npm run test:e2e:roster01 && npm run test:e2e:politics && npm run test:e2e:relationships && npm run test:e2e:maps && npm run test:e2e:contest && npm run test:audit:phase-a && npm run test:audit:phase-b && npm run test:audit:phase-c && npm run test:audit:agency && npm run test:audit:agency-continuity && npm run test:audit:agency-intent && npm run test:audit:power-narrative && npm run test:audit:politics && npm run test:audit:local-governance && npm run test:audit:maps && npm run test:audit:archive && npm run test:audit",
+    "test:release": "npm run test:run && npm run test:audit:architecture && npm run build && npm run build:contest && npm run test:update && npm run test:e2e && npm run test:e2e:fux01 && npm run test:e2e:fux03 && npm run test:e2e:trim01 && npm run test:e2e:trim016 && npm run test:e2e:trim018 && npm run test:e2e:trim02 && npm run test:e2e:roster01 && npm run test:e2e:politics && npm run test:e2e:relationships && npm run test:e2e:maps && npm run test:e2e:contest && npm run test:audit:phase-a && npm run test:audit:phase-b && npm run test:audit:phase-c && npm run test:audit:agency && npm run test:audit:agency-continuity && npm run test:audit:agency-intent && npm run test:audit:power-narrative && npm run test:audit:narrative && npm run test:audit:politics && npm run test:audit:local-governance && npm run test:audit:maps && npm run test:audit:archive && npm run test:audit",
     "preview": "vite preview --host 127.0.0.1"
   },
   "dependencies": {
