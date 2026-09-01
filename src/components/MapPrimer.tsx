@@ -107,7 +107,7 @@ function PrimerMapDiagram({ step }: { step: MapPrimerStep }) {
           </g>
           <g className="map-primer__army" transform="translate(353 132)">
             <circle r="11" />
-            <text x="-7" y="3">8k</text>
+            <text x="-7" y="3">8千</text>
             <text x="18" y="4">军团</text>
           </g>
         </g>

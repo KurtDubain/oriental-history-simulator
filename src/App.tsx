@@ -233,6 +233,14 @@ import './styles/app.css';
 const DEFAULT_SEED = '沧衡-甲子';
 const BASE_AUTOPLAY_INTERVAL = 1_800;
 
+function playerErrorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error
+    && /[\u3400-\u9fff]/.test(error.message)
+    && !/[a-z]/i.test(error.message)
+    ? error.message
+    : fallback;
+}
+
 function quarterHistoryCue(events: ReadonlyArray<WorldState['history'][number]>): AudioCue | null {
   if (events.some((event) => (
     event.kind === 'succession'
@@ -602,7 +610,7 @@ export function App() {
       ),
       onSaved: () => setHasSave(true),
       onError: (error) => {
-        setToast(error instanceof Error ? error.message : '本地史册保存失败。');
+        setToast(playerErrorMessage(error, '本地史册保存失败。'));
       },
     });
     autosaveCoordinatorRef.current = coordinator;
@@ -815,7 +823,7 @@ export function App() {
       }
       session.commit(ticket, () => openWorld(nextWorld, 'create'));
     } catch (error) {
-      if (session.isCurrent(ticket)) setStartError(error instanceof Error ? error.message : '无法创建世界。');
+      if (session.isCurrent(ticket)) setStartError(playerErrorMessage(error, '新世界未能开启，请检查舆图与种子后重试。'));
     } finally {
       session.finish(ticket);
     }
@@ -830,7 +838,7 @@ export function App() {
       const restored = deserializeWorld(saved.payload);
       session.commit(ticket, () => openWorld(restored, 'continue', agencyShadowRestoreToken('autosave')));
     } catch (error) {
-      if (session.isCurrent(ticket)) setStartError(error instanceof Error ? error.message : '无法读取本地史册。');
+      if (session.isCurrent(ticket)) setStartError(playerErrorMessage(error, '本地史册损坏、缺页，或来自暂不支持的版本。'));
     } finally {
       session.finish(ticket);
     }
@@ -847,7 +855,7 @@ export function App() {
         setToast('已导入史册，因果记录与世界状态均已恢复。');
       });
     } catch (error) {
-      if (session.isCurrent(ticket)) setStartError(error instanceof Error ? error.message : '该文件无法作为史册读取。');
+      if (session.isCurrent(ticket)) setStartError(playerErrorMessage(error, '这份史册损坏、缺页，或来自暂不支持的版本。'));
     } finally {
       session.finish(ticket);
     }
@@ -873,7 +881,7 @@ export function App() {
       await refreshWorldSaves();
       setToast(`已将第 ${current.year} 年${current.season}的世界写入本地史册。`);
     } catch (error) {
-      setToast(error instanceof Error ? error.message : '本地史册保存失败。');
+      setToast(playerErrorMessage(error, '本地史册保存失败，当前世界未受影响。'));
     }
   }, [refreshWorldSaves, resetAutosaveCoordinator]);
 
@@ -933,13 +941,13 @@ export function App() {
         setMandateMessage({ tone: 'success', text: `${interventionResult}。分支凭证与状态差量已存入史册。` });
         setToast(`天意已落笔：${interventionResult}`);
       } catch (error) {
-        const reason = error instanceof Error ? error.message : '本地史册保存失败';
+        const reason = playerErrorMessage(error, '本地史册保存失败');
         setMandateMessage({ tone: 'error', text: `天意已经生效，但自动保存失败：${reason}。请手动导出史册。` });
         setToast('天意已经生效，但本地保存失败。');
       }
       return true;
     } catch (error) {
-      const reason = error instanceof Error ? error.message : '本次天意无法生效。';
+      const reason = playerErrorMessage(error, '本次天意无法生效。');
       setMandateMessage({ tone: 'error', text: reason });
       setToast(reason);
       return false;
@@ -956,7 +964,7 @@ export function App() {
       downloadWorld(serializeWorld(validCurrent), `沧衡纪_${validCurrent.seed}_第${validCurrent.year}年${validCurrent.season}.json`);
       setToast('已将完整世界、随机种子与因果史册导出。');
     } catch (error) {
-      setToast(error instanceof Error ? error.message : '世界未通过完整校验，无法导出。');
+      setToast(playerErrorMessage(error, '世界未通过完整校验，无法导出。'));
     }
   }, []);
 
@@ -972,7 +980,7 @@ export function App() {
     try {
       await refreshWorldSaves();
     } catch (error) {
-      setToast(error instanceof Error ? error.message : '无法读取本机世界收藏。');
+      setToast(playerErrorMessage(error, '无法读取本机世界收藏。'));
     } finally {
       setCollectionBusy(false);
     }
@@ -1231,7 +1239,7 @@ export function App() {
       return true;
     } catch (error) {
       playback.pause();
-      setFatalError(error instanceof Error ? error.message : '世界推演发生未知错误。');
+      setFatalError(playerErrorMessage(error, '本季推演未能完成，世界仍停在上一季。'));
       return false;
     } finally {
       advancingRef.current = false;
@@ -2325,8 +2333,8 @@ export function App() {
             />
 
             <div className="observer-world-signature" aria-label="确定性世界签名">
-              <span>SEED {world.seed}</span>
-              <strong>{world.hash}</strong>
+              <span>种子 {world.seed}</span>
+              <strong>校验 {world.hash}</strong>
             </div>
 
             {historicalView ? (

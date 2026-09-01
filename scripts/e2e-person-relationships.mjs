@@ -8,11 +8,11 @@ const externalUrl = process.env.RELATION_E2E_URL;
 const APP_URL = externalUrl ?? `http://127.0.0.1:${PORT}`;
 const ARTIFACT_DIR = 'output/person-relationship-e2e';
 const SUBJECT_ID = 'c_145';
-const SUBJECT_NAME = '顾庭芳';
+const SUBJECT_NAME = '顾允谦';
 const EXPECTED_PEERS = new Map([
-  ['c_153', '顾思齐'],
-  ['c_154', '顾云岫'],
-  ['c_156', '顾知白'],
+  ['c_153', '顾允亮'],
+  ['c_154', '顾允钧'],
+  ['c_156', '顾允璋'],
 ]);
 
 await mkdir(ARTIFACT_DIR, { recursive: true });

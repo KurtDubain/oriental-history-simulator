@@ -56,7 +56,11 @@ function formatBytes(bytes: number): string {
 }
 
 function errorText(error: unknown): string {
-  return error instanceof Error ? error.message : '本次存档操作没有完成。';
+  return error instanceof Error
+    && /[\u3400-\u9fff]/.test(error.message)
+    && !/[a-z]/i.test(error.message)
+    ? error.message
+    : '本次存档操作没有完成，当前世界未受影响。';
 }
 
 export function WorldCollectionPanel({

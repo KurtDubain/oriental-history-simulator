@@ -386,13 +386,13 @@ async function exerciseEmbodiedCourtMobile(browser) {
 
     await page.click('button[data-observer-view="people"]');
     await page.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
-    await page.getByLabel('检索时人群像').fill('李行简');
+    await page.getByLabel('检索时人群像').fill('李玄度');
     await page.locator('.roster-panel button[data-roster-id="c_014"]').click();
     const selected = await waitForSnapshot(page, (state) => (
       state.interface.selected?.kind === 'person'
       && state.interface.selected.id === 'c_014'
     ));
-    assert.equal(selected.interface.selectedDetail.name, '李行简', '冻结种子应稳定定位朝臣派系领袖');
+    assert.equal(selected.interface.selectedDetail.name, '李玄度', '冻结种子应稳定定位朝臣派系领袖');
 
     await page.getByRole('button', { name: '以此人入世' }).click();
     const panel = page.locator('[data-testid="embodiment-actions"]');
@@ -1822,10 +1822,10 @@ try {
   await closurePage.locator('[data-map-primer-skip]').click();
   await advanceTo(closurePage, 3);
   await closurePage.click('button[data-observer-view="people"]');
-  await closurePage.getByLabel('检索时人群像').fill('郑季安');
+  await closurePage.getByLabel('检索时人群像').fill('郑维安');
   await closurePage.locator('.roster-panel button[data-roster-id="c_102"]').click();
   const closureBefore = await snapshot(closurePage);
-  assert.equal(closureBefore.interface.selectedDetail.name, '郑季安', '离世验收种子应稳定定位人物');
+  assert.equal(closureBefore.interface.selectedDetail.name, '郑维安', '离世验收种子应稳定定位人物');
   await closurePage.getByRole('button', { name: '以此人入世' }).click();
   const closureEntered = await snapshot(closurePage);
   assert.equal(closureEntered.observer.embodiment.actorId, 'c_102');
@@ -1921,10 +1921,10 @@ try {
   await advanceTo(governancePage, 9);
   await governancePage.click('button[data-observer-view="people"]');
   await governancePage.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
-  await governancePage.getByLabel('检索时人群像').fill('林季安');
+  await governancePage.getByLabel('检索时人群像').fill('林维穆');
   await governancePage.locator('.roster-panel button[data-roster-id="c_076"]').click();
   const governanceSelected = await snapshot(governancePage);
-  assert.equal(governanceSelected.interface.selectedDetail.name, '林季安', '地方施政验收种子应稳定定位人物');
+  assert.equal(governanceSelected.interface.selectedDetail.name, '林维穆', '地方施政验收种子应稳定定位人物');
   await governancePage.getByRole('button', { name: '以此人入世' }).click();
   const governancePanel = governancePage.locator('[data-testid="embodiment-actions"]');
   await governancePanel.waitFor();

@@ -166,7 +166,7 @@ export function ObserverDesk({
         <header className="observer-desk__header">
           <div className="observer-desk__seal" aria-hidden="true"><Eye size={20} strokeWidth={1.5} /></div>
           <div>
-            <span>OBSERVER · v{APP_VERSION}</span>
+            <span>观史台 · v{APP_VERSION}</span>
             <h2 id={titleId}>观察台</h2>
             <p id={descriptionId}>只记录你想留意的历史，不改变世界。</p>
           </div>

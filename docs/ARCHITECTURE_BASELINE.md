@@ -1,13 +1,13 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，v1.21.0 更新于 2026-09-02，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.21.1 更新于 2026-09-02，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
-- `src` 下生产 TypeScript / TSX：167 个文件，64,951 行（测试排除）。
+- `src` 下生产 TypeScript / TSX：167 个文件，65,024 行（测试排除）。
 - 相对模块依赖：643 条，其中 412 条 runtime、231 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环，正好落在 12/12 的不增长预算内。
-- 当前热点：`engine.ts` 3,120/3,120 行、`invariants.ts` 2,664/2,665 行、`App.tsx` 2,561/2,600 行（实际/门禁）。
-- 其次为 `v02.ts` 2,481 行、`v03-ocean.ts` 2,409 行、`agency/decision.ts` 2,029 行、`v1-agency-shadow.ts` 1,479 行、`map-renderer.ts` 1,461 行与 `Inspector.tsx` 1,397 行。`WorldMap.tsx` 为 1,085/1,100 行，继续由 Scene / renderer / gesture 契约支撑；`view/adapters.ts` 为 53/100 行。
+- 当前热点：`engine.ts` 3,117/3,120 行、`invariants.ts` 2,664/2,665 行、`App.tsx` 2,569/2,600 行（实际/门禁）。
+- 其次为 `v02.ts` 2,488 行、`v03-ocean.ts` 2,409 行、`agency/decision.ts` 2,029 行、`v1-agency-shadow.ts` 1,479 行、`map-renderer.ts` 1,460 行与 `Inspector.tsx` 1,397 行。`WorldMap.tsx` 为 1,085/1,100 行，继续由 Scene / renderer / gesture 契约支撑；`view/adapters.ts` 为 53/100 行。
 
 行数是增长预警，不是机械拆文件指标。新增领域规则不得再默认进入四个最高热点；只有形成稳定输入、输出和所有权后才拆分。
 
@@ -92,7 +92,7 @@ NavalOperationState.manifest
 - `App.tsx` 从 v1.10.0 的约 3,301 行降至约 2,525 行。对象标签/关注转换、Agency 跟踪/档案投影、`render_game_to_text` 快照和它们的 observer-only 合约已有独立 owner；纯投影回归同时核对输出和世界不变性。页面壳仍是权威世界唯一 React owner，拆分模块不保存第二份模拟状态。
 - `calendar.ts` 和 `world-hash.ts` 成为纪年/权威摘要的纯 owner，`engine.ts` 只保留兼容 re-export。`invariants.ts`、`v03-intervention.ts` 和 `persistence.ts` 改为直接依赖纯模块；运行时闭包分别从 33 降至 21、32 降至 4 与 34 降至 32。`engine.ts` 从 3,210 行降至约 3,098 行，哈希构造顺序、保留窗口、schema 和存档均未改变。
 - 架构门直接拒绝 runtime SCC、禁止的跨层依赖、type-only 债务增长和热点预算超标。当前预算为 `App.tsx` 2,600、`engine.ts` 3,120、`invariants.ts` 2,665、`WorldMap.tsx` 1,100、`view/adapters.ts` 100 行；这些是防反弹上限，不是为了凑行数填满的目标。
-- Vite 将 framework、simulation、maps 和应用入口分为稳定产物边界。v1.21.0 最终个人版 / 参赛版 JavaScript gzip 为 429,791 / 429,662 bytes，CSS gzip 均为 39,273 bytes；单 JS raw 585 KiB、JS gzip 总量 420 KiB、CSS gzip 总量 40 KiB 的门禁均未放宽。当前两种构建的 JS gzip 余量仅为 289 / 418 bytes，下一纵切必须优先拆分或删除，不能无依据提高预算。
+- Vite 将 framework、simulation、maps 和应用入口分为稳定产物边界。v1.21.1 本地个人版 / 参赛版 JavaScript gzip 均为 429,895 bytes，按 40 位发布提交标识复核为 429,904 bytes；CSS gzip 均为 39,273 bytes。单 JS raw 585 KiB、JS gzip 总量 420 KiB、CSS gzip 总量 40 KiB 的门禁均未放宽，线上发布形态只余 176 bytes；下一纵切必须先拆分或删除，不能无依据提高预算。
 - `.github/workflows/quality.yml` 在 Pull Request 和 `main` 推送上使用 `.nvmrc` 固定 Node 22，以 `npm ci` 从锁文件安装，依次执行单测、架构门、两种构建/产物预算、安全更新与关键浏览器链；失败时上传 `output/` 以便复现。发布检查同时约束 `package.json` / lockfile / 个人版更新记录 / 参赛版更新记录一致，并在生产变更时要求版本递增。
 
 ## v1.19.0 政治投影与地图载荷边界

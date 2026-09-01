@@ -155,9 +155,8 @@ function applyLinePath(
 }
 
 export function formatPopulation(population: number) {
-  if (population >= 1_000_000) return `${(population / 1_000_000).toFixed(1)}m`;
   if (population >= 10_000) return `${Math.round(population / 10_000)}万`;
-  if (population >= 1_000) return `${(population / 1_000).toFixed(1)}k`;
+  if (population >= 1_000) return `${(population / 1_000).toFixed(1)}千`;
   return Math.max(0, Math.round(population)).toLocaleString("zh-CN");
 }
 
@@ -1447,7 +1446,7 @@ export function drawWorldMap(
     context.textAlign = "center";
     context.textBaseline = "middle";
     const compactStrength =
-      army.strength >= 10_000 ? `${Math.round(army.strength / 10_000)}万` : `${Math.max(1, Math.round(army.strength / 1000))}k`;
+      army.strength >= 10_000 ? `${Math.round(army.strength / 10_000)}万` : `${Math.max(1, Math.round(army.strength / 1000))}千`;
     context.fillText(compactStrength, x, y + 0.5);
     context.restore();
   });

@@ -402,7 +402,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         name: profile.name,
       })),
     } : null,
-    coordinates: `map world coordinates use origin top-left, x rightward, y downward, range ${mapProfile.presentation.width}x${mapProfile.presentation.height}`,
+    coordinates: `地图世界坐标以左上角为原点，横轴向右、纵轴向下，范围 ${mapProfile.presentation.width}×${mapProfile.presentation.height}`,
     time: { turn: world.turn, year: world.year, season: world.season },
     deterministicWorldHash: world.hash,
     archive: {

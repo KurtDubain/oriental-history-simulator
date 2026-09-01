@@ -1,4 +1,4 @@
-import { FAMILY_NAMES, GIVEN_NAMES } from './names';
+import { FAMILY_NAMES, GIVEN_NAMES, selectAvailableGivenName } from './names';
 import { findMapProfileForContentVersion } from '../maps';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
 import { emitSimulationFact, projectFactLinks, type FactTurnBuffer } from './facts';
@@ -606,8 +606,17 @@ export function promoteBackgroundPerson(
   world.counters.character += 1;
   const id = `c_${String(world.counters.character).padStart(3, '0')}`;
   const familyName = forcedFamily ?? stub.familyName;
-  let givenName = stub.givenName;
-  if (world.characters.some((character) => character.name === `${familyName}${givenName}`)) givenName = `${givenName}·${world.counters.character}`;
+  const preferredStart = GIVEN_NAMES.indexOf(stub.givenName as (typeof GIVEN_NAMES)[number]);
+  const nameStart = preferredStart >= 0
+    ? preferredStart
+    : keyedInt(world.seed, 0, GIVEN_NAMES.length - 1, 'promotion', stub.id, purpose, 'given');
+  const givenName = selectAvailableGivenName(
+    familyName,
+    nameStart,
+    new Set(world.characters.map((character) => character.name)),
+    new Set(world.characters.map((character) => character.givenName)),
+    stub.givenName,
+  );
   const age = Math.max(minimumAge, Math.floor((world.turn + 1 - stub.birthTurn) / 4));
   const character: CharacterState = {
     id,
@@ -884,14 +893,12 @@ function createChild(world: WorldState, parents: readonly [CharacterState, Chara
   world.counters.character += 1;
   const id = `c_${String(world.counters.character).padStart(3, '0')}`;
   const start = keyedInt(world.seed, 0, GIVEN_NAMES.length - 1, world.turn, 'birth', id, 'given');
-  let givenName = GIVEN_NAMES[start] as string;
-  for (let offset = 0; offset < GIVEN_NAMES.length; offset += 1) {
-    const candidate = GIVEN_NAMES[(start + offset) % GIVEN_NAMES.length] as string;
-    if (!world.characters.some((character) => character.name === `${family.familyName}${candidate}`)) {
-      givenName = candidate;
-      break;
-    }
-  }
+  const givenName = selectAvailableGivenName(
+    family.familyName,
+    start,
+    new Set(world.characters.map((character) => character.name)),
+    new Set(world.characters.map((character) => character.givenName)),
+  );
   const average = (field: 'leadership' | 'governance' | 'cunning' | 'ambition' | 'loyalty' | 'caution'): number => (
     Math.round(clamp((parents[0][field] + parents[1][field]) / 2 + keyedInt(world.seed, -10, 10, world.turn, 'birth', id, field)))
   );

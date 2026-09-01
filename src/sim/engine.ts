@@ -3,7 +3,7 @@ import {
   type RegionDefinition,
   type RouteDefinition,
 } from '../maps/types';
-import { FAMILY_NAMES, GIVEN_NAMES } from './names';
+import { FAMILY_NAMES, GIVEN_NAMES, selectAvailableGivenName } from './names';
 import { DEFAULT_MAP_PROFILE_ID, getMapProfile, getMapProfileRevision } from '../maps';
 import type { MapProfile, MapProfileId } from '../maps/types';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
@@ -254,22 +254,16 @@ function uniqueName(
   seed: string,
   key: string,
   usedNames: Set<string>,
+  usedGivenNames: Set<string>,
   forcedFamily?: string,
 ): { familyName: string; givenName: string; name: string } {
   const familyName = forcedFamily
     ?? FAMILY_NAMES[keyedInt(seed, 0, FAMILY_NAMES.length - 1, 'name', key, 'family')];
   const start = keyedInt(seed, 0, GIVEN_NAMES.length - 1, 'name', key, 'given');
-  for (let offset = 0; offset < GIVEN_NAMES.length; offset += 1) {
-    const givenName = GIVEN_NAMES[(start + offset) % GIVEN_NAMES.length] as string;
-    const name = `${familyName}${givenName}`;
-    if (!usedNames.has(name)) {
-      usedNames.add(name);
-      return { familyName, givenName, name };
-    }
-  }
-  const givenName = GIVEN_NAMES[start] as string;
-  const name = `${familyName}${givenName}·${usedNames.size + 1}`;
+  const givenName = selectAvailableGivenName(familyName, start, usedNames, usedGivenNames);
+  const name = `${familyName}${givenName}`;
   usedNames.add(name);
+  usedGivenNames.add(givenName);
   return { familyName, givenName, name };
 }
 
@@ -279,12 +273,13 @@ function createInitialCharacters(
   polityRegions: RegionState[],
   globalStart: number,
   usedNames: Set<string>,
+  usedGivenNames: Set<string>,
 ): CharacterState[] {
   const capital = polity.capitalRegionId;
   const nonCapitalRegions = polityRegions
     .filter((region) => region.id !== capital)
     .sort((left, right) => stableCompare(left.id, right.id));
-  const rulerIdentity = uniqueName(seed, `${polity.id}:0`, usedNames);
+  const rulerIdentity = uniqueName(seed, `${polity.id}:0`, usedNames, usedGivenNames);
 
   return Array.from({ length: INITIAL_CHARACTER_COUNT_PER_POLITY }, (_, index) => {
     const identity = index === 0
@@ -293,6 +288,7 @@ function createInitialCharacters(
         seed,
         `${polity.id}:${index}`,
         usedNames,
+        usedGivenNames,
         index === 8 || index === 9 ? rulerIdentity.familyName : undefined,
       );
     const governedRegion = index >= 3 && index < 8
@@ -499,9 +495,10 @@ export function createWorld(
   const routes = createRoutes(regions, profile.simulation.routes);
   const characters: CharacterState[] = [];
   const usedNames = new Set<string>();
+  const usedGivenNames = new Set<string>();
   for (const definition of profile.simulation.polities) {
     const polityRegions = regions.filter((region) => region.controllerId === definition.id);
-    characters.push(...createInitialCharacters(seed, definition, polityRegions, characters.length, usedNames));
+    characters.push(...createInitialCharacters(seed, definition, polityRegions, characters.length, usedNames, usedGivenNames));
   }
   const polities = profile.simulation.polities.map((definition) => {
     const ruler = characters.find((character) => character.polityId === definition.id && character.role === '君主');
