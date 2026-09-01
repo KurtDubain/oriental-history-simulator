@@ -20,6 +20,8 @@ Current Phase A request: 按已冻结的 vNext Roadmap 完成 Phase A 真实性�
 
 Current Phase B request: 在已完成 B01/B03 军权纵切的基础上完成 B04：让君主寿命、继承候选、家族、派系、官职与军队支持形成权威、可追溯的继承危机；复用同一 Situation reducer，并以类型配额保持叙事多样性。
 
+Current v1.18 request: POL06/B05 已完成权势资源、朝堂行动与“朝堂权斗”纵切；下一项只进入 POL07/POL08，统一首都印记、国家、人物、家族与史事入口，并以长期审计收口可见性和真实性。
+
 ## Product thesis
 
 - Visual thesis: 墨色舆图 × 朱砂史册；暖纸底、炭墨信息、单一朱砂交互色，像一座可操作的历史观测台。
@@ -291,3 +293,8 @@ Current Phase B request: 在已完成 B01/B03 军权纵切的基础上完成 B04
 - 2026-09-01 v1.17.0 POL04/POL05 implementation close: 既有“疆界”叠层为每个存续政权显示唯一首都朝局印记，点按直接打开国家“朝局”；在朝局选择派系后，“舆图看根基”只投影该派当季真实地方长官、军团主帅和舰队提督。中央官职、声望、凝聚、联盟与无权威位置的家门财富不进入地图；舰令一舰一根基并随当前港口/海区落点。政治标记与军队共用绘制坐标和按距离命中，移动粗指针在重叠中心仍可分别选中，等距保留军队优先；跨世界/地图打开会强制清空旧派系焦点，桌面实据允许完整多行阅读。
 - 2026-09-01 v1.17.0 release gate: 完整 `npm run test:release` 无中断全绿：85 files / 532 tests；架构扫描为 150 个生产文件 / 59,486 行、343 runtime / 205 type-only imports、0 runtime cycle、0 跨层违例，`App.tsx` 与 `WorldMap.tsx` 分别为 2,543/2,600、1,088/1,100 行。个人/参赛 JS gzip 为 417,200 / 408,522 bytes，CSS gzip 均为 39,675 bytes；更新安全刷新、主试玩、移动地图/设置、TRIM01、名录、政治五场、人物关系、双地图六场和参赛隔离全部通过。双地图双种子 256 季政治审计检查 265 枚首都印记、2,946 个空间根基，舰队当前锚点、直推重放与 T32 存读档均精确；MAP05 的 320 季 P95 94.402ms，T400 冷史 21 卷 / 11.474MiB / 首屏 0.386ms，V0.3 的 320 季 P95 97.217ms、最大存档 8.586MiB，所有审计 `failures: []`。
 - 2026-09-01 v1.17.0 final web-game client: mandatory client 从开篇实点“开启新纪”，复核 v1.17.0 / schema 4 / `private-v03@1` / T0 hash `4f07cdf6c4ab1d73` / 8 枚首都朝局印记 / 默认 0 个派系根基；人工检查 Canvas 的海陆、州界、河流、国号、军团、水师、港口与克制政治印记正常，未生成 console/page error 文件。POL04/POL05 正式关闭，下一条唯一纵切为 POL06 政治行动与 Situation。
+- 2026-09-01 POL06 audit: `court_action_resolved` 已接入 runtime 与完整档案两条不变量路径，核验政权/派系/人物引用、判定值、君位转移、权臣影响增长与清洗真实削权；定向测试、TypeScript 和架构预算通过。
+- 2026-09-01 POL06 audit: Phase B 将 `court_power_struggle` 开放配额固定为3，并审计单一政权范围、同政权 Fact 来源及 POL01 分类账当季候选值，明确拒绝旧 `FactionState.power`。
+- 2026-09-01 POL06 audit: 双地图政治审计覆盖朝堂 Fact → 权势账 → Situation、直推重放及存档续跑；双地图、双种子共 4 局 / 256 季自然产生 54 次朝堂行动、38 条有分类账根基的朝堂权斗，27 次行动进入局势事实链，32+32 续推与直推一致，全部无失败。
+- 2026-09-01 POL06 final truthfulness close: 权臣任期改由有界热 Fact 与活性 pin 维持，派系终结、政权灭亡、人物死亡、正常继位及夺位边界均有回归；清洗必须实际削去官职、影响、成员或权势根基，仅降忠诚不再冒充成功。朝局卷、观察线索和史事文案只列 Fact 冻结证据与实际非零 driver。最终 10 files / 69 tests、`npx tsc -b` 与 `git diff --check` 全绿。
+- 2026-09-01 v1.18.0 release gate: 完整 `npm run test:release` 无中断全绿：89 files / 562 tests；架构扫描为 153 个生产文件 / 61,460 行、351 runtime / 212 type-only imports、0 runtime cycle、0 跨层违例。个人/参赛 JS gzip 为 427,856 / 419,179 bytes，CSS gzip 均为 39,691 bytes；主试玩、FUX01/FUX03、TRIM01、名录、人物关系、双地图六场、政治 1440/390/640/768 触控链、参赛隔离与更新安全刷新全部通过。双地图双种子 256 季自然产生 54 次朝堂行动、38 条朝堂权斗，27 次行动进入局势事实链，重放与 32+32 续推精确；T400 冷史为 21 卷 / 11.564MiB / 首屏约 0.41ms，V0.3 的 320 季 P95 104.777ms、最大存档 8.735MiB，所有审计 `failures: []`。POL06 正式关闭；下一纵切为 POL07 政治入口互通，并以前置包体减重恢复工程余量。

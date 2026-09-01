@@ -38,10 +38,10 @@ const DEFAULT_SEEDS = [
 ] as const;
 
 const LEAD_SLOTS: readonly ObserverLeadSlot[] = ['person', 'polity', 'tension'];
-const SITUATION_TYPE_BY_SLOT: Readonly<Record<ObserverLeadSlot, string>> = {
-  person: 'military_power_crisis',
-  polity: 'inheritance_crisis',
-  tension: 'war_progress',
+const SITUATION_TYPES_BY_SLOT: Readonly<Record<ObserverLeadSlot, readonly string[]>> = {
+  person: ['military_power_crisis'],
+  polity: ['inheritance_crisis', 'court_power_struggle'],
+  tension: ['war_progress'],
 };
 const MAX_CONTINUITY_BYTES = 4 * 1024;
 const MAX_REPORTED_FAILURES = 200;
@@ -419,7 +419,7 @@ function auditSituationLead(world: WorldState, lead: ObserverLead, metrics: Muta
     fail(world.seed, world.turn, `${lead.slot} references missing Situation ${lead.situationId}`);
     return;
   }
-  if (lead.situationType !== situation.type || SITUATION_TYPE_BY_SLOT[lead.slot] !== situation.type) {
+  if (lead.situationType !== situation.type || !SITUATION_TYPES_BY_SLOT[lead.slot].includes(situation.type)) {
     fail(world.seed, world.turn, `${lead.slot} references incompatible Situation type ${situation.type}`);
   }
   if (!targetExists(world, lead)) {

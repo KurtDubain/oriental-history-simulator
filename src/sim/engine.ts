@@ -546,6 +546,8 @@ export function createWorld(
   foundingEvent.sourceFactIds = openingFactionFactIds;
   createV03OceanSystems(world, { legacy: false, profile });
   createV03LifeSystems(world, { legacy: false });
+  // Keep the derived POL01 cache identical across creation, reload and quarter finalization.
+  refreshFactionPowerLedgers(world);
   foundingEvent.summary = `${world.regions.length}处州域、${world.seaZones.length}片海域、${world.polities.length}方政权与${world.characters.length}名核心人物进入同一条可推演的历史。`;
   foundingEvent.evidence = [`固定地图含${world.regions.length}个区域与${world.seaZones.length}片海域`, `初始政权${world.polities.length}个`, `初始核心人物${world.characters.length}名`];
   world.historyDigest = stableHash(foundingEvent);
@@ -3086,6 +3088,7 @@ export function advanceWorldDetailed(
     const nextDate = getDateForTurn(world.turn);
     world.year = nextDate.year;
     world.season = nextDate.season;
+    refreshFactionPowerLedgers(world);
     compactWorldArchive(world);
   });
   const { systems, elapsedMs: systemsMs } = pipeline.finish();

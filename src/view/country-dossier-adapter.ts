@@ -54,7 +54,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     world.facts.filter((fact) => (
       fact.polityIds.includes(item.id)
       && fact.turn >= Math.max(0, world.turn - 16)
-      && ['agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'local_governance_resolved', 'appointment_started', 'appointment_ended', 'faction_lifecycle', 'faction_relation_changed'].includes(fact.kind)
+      && ['agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'local_governance_resolved', 'appointment_started', 'appointment_ended', 'faction_lifecycle', 'faction_relation_changed', 'court_action_resolved'].includes(fact.kind)
     )),
     3,
     'active',

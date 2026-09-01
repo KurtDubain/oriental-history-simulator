@@ -23,6 +23,7 @@ export type SimulationFactKind =
   | 'embodied_action_resolved'
   | 'faction_lifecycle'
   | 'faction_relation_changed'
+  | 'court_action_resolved'
   | 'situation_milestone';
 
 export interface BattleForceFact {
@@ -278,6 +279,29 @@ export interface FactionRelationChangedFactPayload {
   rightLeaderId: string;
 }
 
+export type CourtActionKind =
+  | 'power_broker_formed'
+  | 'power_broker_fell'
+  | 'purge'
+  | 'coup'
+  | 'usurpation';
+
+export interface CourtActionResolvedFactPayload {
+  action: CourtActionKind;
+  polityId: string;
+  actorFactionId: string | null;
+  targetFactionId: string | null;
+  initiatorId: string;
+  targetId: string;
+  reasonCode: string;
+  score: number;
+  threshold: number;
+  rulerBeforeId: string;
+  rulerAfterId: string;
+  affectedFactionIds: string[];
+  removedMemberIds: string[];
+}
+
 export type EmbodiedActionFactKind =
   | 'strengthen_relationship'
   | 'seek_opportunity'
@@ -349,6 +373,7 @@ export type EmbodiedActionSubmittedFact = SimulationFactBase<'embodied_action_su
 export type EmbodiedActionResolvedFact = SimulationFactBase<'embodied_action_resolved', EmbodiedActionResolvedFactPayload>;
 export type FactionLifecycleFact = SimulationFactBase<'faction_lifecycle', FactionLifecycleFactPayload>;
 export type FactionRelationChangedFact = SimulationFactBase<'faction_relation_changed', FactionRelationChangedFactPayload>;
+export type CourtActionResolvedFact = SimulationFactBase<'court_action_resolved', CourtActionResolvedFactPayload>;
 
 export type SimulationFact =
   | WarStartedFact
@@ -367,6 +392,7 @@ export type SimulationFact =
   | EmbodiedActionResolvedFact
   | FactionLifecycleFact
   | FactionRelationChangedFact
+  | CourtActionResolvedFact
   | SituationMilestoneFact;
 
 export type SimulationFactInput = SimulationFact extends infer Fact

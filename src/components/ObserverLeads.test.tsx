@@ -51,7 +51,8 @@ describe('ObserverLeads', () => {
 
     expect(markup.match(/data-source="situation"/g)?.length).toBeGreaterThanOrEqual(3);
     expect(markup.match(/data-situation-id="situation_/g)).toHaveLength(3);
-    expect(markup.match(/data-display-mode="tracking"/g)).toHaveLength(3);
+    expect(markup.match(/data-display-mode="tracking"/g)).toHaveLength(2);
+    expect(markup.match(/data-display-mode="resolution_echo"/g)).toHaveLength(1);
     expect(markup.match(/data-testid="observer-lead-change"/g)).toHaveLength(3);
     expect(markup).toContain('延续');
     expect(observerLeadWatchKey(watchedLead)).toBe(`situation:${watchedLead.situationId}`);

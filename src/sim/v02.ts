@@ -2,7 +2,11 @@ import { FAMILY_NAMES, GIVEN_NAMES } from './names';
 import { findMapProfileForContentVersion } from '../maps';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
 import { emitSimulationFact, projectFactLinks, type FactTurnBuffer } from './facts';
-import { refreshFactionPowerLedgers } from './politics/power-ledger';
+import { calculateFactionPowerLedger, refreshFactionPowerLedgers } from './politics/power-ledger';
+import {
+  emitCourtActionResolvedFact,
+  POWER_BROKER_FORMATION_THRESHOLD,
+} from './politics/court-actions';
 import {
   bootstrapFactionModel,
   changeFactionRelation,
@@ -25,6 +29,7 @@ import type {
   DiplomacyState,
   EventCause,
   FamilyState,
+  FactionState,
   HistoryEvent,
   MemoryKind,
   OfficeAppointment,
@@ -1304,7 +1309,73 @@ function actionRecentlyRecorded(character: CharacterState, kind: string, turn: n
   return character.biography.some((fact) => fact.kind === kind && turn - fact.turn < cooldown);
 }
 
+interface CurrentPowerBrokerState {
+  characterId: string;
+  factionId: string;
+  polityId: string;
+  formedFactId: string;
+}
+
+/**
+ * Court Facts are the bounded, persisted authority for power-broker tenure.
+ * Biography is a capped presentation log and may be trimmed or reconstructed,
+ * so it must never decide whether the same person can become a broker twice.
+ */
+function currentPowerBrokerStates(world: WorldState): Map<string, CurrentPowerBrokerState> {
+  const states = new Map<string, CurrentPowerBrokerState>();
+  for (const fact of [...world.facts].sort((left, right) => (
+    left.turn - right.turn || stableCompare(left.id, right.id)
+  ))) {
+    if (fact.kind !== 'court_action_resolved') continue;
+    if (fact.payload.action === 'power_broker_formed' && fact.payload.actorFactionId) {
+      states.set(fact.payload.initiatorId, {
+        characterId: fact.payload.initiatorId,
+        factionId: fact.payload.actorFactionId,
+        polityId: fact.payload.polityId,
+        formedFactId: fact.id,
+      });
+      continue;
+    }
+    if (fact.payload.action === 'power_broker_fell') {
+      states.delete(fact.payload.targetId);
+      continue;
+    }
+    if (fact.payload.action === 'coup' || fact.payload.action === 'usurpation') {
+      states.delete(fact.payload.initiatorId);
+      states.delete(fact.payload.targetId);
+    }
+  }
+  for (const [characterId, state] of states) {
+    const character = world.characters.find((item) => item.id === characterId);
+    const polity = world.polities.find((item) => item.id === state.polityId);
+    if (
+      !character?.alive
+      || character.polityId !== state.polityId
+      || !polity?.alive
+      || polity.rulerId === characterId
+    ) {
+      states.delete(characterId);
+    }
+  }
+  return states;
+}
+
+function factionLedgerEvidence(world: WorldState, faction: FactionState): string {
+  const ledger = calculateFactionPowerLedger(world, faction);
+  const roots = ledger.categories
+    .filter((category) => category.value > 0)
+    .sort((left, right) => right.value - left.value || stableCompare(left.category, right.category))
+    .slice(0, 3)
+    .map((category) => `${category.label}${category.value}`)
+    .join('、');
+  return `${faction.name}由${roots || '尚存成员网络'}构成权势${ledger.total}`;
+}
+
+
 export function processV02Politics(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
+  // Capture the Fact-backed identity before lifecycle maintenance can dissolve
+  // the carrier and clear CharacterState.factionId in this same quarter.
+  const currentPowerBrokers = currentPowerBrokerStates(world);
   processFactionLifecycle(world, context, emit);
   for (const polity of world.polities.filter((item) => item.alive).sort((left, right) => stableCompare(left.id, right.id))) {
     refreshFactionPowerLedgers(world, polity.id);
@@ -1320,6 +1391,73 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
     polity.courtInfluence = Math.round(clamp(
       ruler.influence * 0.4 + polity.authority * 0.35 + polity.administration * 0.25 - Math.max(0, dominant.power - 55) * 0.25,
     ));
+
+    const fallenBroker = world.characters
+      .filter((character) => (
+        character.alive && currentPowerBrokers.get(character.id)?.polityId === polity.id
+      ))
+      .map((character) => {
+        const brokerState = currentPowerBrokers.get(character.id) as CurrentPowerBrokerState;
+        return {
+          character,
+          brokerState,
+          faction: world.factions.find((faction) => faction.id === brokerState.factionId),
+        };
+      })
+      .filter(({ character, faction }) => (
+        character.id !== ruler.id
+        && (!faction?.active || faction.id !== dominant.id || faction.power < 54 || faction.leaderId !== character.id)
+      ))
+      .sort((left, right) => stableCompare(left.character.id, right.character.id))[0];
+    if (fallenBroker) {
+      const brokerFaction = fallenBroker.faction;
+      const evidence = brokerFaction?.active
+        ? factionLedgerEvidence(world, brokerFaction)
+        : brokerFaction
+          ? `${brokerFaction.name}已经退出朝局，不能再承载${fallenBroker.character.name}的权臣地位`
+          : `${fallenBroker.character.name}原有派系载体已不可用`;
+      const fact = emitCourtActionResolvedFact(world, context, {
+        action: 'power_broker_fell',
+        polityId: polity.id,
+        actorFactionId: ruler.factionId,
+        targetFactionId: fallenBroker.brokerState.factionId,
+        initiatorId: ruler.id,
+        targetId: fallenBroker.character.id,
+        reasonCode: brokerFaction?.active ? 'political_foothold_lost' : 'faction_carrier_lost',
+        score: brokerFaction?.active ? brokerFaction.power : 0,
+        threshold: 54,
+        rulerBeforeId: ruler.id,
+        rulerAfterId: ruler.id,
+        affectedFactionIds: [
+          ...(ruler.factionId ? [ruler.factionId] : []),
+          fallenBroker.brokerState.factionId,
+        ],
+        importance: 3,
+        causes: [
+          { label: '旧日地位', role: '结构', weight: 0.3, evidence: `${fallenBroker.character.name}此前已被朝野视为权力中枢` },
+          { label: '根基变化', role: '条件', weight: 0.4, evidence },
+          { label: '失势结果', role: '结果', weight: 0.3, evidence: `${fallenBroker.character.name}不再同时占据首要派系、领袖身份与足够权势根基` },
+        ],
+        stateDeltas: [],
+        sourceFactIds: brokerFaction?.endedFactId ? [brokerFaction.endedFactId] : [],
+      });
+      const event = emit({
+        category: '政治',
+        kind: 'power_broker_fell',
+        title: `${fallenBroker.character.name}退出${polity.shortName}权力中枢`,
+        summary: `${fallenBroker.character.name}退出权力中枢；${evidence}。`,
+        importance: 3,
+        actorIds: [fallenBroker.character.id, ruler.id],
+        polityIds: [polity.id],
+        regionIds: polity.capitalRegionId ? [polity.capitalRegionId] : [],
+        causes: fact.causes,
+        stateDeltas: fact.stateDeltas,
+        ...projectFactLinks(fact),
+      });
+      addBiography(fallenBroker.character, event, '权臣失势');
+      remember(world, fallenBroker.character.id, ruler.id, '竞争', 10, event.summary, event.id);
+      continue;
+    }
 
     if (context.season === '冬' && factions.length >= 2) {
       const partner = factions.find((faction) => (
@@ -1340,41 +1478,78 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
           remember(world, leader.id, partnerLeader.id, '恩义', 10, event.summary, event.id);
           remember(world, partnerLeader.id, leader.id, '恩义', 10, event.summary, event.id);
         }
+        if (relationFact) refreshFactionPowerLedgers(world, polity.id);
       }
     }
 
     if (
-      dominant.power >= 66
+      dominant.power >= POWER_BROKER_FORMATION_THRESHOLD
       && leader.id !== ruler.id
       && context.turn - dominant.lastActionTurn >= 32
-      && !actionRecentlyRecorded(leader, '成为权臣', context.turn, 40)
+      && !currentPowerBrokers.has(leader.id)
       && context.turn - polity.lastCourtCrisisTurn >= 32
     ) {
       const oldInfluence = leader.influence;
+      // Freeze the score that actually passed the eligibility check. The
+      // influence mutation and cache refresh below are consequences, not a
+      // second decision roll, and may cross a rounded category boundary.
+      const formationScore = dominant.power;
+      const ledgerEvidence = factionLedgerEvidence(world, dominant);
       leader.influence = Math.round(clamp(leader.influence + 3));
       dominant.lastActionTurn = context.turn;
       polity.lastCourtCrisisTurn = context.turn;
+      refreshFactionPowerLedgers(world, polity.id);
+      const deltas: StateDelta[] = oldInfluence === leader.influence ? [] : [
+        { entityType: 'character', entityId: leader.id, field: 'influence', before: oldInfluence, after: leader.influence, delta: leader.influence - oldInfluence },
+      ];
+      const causes: EventCause[] = [
+          { label: '派系资源', role: '结构', weight: 0.35, evidence: ledgerEvidence },
+          { label: '制度空间', role: '条件', weight: 0.25, evidence: `中央权威${polity.authority}、朝廷控制${polity.courtInfluence}` },
+          { label: '领袖能力', role: '选择', weight: 0.25, evidence: `${leader.name}谋略${leader.cunning}、影响${oldInfluence}` },
+          { label: '权臣形成', role: '结果', weight: 0.15, evidence: oldInfluence === leader.influence
+            ? `个人影响已在上限${leader.influence}，本次以朝堂行动事实确立权臣身份`
+            : `个人影响${oldInfluence}→${leader.influence}` },
+      ];
+      const fact = emitCourtActionResolvedFact(world, context, {
+        action: 'power_broker_formed',
+        polityId: polity.id,
+        actorFactionId: dominant.id,
+        targetFactionId: ruler.factionId,
+        initiatorId: leader.id,
+        targetId: ruler.id,
+        reasonCode: 'multi_resource_dominance',
+        score: formationScore,
+        threshold: POWER_BROKER_FORMATION_THRESHOLD,
+        rulerBeforeId: ruler.id,
+        rulerAfterId: ruler.id,
+        affectedFactionIds: [dominant.id, ...(ruler.factionId ? [ruler.factionId] : [])],
+        importance: 3,
+        causes,
+        stateDeltas: deltas,
+      });
+      const frozenPowerRoots = fact.causes.find((cause) => cause.label === '派系资源')?.evidence ?? ledgerEvidence;
       const event = emit({
         category: '政治',
         kind: 'power_broker',
         title: `${leader.name}权倾${polity.shortName}廷`,
-        summary: `${leader.name}凭${dominant.name}的官职、家族与成员网络成为权力中枢，君主决策需要其合作。`,
+        summary: `${leader.name}凭${frozenPowerRoots}成为朝议中的权力中枢，${ruler.name}的决策需要其合作。`,
         importance: 3,
         actorIds: [leader.id, ruler.id],
         polityIds: [polity.id],
         regionIds: polity.capitalRegionId ? [polity.capitalRegionId] : [],
-        causes: [
-          { label: '派系资源', role: '结构', weight: 0.35, evidence: `${dominant.name}权力${dominant.power}、凝聚${dominant.cohesion}` },
-          { label: '制度空间', role: '条件', weight: 0.25, evidence: `中央权威${polity.authority}、朝廷控制${polity.courtInfluence}` },
-          { label: '领袖能力', role: '选择', weight: 0.25, evidence: `${leader.name}谋略${leader.cunning}、影响${oldInfluence}` },
-          { label: '权臣形成', role: '结果', weight: 0.15, evidence: `个人影响${oldInfluence}→${leader.influence}` },
-        ],
-        stateDeltas: [
-          { entityType: 'character', entityId: leader.id, field: 'influence', before: oldInfluence, after: leader.influence, delta: leader.influence - oldInfluence },
-        ],
+        causes: fact.causes,
+        stateDeltas: fact.stateDeltas,
+        ...projectFactLinks(fact),
       });
       addBiography(leader, event, '成为权臣');
+      currentPowerBrokers.set(leader.id, {
+        characterId: leader.id,
+        factionId: dominant.id,
+        polityId: polity.id,
+        formedFactId: fact.id,
+      });
       remember(world, ruler.id, leader.id, '竞争', 8, event.summary, event.id);
+      continue;
     }
 
     const relationToRuler = leader.id === ruler.id ? undefined : ensureRelationship(world, leader.id, ruler.id);
@@ -1394,6 +1569,14 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       && !actionRecentlyRecorded(leader, '发动政变', context.turn, 40)
     ) {
       const oldRulerId = polity.rulerId;
+      const oldRulingFamilyId = polity.rulingFamilyId;
+      const oldDynastyName = polity.dynastyName;
+      const oldLegitimacy = polity.legitimacy;
+      const oldAuthority = polity.authority;
+      const oldRulerInfluence = ruler.influence;
+      const oldLeaderInfluence = leader.influence;
+      const oldGovernedRegionId = leader.governedRegionId;
+      const ledgerEvidence = factionLedgerEvidence(world, dominant);
       const sameFamily = leader.familyId === ruler.familyId;
       polity.rulerId = leader.id;
       polity.rulingFamilyId = leader.familyId;
@@ -1405,26 +1588,73 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       leader.governedRegionId = null;
       dominant.lastActionTurn = context.turn;
       polity.lastCourtCrisisTurn = context.turn;
+      refreshFactionPowerLedgers(world, polity.id);
+      const causes: EventCause[] = [
+          { label: '派系控制', role: '结构', weight: 0.28, evidence: ledgerEvidence },
+          { label: '中央虚弱', role: '条件', weight: 0.22, evidence: `权威${oldAuthority}，朝廷控制${polity.courtInfluence}` },
+          { label: '夺权动机', role: '选择', weight: 0.25, evidence: `野心${leader.ambition}、忠诚${leader.loyalty}、积怨${relationToRuler?.grievance ?? 0}` },
+          { label: '行动触发', role: '触发', weight: 0.1, evidence: `政变效用${coupScore.toFixed(1)}达到92` },
+          { label: '君位转移', role: '结果', weight: 0.15, evidence: `${oldRulerId}→${leader.id}` },
+      ];
+      const rawDeltas: StateDelta[] = [
+          { entityType: 'polity', entityId: polity.id, field: 'rulerId', before: oldRulerId, after: leader.id },
+          { entityType: 'polity', entityId: polity.id, field: 'rulingFamilyId', before: oldRulingFamilyId, after: polity.rulingFamilyId },
+          { entityType: 'polity', entityId: polity.id, field: 'dynastyName', before: oldDynastyName, after: polity.dynastyName },
+          { entityType: 'polity', entityId: polity.id, field: 'legitimacy', before: oldLegitimacy, after: polity.legitimacy, delta: polity.legitimacy - oldLegitimacy },
+          { entityType: 'polity', entityId: polity.id, field: 'authority', before: oldAuthority, after: polity.authority, delta: polity.authority - oldAuthority },
+          { entityType: 'character', entityId: ruler.id, field: 'influence', before: oldRulerInfluence, after: ruler.influence, delta: ruler.influence - oldRulerInfluence },
+          { entityType: 'character', entityId: leader.id, field: 'influence', before: oldLeaderInfluence, after: leader.influence, delta: leader.influence - oldLeaderInfluence },
+          ...(oldGovernedRegionId !== leader.governedRegionId ? [{
+            entityType: 'character' as const,
+            entityId: leader.id,
+            field: 'governedRegionId',
+            before: oldGovernedRegionId,
+            after: leader.governedRegionId,
+          }] : []),
+      ];
+      const deltas = rawDeltas.filter((delta) => delta.before !== delta.after);
+      const coupFactionIds = new Set([dominant.id, ruler.factionId].filter((id): id is string => Boolean(id)));
+      const sourceFactIds = context.facts
+        .filter((fact) => (
+          fact.kind === 'faction_relation_changed'
+          && fact.payload.polityId === polity.id
+          && (
+            coupFactionIds.has(fact.payload.leftFactionId)
+            || coupFactionIds.has(fact.payload.rightFactionId)
+          )
+        ))
+        .map((fact) => fact.id)
+        .slice(-2);
+      const fact = emitCourtActionResolvedFact(world, context, {
+        action: sameFamily ? 'coup' : 'usurpation',
+        polityId: polity.id,
+        actorFactionId: dominant.id,
+        targetFactionId: ruler.factionId,
+        initiatorId: leader.id,
+        targetId: ruler.id,
+        reasonCode: sameFamily ? 'palace_transfer' : 'dynasty_replaced',
+        score: coupScore,
+        threshold: 92,
+        rulerBeforeId: oldRulerId,
+        rulerAfterId: leader.id,
+        affectedFactionIds: [dominant.id, ...(ruler.factionId ? [ruler.factionId] : [])],
+        importance: 5,
+        causes,
+        stateDeltas: deltas,
+        sourceFactIds,
+      });
       const event = emit({
         category: '政治',
         kind: sameFamily ? 'coup' : 'usurpation',
         title: sameFamily ? `${leader.name}宫变夺权` : `${leader.name}篡立新朝`,
         summary: `${leader.name}联合${dominant.name}控制中枢，${ruler.name}失去君位；${sameFamily ? '王朝仍在宗族内部更替' : `国号之下改奉${leader.familyName}氏` }。`,
         importance: 5,
-        actorIds: [leader.id, ruler.id, ...dominant.memberIds.slice(0, 4)],
+        actorIds: [leader.id, ruler.id],
         polityIds: [polity.id],
         regionIds: polity.capitalRegionId ? [polity.capitalRegionId] : [],
-        causes: [
-          { label: '派系控制', role: '结构', weight: 0.28, evidence: `${dominant.name}权力${dominant.power}、凝聚${dominant.cohesion}` },
-          { label: '中央虚弱', role: '条件', weight: 0.22, evidence: `权威${polity.authority}，朝廷控制${polity.courtInfluence}` },
-          { label: '夺权动机', role: '选择', weight: 0.25, evidence: `野心${leader.ambition}、忠诚${leader.loyalty}、积怨${relationToRuler?.grievance ?? 0}` },
-          { label: '行动触发', role: '触发', weight: 0.1, evidence: `政变效用${coupScore.toFixed(1)}达到92` },
-          { label: '君位转移', role: '结果', weight: 0.15, evidence: `${oldRulerId}→${leader.id}` },
-        ],
-        stateDeltas: [
-          { entityType: 'polity', entityId: polity.id, field: 'rulerId', before: oldRulerId, after: leader.id },
-          { entityType: 'character', entityId: ruler.id, field: 'influence', before: ruler.influence + 28, after: ruler.influence, delta: -28 },
-        ],
+        causes: fact.causes,
+        stateDeltas: fact.stateDeltas,
+        ...projectFactLinks(fact),
       });
       addBiography(leader, event, '发动政变');
       addBiography(ruler, event, '失去君位');
@@ -1444,33 +1674,103 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
     ) {
       const oldPower = dominant.power;
       const oldInfluence = leader.influence;
+      const oldLoyalty = leader.loyalty;
+      const oldGovernedRegionId = leader.governedRegionId;
+      const oldMemberIds = [...dominant.memberIds];
+      const oldCoreMemberIds = [...dominant.coreMemberIds];
+      const ledgerEvidence = factionLedgerEvidence(world, dominant);
       leader.governedRegionId = null;
       leader.influence = Math.round(clamp(leader.influence - 16));
       leader.loyalty = Math.round(clamp(leader.loyalty - 18));
       const retainedMemberIds = dominant.memberIds.filter((id) => id === leader.id || keyedRandom(world.seed, context.turn, 'purge', dominant.id, id) > 0.35);
-      expelFactionMembers(world, dominant.id, dominant.memberIds.filter((id) => !retainedMemberIds.includes(id)));
-      dominant.power = Math.round(clamp(dominant.power - 18));
+      const removedMemberIds = dominant.memberIds.filter((id) => !retainedMemberIds.includes(id));
+      expelFactionMembers(world, dominant.id, removedMemberIds);
+      refreshFactionPowerLedgers(world, polity.id);
+      const causes: EventCause[] = [
+          { label: '派系威胁', role: '结构', weight: 0.3, evidence: ledgerEvidence },
+          { label: '君主能力', role: '条件', weight: 0.25, evidence: `谋略${ruler.cunning}、权威${polity.authority}` },
+          { label: '压制选择', role: '选择', weight: 0.25, evidence: `清洗效用${purgeScore.toFixed(1)}达到66` },
+          { label: '政治后果', role: '结果', weight: 0.2, evidence: `派系权力${oldPower}→${dominant.power}，领袖影响${oldInfluence}→${leader.influence}` },
+      ];
+      const rawDeltas: StateDelta[] = [
+          { entityType: 'faction', entityId: dominant.id, field: 'power', before: oldPower, after: dominant.power, delta: dominant.power - oldPower },
+          { entityType: 'character', entityId: leader.id, field: 'influence', before: oldInfluence, after: leader.influence, delta: leader.influence - oldInfluence },
+          { entityType: 'character', entityId: leader.id, field: 'loyalty', before: oldLoyalty, after: leader.loyalty, delta: leader.loyalty - oldLoyalty },
+          ...(oldGovernedRegionId !== leader.governedRegionId ? [{
+            entityType: 'character' as const,
+            entityId: leader.id,
+            field: 'governedRegionId',
+            before: oldGovernedRegionId,
+            after: leader.governedRegionId,
+          }] : []),
+          { entityType: 'faction', entityId: dominant.id, field: 'memberCount', before: oldMemberIds.length, after: dominant.memberIds.length, delta: dominant.memberIds.length - oldMemberIds.length },
+          { entityType: 'faction', entityId: dominant.id, field: 'coreMemberCount', before: oldCoreMemberIds.length, after: dominant.coreMemberIds.length, delta: dominant.coreMemberIds.length - oldCoreMemberIds.length },
+          ...removedMemberIds.map((memberId): StateDelta => ({
+            entityType: 'character', entityId: memberId, field: 'factionId', before: dominant.id, after: null,
+          })),
+      ];
+      const deltas = rawDeltas.filter((delta) => delta.before !== delta.after);
+      const hasConcreteWeakening = dominant.power < oldPower
+        || dominant.memberIds.length < oldMemberIds.length
+        || dominant.coreMemberIds.length < oldCoreMemberIds.length
+        || leader.influence < oldInfluence
+        || (oldGovernedRegionId !== null && leader.governedRegionId === null)
+        || removedMemberIds.length > 0;
+      // Loyalty loss can accompany a purge, but by itself it makes the target
+      // more hostile rather than less powerful. Without a real office,
+      // influence, membership or ledger loss there is no successful action to
+      // record, and the attempted loyalty mutation must not leak silently.
+      if (!hasConcreteWeakening) {
+        leader.loyalty = oldLoyalty;
+        continue;
+      }
       dominant.lastActionTurn = context.turn;
       polity.lastCourtCrisisTurn = context.turn;
+      const fact = emitCourtActionResolvedFact(world, context, {
+        action: 'purge',
+        polityId: polity.id,
+        actorFactionId: ruler.factionId,
+        targetFactionId: dominant.id,
+        initiatorId: ruler.id,
+        targetId: leader.id,
+        reasonCode: 'central_reassertion',
+        score: purgeScore,
+        threshold: 66,
+        rulerBeforeId: ruler.id,
+        rulerAfterId: ruler.id,
+        affectedFactionIds: [dominant.id, ...(ruler.factionId ? [ruler.factionId] : [])],
+        removedMemberIds,
+        importance: 4,
+        causes,
+        stateDeltas: deltas,
+      });
+      const removedNames = removedMemberIds
+        .slice(0, 3)
+        .map((id) => world.characters.find((character) => character.id === id)?.name ?? '无名成员');
+      const purgeResults = [
+        ...(oldGovernedRegionId !== null && leader.governedRegionId === null
+          ? [`撤去${leader.name}的地方职权`]
+          : []),
+        ...(leader.influence < oldInfluence
+          ? [`将${leader.name}的个人影响从${oldInfluence}压到${leader.influence}`]
+          : []),
+        ...(removedMemberIds.length > 0
+          ? [`逐出${removedNames.join('、')}${removedMemberIds.length > removedNames.length ? '等' : ''}（共${removedMemberIds.length}人）`]
+          : ['未拆散成员网络']),
+        ...(dominant.power < oldPower ? [`${dominant.name}权势${oldPower}→${dominant.power}`] : []),
+      ];
       const event = emit({
         category: '政治',
         kind: 'purge',
         title: `${ruler.name}清洗${dominant.name}`,
-        summary: `${ruler.name}依靠中央权威解除${leader.name}的地方职权并拆散其部分政治网络，但也埋下个人积怨。`,
+        summary: `${ruler.name}依靠中央权威对${dominant.name}动手：${purgeResults.join('，')}。`,
         importance: 4,
         actorIds: [ruler.id, leader.id],
         polityIds: [polity.id],
         regionIds: polity.capitalRegionId ? [polity.capitalRegionId] : [],
-        causes: [
-          { label: '派系威胁', role: '结构', weight: 0.3, evidence: `${dominant.name}清洗前权力${oldPower}` },
-          { label: '君主能力', role: '条件', weight: 0.25, evidence: `谋略${ruler.cunning}、权威${polity.authority}` },
-          { label: '压制选择', role: '选择', weight: 0.25, evidence: `清洗效用${purgeScore.toFixed(1)}达到66` },
-          { label: '政治后果', role: '结果', weight: 0.2, evidence: `派系权力${oldPower}→${dominant.power}，领袖影响${oldInfluence}→${leader.influence}` },
-        ],
-        stateDeltas: [
-          { entityType: 'faction', entityId: dominant.id, field: 'power', before: oldPower, after: dominant.power, delta: dominant.power - oldPower },
-          { entityType: 'character', entityId: leader.id, field: 'influence', before: oldInfluence, after: leader.influence, delta: leader.influence - oldInfluence },
-        ],
+        causes: fact.causes,
+        stateDeltas: fact.stateDeltas,
+        ...projectFactLinks(fact),
       });
       addBiography(leader, event, '遭到清洗');
       remember(world, leader.id, ruler.id, '羞辱', 28, event.summary, event.id);

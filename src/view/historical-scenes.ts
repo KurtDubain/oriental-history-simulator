@@ -81,7 +81,9 @@ function deltaCopy(world: WorldState, delta: StateDelta): string | null {
         ? polityName(world, delta.entityId)
         : delta.entityType === 'region'
           ? regionName(world, delta.entityId)
-          : null;
+          : delta.entityType === 'faction'
+            ? factionName(world, delta.entityId)
+            : null;
   if (!name) return null;
   const field = delta.field === 'influence'
     ? '影响'
@@ -89,7 +91,13 @@ function deltaCopy(world: WorldState, delta: StateDelta): string | null {
       ? '忠诚'
       : delta.field === 'insubordination'
         ? '抗命心'
-        : null;
+        : delta.field === 'power'
+          ? '权势'
+          : delta.field === 'memberCount'
+            ? '成员数'
+            : delta.field === 'coreMemberCount'
+              ? '核心成员数'
+              : null;
   if (field && typeof delta.before === 'number' && typeof delta.after === 'number') {
     return `${name}${field}${Math.round(delta.before)}→${Math.round(delta.after)}`;
   }
@@ -256,6 +264,72 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact): F
       summary: fact.payload.action === 'formed'
         ? `双方领袖把${relation === '盟约' ? '互相支持' : '彼此牵制'}登记为明确朝局关系。`
         : `双方不再维持此前的${relation}关系。`,
+    };
+  }
+  if (fact.kind === 'court_action_resolved') {
+    const actor = characterName(world, fact.payload.initiatorId);
+    const target = characterName(world, fact.payload.targetId);
+    const actorFaction = fact.payload.actorFactionId ? factionName(world, fact.payload.actorFactionId) : '其所属集团';
+    const targetFaction = fact.payload.targetFactionId ? factionName(world, fact.payload.targetFactionId) : '相关集团';
+    if (fact.payload.action === 'power_broker_formed') {
+      const frozenPowerRoots = fact.causes.find((cause) => cause.label === '派系资源')?.evidence
+        ?? `${actorFaction}的已登记政治资源`;
+      return {
+        title: `${actor}成为${polityName(world, fact.payload.polityId)}权力中枢`,
+        summary: `${actor}凭${frozenPowerRoots}进入朝议中枢，${target}此后需要与其合作。`,
+      };
+    }
+    if (fact.payload.action === 'power_broker_fell') {
+      const frozenChange = fact.causes.find((cause) => cause.label === '根基变化')?.evidence
+        ?? `${targetFaction}已无法继续承载${target}的权臣地位`;
+      return {
+        title: `${target}退出${polityName(world, fact.payload.polityId)}权力中枢`,
+        summary: `${target}退出权力中枢；${frozenChange}。`,
+      };
+    }
+    if (fact.payload.action === 'purge') {
+      const removedNames = fact.payload.removedMemberIds.slice(0, 3).map((id) => characterName(world, id));
+      const governedRemoved = fact.stateDeltas.some((delta) => (
+        delta.entityType === 'character'
+        && delta.entityId === fact.payload.targetId
+        && delta.field === 'governedRegionId'
+        && delta.before !== null
+        && delta.after === null
+      ));
+      const influenceReduced = fact.stateDeltas.some((delta) => (
+        delta.entityType === 'character'
+        && delta.entityId === fact.payload.targetId
+        && delta.field === 'influence'
+        && typeof delta.before === 'number'
+        && typeof delta.after === 'number'
+        && delta.after < delta.before
+      ));
+      const powerReduced = Boolean(fact.payload.targetFactionId) && fact.stateDeltas.some((delta) => (
+        delta.entityType === 'faction'
+        && delta.entityId === fact.payload.targetFactionId
+        && delta.field === 'power'
+        && typeof delta.before === 'number'
+        && typeof delta.after === 'number'
+        && delta.after < delta.before
+      ));
+      const changes = [
+        ...(governedRemoved ? [`撤去${target}的地方职权`] : []),
+        ...(influenceReduced ? [`压低${target}在朝中的影响`] : []),
+        ...(removedNames.length === 0
+          ? []
+          : fact.payload.removedMemberIds.length > removedNames.length
+            ? [`将${removedNames.join('、')}等${fact.payload.removedMemberIds.length}人逐出派系`]
+            : [`将${removedNames.join('、')}逐出派系`]),
+        ...(powerReduced ? [`削弱${targetFaction}的已登记权势`] : []),
+      ];
+      return {
+        title: `${actor}清洗${targetFaction}`,
+        summary: `${actor}对${targetFaction}动手；${changes.join('，') || '事实仅记录了行动身份，未冻结可读的削权差量'}。`,
+      };
+    }
+    return {
+      title: fact.payload.action === 'coup' ? `${actor}发动宫变` : `${actor}篡立新朝`,
+      summary: `${actor}依靠${actorFaction}控制中枢，${target}失去君位；君位由${characterName(world, fact.payload.rulerBeforeId)}转给${characterName(world, fact.payload.rulerAfterId)}。`,
     };
   }
   const transition = fact.payload.transition === 'formed'
@@ -465,6 +539,40 @@ function factTouchesSituation(fact: SimulationFact, situation: SituationState): 
     && fact.polityIds.some((id) => participantPolities.has(id));
 }
 
+function courtFactTouchesSituation(fact: SimulationFact, situation: SituationState): boolean {
+  const participantCharacters = new Set([
+    ...situation.participants.coreCharacterIds,
+    ...situation.participants.supportingCharacterIds,
+    ...situation.participants.opposingCharacterIds,
+  ]);
+  const participantFactions = new Set(situation.participants.factionIds);
+  if (fact.kind === 'court_action_resolved') {
+    return fact.payload.affectedFactionIds.some((id) => participantFactions.has(id));
+  }
+  if (fact.kind === 'faction_relation_changed') {
+    return participantFactions.has(fact.payload.leftFactionId)
+      || participantFactions.has(fact.payload.rightFactionId);
+  }
+  if (fact.kind === 'faction_lifecycle') {
+    return [
+      ...fact.payload.affectedFactionIds,
+      ...fact.payload.createdFactionIds,
+      ...fact.payload.endedFactionIds,
+    ].some((id) => participantFactions.has(id));
+  }
+  if (fact.kind === 'agency_support_resolved') {
+    return participantCharacters.has(fact.payload.actorId)
+      || (fact.payload.targetKind !== 'army_officers' && participantCharacters.has(fact.payload.targetId));
+  }
+  if (fact.kind === 'agency_intent_resolved') {
+    return participantCharacters.has(fact.payload.actorId);
+  }
+  if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
+    return participantCharacters.has(fact.payload.holderId);
+  }
+  return false;
+}
+
 export function projectSituationHistoricalScenes(
   world: WorldState,
   situation: SituationState,
@@ -486,6 +594,20 @@ export function projectSituationHistoricalScenes(
     if (situation.type === 'military_power_crisis') {
       return ['agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'appointment_started', 'appointment_ended']
         .includes(fact.kind) && factTouchesSituation(fact, situation);
+    }
+    if (situation.type === 'court_power_struggle') {
+      const polityMatch = fact.polityIds.some((id) => situation.participants.polityIds.includes(id));
+      if (!polityMatch) return false;
+      const isCourtSceneFact = [
+        'faction_relation_changed',
+        'faction_lifecycle',
+        'agency_support_resolved',
+        'agency_intent_resolved',
+        'appointment_started',
+        'appointment_ended',
+        'court_action_resolved',
+      ].includes(fact.kind);
+      return isCourtSceneFact && courtFactTouchesSituation(fact, situation);
     }
     return ['character_death', 'appointment_started', 'appointment_ended']
       .includes(fact.kind) && factTouchesSituation(fact, situation);

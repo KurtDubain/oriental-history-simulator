@@ -14,6 +14,7 @@ import {
 import type { SituationRecentChange } from './situations/types';
 import type { HistoryEvent, InvariantViolation, SimulationFact, WorldState } from './types';
 import { validateRuntimeEmbodiedActions } from './validation/embodiment';
+import { validateCourtActionFacts } from './validation/court-actions';
 import { validateFactionState } from './validation/factions';
 import { validateCommitmentState } from './validation/commitments';
 import { findMapProfileForContentVersion } from '../maps';
@@ -988,6 +989,13 @@ export function validateTurnRuntime(
     validateRuntimeFact(fact, previous.turn, next.counters.fact, characterIds, polityIds, regionIds, violations);
   }
   violations.push(...validateRuntimeEmbodiedActions(appendedFacts));
+  // Court projection validation only needs this quarter's exact Chronicle
+  // counterparts here. Supplying the bounded suffix preserves the runtime
+  // validator's no-full-history contract; exhaustive validation still passes
+  // the reconstructed complete Chronicle below.
+  violations.push(...validateCourtActionFacts({ ...next, history: appendedEvents }, appendedFacts.filter(
+    (fact): fact is Extract<SimulationFact, { kind: 'court_action_resolved' }> => fact.kind === 'court_action_resolved',
+  )));
   const expectedFactDigest = appendedFacts.reduce(
     (digest, fact) => extendAppendOnlyDigest(digest, fact),
     previous.factDigest,
@@ -1443,6 +1451,9 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   const warById = new Map(world.wars.map((war) => [war.id, war]));
   const eventById = new Map(history.map((event) => [event.id, event]));
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
+  violations.push(...validateCourtActionFacts(fullWorld, facts.filter(
+    (fact): fact is Extract<SimulationFact, { kind: 'court_action_resolved' }> => fact.kind === 'court_action_resolved',
+  )));
 
   const warStartsById = new Map<string, Extract<SimulationFact, { kind: 'war_started' }>[]>();
   const warEndsById = new Map<string, Extract<SimulationFact, { kind: 'war_ended' }>[]>();

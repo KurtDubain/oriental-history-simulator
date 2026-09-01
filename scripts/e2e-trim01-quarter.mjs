@@ -787,9 +787,14 @@ async function exerciseResponsiveRosterDossier(page, scenario, baseline) {
   await roster.waitFor();
   await roster.locator('[data-roster-id]').first().click();
   await inspector.waitFor();
+  await inspector.evaluate(async (element) => {
+    await Promise.all(element.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
+    await new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+  });
   const canvas = page.locator('.world-map__canvas');
   await canvas.focus();
-  await page.keyboard.press('ArrowRight');
+  await page.waitForFunction(() => document.activeElement?.classList.contains('world-map__canvas'));
+  await canvas.press('ArrowRight');
   await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.selected?.kind === 'region');
   await page.setViewportSize({ width: 768, height });
   assert.equal(await page.locator('[data-inspector-return="roster"]').count(), 0, `${scenario.slug} 地图改选后不得复活旧名录来路`);

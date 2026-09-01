@@ -10,17 +10,37 @@ import {
   type SimulationFact,
   type WorldState,
 } from '../src/sim';
+import {
+  calculateFactionPowerLedger,
+  type PoliticalPowerCategory,
+} from '../src/sim/politics/power-ledger';
 
 const seeds = process.env.PHASE_B_AUDIT_SEEDS?.split(',').map((seed) => seed.trim()).filter(Boolean)
   ?? ['军权春秋', '春战副将', '同源世界', '沧海一粟', '赤潮', '归档校验', '副将立功', '北境军令'];
 const turns = Math.max(8, Number.parseInt(process.env.PHASE_B_AUDIT_TURNS ?? '80', 10));
 
-const REQUIRED_SITUATION_TYPES = ['military_power_crisis', 'inheritance_crisis', 'war_progress'] as const;
+const REQUIRED_SITUATION_TYPES = [
+  'military_power_crisis',
+  'inheritance_crisis',
+  'war_progress',
+  'court_power_struggle',
+] as const;
 const OPEN_BUDGETS: Readonly<Record<(typeof REQUIRED_SITUATION_TYPES)[number], number>> = {
   military_power_crisis: 5,
   inheritance_crisis: 3,
   war_progress: 4,
+  court_power_struggle: 3,
 };
+
+const COURT_LEDGER_FIELDS = new Set<PoliticalPowerCategory>([
+  'central_office',
+  'regional_office',
+  'military_command',
+  'family_backing',
+  'member_renown',
+  'alliance_support',
+  'cohesion',
+]);
 
 interface SituationTypeTransitions {
   formed: number;
@@ -67,6 +87,98 @@ function factWarId(fact: SimulationFact): string | null {
   return fact.kind === 'territory_control_changed' ? fact.payload.warId : null;
 }
 
+function auditCourtSituation(
+  world: WorldState,
+  situation: WorldState['situationSystem']['situations'][number],
+  factById: ReadonlyMap<string, SimulationFact>,
+): string[] {
+  const failures: string[] = [];
+  const polity = world.polities.find((item) => item.id === situation.scopeKey);
+  if (!polity) failures.push(`${situation.id}以未知政权${situation.scopeKey}作为朝局范围`);
+  if (situation.participants.polityIds.length !== 1
+    || situation.participants.polityIds[0] !== situation.scopeKey) {
+    failures.push(`${situation.id}的参与政权没有严格收口到${situation.scopeKey}`);
+  }
+
+  const referencedFactIds = new Set([
+    ...situation.causalFactIds,
+    ...situation.milestoneFactIds,
+    ...situation.recentChanges.flatMap((change) => change.sourceFactIds),
+    ...situation.signals.flatMap((signal) => signal.refs
+      .filter((ref) => ref.kind === 'fact')
+      .map((ref) => ref.kind === 'fact' ? ref.factId : '')),
+    ...(situation.resolution?.resultFactIds ?? []),
+  ]);
+  for (const factId of referencedFactIds) {
+    const fact = factById.get(factId);
+    if (!fact || !fact.polityIds.includes(situation.scopeKey)) {
+      failures.push(`${situation.id}引用了异国或未知来源事实${factId}`);
+    }
+  }
+
+  const ledgerRefs = [...situation.signals, situation.nextWatch]
+    .flatMap((signal) => signal.refs)
+    .filter((ref) => ref.kind === 'index' && ref.entityType === 'faction_power_ledger');
+  const groundedCategories = new Set<string>();
+  for (const ref of ledgerRefs) {
+    if (ref.kind !== 'index') continue;
+    if (ref.field === 'power') {
+      failures.push(`${situation.id}把旧FactionState.power当作朝局证据`);
+      continue;
+    }
+    if (!COURT_LEDGER_FIELDS.has(ref.field as PoliticalPowerCategory)) continue;
+    const faction = world.factions.find((item) => item.id === ref.entityId);
+    if (!faction || faction.polityId !== situation.scopeKey) {
+      failures.push(`${situation.id}引用未知或异国权势账${ref.entityId}`);
+      continue;
+    }
+    if (typeof ref.value !== 'number' || !Number.isFinite(ref.value)) {
+      failures.push(`${situation.id}的${ref.entityId}/${ref.field}不是有限分类账值`);
+    } else {
+      groundedCategories.add(ref.field);
+    }
+  }
+  if (groundedCategories.size < 2) {
+    failures.push(`${situation.id}没有至少两类可核验权势账支撑朝局判断`);
+  }
+
+  // Persisted signals are historical snapshots when a candidate temporarily
+  // disappears. Exact current-value checks belong to the current candidate,
+  // whose lastSeenTurn proves that the detector actually ran this quarter.
+  const candidate = world.situationSystem.candidates.find((item) => (
+    item.key === `court_power_struggle:${situation.scopeKey}`
+    && item.lastSeenTurn === world.turn - 1
+  ));
+  if (candidate) {
+    const detectorWorld = {
+      ...world,
+      turn: candidate.lastSeenTurn,
+      facts: world.facts.filter((fact) => fact.turn <= candidate.lastSeenTurn),
+    };
+    const currentRefs = [...candidate.observation.signals, candidate.observation.nextWatch]
+      .flatMap((signal) => signal.refs)
+      .filter((ref) => (
+        ref.kind === 'index'
+        && ref.entityType === 'faction_power_ledger'
+        && COURT_LEDGER_FIELDS.has(ref.field as PoliticalPowerCategory)
+      ));
+    for (const ref of currentRefs) {
+      if (ref.kind !== 'index') continue;
+      const faction = world.factions.find((item) => item.id === ref.entityId);
+      const account = faction && faction.polityId === situation.scopeKey
+        ? calculateFactionPowerLedger(detectorWorld, faction).categories
+          .find((item) => item.category === ref.field)
+        : null;
+      if (typeof ref.value !== 'number'
+        || !Number.isFinite(ref.value)
+        || Math.abs(ref.value - (account?.value ?? Number.NaN)) > 0.11) {
+        failures.push(`${situation.id}当前候选的${ref.entityId}/${ref.field}不是检测时POL01值`);
+      }
+    }
+  }
+  return failures;
+}
+
 function auditMilestoneFact(world: WorldState, fact: Extract<SimulationFact, { kind: 'situation_milestone' }>): string[] {
   const failures: string[] = [];
   const factById = new Map(readWorldFacts(world).map((item) => [item.id, item]));
@@ -110,6 +222,16 @@ function auditMilestoneFact(world: WorldState, fact: Extract<SimulationFact, { k
       if (!endFact) failures.push(`${fact.id}结案没有引用同战争的war_ended事实`);
       else if (endFact.payload.result !== fact.payload.outcomeKey) {
         failures.push(`${fact.id}结案结果${fact.payload.outcomeKey}与${endFact.id}的${endFact.payload.result}不一致`);
+      }
+    }
+  }
+  if (situation.type === 'court_power_struggle') {
+    failures.push(...auditCourtSituation(world, situation, factById));
+    if (fact.category !== '政治') failures.push(`${fact.id}的朝局里程碑没有归入政治类别`);
+    for (const sourceFactId of fact.sourceFactIds) {
+      const source = factById.get(sourceFactId);
+      if (!source?.polityIds.includes(situation.scopeKey)) {
+        failures.push(`${fact.id}没有引用同一政权${situation.scopeKey}的领域事实`);
       }
     }
   }
@@ -213,6 +335,16 @@ function run(seed: string): AuditRun {
     for (const [type, budget] of Object.entries(OPEN_BUDGETS)) {
       if ((openByType[type] ?? 0) > budget) {
         failures.push(`T${world.turn}${type}开放局势超过类型预算${budget}`);
+      }
+    }
+    const courtSituations = world.situationSystem.situations.filter((situation) => (
+      situation.type === 'court_power_struggle'
+      && (situation.status === 'open' || situation.resolvedTurn === world.turn - 1)
+    ));
+    if (courtSituations.length > 0) {
+      const factById = new Map(readWorldFacts(world).map((fact) => [fact.id, fact]));
+      for (const situation of courtSituations) {
+        failures.push(...auditCourtSituation(world, situation, factById));
       }
     }
     if (world.situationSystem.candidates.length > 64) failures.push(`T${world.turn}候选局势超过64`);

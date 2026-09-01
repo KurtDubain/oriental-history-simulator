@@ -11,6 +11,7 @@ import {
   type CharacterState,
   type WorldState,
 } from './index';
+import { politicalAllianceFormationFact } from './politics/faction-commitments';
 
 function relationTrust(world: WorldState, sourceId: string, targetId: string): number {
   return world.relationships.find((relation) => (
@@ -172,7 +173,12 @@ describe('V0.2 coupled social simulation', () => {
 
   it('invalidates a political promise in the same turn its exact faction alliance ends', () => {
     const beforeDestruction = advanceWorldBy(createWorld('军权春秋'), 23);
-    const commitmentBefore = beforeDestruction.commitments.find((commitment) => commitment.id === 'commit_00051');
+    const commitmentBefore = beforeDestruction.commitments.find((commitment) => {
+      const formation = politicalAllianceFormationFact(beforeDestruction, commitment);
+      return formation
+        && [formation.payload.leftFactionId, formation.payload.rightFactionId].includes('fac_0010')
+        && [formation.payload.leftFactionId, formation.payload.rightFactionId].includes('fac_0008');
+    });
     expect(commitmentBefore).toMatchObject({
       kind: '政治联盟',
       madeTurn: 11,

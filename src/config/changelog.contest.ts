@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.18.0',
+    date: '2026-09-01',
+    title: '朝权成局，兴替有因',
+    items: [
+      '联盟、背书、官职与军令进入同一份真实权势账；权臣形成、清洗、失势与宫变都会改变具体人物、派系或君位状态。',
+      '新增“朝堂权斗”持续局势，以同一政权的官席、军令、家门声望、盟约和中央权威解释形成、转折与结案。',
+      '朝堂行动同步进入具体史事、人物记忆、传记与朝局档案；旧 schema 4 存档不补造往事，确定性与世界 hash 契约保持兼容。',
+    ],
+  },
+  {
     version: '1.17.0',
     date: '2026-09-01',
     title: '朝局落印，实权落地',

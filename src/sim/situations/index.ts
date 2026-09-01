@@ -36,6 +36,21 @@ export {
   WAR_PROGRESS_TYPE,
   warProgressDetector,
 } from './war-progress-detector';
+export {
+  buildCourtStruggleIndex,
+  COURT_STRUGGLE_TEMPLATE,
+  COURT_STRUGGLE_TYPE,
+  courtStruggleDetector,
+  detectCourtStruggleCandidates,
+  detectCourtStruggleCandidatesFromIndex,
+} from './court-struggle-detector';
+export type {
+  CourtStruggleCandidate,
+  CourtStruggleFactionIndex,
+  CourtStruggleIndex,
+  CourtStruggleSignal,
+  CourtStruggleWatchSignal,
+} from './court-struggle-detector';
 export type {
   WarProgressCandidate,
   WarProgressFactHistory,

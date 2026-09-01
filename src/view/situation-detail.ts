@@ -1,4 +1,5 @@
 import {
+  COURT_STRUGGLE_TEMPLATE,
   INHERITANCE_CRISIS_TEMPLATE,
   MILITARY_POWER_CRISIS_TEMPLATE,
   WAR_PROGRESS_TEMPLATE,
@@ -217,6 +218,7 @@ const FACT_KIND_LABELS: Record<SimulationFact['kind'], string> = {
   embodied_action_resolved: '行动结果',
   faction_lifecycle: '派系变动',
   faction_relation_changed: '派系关系',
+  court_action_resolved: '朝堂行动',
   situation_milestone: '局势里程碑',
 };
 
@@ -239,12 +241,24 @@ const FIELD_LABELS: Readonly<Record<string, string>> = {
   status: '状态',
   phase: '阶段',
   tension: '局势张力',
+  power: '派系实力',
+  memberCount: '派系成员',
+  coreMemberCount: '核心成员',
+  influence: '人物影响',
+  loyalty: '人物忠诚',
+  governedRegionId: '所掌州域',
+  factionId: '派系归属',
+  rulingFamilyId: '统治家族',
+  dynastyName: '王朝名号',
+  rulingFamilyPower: '王室根基',
+  dynastyStability: '王朝稳定',
 };
 
 const TEMPLATE_BY_TYPE: Readonly<Record<string, SituationTemplate>> = {
   military_power_crisis: MILITARY_POWER_CRISIS_TEMPLATE,
   inheritance_crisis: INHERITANCE_CRISIS_TEMPLATE,
   war_progress: WAR_PROGRESS_TEMPLATE,
+  court_power_struggle: COURT_STRUGGLE_TEMPLATE,
 };
 
 function stableCompare(left: string, right: string): number {
@@ -288,7 +302,8 @@ function valueLabel(world: WorldState, value: DeltaValue, field: string): string
     ?? world.polities.find((item) => item.id === value)?.shortName
     ?? world.polities.find((item) => item.id === value)?.name
     ?? world.regions.find((item) => item.id === value)?.name
-    ?? world.families.find((item) => item.id === value)?.name;
+    ?? world.families.find((item) => item.id === value)?.name
+    ?? world.factions.find((item) => item.id === value)?.name;
   if (named) return named;
   return field === 'outcomeKey' ? situationOutcomeLabel(value) : value;
 }
@@ -547,9 +562,33 @@ function evidenceFacts(
   return { facts: boundChronological(ordered, MAX_SITUATION_DETAIL_FACTS), missingFactIds };
 }
 
-function outcomeSummary(situation: SituationState, label: string): string {
+const COURT_POWER_ROOT_SIGNAL_KEYS = new Set([
+  'challenger_central_office',
+  'challenger_regional_office',
+  'challenger_military_command',
+  'challenger_family_renown',
+  'challenger_alliance_support',
+  'challenger_cohesion',
+]);
+
+function courtPowerRootLabels(drivers: readonly SituationDetailDriver[]): string[] {
+  return drivers
+    .filter((driver) => (
+      driver.direction === 'drives'
+      && COURT_POWER_ROOT_SIGNAL_KEYS.has(driver.key)
+    ))
+    .sort((left, right) => Math.abs(right.contribution) - Math.abs(left.contribution) || stableCompare(left.key, right.key))
+    .slice(0, 3)
+    .map((driver) => driver.label);
+}
+
+function outcomeSummary(situation: SituationState, label: string, courtRoots: readonly string[] = []): string {
   if (situation.type === 'war_progress') return `这场战争以“${label}”收束；胜负与停战理由只取自战争结案事实。`;
   if (situation.type === 'inheritance_crisis') return `继承秩序以“${label}”收束；结果由同季任免、死亡或政权存续事实共同确认。`;
+  if (situation.type === 'court_power_struggle') {
+    const roots = courtRoots.length > 0 ? `${courtRoots.join('、')}的积累与` : '';
+    return `这场朝堂权斗以“${label}”收束；结果由${roots}同季派系变动与朝堂行动事实确认。`;
+  }
   return `军权矛盾以“${label}”收束；卷宗只陈述已发生的任免、死亡或结构消散，不推断人物谋反意图。`;
 }
 
@@ -567,11 +606,12 @@ function playerSummary(
   const driving = preferredDriver?.label;
   const restraint = drivers.find((driver) => driver.direction === 'restrains')?.label;
   const latestScene = scenes[0]?.shortText;
+  const courtRoots = situation.type === 'court_power_struggle' ? courtPowerRootLabels(drivers) : [];
   if (situation.status === 'resolved') {
     return [
       ...(latestScene ? [latestScene] : []),
       `${item.title}起于${dateLabel(situation.startedTurn)}，于${dateLabel(situation.resolvedTurn ?? situation.lastUpdatedTurn)}结案，历时${durationLabel}。`,
-      outcomeSummary(situation, outcomeLabel ?? '结构压力消散'),
+      outcomeSummary(situation, outcomeLabel ?? '结构压力消散', courtRoots),
     ].slice(0, 3);
   }
   if (situation.type === 'military_power_crisis') {
@@ -586,6 +626,14 @@ function playerSummary(
       ...(latestScene ? [latestScene] : []),
       `${polity ?? '该政权'}的继承次序、候选支持与中央执行能力尚未形成稳定闭环；卷宗不替任何候选人虚构意图。`,
       driving ? `当前矛盾主要由“${driving}”推动${restraint ? `，“${restraint}”仍提供秩序约束` : ''}。` : '现有结构证据仍在积累。',
+    ];
+  }
+  if (situation.type === 'court_power_struggle') {
+    const rootCopy = courtRoots.length > 0 ? courtRoots.join('、') : (driving ?? '已登记的权势根基');
+    return [
+      ...(latestScene ? [latestScene] : []),
+      `${polity ?? '该朝廷'}朝中的较量目前落在${rootCopy}；这不等于任何人已经决定夺位。`,
+      driving ? `目前最能推动朝局的是“${driving}”${restraint ? `，“${restraint}”仍在限制其扩张` : ''}。` : '双方的实权根基仍在积累。',
     ];
   }
   return [

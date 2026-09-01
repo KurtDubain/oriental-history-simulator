@@ -68,6 +68,52 @@ function appendFact(
   return fact;
 }
 
+function appendPowerBrokerFact(
+  world: ArchiveWorldState,
+  turn: number,
+  action: 'power_broker_formed' | 'power_broker_fell' | 'purge',
+  brokerId: string,
+  brokerFactionId: string,
+  rulerId: string,
+  rulerFactionId: string | null,
+): SimulationFact {
+  const date = getDateForTurn(turn);
+  world.counters.fact += 1;
+  const fact: SimulationFact = {
+    id: `fact_${String(world.counters.fact).padStart(7, '0')}`,
+    turn,
+    year: date.year,
+    season: date.season,
+    kind: 'court_action_resolved',
+    category: '政治',
+    importance: 3,
+    actorIds: [brokerId, rulerId],
+    polityIds: [world.characters.find((item) => item.id === brokerId)?.polityId ?? 'missing'],
+    regionIds: [],
+    causes: [{ label: '权臣任期测试', role: '结果', weight: 1, evidence: action }],
+    stateDeltas: [],
+    sourceFactIds: [],
+    payload: {
+      action,
+      polityId: world.characters.find((item) => item.id === brokerId)?.polityId ?? 'missing',
+      actorFactionId: action === 'power_broker_formed' ? brokerFactionId : rulerFactionId,
+      targetFactionId: action === 'power_broker_formed' ? rulerFactionId : brokerFactionId,
+      initiatorId: action === 'power_broker_formed' ? brokerId : rulerId,
+      targetId: action === 'power_broker_formed' ? rulerId : brokerId,
+      reasonCode: action,
+      score: action === 'power_broker_formed' ? 70 : action === 'purge' ? 68 : 20,
+      threshold: action === 'power_broker_formed' ? 66 : action === 'purge' ? 66 : 54,
+      rulerBeforeId: rulerId,
+      rulerAfterId: rulerId,
+      affectedFactionIds: [brokerFactionId, ...(rulerFactionId ? [rulerFactionId] : [])].sort(),
+      removedMemberIds: [],
+    },
+  };
+  world.facts.push(fact);
+  world.factDigest = stableHash([world.factDigest, fact]);
+  return fact;
+}
+
 function appendEvent(
   world: ArchiveWorldState,
   turn: number,
@@ -236,6 +282,99 @@ describe('self-contained world cold archive', () => {
     ]));
     expect(referenced.has(resolvedFactId)).toBe(false);
     expect(referenced.has(archivedRootFactId)).toBe(false);
+  });
+
+  it('keeps an active power-broker Fact beyond the hot window and unpins it only after explicit fall', () => {
+    const world = createWorld('权臣事实冷档案存活根') as ArchiveWorldState;
+    const polity = world.polities.find((item) => item.alive);
+    const ruler = world.characters.find((item) => item.id === polity?.rulerId);
+    const brokerFaction = world.factions.find((item) => (
+      item.active && item.polityId === polity?.id && item.leaderId !== ruler?.id
+    ));
+    const broker = world.characters.find((item) => item.id === brokerFaction?.leaderId);
+    if (!polity || !ruler || !brokerFaction || !broker) throw new Error('expected court actors for archive pin test');
+    const formed = appendPowerBrokerFact(
+      world,
+      0,
+      'power_broker_formed',
+      broker.id,
+      brokerFaction.id,
+      ruler.id,
+      ruler.factionId,
+    );
+    for (let turn = 0; turn < 96; turn += 1) {
+      const filler = appendFact(world, turn);
+      appendEvent(world, turn);
+      world.lastTurn = { factIds: [filler.id] } as unknown as TurnReport;
+    }
+    setWorldTurn(world, 96);
+    compactWorldArchive(world);
+
+    expect(world.archiveSystem?.archivedThroughTurn).toBe(31);
+    expect(world.archiveSystem?.pinnedFactIds).toContain(formed.id);
+    expect(findActiveWorldFact(world, formed.id)).toEqual(formed);
+    const originalRulerId = polity.rulerId;
+    polity.rulerId = broker.id;
+    expect(collectReferencedFactIds(world)).not.toContain(formed.id);
+    polity.rulerId = originalRulerId;
+    polity.alive = false;
+    expect(collectReferencedFactIds(world)).not.toContain(formed.id);
+    polity.alive = true;
+    broker.alive = false;
+    expect(collectReferencedFactIds(world)).not.toContain(formed.id);
+    broker.alive = true;
+    const originalBrokerPolityId = broker.polityId;
+    const otherLivingPolity = world.polities.find((item) => item.alive && item.id !== polity.id);
+    expect(otherLivingPolity).toBeDefined();
+    broker.polityId = otherLivingPolity?.id ?? broker.polityId;
+    expect(collectReferencedFactIds(world)).not.toContain(formed.id);
+    broker.polityId = originalBrokerPolityId;
+    expect(collectReferencedFactIds(world)).toContain(formed.id);
+
+    appendPowerBrokerFact(
+      world,
+      96,
+      'purge',
+      broker.id,
+      brokerFaction.id,
+      ruler.id,
+      ruler.factionId,
+    );
+    for (let turn = 96; turn < 176; turn += 1) {
+      const filler = appendFact(world, turn);
+      appendEvent(world, turn);
+      world.lastTurn = { factIds: [filler.id] } as unknown as TurnReport;
+    }
+    setWorldTurn(world, 176);
+    compactWorldArchive(world);
+
+    expect(world.archiveSystem?.archivedThroughTurn).toBe(111);
+    expect(world.archiveSystem?.pinnedFactIds).toContain(formed.id);
+    expect(findActiveWorldFact(world, formed.id)).toEqual(formed);
+
+    const fell = appendPowerBrokerFact(
+      world,
+      176,
+      'power_broker_fell',
+      broker.id,
+      brokerFaction.id,
+      ruler.id,
+      ruler.factionId,
+    );
+    for (let turn = 176; turn < 256; turn += 1) {
+      const filler = appendFact(world, turn);
+      appendEvent(world, turn);
+      world.lastTurn = { factIds: [filler.id] } as unknown as TurnReport;
+    }
+    setWorldTurn(world, 256);
+    compactWorldArchive(world);
+
+    expect(world.archiveSystem?.archivedThroughTurn).toBe(191);
+    expect(world.archiveSystem?.pinnedFactIds).not.toContain(formed.id);
+    expect(findActiveWorldFact(world, formed.id)).toBeUndefined();
+    expect(findWorldFact(world, formed.id)).toEqual(formed);
+    expect(findWorldFact(world, fell.id)).toEqual(fell);
+    expect(validateWorldArchiveIntegrity(world)).toEqual([]);
   });
 
   it('imports the original whole-Situation pin layout and repins it to live roots', () => {

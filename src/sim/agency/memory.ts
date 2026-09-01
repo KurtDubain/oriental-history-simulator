@@ -33,6 +33,11 @@ export const PERSONAL_MEMORY_KINDS = [
   'support_denied',
   'command_appeased',
   'command_curbed',
+  'court_ascended',
+  'court_fell',
+  'court_purged',
+  'throne_seized',
+  'throne_lost',
   'local_relief_enacted',
   'local_levy_reduced',
   'local_measure_setback',
@@ -419,6 +424,74 @@ function embodiedActionCandidates(
   }];
 }
 
+function courtActionCandidates(
+  fact: Extract<SimulationFact, { kind: 'court_action_resolved' }>,
+): MemoryCandidate[] {
+  const polity = subject('polity', fact.payload.polityId, true);
+  const other = (characterId: string) => subject('character', characterId);
+  const base = {
+    scope: 'political' as const,
+    qualifier: `${fact.payload.action}:${fact.payload.reasonCode}`,
+    turn: fact.turn,
+    factId: fact.id,
+  };
+  if (fact.payload.action === 'power_broker_formed') {
+    return [{
+      ...base,
+      characterId: fact.payload.initiatorId,
+      kind: 'court_ascended',
+      subjects: uniqueSubjects([polity, other(fact.payload.targetId)]),
+      salience: 72,
+      valence: 64,
+      pinnedEligible: false,
+    }];
+  }
+  if (fact.payload.action === 'power_broker_fell') {
+    return [{
+      ...base,
+      characterId: fact.payload.targetId,
+      kind: 'court_fell',
+      subjects: uniqueSubjects([polity, other(fact.payload.initiatorId)]),
+      salience: 76,
+      valence: -72,
+      pinnedEligible: false,
+    }];
+  }
+  if (fact.payload.action === 'purge') {
+    return [fact.payload.targetId, ...fact.payload.removedMemberIds]
+      .filter((id, index, all) => all.indexOf(id) === index)
+      .map((characterId) => ({
+        ...base,
+        characterId,
+        kind: 'court_purged' as const,
+        subjects: uniqueSubjects([polity, other(fact.payload.initiatorId)]),
+        salience: characterId === fact.payload.targetId ? 86 : 62,
+        valence: characterId === fact.payload.targetId ? -88 : -58,
+        pinnedEligible: characterId === fact.payload.targetId,
+      }));
+  }
+  return [
+    {
+      ...base,
+      characterId: fact.payload.initiatorId,
+      kind: 'throne_seized' as const,
+      subjects: uniqueSubjects([polity, other(fact.payload.targetId)]),
+      salience: 100,
+      valence: 92,
+      pinnedEligible: true,
+    },
+    {
+      ...base,
+      characterId: fact.payload.targetId,
+      kind: 'throne_lost' as const,
+      subjects: uniqueSubjects([polity, other(fact.payload.initiatorId)]),
+      salience: 100,
+      valence: -100,
+      pinnedEligible: true,
+    },
+  ];
+}
+
 function candidatesForFact(world: WorldState, fact: SimulationFact): MemoryCandidate[] {
   if (fact.kind === 'battle') return battleCandidates(fact);
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') return appointmentCandidates(fact);
@@ -430,6 +503,7 @@ function candidatesForFact(world: WorldState, fact: SimulationFact): MemoryCandi
   if (fact.kind === 'agency_intent_resolved') return commandResponseCandidates(fact);
   if (fact.kind === 'local_governance_resolved') return localGovernanceCandidates(fact);
   if (fact.kind === 'embodied_action_resolved') return embodiedActionCandidates(fact);
+  if (fact.kind === 'court_action_resolved') return courtActionCandidates(fact);
   return [];
 }
 
@@ -560,6 +634,7 @@ function entityName(world: WorldState, ref: PersonalMemorySubjectRef | null): st
   if (titleKey.includes('inheritance_crisis')) return '继承风波';
   if (titleKey.includes('military_power_crisis')) return '军权之争';
   if (titleKey.includes('war_progress')) return '战局变迁';
+  if (titleKey.includes('court_power_struggle')) return '朝堂权斗';
   return '一场持续局势';
 }
 
@@ -583,6 +658,11 @@ function memoryTitle(world: WorldState, memory: PersonalMemoryState): string {
   if (memory.kind === 'support_denied') return `${name}未肯相助`;
   if (memory.kind === 'command_appeased') return `请领${name}未准，另受安抚`;
   if (memory.kind === 'command_curbed') return `请领${name}未准并遭削权`;
+  if (memory.kind === 'court_ascended') return `成为${name}朝中的权力中枢`;
+  if (memory.kind === 'court_fell') return `退出${name}的权力中枢`;
+  if (memory.kind === 'court_purged') return `在${name}朝局中遭到清洗`;
+  if (memory.kind === 'throne_seized') return `夺得${name}君位`;
+  if (memory.kind === 'throne_lost') return `失去${name}君位`;
   if (memory.kind === 'local_relief_enacted') return `在${name}开仓赈济`;
   if (memory.kind === 'local_levy_reduced') return `为${name}减免本季赋`;
   if (memory.kind === 'local_measure_setback') return `为${name}所请施政未成`;

@@ -73,7 +73,7 @@ const CATEGORY_META: Readonly<Record<PoliticalPowerCategory, { label: string; ma
   military_command: { label: '军令', maximum: 22 },
   family_backing: { label: '家门与财富', maximum: 13 },
   member_renown: { label: '人物声望', maximum: 13 },
-  alliance_support: { label: '盟派支持', maximum: 6 },
+  alliance_support: { label: '盟约与背书', maximum: 6 },
   cohesion: { label: '内部凝聚', maximum: 10 },
 };
 
@@ -262,6 +262,64 @@ function allianceResources(world: WorldState, faction: FactionState): PoliticalP
   }).sort((left, right) => stableCompare(left.id, right.id));
 }
 
+function recentSupportResources(
+  world: WorldState,
+  faction: FactionState,
+  members: readonly CharacterState[],
+): PoliticalPowerResource[] {
+  const memberIds = new Set(members.map((member) => member.id));
+  const candidates = world.facts
+    .filter((fact): fact is Extract<SimulationFact, { kind: 'agency_support_resolved' }> => (
+      fact.kind === 'agency_support_resolved'
+      && fact.payload.outcome === 'secured'
+      && memberIds.has(fact.payload.actorId)
+      && fact.payload.polityId === faction.polityId
+      && world.turn - fact.turn <= 16
+      && (fact.payload.targetKind === 'army_officers'
+        ? world.armies.some((army) => (
+          army.id === fact.payload.targetArmyId && army.polityId === faction.polityId
+        ))
+        : world.characters.some((character) => (
+          character.id === fact.payload.targetId
+          && character.alive
+          && character.polityId === faction.polityId
+        )))
+    ))
+    .sort((left, right) => (
+      right.turn - left.turn
+      || right.payload.strength - left.payload.strength
+      || stableCompare(right.id, left.id)
+    ));
+  const seenCarriers = new Set<string>();
+  const retained = candidates.filter((fact) => {
+    const carrierId = fact.payload.targetKind === 'army_officers'
+      ? fact.payload.targetArmyId
+      : fact.payload.targetId;
+    const key = `${fact.payload.actorId}:${fact.payload.targetKind}:${carrierId}`;
+    if (seenCarriers.has(key)) return false;
+    seenCarriers.add(key);
+    return true;
+  }).slice(0, 4);
+  return retained
+    .map((fact) => {
+      const actor = world.characters.find((character) => character.id === fact.payload.actorId)?.name ?? '该派成员';
+      const military = fact.payload.targetKind === 'army_officers';
+      const target = military
+        ? `${world.armies.find((army) => army.id === fact.payload.targetArmyId)?.name ?? fact.payload.targetArmyName ?? '旧日所部'}将校`
+        : world.characters.find((character) => character.id === fact.payload.targetId)?.name ?? '所请之人';
+      return {
+        id: `support:${fact.id}`,
+        category: (military ? 'military_command' : 'alliance_support') as PoliticalPowerCategory,
+        label: `${target}支持`,
+        detail: `${actor}在第${fact.year}年${fact.season}季取得${target}的明确支持；它会随时间失效，也不等同于正式官职`,
+        value: 2 + fact.payload.strength * 0.035,
+        characterIds: [fact.payload.actorId, ...(military ? [] : [fact.payload.targetId])],
+        regionIds: [...fact.regionIds],
+        evidence: [{ entityType: 'fact' as const, entityId: fact.id, field: 'outcome' }],
+      } satisfies PoliticalPowerResource;
+    });
+}
+
 function scaleCategoryResources(
   category: PoliticalPowerCategory,
   resources: readonly PoliticalPowerResource[],
@@ -298,6 +356,7 @@ export function calculateFactionPowerLedger(world: WorldState, faction: FactionS
     ...familyResources(world, members),
     ...renownResources(members),
     ...allianceResources(world, faction),
+    ...recentSupportResources(world, faction, members),
     {
       id: `cohesion:${faction.id}`,
       category: 'cohesion',
@@ -428,6 +487,38 @@ export function recentFactionPowerMovements(
           characterIds: [...fact.actorIds],
         } satisfies PoliticalPowerMovement];
       }
+      if (fact.kind === 'court_action_resolved' && fact.payload.affectedFactionIds.includes(faction.id)) {
+        const initiator = world.characters.find((item) => item.id === fact.payload.initiatorId)?.name ?? '朝中人物';
+        const target = world.characters.find((item) => item.id === fact.payload.targetId)?.name ?? '对手';
+        // A court Fact may name both sides as affected, but the same movement
+        // must not be projected onto both ledgers. Formation belongs to the
+        // broker's actor faction; a fall belongs to that broker's target
+        // faction. The ruler side is represented by its own later action.
+        if (
+          (fact.payload.action === 'power_broker_formed' && fact.payload.actorFactionId !== faction.id)
+          || (fact.payload.action === 'power_broker_fell' && fact.payload.targetFactionId !== faction.id)
+        ) return [];
+        const targeted = fact.payload.targetFactionId === faction.id && fact.payload.actorFactionId !== faction.id;
+        const purgeTargeted = fact.payload.targetFactionId === faction.id;
+        const movement = fact.payload.action === 'power_broker_formed'
+          ? { direction: 'gained' as const, label: '领袖成为权力中枢', detail: `${initiator}凭本派实际根基成为朝议中枢` }
+          : fact.payload.action === 'power_broker_fell'
+            ? { direction: 'lost' as const, label: '退出权力中枢', detail: `${target}失去维持权臣地位的具体根基` }
+            : fact.payload.action === 'purge'
+              ? purgeTargeted
+                ? { direction: 'lost' as const, label: '遭到朝廷清洗', detail: `${initiator}逐出${fact.payload.removedMemberIds.length}名成员并削弱${target}的政治根基` }
+                : { direction: 'gained' as const, label: '朝廷重申控制', detail: `${initiator}压制${target}所在派系` }
+              : targeted
+                ? { direction: 'lost' as const, label: '君位易手', detail: `${target}失去君位` }
+                : { direction: 'gained' as const, label: fact.payload.action === 'coup' ? '宫变得手' : '篡立新朝', detail: `${initiator}依靠本派控制中枢并取得君位` };
+        return [{
+          id: `movement:${fact.id}:${faction.id}`,
+          turn: fact.turn,
+          ...movement,
+          factId: fact.id,
+          characterIds: [fact.payload.initiatorId, fact.payload.targetId],
+        } satisfies PoliticalPowerMovement];
+      }
       if (fact.turn < membershipBoundary) return [];
       const movement = agencyMovement(world, fact);
       return movement && movement.characterIds.some((id) => memberIds.has(id)) ? [movement] : [];
@@ -449,16 +540,46 @@ export function calculateCharacterPowerPosition(world: WorldState, characterId: 
     ? world.factions.find((item) => item.id === character.factionId && item.active && item.polityId === character.polityId)
     : undefined;
   const factionResources = faction
-    ? calculateFactionPowerLedger(world, faction).resources.filter((resource) => resource.characterIds.includes(characterId))
+    ? calculateFactionPowerLedger(world, faction).resources.filter((resource) => (
+      resource.characterIds.includes(characterId)
+      // A secured request is projected below from the initiator's point of view.
+      // The faction ledger also carries it as collective backing, so keeping both
+      // would count the same Fact twice and could attribute it to its target.
+      && !resource.id.startsWith('support:')
+    ))
     : [];
-  const supportResources = world.facts
+  const supportCandidates = world.facts
     .filter((fact): fact is Extract<SimulationFact, { kind: 'agency_support_resolved' }> => (
       fact.kind === 'agency_support_resolved'
       && fact.payload.actorId === characterId
       && fact.payload.outcome === 'secured'
       && world.turn - fact.turn <= 16
+      && fact.payload.polityId === character?.polityId
+      && (fact.payload.targetKind === 'army_officers'
+        ? world.armies.some((army) => (
+          army.id === fact.payload.targetArmyId && army.polityId === fact.payload.polityId
+        ))
+        : world.characters.some((target) => (
+          target.id === fact.payload.targetId
+          && target.alive
+          && target.polityId === fact.payload.polityId
+        )))
     ))
-    .sort((left, right) => right.turn - left.turn || stableCompare(right.id, left.id))
+    .sort((left, right) => (
+      right.turn - left.turn
+      || right.payload.strength - left.payload.strength
+      || stableCompare(right.id, left.id)
+    ));
+  const seenSupportCarriers = new Set<string>();
+  const supportResources = supportCandidates.filter((fact) => {
+    const carrierId = fact.payload.targetKind === 'army_officers'
+      ? fact.payload.targetArmyId
+      : fact.payload.targetId;
+    const key = `${fact.payload.actorId}:${fact.payload.targetKind}:${carrierId}`;
+    if (seenSupportCarriers.has(key)) return false;
+    seenSupportCarriers.add(key);
+    return true;
+  })
     .slice(0, 3)
     .map((fact): PoliticalPowerResource => {
       const target = fact.payload.targetKind === 'army_officers'
@@ -475,7 +596,9 @@ export function calculateCharacterPowerPosition(world: WorldState, characterId: 
         evidence: [{ entityType: 'fact', entityId: fact.id, field: 'outcome' }],
       };
     });
-  const resources = [...factionResources, ...supportResources]
+  const resources = [...new Map(
+    [...factionResources, ...supportResources].map((resource) => [resource.id, resource] as const),
+  ).values()]
     .sort((left, right) => right.value - left.value || stableCompare(left.id, right.id))
     .slice(0, 8);
   const total = Math.round(clamp(resources.reduce((sum, resource) => sum + resource.value, 0) * 1.45));

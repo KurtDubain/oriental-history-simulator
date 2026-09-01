@@ -12,6 +12,7 @@ const APP_URL = externalUrl ?? `http://127.0.0.1:${PORT}`;
 const ARTIFACT_DIR = 'output/political-visibility-e2e';
 const TARGET_TURN = 4;
 const MOBILE_DOSSIER_MAX_WIDTH = 840;
+const MOBILE_QUICK_LOOK_MAX_WIDTH = 760;
 const MOBILE_SEAT_MAX_WIDTH = 720;
 const SCENARIO_FILTER = process.env.POLITICAL_VISIBILITY_E2E_SCENARIO;
 
@@ -26,6 +27,13 @@ const SCENARIOS = Object.freeze([
   {
     slug: 'private-mobile-wide-640x900',
     viewport: { width: 640, height: 900 },
+    mapProfileId: 'private-v03',
+    targetPolityId: 'p_yan',
+    seed: 'POL05-朝堂舆图-心中山河',
+  },
+  {
+    slug: 'private-touch-tablet-768x900',
+    viewport: { width: 768, height: 900 },
     mapProfileId: 'private-v03',
     targetPolityId: 'p_yan',
     seed: 'POL05-朝堂舆图-心中山河',
@@ -201,6 +209,46 @@ function assertObserverInvariant(current, baseline, detail) {
   );
 }
 
+function situationParticipantGroup(situation, key) {
+  return situation.participants.find((group) => group.key === key)?.entities ?? [];
+}
+
+function selectCourtSituation(state, scenario) {
+  const courts = state.observer.situations.open
+    .filter((situation) => situation.type === 'court_power_struggle');
+  assert.ok(courts.length > 0, `${scenario.slug} 固定世界必须自然形成朝堂权斗`);
+  assert.ok(courts.length <= 3, `${scenario.slug} 朝堂权斗开放局势不得超过类型配额 3`);
+  return courts.find((situation) => (
+    situationParticipantGroup(situation, 'polityIds').some((item) => item.id === scenario.targetPolityId)
+  )) ?? courts[0];
+}
+
+async function assertMobileTapTarget(locator, scenario, label) {
+  if (scenario.viewport.width > MOBILE_DOSSIER_MAX_WIDTH) return;
+  const metrics = await locator.evaluate((element) => {
+    const rect = element.getBoundingClientRect();
+    const hit = document.elementFromPoint(rect.left + rect.width / 2, rect.top + rect.height / 2);
+    return {
+      width: rect.width,
+      height: rect.height,
+      left: rect.left,
+      right: rect.right,
+      top: rect.top,
+      bottom: rect.bottom,
+      viewportWidth: innerWidth,
+      viewportHeight: innerHeight,
+      unobstructed: Boolean(hit && (hit === element || element.contains(hit))),
+    };
+  });
+  assert.ok(metrics.width >= 44 && metrics.height >= 44, `${scenario.slug} ${label}触控区至少 44px`);
+  assert.ok(
+    metrics.left >= -1 && metrics.right <= metrics.viewportWidth + 1
+      && metrics.top >= -1 && metrics.bottom <= metrics.viewportHeight + 1,
+    `${scenario.slug} ${label}必须位于可见触控视口内`,
+  );
+  assert.equal(metrics.unobstructed, true, `${scenario.slug} ${label}触控中心不得被遮挡`);
+}
+
 async function createWorld(page, scenario) {
   await page.addInitScript(() => {
     localStorage.setItem('canghai-map-primer-complete-v1', '1');
@@ -282,7 +330,8 @@ async function assertPoliticalMapOverview(page, scenario, baseline) {
 }
 
 async function expandMobileCountryInspector(page, scenario, inspector) {
-  if (scenario.viewport.width > MOBILE_DOSSIER_MAX_WIDTH) return;
+  // 761–840px is a touch-friendly full dossier, not the compact map quick-look.
+  if (scenario.viewport.width > MOBILE_QUICK_LOOK_MAX_WIDTH) return;
   const mode = await inspector.getAttribute('data-mobile-mode');
   assert.ok(mode === 'quick' || mode === 'full', `${scenario.slug} 移动档案必须声明速览/完整模式`);
   if (mode === 'quick') await activate(page.getByTestId('map-quick-look-details'), scenario);
@@ -659,7 +708,7 @@ async function exerciseSeatHolderRoundTrip(page, scenario, baseline, court, sele
 async function closeVisibleInspector(page, scenario) {
   const inspector = page.locator('.observer-inspector:visible');
   if (!await inspector.count()) return;
-  const quick = scenario.viewport.width <= MOBILE_DOSSIER_MAX_WIDTH
+  const quick = scenario.viewport.width <= MOBILE_QUICK_LOOK_MAX_WIDTH
     && await inspector.getAttribute('data-mobile-mode') === 'quick';
   const close = quick
     ? inspector.getByTestId('map-quick-look').getByRole('button', { name: '收起', exact: true })
@@ -810,6 +859,125 @@ async function exerciseFactionMapRoots(page, scenario, baseline, court, selected
   return restored;
 }
 
+async function exerciseCourtSituationRoundTrip(page, scenario, baseline) {
+  const situation = selectCourtSituation(baseline, scenario);
+  const polity = situationParticipantGroup(situation, 'polityIds')[0];
+  const namedParticipants = [
+    ...situationParticipantGroup(situation, 'factionIds'),
+    ...situationParticipantGroup(situation, 'coreCharacterIds'),
+  ];
+  assert.ok(polity, `${scenario.slug} 朝堂权斗必须指向真实政权`);
+  assert.ok(namedParticipants.length > 0, `${scenario.slug} 朝堂权斗必须有真实派系或人物`);
+  assert.equal(situation.typeLabel, '朝堂权斗');
+  assert.match(situation.title, new RegExp(`${polity.label}.*朝堂权斗`));
+  assert.ok(
+    situation.evidence.filter((item) => item.role === 'structural').length >= 2,
+    `${scenario.slug} 朝堂权斗必须有至少两条结构实据`,
+  );
+  assert.ok(
+    situation.evidence.every((item) => item.refs.length > 0),
+    `${scenario.slug} 朝堂权斗实据必须指向权威对象或索引`,
+  );
+  assert.equal(baseline.interface.overlay, 'political', `${scenario.slug} 阅读朝局应从疆界政治层开始`);
+
+  const shortcut = page.locator('[data-situation-workbench-trigger="true"]');
+  await shortcut.waitFor({ state: 'visible' });
+  await assertMobileTapTarget(shortcut, scenario, '持续局势入口');
+  await activate(shortcut, scenario);
+  const workbench = page.locator('.situation-workbench');
+  await workbench.waitFor({ state: 'visible' });
+  const targetRow = workbench.locator(`.situation-workbench__directory button[data-situation-id="${situation.id}"]`);
+  if (!await targetRow.isVisible()) {
+    const directoryToggle = workbench.locator('.situation-workbench__directory-toggle');
+    await assertMobileTapTarget(directoryToggle, scenario, '局势目录开关');
+    await activate(directoryToggle, scenario);
+    await targetRow.waitFor({ state: 'visible' });
+  }
+  await assertMobileTapTarget(targetRow, scenario, '朝堂权斗目录项');
+  await activate(targetRow, scenario);
+  const opened = await waitForState(
+    page,
+    (current, expected) => current.observer?.selectedSituationId === expected.id
+      && current.observer?.selectedSituation?.type === 'court_power_struggle',
+    { id: situation.id },
+  );
+  if (scenario.viewport.width <= MOBILE_DOSSIER_MAX_WIDTH
+    && await workbench.getAttribute('data-mobile-directory') !== null) {
+    await activate(workbench.locator('.situation-workbench__directory-toggle'), scenario);
+    await page.waitForFunction(() => (
+      document.querySelector('.situation-workbench')?.getAttribute('data-mobile-directory') === null
+    ));
+  }
+  assertObserverInvariant(opened, baseline, `${scenario.slug} 阅读朝堂权斗`);
+  assert.equal(opened.interface.overlay, 'political', `${scenario.slug} 阅卷不得离开政治疆界层`);
+  const detail = opened.observer.selectedSituation;
+  assert.equal(detail.title, situation.title);
+  assert.ok(detail.playerSummary.length >= 2, `${scenario.slug} 朝堂权斗应有可读的当季摘要`);
+  const concreteCopy = [
+    ...detail.playerSummary,
+    detail.currentChange,
+    detail.nextWatch,
+  ].join(' ');
+  assert.match(concreteCopy, new RegExp(polity.label), `${scenario.slug} 朝局正文必须点明政权`);
+  assert.ok(
+    namedParticipants.some((item) => concreteCopy.includes(item.label)),
+    `${scenario.slug} 朝局正文必须点明真实派系或人物，不能只说“起源”与“转折”`,
+  );
+  assert.match(
+    detail.nextWatch,
+    /任免|军令|结盟|清洗|官席|地方/,
+    `${scenario.slug} 朝局后续看点必须是可观察的具体动作`,
+  );
+  assert.match((await workbench.textContent()) ?? '', /朝堂权斗/);
+  assert.match((await workbench.textContent()) ?? '', new RegExp(polity.label));
+  await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-court-situation.png`, fullPage: false });
+
+  const polityButton = workbench.locator('.situation-workbench__participants')
+    .getByRole('button', { name: polity.label, exact: true });
+  assert.equal(await polityButton.count(), 1, `${scenario.slug} 朝局卷宗应可进入同一政权`);
+  await polityButton.scrollIntoViewIfNeeded();
+  await assertMobileTapTarget(polityButton, scenario, '卷中政权入口');
+  await activate(polityButton, scenario);
+  await workbench.waitFor({ state: 'detached' });
+  const inspector = page.locator('.observer-inspector[data-kind="country"]');
+  await inspector.waitFor({ state: 'visible' });
+  await expandMobileCountryInspector(page, scenario, inspector);
+  const selectedCountry = await waitForState(
+    page,
+    (current, polityId) => current.interface?.selected?.kind === 'country'
+      && current.interface.selected.id === polityId,
+    polity.id,
+  );
+  assertObserverInvariant(selectedCountry, baseline, `${scenario.slug} 从朝局卷查看同一政权`);
+  assert.equal(selectedCountry.interface.overlay, 'political', `${scenario.slug} 卷宗与国家朝局必须共用政治疆界层`);
+
+  const courtTab = inspector.locator('[data-inspector-tab="court"]');
+  await activate(courtTab, scenario);
+  const court = inspector.getByTestId('court-projection');
+  await court.waitFor({ state: 'visible' });
+  await waitForAnimations(court);
+  const courtState = await waitForState(
+    page,
+    (current, polityId) => current.interface?.selectedDetail?.court?.polityId === polityId,
+    polity.id,
+  );
+  assertObserverInvariant(courtState, baseline, `${scenario.slug} 从朝局卷读取国家朝局`);
+  assert.equal(courtState.interface.overlay, 'political');
+  const courtScenario = { ...scenario, targetPolityId: polity.id };
+  await assertProjectionAlignment(page, courtScenario, court, courtState);
+  const factionIds = new Set(situationParticipantGroup(situation, 'factionIds').map((item) => item.id));
+  assert.ok(
+    courtState.interface.selectedDetail.court.factionPositions.some((item) => factionIds.has(item.factionId)),
+    `${scenario.slug} 卷宗与国家朝局必须指向同一批权威派系`,
+  );
+  await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-court-situation-polity.png`, fullPage: false });
+  await closeVisibleInspector(page, scenario);
+  const returned = await snapshot(page);
+  assertObserverInvariant(returned, baseline, `${scenario.slug} 朝堂权斗完整阅读链`);
+  assert.equal(returned.interface.overlay, 'political');
+  return returned;
+}
+
 async function verifyScenario(browser, scenario) {
   const context = await browser.newContext({
     viewport: scenario.viewport,
@@ -830,8 +998,10 @@ async function verifyScenario(browser, scenario) {
     const seatReturned = await exerciseSeatHolderRoundTrip(page, scenario, baseline, opened.court, opened.selected);
     const returned = await exerciseLeaderRoundTrip(page, scenario, baseline, seatReturned.court, seatReturned.selected);
     await assertProjectionAlignment(page, scenario, returned.court, returned.selected);
-    const final = await exerciseFactionMapRoots(page, scenario, baseline, returned.court, returned.selected);
-    assertObserverInvariant(final, baseline, `${scenario.slug} POL03–POL05 完整观察链`);
+    const mapRestored = await exerciseFactionMapRoots(page, scenario, baseline, returned.court, returned.selected);
+    assertObserverInvariant(mapRestored, baseline, `${scenario.slug} POL03–POL05 完整观察链`);
+    const final = await exerciseCourtSituationRoundTrip(page, scenario, baseline);
+    assertObserverInvariant(final, baseline, `${scenario.slug} POL06 朝堂权斗观察闭环`);
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-restored.png`, fullPage: false });
     assert.deepEqual(browserErrors, [], `${scenario.slug} 不得产生 console.error 或 pageerror`);
   } finally {
@@ -851,7 +1021,7 @@ let browser = null;
 try {
   browser = await chromium.launch({ headless: true });
   for (const scenario of SCENARIOS) await verifyScenario(browser, scenario);
-  process.stdout.write(`POL03–POL05 political visibility E2E passed: turn ${TARGET_TURN} × ${SCENARIOS.length} map/viewport scenarios.\n`);
+  process.stdout.write(`POL03–POL06 political visibility E2E passed: turn ${TARGET_TURN} × ${SCENARIOS.length} map/viewport scenarios.\n`);
 } finally {
   await browser?.close();
   await server?.close();

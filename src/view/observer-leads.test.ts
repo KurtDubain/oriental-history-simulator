@@ -12,6 +12,7 @@ import {
   type ObserverLeadProjection,
   type ObserverLeadSlot,
 } from './observer-leads';
+import { projectSituationSystemSnapshot } from './situation-snapshot';
 
 function targetExists(world: WorldState, kind: string, id: string): boolean {
   if (kind === 'person') return world.characters.some((item) => item.id === id);
@@ -115,14 +116,37 @@ describe('observer story leads', () => {
       ['polity', 'fallback', null],
       ['tension', 'fallback', null],
     ]);
-    expect(at(4).leads.map((lead) => [lead.slot, lead.source, lead.situationType])).toEqual([
+    const turn4 = at(4);
+    expect(turn4.leads.map((lead) => [lead.slot, lead.source, lead.situationType])).toEqual([
       ['person', 'fallback', null],
-      ['polity', 'fallback', null],
+      ['polity', 'situation', 'court_power_struggle'],
       ['tension', 'situation', 'war_progress'],
     ]);
+    expect(turn4.leads.find((lead) => lead.situationType === 'court_power_struggle')).toMatchObject({
+      target: { kind: 'country' },
+      overlay: 'political',
+    });
+    const courtLead = turn4.leads.find((lead) => lead.situationType === 'court_power_struggle');
+    const world4 = worlds.get(4) as WorldState;
+    const courtSnapshot = projectSituationSystemSnapshot(world4.situationSystem, world4).open
+      .find((item) => item.id === courtLead?.situationId);
+    const actualRootLabels = courtSnapshot?.evidence
+      .filter((entry) => entry.contribution > 0 && [
+        'challenger_central_office',
+        'challenger_regional_office',
+        'challenger_military_command',
+        'challenger_family_renown',
+        'challenger_alliance_support',
+        'challenger_cohesion',
+      ].includes(entry.key))
+      .map((entry) => entry.label) ?? [];
+    expect(actualRootLabels.length).toBeGreaterThan(0);
+    expect(actualRootLabels.some((label) => courtLead?.question.includes(label))).toBe(true);
     for (const turn of [6, 8]) {
       const leads = at(turn).leads;
-      expect(leads.find((lead) => lead.slot === 'polity')).toMatchObject({ source: 'situation', situationType: 'inheritance_crisis' });
+      const polityLead = leads.find((lead) => lead.slot === 'polity');
+      expect(polityLead?.source).toBe('situation');
+      expect(['inheritance_crisis', 'court_power_struggle']).toContain(polityLead?.situationType);
       expect(leads.find((lead) => lead.slot === 'tension')).toMatchObject({ source: 'situation', situationType: 'war_progress' });
       const personLead = leads.find((lead) => lead.slot === 'person');
       expect(personLead?.source === 'fallback' || personLead?.situationType === 'military_power_crisis').toBe(true);

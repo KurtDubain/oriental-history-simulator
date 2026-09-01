@@ -5,23 +5,27 @@ import { createServer } from 'vite';
 
 const APP_URL = 'http://127.0.0.1:4173';
 const PACKAGE_VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
-const SNAPSHOT_LIMIT = 128 * 1024;
+// Four bounded Situation types now share the observer payload; keep a small, explicit
+// allowance for the court projection without relaxing the per-type/open-list caps.
+const SNAPSHOT_LIMIT = 144 * 1024;
 const ARTIFACT_DIR = 'output/v1-release-visual';
 const SITUATION_TYPE_LABELS = Object.freeze({
   military_power_crisis: '军权危机',
   inheritance_crisis: '继承危机',
   war_progress: '战争进程',
+  court_power_struggle: '朝堂权斗',
 });
 const SITUATION_OPEN_BUDGETS = Object.freeze({
   military_power_crisis: 5,
   inheritance_crisis: 3,
   war_progress: 4,
+  court_power_struggle: 3,
 });
 const LEAD_SLOTS = Object.freeze(['person', 'polity', 'tension']);
-const SITUATION_TYPE_BY_LEAD_SLOT = Object.freeze({
-  person: 'military_power_crisis',
-  polity: 'inheritance_crisis',
-  tension: 'war_progress',
+const SITUATION_TYPES_BY_LEAD_SLOT = Object.freeze({
+  person: Object.freeze(['military_power_crisis']),
+  polity: Object.freeze(['inheritance_crisis', 'court_power_struggle']),
+  tension: Object.freeze(['war_progress']),
 });
 const LEAD_STAGE_BY_SITUATION_PHASE = Object.freeze({
   emerging: '伏线',
@@ -31,7 +35,6 @@ const LEAD_STAGE_BY_SITUATION_PHASE = Object.freeze({
 const SITUATION_WATCH_SEED = '春战副将';
 const SITUATION_WATCH_TURN = 8;
 const SITUATION_WATCH_SLOT = 'tension';
-const SITUATION_WATCH_EXPECTED_ID = 'situation_000001';
 const SITUATION_WATCH_EXPECTED_PAUSE_TURN = 10;
 const PRIVATE_MAP_CONTENT_VERSION = 'v03-82';
 
@@ -408,11 +411,15 @@ function assertObserverLeadMilestone(state, expectedSources, label) {
   const leads = state.observer.focusLeads;
   assert.equal(leads.length, LEAD_SLOTS.length, `${label}应始终给出三条观察题`);
   assert.deepEqual(leads.map((lead) => lead.slot), LEAD_SLOTS, `${label}三问槽位顺序不得变化`);
-  assert.deepEqual(
-    leads.map((lead) => lead.source),
-    LEAD_SLOTS.map((slot) => expectedSources[slot]),
-    `${label}应按槽位优先使用 Situation，仅在无匹配时回退`,
-  );
+  for (const lead of leads) {
+    const expected = Array.isArray(expectedSources[lead.slot])
+      ? expectedSources[lead.slot]
+      : [expectedSources[lead.slot]];
+    assert.ok(
+      expected.includes(lead.source),
+      `${label} ${lead.slot}应按槽位优先使用 Situation，仅在无匹配时回退`,
+    );
+  }
   const arbitration = state.observer.leadArbitration;
   assert.equal(arbitration.version, 1, `${label}应暴露有界的连续性仲裁版本`);
   assert.equal(arbitration.lastArbitratedTurn, state.time.turn, `${label}仲裁必须对应当前季度`);
@@ -436,7 +443,19 @@ function assertObserverLeadMilestone(state, expectedSources, label) {
     }
 
     assert.equal(lead.source, 'situation', `${label} ${lead.slot}只能使用权威 Situation 题源`);
-    assert.equal(lead.situationType, SITUATION_TYPE_BY_LEAD_SLOT[lead.slot], `${label} ${lead.slot}应匹配正确局势类型`);
+    assert.ok(
+      SITUATION_TYPES_BY_LEAD_SLOT[lead.slot].includes(lead.situationType),
+      `${label} ${lead.slot}应匹配正确局势类型`,
+    );
+    if (lead.displayMode === 'resolution_echo') {
+      const resolved = state.observer.situations.recentResolved.find((item) => item.id === lead.situationId);
+      assert.ok(resolved, `${label} ${lead.slot}的结案回声必须指向近期已结案局势`);
+      assert.equal(resolved.type, lead.situationType, `${label} ${lead.slot}结案回声不得改变局势类型`);
+      assert.equal(lead.stage, '回响', `${label} ${lead.slot}结案后应明确进入回响阶段`);
+      assert.equal(resolved.status, 'resolved', `${label} ${lead.slot}结案回声必须保留已结案状态`);
+      assert.ok(resolved.resolvedTurn !== null && resolved.milestoneFactIds.length > 0, `${label} ${lead.slot}结案回声必须反链权威里程碑`);
+      continue;
+    }
     assert.equal(lead.displayMode, 'tracking', `${label} ${lead.slot}的未结案局势应持续追踪`);
     const situation = state.observer.situations.open.find((item) => item.id === lead.situationId);
     assert.ok(situation, `${label} ${lead.slot}必须指向当前开放的局势`);
@@ -517,7 +536,7 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   auditSituationProjection(turn4.observer.situations, ['war_progress']);
   assertObserverLeadMilestone(turn4, {
     person: 'fallback',
-    polity: 'fallback',
+    polity: ['fallback', 'situation'],
     tension: 'situation',
   }, 'T4');
 
@@ -642,8 +661,8 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   const turn8 = await advanceTo(page, SITUATION_WATCH_TURN);
   const lead = turn8.observer.focusLeads.find((item) => item.slot === SITUATION_WATCH_SLOT);
   assert.ok(lead?.situationId, '冻结种子 T8 的天下矛盾必须由真实 Situation 承载');
-  assert.equal(lead.situationId, SITUATION_WATCH_EXPECTED_ID, '冻结种子应保持稳定的局势 ID');
   const watchedSituationId = lead.situationId;
+  assert.match(watchedSituationId, /^situation_\d+$/, '冻结种子应使用稳定的局势身份，不依赖其他检测器的全局排号');
   const turn8Situation = situationFromSnapshot(turn8, watchedSituationId);
   assert.equal(turn8Situation?.status, 'open');
   assert.equal(turn8Situation?.phase, 'critical', '关注前的战争局势应处于临界阶段');
@@ -1317,7 +1336,7 @@ try {
   assertRuntimePhase(initial, 'validation.full', '新建世界必须记录全量校验耗时');
   assertRuntimePhase(initial, 'react.commit', '新建世界必须记录 React 提交耗时');
   assertRuntimePhase(initial, 'canvas.draw', '新建世界必须记录 Canvas 绘制耗时');
-  assert.ok(Buffer.byteLength(initialText, 'utf8') < SNAPSHOT_LIMIT, '文本观察快照必须小于128KiB');
+  assert.ok(Buffer.byteLength(initialText, 'utf8') < SNAPSHOT_LIMIT, '文本观察快照必须小于144KiB');
   const mapTopology = await page.locator('.world-map').evaluate((element) => ({
     layout: element.getAttribute('data-map-layout'),
     landmasses: element.getAttribute('data-landmass-count'),
@@ -1338,12 +1357,10 @@ try {
   });
   assert.ok(situationSample.projection.openCount > 0);
   const situationPauseSample = await exerciseSituationWatchAndPause(browser);
-  assert.deepEqual(situationPauseSample, {
-    seed: SITUATION_WATCH_SEED,
-    situationId: SITUATION_WATCH_EXPECTED_ID,
-    pauseTurn: SITUATION_WATCH_EXPECTED_PAUSE_TURN,
-    trigger: 'phase-change',
-  });
+  assert.equal(situationPauseSample.seed, SITUATION_WATCH_SEED);
+  assert.match(situationPauseSample.situationId, /^situation_\d+$/);
+  assert.equal(situationPauseSample.pauseTurn, SITUATION_WATCH_EXPECTED_PAUSE_TURN);
+  assert.equal(situationPauseSample.trigger, 'phase-change');
   await exerciseMapViewportDesktop(page);
   await exerciseObserverLeads(page, afterPrimer.deterministicWorldHash);
   await page.screenshot({ path: `${ARTIFACT_DIR}/geographic-world-map.png`, fullPage: true });
@@ -1621,7 +1638,11 @@ try {
   const observed = JSON.parse(observedText);
   assert.equal(observed.deterministicWorldHash, hashBeforeBrowsing, '纯观察操作不应改变世界哈希');
   assert.equal(observed.observer.guideCompleted, 5, '首次试玩的五项真实操作应全部完成');
-  assert.ok(Buffer.byteLength(observedText, 'utf8') < SNAPSHOT_LIMIT, '对象档案展开后文本快照仍须小于128KiB');
+  const observedBytes = Buffer.byteLength(observedText, 'utf8');
+  assert.ok(
+    observedBytes < SNAPSHOT_LIMIT,
+    `对象档案展开后文本快照仍须小于144KiB，实际 ${observedBytes} bytes`,
+  );
 
   await page.locator('button[data-observer-desk-trigger="true"]').click();
   const completedGuide = page.locator('.observer-desk [role="progressbar"]');
@@ -1949,7 +1970,7 @@ try {
   const mobileTurn4 = await advanceTo(mobilePage, 4);
   assertObserverLeadMilestone(mobileTurn4, {
     person: 'fallback',
-    polity: 'fallback',
+    polity: ['fallback', 'situation'],
     tension: 'situation',
   }, '移动端 T4');
   const mobileTurn6 = await advanceTo(mobilePage, 6);

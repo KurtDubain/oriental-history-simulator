@@ -383,6 +383,9 @@ function situationPauseTitle(world: WorldState, situation: SituationState): stri
   if (situation.type === 'inheritance_crisis') {
     return `${polityName(situation.participants.polityIds[0])}的继承之局`;
   }
+  if (situation.type === 'court_power_struggle') {
+    return `${polityName(situation.participants.polityIds[0])}的朝堂权斗`;
+  }
   if (situation.type === 'war_progress') {
     const war = world.wars.find((item) => item.id === situation.scopeKey);
     return war

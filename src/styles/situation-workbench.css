@@ -942,6 +942,15 @@
     min-height: 44px;
     padding: 0 8px;
   }
+
+  .situation-workbench__participants dd button,
+  .situation-workbench__participants dd span {
+    min-height: 44px;
+  }
+
+  .situation-workbench__participants dd button {
+    min-width: 44px;
+  }
 }
 
 @media (max-width: 760px) {
@@ -1064,6 +1073,11 @@
     min-height: 44px;
     align-items: center;
     font-size: 12px;
+  }
+
+  .situation-workbench__participants dd button {
+    min-width: 44px;
+    justify-content: center;
   }
 
   .situation-workbench__timeline > ol::before {

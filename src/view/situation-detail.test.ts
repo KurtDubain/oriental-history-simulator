@@ -29,18 +29,18 @@ function withoutOptionalHistoryLinks<T extends {
 }
 
 describe('Situation detail projection', () => {
-  it('renders all three real Situation types as bounded Chinese stories without mutating the world', () => {
+  it('renders the three baseline Situation types as bounded Chinese stories without mutating the world', () => {
     const world = establishedWorld();
     const before = JSON.stringify(world);
     const hash = world.hash;
     const types = new Set(world.situationSystem.situations.map((item) => item.type));
-    expect(types).toEqual(new Set(['military_power_crisis', 'inheritance_crisis', 'war_progress']));
+    expect([...types]).toEqual(expect.arrayContaining(['military_power_crisis', 'inheritance_crisis', 'war_progress']));
 
     for (const situation of world.situationSystem.situations) {
       const detail = projectSituationDetail(world, situation);
-      expect(detail.title).toMatch(/危机|战争进程/);
+      expect(detail.title).toMatch(/危机|战争进程|朝堂权斗/);
       expect(detail.playerSummary.length).toBeGreaterThanOrEqual(2);
-      expect(detail.playerSummary.join('')).not.toMatch(/military_power_crisis|inheritance_crisis|war_progress|situation_/);
+      expect(detail.playerSummary.join('')).not.toMatch(/military_power_crisis|inheritance_crisis|war_progress|court_power_struggle|situation_/);
       expect(detail.nextWatch).toMatch(/[\u3400-\u9fff]/u);
       expect(detail.timeline.length).toBeLessThanOrEqual(MAX_SITUATION_DETAIL_TIMELINE);
       expect(detail.evidence.length).toBeLessThanOrEqual(MAX_SITUATION_DETAIL_FACTS);
@@ -63,6 +63,63 @@ describe('Situation detail projection', () => {
 
     expect(world.hash).toBe(hash);
     expect(JSON.stringify(world)).toBe(before);
+  });
+
+  it('projects court power struggles as a concrete polity story backed by the POL01 vocabulary', () => {
+    const world = establishedWorld();
+    const base = world.situationSystem.situations[0];
+    const polity = world.polities.find((item) => item.alive);
+    const factions = world.factions.filter((item) => item.active && item.polityId === polity?.id).slice(0, 2);
+    if (!base || !polity || factions.length === 0) throw new Error('expected baseline Situation and court participants');
+    const court: SituationState = {
+      ...base,
+      id: 'situation_court_projection',
+      type: 'court_power_struggle',
+      titleKey: 'situation.court_power_struggle',
+      scopeKey: polity.id,
+      participants: {
+        coreCharacterIds: [polity.rulerId, factions[0].leaderId],
+        supportingCharacterIds: [],
+        opposingCharacterIds: [],
+        familyIds: [],
+        factionIds: factions.map((item) => item.id),
+        polityIds: [polity.id],
+        regionIds: polity.capitalRegionId ? [polity.capitalRegionId] : [],
+        armyIds: [],
+        fleetIds: [],
+      },
+      signals: [
+        {
+          key: 'challenger_central_office',
+          role: 'structural',
+          contribution: 16,
+          refs: [{ kind: 'index', entityType: 'faction_power_ledger', entityId: factions[0].id, field: 'central_office', value: 20 }],
+        },
+        {
+          key: 'weak_court_authority',
+          role: 'structural',
+          contribution: 9,
+          refs: [{ kind: 'index', entityType: 'polity', entityId: polity.id, field: 'authority', value: polity.authority }],
+        },
+      ],
+      nextWatch: {
+        key: 'watch_court_power_resources',
+        refs: [{ kind: 'index', entityType: 'polity', entityId: polity.id, field: 'authority', value: polity.authority }],
+      },
+      possibleOutcomes: [
+        { key: 'factional_compromise', confidence: 57 },
+        { key: 'palace_coup_succeeded', confidence: 29 },
+      ],
+    };
+
+    const detail = projectSituationDetail(world, court);
+    expect(detail.typeLabel).toBe('朝堂权斗');
+    expect(detail.title).toBe(`${polity.shortName || polity.name}的朝堂权斗`);
+    expect(detail.playerSummary.join('')).toContain(detail.publicDrivers[0]?.label);
+    expect(detail.nextWatch).toContain('任免');
+    expect(detail.publicDrivers[0]?.label).toBe('实掌中枢官席');
+    expect(detail.audit.template?.type).toBe('court_power_struggle');
+    expect(detail.audit.possibleOutcomes.map((item) => item.label)).toEqual(['双方暂成妥协', '宫变夺位已成']);
   });
 
   it('uses Chronicle only for optional navigation links, never for story, outcome, or consequence truth', () => {

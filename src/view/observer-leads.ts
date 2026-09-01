@@ -110,6 +110,7 @@ const SITUATION_SLOT_BY_TYPE: Readonly<Record<string, ObserverLeadSlot>> = {
   military_power_crisis: 'person',
   inheritance_crisis: 'polity',
   war_progress: 'tension',
+  court_power_struggle: 'polity',
 };
 
 const compact = new Intl.NumberFormat('zh-CN', {
@@ -507,6 +508,23 @@ function situationQuestion(item: SituationSnapshotItem, state: SituationState, r
   }
   if (item.type === 'inheritance_crisis') {
     return `${polity}的继承秩序，会安稳落定还是引发权力重组？`;
+  }
+  if (item.type === 'court_power_struggle') {
+    const rootKeys = new Set([
+      'challenger_central_office',
+      'challenger_regional_office',
+      'challenger_military_command',
+      'challenger_family_renown',
+      'challenger_alliance_support',
+      'challenger_cohesion',
+    ]);
+    const actualRoots = item.evidence
+      .filter((entry) => entry.contribution > 0 && rootKeys.has(entry.key))
+      .sort((left, right) => right.contribution - left.contribution || stableCompare(left.key, right.key))
+      .slice(0, 3)
+      .map((entry) => entry.label);
+    const rootCopy = actualRoots.length > 0 ? actualRoots.join('、') : '已登记的权势根基';
+    return `${polity}的君主与实力派，谁能凭${rootCopy}左右朝局？`;
   }
   return `${item.title.replace(/的战争进程$/u, '')}，战局会如何收束？`;
 }

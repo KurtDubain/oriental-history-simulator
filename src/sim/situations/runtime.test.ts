@@ -13,7 +13,7 @@ import {
 } from '../index';
 
 describe('authoritative Situation engine integration', () => {
-  it('forms all three deterministic Situation stories from real Facts and preserves identity across saves', () => {
+  it('forms all four deterministic Situation stories from real Facts and preserves identity across saves', () => {
     const first = advanceWorldBy(createWorld('春战副将'), 12);
     const replay = advanceWorldBy(createWorld('春战副将'), 12);
 
@@ -25,11 +25,13 @@ describe('authoritative Situation engine integration', () => {
     expect(open.filter((situation) => situation.type === 'military_power_crisis').length).toBeLessThanOrEqual(5);
     expect(open.filter((situation) => situation.type === 'inheritance_crisis').length).toBeLessThanOrEqual(3);
     expect(open.filter((situation) => situation.type === 'war_progress').length).toBeLessThanOrEqual(4);
+    expect(open.filter((situation) => situation.type === 'court_power_struggle').length).toBeLessThanOrEqual(3);
     expect(first.situationSystem.candidates.length).toBeLessThanOrEqual(64);
     expect(new Set(first.situationSystem.candidates.map((candidate) => candidate.type))).toEqual(new Set([
       'inheritance_crisis',
       'military_power_crisis',
       'war_progress',
+      'court_power_struggle',
     ]));
 
     const factById = new Map(first.facts.map((fact) => [fact.id, fact]));
@@ -39,6 +41,7 @@ describe('authoritative Situation engine integration', () => {
       'inheritance_crisis',
       'military_power_crisis',
       'war_progress',
+      'court_power_struggle',
     ]));
     for (const fact of milestones) {
       expect(fact.sourceFactIds.length).toBeGreaterThan(0);

@@ -96,6 +96,7 @@ const TYPE_LABELS: Readonly<Record<string, string>> = {
   military_power_crisis: '军权危机',
   inheritance_crisis: '继承危机',
   war_progress: '战争进程',
+  court_power_struggle: '朝堂权斗',
 };
 
 const STATUS_LABELS: Record<SituationStatus, string> = {
@@ -201,6 +202,23 @@ const SIGNAL_LABELS: Readonly<Record<string, string>> = {
   defender_destroyed: '守方政权覆灭',
   attacker_dissolved: '攻方因继承断绝而解体',
   defender_dissolved: '守方因继承断绝而解体',
+  challenger_central_office: '实掌中枢官席',
+  challenger_regional_office: '地方任官根基',
+  challenger_military_command: '手中军令',
+  challenger_family_renown: '家门与人物声望',
+  challenger_alliance_support: '盟约与背书',
+  challenger_cohesion: '派内凝聚',
+  challenger_power_margin: '与君主派系的实力差',
+  weak_court_authority: '中央权威不足',
+  strong_court_authority: '中央仍能节制百官',
+  public_faction_rivalry: '与君主派系公开相争',
+  recent_court_action: '本季朝堂行动',
+  recent_faction_relation: '派系盟争生变',
+  recent_power_resource_change: '官席、军令或支持变动',
+  ruler_reasserted_control: '君主重掌朝局',
+  factional_compromise: '双方暂成妥协',
+  power_broker_fell: '权臣失势',
+  palace_coup_succeeded: '宫变夺位已成',
 };
 
 export function situationTypeLabel(type: string): string {
@@ -240,6 +258,7 @@ const WATCH_SIGNAL_LABELS: Readonly<Record<string, string>> = {
   watch_war_score_and_control: '观察下一场战役是否扩大战果差距并改变州域控制权',
   watch_postwar_absorption: '观察故国领土、军队、人物与家族如何进入新的政治秩序',
   watch_postwar_settlement: '观察停战边界、赔款与双方战争疲劳是否稳定',
+  watch_court_power_resources: '观察下一次任免、军令、结盟或清洗，会把实权推向哪一方',
 };
 
 const PARTICIPANT_GROUP_LABELS: Record<SituationParticipantGroupKey, string> = {
@@ -368,6 +387,9 @@ function situationTitle(
   }
   if (situation.type === 'inheritance_crisis' && polity) {
     return `${polity}的继承危机`;
+  }
+  if (situation.type === 'court_power_struggle' && polity) {
+    return `${polity}的朝堂权斗`;
   }
   if (situation.type === 'war_progress') {
     const war = world.wars.find((item) => item.id === situation.scopeKey);

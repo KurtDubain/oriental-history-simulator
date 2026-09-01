@@ -19,6 +19,12 @@ import {
   WAR_PROGRESS_TYPE,
   warProgressDetector,
 } from './war-progress-detector';
+import {
+  buildCourtStruggleIndex,
+  COURT_STRUGGLE_TEMPLATE,
+  COURT_STRUGGLE_TYPE,
+  courtStruggleDetector,
+} from './court-struggle-detector';
 import { attachSituationMilestoneFacts, reduceSituationTurn } from './reducer';
 import type {
   SituationDetector,
@@ -31,6 +37,7 @@ interface SituationRuntimeIndex {
   militaryPower: ReturnType<typeof buildMilitaryPowerCrisisIndex>;
   inheritance: ReturnType<typeof buildInheritanceCrisisIndex>;
   warProgress: ReturnType<typeof buildWarProgressIndex>;
+  courtStruggle: ReturnType<typeof buildCourtStruggleIndex>;
 }
 
 const militaryPowerRuntimeDetector: SituationDetector<SituationRuntimeIndex> = {
@@ -57,6 +64,15 @@ const warProgressRuntimeDetector: SituationDetector<SituationRuntimeIndex> = {
     turn,
     facts,
     index: index.warProgress,
+  }),
+};
+
+const courtStruggleRuntimeDetector: SituationDetector<SituationRuntimeIndex> = {
+  id: courtStruggleDetector.id,
+  detect: ({ turn, facts, index }) => courtStruggleDetector.detect({
+    turn,
+    facts,
+    index: index.courtStruggle,
   }),
 };
 
@@ -114,6 +130,19 @@ const SIGNAL_LABELS: Record<string, string> = {
   frontline_supply_ready: '前线补给尚可支撑',
   field_army_capacity: '双方仍有野战能力',
   critical_operational_evidence: '战事升级条件具备',
+  challenger_central_office: '挑战派系的中枢席位',
+  challenger_regional_office: '挑战派系的地方任官',
+  challenger_military_command: '挑战派系掌握军令',
+  challenger_family_renown: '挑战派系的家门与声望',
+  challenger_alliance_support: '挑战派系的盟约与背书',
+  challenger_cohesion: '挑战派系内部凝聚',
+  challenger_power_margin: '挑战派系与君主派系的权势差',
+  weak_court_authority: '中央权威不足',
+  strong_court_authority: '中央权威仍强',
+  public_faction_rivalry: '与君主派系公开相争',
+  recent_court_action: '本季朝堂行动',
+  recent_faction_relation: '派系关系变动',
+  recent_power_resource_change: '权势资源变动',
 };
 
 const OUTCOME_LABELS: Readonly<Record<string, string>> = {
@@ -124,7 +153,7 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
   orderly_succession: '有序继承完成',
   regency: '监国秩序建立',
   regency_established: '监国秩序建立',
-  factional_compromise: '派系协调完成',
+  factional_compromise: '派系达成妥协',
   dynastic_usurpation: '异姓权力交接完成',
   dynasty_replaced: '王朝已被替代',
   palace_transfer: '宫廷内部权力交接',
@@ -139,6 +168,9 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
   defender_destroyed: '守方政权覆灭',
   attacker_dissolved: '攻方因继承断绝而解体',
   defender_dissolved: '守方因继承断绝而解体',
+  ruler_reasserted_control: '君主重新控制朝局',
+  power_broker_fell: '权臣失势',
+  palace_coup_succeeded: '宫变夺权成功',
 };
 
 function outcomeLabel(outcomeKey: string | null): string {
@@ -168,6 +200,10 @@ function situationTitle(world: WorldState, situation: SituationState): string {
     if (!war) return '这场战争的进程';
     return `${polityName(world, war.attackerId)}进攻${polityName(world, war.defenderId)}的战争进程`;
   }
+  if (situation.type === COURT_STRUGGLE_TYPE) {
+    const polity = polityName(world, situation.participants.polityIds[0] ?? '未知政权');
+    return `${polity}的朝权之争`;
+  }
   return '这场历史局势';
 }
 
@@ -180,6 +216,9 @@ function formationSummary(title: string, type: string): string {
   }
   if (type === WAR_PROGRESS_TYPE) {
     return `${title}已连续两个季度维持结构性张力，并由开战、会战或领土控制变更事实提供可追溯的战争证据。`;
+  }
+  if (type === COURT_STRUGGLE_TYPE) {
+    return `${title}已连续两个季度越过形成门槛；中枢席位、地方任官、军令、家门声望或盟约背书构成了可核验的权势根基。`;
   }
   return `${title}已连续两个季度维持结构性压力，并由可核验的当季事实提供起点证据。`;
 }
@@ -352,11 +391,13 @@ export function processSituationSystem(
         militaryPower: buildMilitaryPowerCrisisIndex(world),
         inheritance: buildInheritanceCrisisIndex(world),
         warProgress: buildWarProgressIndex(world),
+        courtStruggle: buildCourtStruggleIndex(world),
       },
       detectors: [
         militaryPowerRuntimeDetector,
         inheritanceRuntimeDetector,
         warProgressRuntimeDetector,
+        courtStruggleRuntimeDetector,
       ],
     },
     {
@@ -364,11 +405,13 @@ export function processSituationSystem(
         MILITARY_POWER_CRISIS_TEMPLATE,
         INHERITANCE_CRISIS_TEMPLATE,
         WAR_PROGRESS_TEMPLATE,
+        COURT_STRUGGLE_TEMPLATE,
       ],
       maxOpenByType: {
         [MILITARY_POWER_CRISIS_TYPE]: 5,
         [INHERITANCE_CRISIS_TYPE]: 3,
         [WAR_PROGRESS_TYPE]: 4,
+        [COURT_STRUGGLE_TYPE]: 3,
       },
     },
   );

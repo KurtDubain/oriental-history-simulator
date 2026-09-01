@@ -4,8 +4,11 @@ import { gzipSync } from 'node:zlib';
 
 const KIB = 1024;
 const budgets = {
-  singleJavaScriptRawBytes: 560 * KIB,
-  totalJavaScriptGzipBytes: 410 * KIB,
+  // v1.18 adds the fourth authoritative Situation detector plus its durable
+  // Fact validation. Keep the new measured ceiling tight so later work must
+  // still earn any further growth with a real split or removal.
+  singleJavaScriptRawBytes: 585 * KIB,
+  totalJavaScriptGzipBytes: 418 * KIB,
   totalCssGzipBytes: 40 * KIB,
 } as const;
 

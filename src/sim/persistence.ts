@@ -11,6 +11,7 @@ import { createAgencySystemState } from './agency/memory';
 import { createAgencyDecisionSystemState } from './agency/decision';
 import { findMapProfileForContentVersion } from '../maps';
 import { migrateFactionIdentityModel } from './politics/faction-lifecycle';
+import { refreshFactionPowerLedgers } from './politics/power-ledger';
 import {
   compactWorldArchive,
   createWorldArchiveState,
@@ -311,6 +312,13 @@ export function deserializeWorld(serialized: string): WorldState {
     // Recompact after authentication so imported saves immediately adopt the
     // narrower live-decision roots without changing their Fact chain.
     compactWorldArchive(world);
+  }
+  const factionPowerBefore = new Map(world.factions.map((faction) => [faction.id, faction.power]));
+  refreshFactionPowerLedgers(world);
+  if (world.factions.some((faction) => factionPowerBefore.get(faction.id) !== faction.power)) {
+    // POL01 totals are a derived cache. Older authenticated schema-4 saves did
+    // not include recent support Facts, so adopt the current account on load.
+    migrated = true;
   }
   if (migrated) world.hash = computeWorldHash(world);
   const violations = validateWorld(world);

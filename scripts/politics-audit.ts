@@ -34,6 +34,15 @@ const turns = Number.isSafeInteger(requestedTurns) ? Math.max(16, requestedTurns
 const splitTurn = Math.max(8, Math.min(turns - 1, Math.floor(turns / 2)));
 const VALIDATION_INTERVAL = 8;
 const CENTRAL_OFFICES = new Set(['君主', '宰辅', '枢密使', '廷臣']);
+const POLITICAL_POWER_CATEGORIES = new Set([
+  'central_office',
+  'regional_office',
+  'military_command',
+  'family_backing',
+  'member_renown',
+  'alliance_support',
+  'cohesion',
+]);
 
 interface PoliticalFingerprint {
   turn: number;
@@ -84,12 +93,23 @@ interface AuditSample {
   peakSpatialRoots: number;
   lifecycle: TransitionCounts;
   relations: RelationCounts;
+  courtActions: number;
+  courtSituations: number;
+  linkedCourtActions: number;
+  ledgerGroundedCourtSituations: number;
   validationChecks: number;
   projectionChecks: number;
   capitalPulseChecks: number;
   spatialRootChecks: number;
   replayExact: boolean;
   resumeExact: boolean;
+}
+
+interface CourtChainCounts {
+  actions: number;
+  situations: number;
+  linkedActions: number;
+  ledgerGroundedSituations: number;
 }
 
 const failures: string[] = [];
@@ -283,6 +303,114 @@ function auditLifecycleFacts(
       }
     }
   }
+}
+
+function auditCourtPowerChains(
+  world: WorldState,
+  facts: readonly SimulationFact[],
+  scope: string,
+): CourtChainCounts {
+  const factById = new Map(facts.map((fact) => [fact.id, fact]));
+  const actions = facts.filter((fact) => fact.kind === 'court_action_resolved');
+  const situations = world.situationSystem.situations.filter((situation) => (
+    situation.type === 'court_power_struggle'
+  ));
+  const linkedActionIds = new Set<string>();
+  let ledgerGroundedSituations = 0;
+
+  for (const situation of situations) {
+    const polity = world.polities.find((item) => item.id === situation.scopeKey);
+    if (!polity
+      || situation.participants.polityIds.length !== 1
+      || situation.participants.polityIds[0] !== situation.scopeKey) {
+      fail(scope, `${situation.id}没有严格落在一个真实政权范围`);
+    }
+
+    const referencedFactIds = new Set([
+      ...situation.causalFactIds,
+      ...situation.milestoneFactIds,
+      ...situation.recentChanges.flatMap((change) => change.sourceFactIds),
+      ...situation.signals.flatMap((signal) => signal.refs
+        .filter((ref) => ref.kind === 'fact')
+        .map((ref) => ref.kind === 'fact' ? ref.factId : '')),
+      ...(situation.resolution?.resultFactIds ?? []),
+    ]);
+    for (const factId of referencedFactIds) {
+      const fact = factById.get(factId);
+      if (!fact || !fact.polityIds.includes(situation.scopeKey)) {
+        fail(scope, `${situation.id}引用异国或未知Fact ${factId}`);
+      }
+      if (fact?.kind === 'court_action_resolved') linkedActionIds.add(fact.id);
+    }
+
+    const allLedgerRefs = [...situation.signals, situation.nextWatch]
+      .flatMap((signal) => signal.refs)
+      .filter((ref) => ref.kind === 'index' && ref.entityType === 'faction_power_ledger');
+    if (allLedgerRefs.some((ref) => ref.kind === 'index' && ref.field === 'power')) {
+      fail(scope, `${situation.id}读取了旧FactionState.power`);
+    }
+    const categoryRefs = allLedgerRefs.filter((ref) => (
+      ref.kind === 'index' && POLITICAL_POWER_CATEGORIES.has(ref.field)
+    ));
+    const groundedCategories = new Set<string>();
+    for (const ref of categoryRefs) {
+      if (ref.kind !== 'index') continue;
+      const faction = world.factions.find((item) => item.id === ref.entityId);
+      if (!faction || faction.polityId !== situation.scopeKey) {
+        fail(scope, `${situation.id}引用未知、异国或非POL01分类账${ref.entityId}/${ref.field}`);
+        continue;
+      }
+      if (typeof ref.value !== 'number' || !Number.isFinite(ref.value)) {
+        fail(scope, `${situation.id}的分类账证据不是有限数值`);
+        continue;
+      }
+      groundedCategories.add(ref.field);
+    }
+    if (groundedCategories.size < 2) {
+      fail(scope, `${situation.id}不足两类可核验POL01权势账`);
+    } else {
+      ledgerGroundedSituations += 1;
+    }
+
+    const candidate = world.situationSystem.candidates.find((item) => (
+      item.key === `court_power_struggle:${situation.scopeKey}`
+      && item.lastSeenTurn === world.turn - 1
+    ));
+    if (candidate) {
+      const detectorWorld = {
+        ...world,
+        turn: candidate.lastSeenTurn,
+        facts: world.facts.filter((fact) => fact.turn <= candidate.lastSeenTurn),
+      };
+      const currentRefs = [...candidate.observation.signals, candidate.observation.nextWatch]
+        .flatMap((signal) => signal.refs)
+        .filter((ref) => (
+          ref.kind === 'index'
+          && ref.entityType === 'faction_power_ledger'
+          && POLITICAL_POWER_CATEGORIES.has(ref.field)
+        ));
+      for (const ref of currentRefs) {
+        if (ref.kind !== 'index') continue;
+        const faction = world.factions.find((item) => item.id === ref.entityId);
+        const account = faction && faction.polityId === situation.scopeKey
+          ? calculateFactionPowerLedger(detectorWorld, faction).categories
+            .find((item) => item.category === ref.field)
+          : null;
+        if (typeof ref.value !== 'number'
+          || !Number.isFinite(ref.value)
+          || Math.abs(ref.value - (account?.value ?? Number.NaN)) > 0.11) {
+          fail(scope, `${situation.id}当前候选的${ref.entityId}/${ref.field}不是检测时POL01值`);
+        }
+      }
+    }
+  }
+
+  return {
+    actions: actions.length,
+    situations: situations.length,
+    linkedActions: linkedActionIds.size,
+    ledgerGroundedSituations,
+  };
 }
 
 function auditFactionIdentity(
@@ -809,6 +937,7 @@ function auditWorld(profile: MapProfile, seed: string, world: WorldState): {
     facts = [...world.facts];
   }
   const activePeak = auditFactionIdentity(world, facts, scope);
+  auditCourtPowerChains(world, facts, scope);
   const beforeProjection = serializeWorld(world);
   const beforeProjectionHash = world.hash;
   let courtSeatPeak = 0;
@@ -937,6 +1066,7 @@ for (const profile of profiles) {
     if (!resumeExact) fail(scoped(profile, seed, turns), `T${splitTurn}存读档后的派系演化分叉`);
 
     const facts = readWorldFacts(first.world);
+    const courtChains = auditCourtPowerChains(first.world, facts, scoped(profile, seed, turns));
     samples.push({
       profileId: profile.id,
       revision: profile.revision,
@@ -949,6 +1079,10 @@ for (const profile of profiles) {
       peakSpatialRoots: first.peakSpatialRoots,
       lifecycle: transitionCounts(facts),
       relations: relationCounts(facts),
+      courtActions: courtChains.actions,
+      courtSituations: courtChains.situations,
+      linkedCourtActions: courtChains.linkedActions,
+      ledgerGroundedCourtSituations: courtChains.ledgerGroundedSituations,
       validationChecks: first.validationChecks,
       projectionChecks: first.projectionChecks,
       capitalPulseChecks: first.capitalPulseChecks,
@@ -972,6 +1106,10 @@ const aggregate = samples.reduce((sum, sample) => ({
   projectionChecks: sum.projectionChecks + sample.projectionChecks,
   capitalPulseChecks: sum.capitalPulseChecks + sample.capitalPulseChecks,
   spatialRootChecks: sum.spatialRootChecks + sample.spatialRootChecks,
+  courtActions: sum.courtActions + sample.courtActions,
+  courtSituations: sum.courtSituations + sample.courtSituations,
+  linkedCourtActions: sum.linkedCourtActions + sample.linkedCourtActions,
+  ledgerGroundedCourtSituations: sum.ledgerGroundedCourtSituations + sample.ledgerGroundedCourtSituations,
 }), {
   worlds: 0,
   factions: 0,
@@ -985,6 +1123,10 @@ const aggregate = samples.reduce((sum, sample) => ({
   projectionChecks: 0,
   capitalPulseChecks: 0,
   spatialRootChecks: 0,
+  courtActions: 0,
+  courtSituations: 0,
+  linkedCourtActions: 0,
+  ledgerGroundedCourtSituations: 0,
 });
 
 if (aggregate.formed === 0) fail('aggregate', '固定样本没有建立任何权威派系');
@@ -992,9 +1134,13 @@ if (aggregate.relationsFormed === 0) fail('aggregate', '固定样本没有形成
 if (aggregate.projectionChecks === 0) fail('aggregate', '没有执行任何朝堂投影真实性检查');
 if (aggregate.capitalPulseChecks === 0) fail('aggregate', '没有核验任何首都朝局脉搏');
 if (aggregate.spatialRootChecks === 0) fail('aggregate', '固定样本没有形成任何可核验的空间权势根基');
+if (aggregate.courtActions === 0) fail('aggregate', '固定样本没有形成任何权威朝堂行动Fact');
+if (aggregate.courtSituations === 0) fail('aggregate', '固定样本没有形成任何朝堂权斗Situation');
+if (aggregate.linkedCourtActions === 0) fail('aggregate', '没有朝堂行动Fact进入同政权Situation因果链');
+if (aggregate.ledgerGroundedCourtSituations === 0) fail('aggregate', '没有朝堂Situation由至少两类POL01权势根基支撑');
 
 console.log(JSON.stringify({
-  phase: 'POL02-POL05 political identity, court and map gate',
+  phase: 'POL02-POL06 political identity, court, map and struggle gate',
   scope: {
     profiles: profiles.map((profile) => `${profile.id}@${profile.revision}`),
     seeds,
