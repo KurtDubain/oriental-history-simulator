@@ -1,5 +1,6 @@
 import { useEffect, useId, useMemo, useState, type KeyboardEvent } from 'react';
 import type { CourtProjectionView, CourtSeatView } from '../view/court-projection';
+import type { CourtFocusRequest } from '../view/observer-navigation';
 import '../styles/court-projection.css';
 
 interface CourtFactionDetail {
@@ -27,23 +28,85 @@ interface CourtFactionDetail {
   } | null;
 }
 
-type CourtFocus = { kind: 'seat' | 'faction'; id: string };
+type CourtFocus =
+  | { kind: 'seat' | 'faction'; id: string }
+  | { kind: 'request-miss'; requestKey: number };
 
 export interface CourtProjectionProps {
   court: CourtProjectionView;
   factions: readonly CourtFactionDetail[];
+  focusRequest?: CourtFocusRequest;
   onSelectPerson?: (personId: string) => void;
   onSelectEvent?: (eventId: string) => void;
   onShowFactionRoots?: (factionId: string) => void;
 }
 
-function defaultFocus(court: CourtProjectionView): CourtFocus | null {
-  const dominant = court.factionPositions.find((faction) => faction.dominant)
-    ?? court.factionPositions[0];
+function defaultFocus(
+  court: CourtProjectionView,
+  factions: readonly CourtFactionDetail[],
+): CourtFocus | null {
+  const availableFactionIds = new Set(factions.map((faction) => faction.id));
+  const positions = court.factionPositions.filter(
+    (position) => availableFactionIds.has(position.factionId),
+  );
+  const dominant = positions.find((faction) => faction.dominant) ?? positions[0];
   if (dominant) return { kind: 'faction', id: dominant.factionId };
   if (court.ruler) return { kind: 'seat', id: court.ruler.id };
   const seat = court.seats[0];
   return seat ? { kind: 'seat', id: seat.id } : null;
+}
+
+function requestedFocus(
+  court: CourtProjectionView,
+  factions: readonly CourtFactionDetail[],
+  request: CourtFocusRequest,
+): CourtFocus {
+  const matchesCurrentCourt = request.polityId === court.polityId;
+  const factionIsActive = court.factionPositions.some(
+    (position) => position.factionId === request.factionId,
+  );
+  const factionHasDetail = factions.some((faction) => faction.id === request.factionId);
+  return matchesCurrentCourt && factionIsActive && factionHasDetail
+    ? { kind: 'faction', id: request.factionId }
+    : { kind: 'request-miss', requestKey: request.requestKey };
+}
+
+function sameFocus(left: CourtFocus | null, right: CourtFocus | null): boolean {
+  if (left?.kind !== right?.kind) return false;
+  if (!left || !right) return left === right;
+  if (left.kind === 'request-miss' && right.kind === 'request-miss') {
+    return left.requestKey === right.requestKey;
+  }
+  return left.kind !== 'request-miss'
+    && right.kind !== 'request-miss'
+    && left.id === right.id;
+}
+
+/** @internal Pure state transition kept public for the active-to-retired regression. */
+export function reconcileCourtFocusAfterUpdate(
+  current: CourtFocus | null,
+  court: CourtProjectionView,
+  factions: readonly CourtFactionDetail[],
+  focusRequest?: CourtFocusRequest,
+): CourtFocus | null {
+  const stillFollowingRequest = focusRequest && (
+    current?.kind === 'request-miss'
+    || (current?.kind === 'faction' && current.id === focusRequest.factionId)
+  );
+  if (stillFollowingRequest) {
+    const next = requestedFocus(court, factions, focusRequest);
+    return sameFocus(current, next) ? current : next;
+  }
+  if (!focusRequest && current?.kind === 'request-miss') {
+    return defaultFocus(court, factions);
+  }
+  const stillExists = current?.kind === 'seat'
+    ? court.seats.some((seat) => seat.id === current.id)
+    : current?.kind === 'faction'
+      ? court.factionPositions.some((position) => position.factionId === current.id)
+        && factions.some((faction) => faction.id === current.id)
+      : false;
+  return stillExists ? current : defaultFocus(court, factions);
 }
 
 function seatSummary(seat: CourtSeatView): string {
@@ -85,19 +148,42 @@ function CourtSeatButton({
   );
 }
 
-export function CourtProjection({ court, factions, onSelectPerson, onSelectEvent, onShowFactionRoots }: CourtProjectionProps) {
+export function CourtProjection({ court, factions, focusRequest, onSelectPerson, onSelectEvent, onShowFactionRoots }: CourtProjectionProps) {
   const detailId = useId();
-  const [focus, setFocus] = useState<CourtFocus | null>(() => defaultFocus(court));
+  const [focus, setFocus] = useState<CourtFocus | null>(() => (
+    focusRequest ? requestedFocus(court, factions, focusRequest) : defaultFocus(court, factions)
+  ));
   useEffect(() => {
+    setFocus((current) => reconcileCourtFocusAfterUpdate(
+      current,
+      court,
+      factions,
+      focusRequest,
+    ));
+  }, [
+    court.polityId,
+    court.seats,
+    court.factionPositions,
+    factions,
+    focusRequest?.factionId,
+    focusRequest?.polityId,
+    focusRequest?.requestKey,
+  ]);
+  useEffect(() => {
+    if (!focusRequest) {
+      setFocus((current) => current?.kind === 'request-miss' ? defaultFocus(court, factions) : current);
+      return;
+    }
     setFocus((current) => {
-      const stillExists = current?.kind === 'seat'
-        ? court.seats.some((seat) => seat.id === current.id)
-        : current?.kind === 'faction'
-          ? court.factionPositions.some((position) => position.factionId === current.id)
-          : false;
-      return stillExists ? current : defaultFocus(court);
+      const next = requestedFocus(court, factions, focusRequest);
+      return sameFocus(current, next) ? current : next;
     });
-  }, [court.polityId, court.seats, court.factionPositions]);
+  }, [
+    court.polityId,
+    focusRequest?.factionId,
+    focusRequest?.polityId,
+    focusRequest?.requestKey,
+  ]);
   const factionById = useMemo(() => new Map(factions.map((faction) => [faction.id, faction])), [factions]);
   const positionById = useMemo(() => new Map(court.factionPositions.map((position) => [position.factionId, position])), [court.factionPositions]);
   const graphFactions = court.graphFactionIds
@@ -118,7 +204,13 @@ export function CourtProjection({ court, factions, onSelectPerson, onSelectEvent
   };
 
   return (
-    <section className="court-projection" aria-labelledby={`${detailId}-heading`} data-testid="court-projection">
+    <section
+      className="court-projection"
+      aria-labelledby={`${detailId}-heading`}
+      data-testid="court-projection"
+      data-court-focus-state={focus?.kind === 'request-miss' ? 'unavailable' : focus?.kind ?? 'empty'}
+      data-court-focused-faction-id={focus?.kind === 'faction' ? focus.id : undefined}
+    >
       <header className="court-projection__heading">
         <div>
           <span>朝仪 · 当季座次</span>
@@ -296,6 +388,8 @@ export function CourtProjection({ court, factions, onSelectPerson, onSelectEvent
               {onSelectPerson ? <button type="button" onClick={() => onSelectPerson(focusedFaction.leaderId)}>看领袖 · {focusedFaction.leader}</button> : null}
             </footer>
           </>
+        ) : focus?.kind === 'request-miss' ? (
+          <p className="court-projection__empty">所请求派系不在当前朝局，未作替代选择。</p>
         ) : <p className="court-projection__empty">目前没有中枢任官记录，派系格局也未成形。</p>}
       </div>
     </section>

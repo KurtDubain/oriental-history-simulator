@@ -116,7 +116,7 @@ export interface WorldMapProps {
   selectedObject?: { kind: string; id: string } | null;
   overlay: MapOverlay;
   onSelectRegion: (regionId: string) => void;
-  onSelectObject?: (kind: MapObjectKind, id: string) => void;
+  onSelectObject?: (kind: MapObjectKind, id: string, marker?: MapMarkerView) => void;
   onSelectBlank?: () => void;
   onLodChange?: (level: MapLodLevel) => void;
   onGestureActivityChange?: (active: boolean) => void;
@@ -533,7 +533,7 @@ export function WorldMap({
     if (hit.kind === 'marker') {
       const target = mapMarkerTarget(hit.marker);
       if (target.kind === 'region') onSelectRegion(target.id);
-      else onSelectObject?.(target.kind, target.id);
+      else onSelectObject?.(target.kind, target.id, hit.marker);
       showTapFeedback(point);
       return;
     }
@@ -816,13 +816,13 @@ export function WorldMap({
       const visibleSeaZones = scene.seaZones
         .filter((item) => scene.interactiveSeaZoneIds.has(item.id))
         .map((item) => ({ kind: "seaZone" as const, id: item.id }));
-      const contextualObjects = overlay === "naval"
+      const contextualObjects: Array<{ kind: MapObjectKind | 'region'; id: string; marker?: MapMarkerView }> = overlay === "naval"
         ? [...visibleSeaZones, ...scene.fleets.map((item) => ({ kind: "fleet" as const, id: item.id }))]
         : overlay === "trade"
           ? [...scene.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId })), ...visibleSeaZones]
         : overlay === "war"
           ? scene.armies.map((item) => ({ kind: "army" as const, id: item.id }))
-        : [...scene.markers.map(mapMarkerTarget), ...scene.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId }))];
+        : [...scene.markers.map((marker) => ({ ...mapMarkerTarget(marker), marker })), ...scene.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId }))];
       if (scene.regions.length === 0 && contextualObjects.length === 0) return;
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -837,7 +837,7 @@ export function WorldMap({
         if (hover?.kind === "marker") {
           const target = mapMarkerTarget(hover.marker);
           if (target.kind === 'region') onSelectRegion(target.id);
-          else onSelectObject?.(target.kind, target.id);
+          else onSelectObject?.(target.kind, target.id, hover.marker);
           return;
         }
         if (hover?.kind === "flow") {
@@ -849,7 +849,7 @@ export function WorldMap({
         ));
         if (selectedContext) {
           if (selectedContext.kind === 'region') onSelectRegion(selectedContext.id);
-          else onSelectObject?.(selectedContext.kind, selectedContext.id);
+          else onSelectObject?.(selectedContext.kind, selectedContext.id, selectedContext.marker);
           return;
         }
         const targetId = hover?.kind === "region" || hover?.kind === "regionNode"
@@ -865,7 +865,7 @@ export function WorldMap({
         const direction = event.key === "ArrowRight" ? 1 : -1;
         const next = contextualObjects[(currentIndex + direction + contextualObjects.length) % contextualObjects.length];
         if (next?.kind === 'region') onSelectRegion(next.id);
-        else if (next) onSelectObject?.(next.kind, next.id);
+        else if (next) onSelectObject?.(next.kind, next.id, next.marker);
         return;
       }
       const currentIndex = scene.regions.findIndex((region) => region.id === selectedRegionId);

@@ -9,6 +9,10 @@ import type {
   SituationState,
   SituationStatus,
 } from '../sim/situations';
+import {
+  projectSituationPoliticalFocus,
+  type PoliticalFocusLink,
+} from './political-focus';
 
 export const MAX_SNAPSHOT_OPEN_SITUATIONS = 12;
 export const MAX_SNAPSHOT_RECENT_RESOLVED_SITUATIONS = 2;
@@ -71,6 +75,7 @@ export interface SituationSnapshotItem {
   resolvedTurn: number | null;
   causalFactIds: string[];
   milestoneFactIds: string[];
+  politicalFocus: readonly PoliticalFocusLink[];
   participants: SituationSnapshotParticipantGroup[];
   evidence: SituationSnapshotEvidence[];
   latestChange: SituationSnapshotChange | null;
@@ -426,6 +431,7 @@ function situationItem(
     resolvedTurn: situation.resolvedTurn,
     causalFactIds: [...situation.causalFactIds],
     milestoneFactIds: [...situation.milestoneFactIds],
+    politicalFocus: projectSituationPoliticalFocus(world, situation),
     participants,
     evidence: situationEvidence(situation.signals),
     latestChange: latestChangeSnapshot(situation.recentChanges),

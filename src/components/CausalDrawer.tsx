@@ -1,6 +1,8 @@
 import { useEffect, useId, useRef, useState } from 'react';
-import { ArrowDown, GitBranch, Search, UsersRound, X } from 'lucide-react';
+import { ArrowDown, GitBranch, Landmark, Search, UsersRound, X } from 'lucide-react';
 import type { ArchiveEntityKind } from './HistoricalArchive';
+import type { CourtFactionTarget } from '../view/observer-navigation';
+import type { PoliticalFocusLink } from '../view/political-focus';
 import { useDialogLayer } from './useDialogLayer';
 import '../styles/observer-ui.css';
 
@@ -30,6 +32,7 @@ export interface CausalEvent {
   summary?: string;
   factors: CausalFactor[];
   consequence?: string;
+  politicalFocus?: readonly PoliticalFocusLink[];
   subjects?: Array<{
     id: string;
     kind: ArchiveEntityKind;
@@ -45,6 +48,7 @@ export interface CausalDrawerProps {
   onInspectEvidence?: (factor: CausalFactor) => void;
   onSelectSubject?: (kind: ArchiveEntityKind, id: string) => void;
   onSelectReference?: (reference: CausalReference) => void;
+  onSelectCourtFaction?: (target: CourtFactionTarget) => void;
   returnFocusTo?: HTMLElement | null;
   shouldRestoreFocus?: () => boolean;
 }
@@ -64,6 +68,7 @@ export function CausalDrawer({
   onInspectEvidence,
   onSelectSubject,
   onSelectReference,
+  onSelectCourtFaction,
   returnFocusTo,
   shouldRestoreFocus,
 }: CausalDrawerProps) {
@@ -171,6 +176,28 @@ export function CausalDrawer({
               <span>后续影响</span>
               <p>{event.consequence}</p>
             </footer>
+          ) : null}
+
+          {event.politicalFocus?.length ? (
+            <section className="observer-causal-subjects observer-causal-subjects--court" aria-label="本件史事涉及的朝局派系">
+              <span><Landmark size={13} aria-hidden="true" />本事所系朝局</span>
+              <p>可回到当下朝局核对这些派系；已经退场者只保留史迹。</p>
+              <div>
+                {event.politicalFocus.map((link) => (
+                  <button
+                    key={link.factionId}
+                    type="button"
+                    data-court-focus-faction={link.factionId}
+                    disabled={!link.active || !onSelectCourtFaction}
+                    title={link.detail}
+                    onClick={() => onSelectCourtFaction?.(link)}
+                  >
+                    <strong>{link.factionName}</strong>
+                    <small>{link.active ? `${link.polityName} · 看其朝局` : `${link.polityName} · 已退出当下朝局`}</small>
+                  </button>
+                ))}
+              </div>
+            </section>
           ) : null}
 
           {event.subjects?.length ? (

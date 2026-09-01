@@ -247,9 +247,13 @@ describe('render_game_to_text projection boundary', () => {
 
     const focused = JSON.parse(makeTextSnapshot(world, options({
       focusedPoliticalFactionId: factionId,
-      selection: { kind: 'country', id: overview.interface.politicalMap.visiblePulses[0].polityId, initialTab: 'court', tabRequestKey: 1 },
+      selection: {
+        kind: 'country', id: overview.interface.politicalMap.visiblePulses[0].polityId, initialTab: 'court', tabRequestKey: 1,
+        courtFocus: { polityId: overview.interface.politicalMap.visiblePulses[0].polityId, factionId, requestKey: 1 },
+      },
     })));
     expect(focused.interface.politicalMap.focusedFactionId).toBe(factionId);
+    expect(focused.interface.politicalMap.courtFocusedFactionId).toBe(factionId);
     expect(focused.interface.politicalMap.courtEntryActive).toBe(true);
     expect(focused.interface.politicalMap.visibleRoots.every((root: { factionId: string }) => root.factionId === factionId)).toBe(true);
     expect(JSON.parse(makeTextSnapshot(world, options({ overlay: 'war' }))).interface.politicalMap).toMatchObject({

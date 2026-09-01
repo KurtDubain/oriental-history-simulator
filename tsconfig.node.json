@@ -10,5 +10,16 @@
     "allowImportingTsExtensions": true,
     "noEmit": true
   },
-  "include": ["vite.config.ts"]
+  "include": [
+    "vite.config.ts",
+    "src/maps/catalog.ts",
+    "src/maps/catalog.contest.ts",
+    "src/maps/html-payload.ts",
+    "src/maps/scale-policy.ts",
+    "src/maps/types.ts",
+    "src/maps/private-v03/**/*.ts",
+    "src/maps/contest-v01/**/*.ts",
+    "src/view/map-territories.ts"
+  ],
+  "exclude": ["src/**/*.test.ts", "src/**/*.test.tsx"]
 }

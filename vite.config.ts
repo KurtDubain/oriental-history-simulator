@@ -2,6 +2,10 @@ import { defineConfig } from 'vitest/config';
 import type { Plugin } from 'vite';
 import react from '@vitejs/plugin-react';
 import packageJson from './package.json';
+import { MAP_PROFILE_CATALOG as FULL_MAP_PROFILE_CATALOG } from './src/maps/catalog';
+import { MAP_PROFILE_CATALOG as CONTEST_MAP_PROFILE_CATALOG } from './src/maps/catalog.contest';
+import { serializeApplicationJson } from './src/maps/html-payload';
+import type { MapProfile } from './src/maps/types';
 
 const runtimeProcess = (globalThis as typeof globalThis & {
   process?: { env?: Record<string, string | undefined> };
@@ -26,6 +30,42 @@ const changelogPath = decodeURIComponent(new URL(
     : './src/config/changelog.ts',
   import.meta.url,
 ).pathname);
+
+const MAP_PROFILE_CATALOG_MODULE_ID = '@map-profile-catalog';
+const MAP_PROFILE_DATA_ELEMENT_ID = 'canghai-map-profile-data';
+const VIRTUAL_BROWSER_CATALOG_ID = '\0virtual:canghai-browser-map-profile-catalog';
+
+function mapProfilePayload(
+  profiles: readonly MapProfile[],
+  serverCatalogPath: string,
+): Plugin {
+  const serializedProfiles = serializeApplicationJson(profiles);
+  return {
+    name: 'canghai-map-profile-payload',
+    enforce: 'pre',
+    resolveId(source, _importer, options) {
+      if (source !== MAP_PROFILE_CATALOG_MODULE_ID) return null;
+      // Tests and vite-node audits run as SSR and retain the source catalog.
+      // Browser modules receive only a marker and load the payload from HTML.
+      return options?.ssr ? serverCatalogPath : VIRTUAL_BROWSER_CATALOG_ID;
+    },
+    load(moduleId) {
+      if (moduleId !== VIRTUAL_BROWSER_CATALOG_ID) return null;
+      return 'export const MAP_PROFILE_CATALOG = undefined;';
+    },
+    transformIndexHtml() {
+      return [{
+        tag: 'script',
+        attrs: {
+          id: MAP_PROFILE_DATA_ELEMENT_ID,
+          type: 'application/json',
+        },
+        children: serializedProfiles,
+        injectTo: 'body-prepend',
+      }];
+    },
+  };
+}
 
 function contestIsolation(enabled: boolean): Plugin {
   return {
@@ -84,18 +124,26 @@ function appVersionAsset(version: string, deploymentId: string): Plugin {
   };
 }
 
+const buildMapProfiles = contestBuild
+  ? CONTEST_MAP_PROFILE_CATALOG
+  : FULL_MAP_PROFILE_CATALOG;
+
 export default defineConfig({
   resolve: {
     alias: {
       '@app-changelog': changelogPath,
-      '@map-profile-catalog': mapCatalogPath,
     },
   },
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
     __APP_BUILD_ID__: JSON.stringify(buildId),
   },
-  plugins: [contestIsolation(contestBuild), appVersionAsset(packageJson.version, buildId), react()],
+  plugins: [
+    mapProfilePayload(buildMapProfiles, mapCatalogPath),
+    contestIsolation(contestBuild),
+    appVersionAsset(packageJson.version, buildId),
+    react(),
+  ],
   build: {
     minify: 'terser',
     terserOptions: {
@@ -124,6 +172,7 @@ export default defineConfig({
             || normalized.endsWith('/src/sim/random.ts')
             || normalized.endsWith('/src/sim/world-hash.ts')
           ) return 'simulation-core';
+          if (normalized.includes('/src/sim/politics/')) return 'politics';
           if (normalized.includes('/src/sim/')) return 'simulation';
           return undefined;
         },

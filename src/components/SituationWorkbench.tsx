@@ -18,6 +18,7 @@ import type {
   SituationDetailProjection,
   SituationWorkbenchProjection,
 } from '../view/situation-detail';
+import type { CourtFactionTarget } from '../view/observer-navigation';
 import type { SituationParticipantGroupKey } from '../view/situation-snapshot';
 import { useDialogLayer } from './useDialogLayer';
 import '../styles/situation-workbench.css';
@@ -29,6 +30,7 @@ export interface SituationWorkbenchProps {
   onSelectSituation: (situationId: string) => void;
   onSelectEntity: (kind: ArchiveEntityKind, id: string) => void;
   onSelectHistoryEvent: (eventId: string) => void;
+  onSelectCourtFaction?: (target: CourtFactionTarget) => void;
   isWatched?: boolean;
   onToggleWatch?: () => void;
   returnFocusTo?: HTMLElement | null;
@@ -65,6 +67,7 @@ export function SituationWorkbench({
   onSelectSituation,
   onSelectEntity,
   onSelectHistoryEvent,
+  onSelectCourtFaction,
   isWatched = false,
   onToggleWatch,
   returnFocusTo,
@@ -257,11 +260,35 @@ export function SituationWorkbench({
                       <div key={group.key}>
                         <dt><ParticipantIcon kind={group.key} />{group.label}</dt>
                         <dd>
-                          {group.entities.map((entity) => selectableKind ? (
-                            <button key={entity.id} type="button" onClick={() => onSelectEntity(selectableKind, entity.id)}>
-                              {entity.label}
-                            </button>
-                          ) : <span key={entity.id}>{entity.label}</span>)}
+                          {group.entities.map((entity) => {
+                            const courtLink = group.key === 'factionIds'
+                              ? detail.politicalFocus.find((link) => link.factionId === entity.id)
+                              : undefined;
+                            if (courtLink) {
+                              return (
+                                <button
+                                  key={entity.id}
+                                  type="button"
+                                  className="situation-workbench__court-link"
+                                  data-court-focus-faction={courtLink.factionId}
+                                  disabled={!courtLink.active || !onSelectCourtFaction}
+                                  title={courtLink.detail}
+                                  onClick={() => onSelectCourtFaction?.(courtLink)}
+                                >
+                                  <strong>{entity.label}</strong>
+                                  <small>{courtLink.active ? '看其朝局' : '已退场'}</small>
+                                </button>
+                              );
+                            }
+                            if (selectableKind) {
+                              return (
+                                <button key={entity.id} type="button" onClick={() => onSelectEntity(selectableKind, entity.id)}>
+                                  {entity.label}
+                                </button>
+                              );
+                            }
+                            return <span key={entity.id}>{entity.label}</span>;
+                          })}
                         </dd>
                       </div>
                     );

@@ -104,6 +104,29 @@ const contents = await Promise.all(files.map(async (file) => ({
 const joined = contents.map((entry) => entry.text).join('\n');
 const leaked = forbiddenTokens.filter((token) => containsToken(joined, token));
 const missing = requiredTokens.filter((token) => !joined.includes(token));
+const javascriptText = contents
+  .filter((entry) => extname(entry.file.pathname) === '.js')
+  .map((entry) => entry.text)
+  .join('\n');
+const profilePayloadInJavascript = requiredTokens.filter((token) => javascriptText.includes(token));
+
+const indexHtml = await readFile(new URL('index.html', root), 'utf8');
+const profileScript = [...indexHtml.matchAll(/<script\b([^>]*)>([\s\S]*?)<\/script>/g)]
+  .find((match) => /\bid="canghai-map-profile-data"/.test(match[1] ?? ''));
+if (!profileScript || !/\btype="application\/json"/.test(profileScript[1] ?? '')) {
+  throw new Error('参赛 HTML 缺少地图 application/json 数据节点');
+}
+const profilePayloadText = profileScript[2] ?? '';
+if (profilePayloadText.includes('<') || /[\u2028\u2029]/u.test(profilePayloadText)) {
+  throw new Error('参赛地图 HTML payload 含有未转义的脚本边界字符');
+}
+const htmlProfiles = JSON.parse(profilePayloadText) as MapProfile[];
+if (
+  htmlProfiles.length !== 1
+  || htmlProfiles[0]?.id !== 'contest-v01'
+  || htmlProfiles[0]?.revision !== 1
+  || htmlProfiles[0]?.contentVersion !== 'contest-v01-68'
+) throw new Error(`参赛 HTML 地图 payload 不符合 allowlist：${JSON.stringify(htmlProfiles.map((profile) => profile.id))}`);
 
 const versionAsset = JSON.parse(await readFile(new URL('version.json', root), 'utf8')) as { version?: string };
 const profileAsset = JSON.parse(await readFile(new URL('contest-profile.json', root), 'utf8')) as {
@@ -121,14 +144,18 @@ if (
   ])
 ) throw new Error(`参赛内容清单不符合预期：${JSON.stringify(profileAsset)}`);
 
-if (leaked.length > 0 || missing.length > 0) {
+if (leaked.length > 0 || missing.length > 0 || profilePayloadInJavascript.length > 0) {
   const locations = leaked.map((token) => ({
     token,
     files: contents
       .filter((entry) => containsToken(entry.text, token))
       .map((entry) => entry.file.pathname.split('/dist-contest/')[1] ?? entry.file.pathname),
   }));
-  throw new Error(JSON.stringify({ leaked: locations, missing }, null, 2));
+  throw new Error(JSON.stringify({
+    leaked: locations,
+    missing,
+    profilePayloadInJavascript,
+  }, null, 2));
 }
 
 process.stdout.write(`${JSON.stringify({
@@ -138,4 +165,6 @@ process.stdout.write(`${JSON.stringify({
   forbiddenTokens: forbiddenTokens.length,
   requiredTokens,
   allowlist: profileAsset.allowlist,
+  htmlProfiles: htmlProfiles.map((profile) => profile.id),
+  profilePayloadInJavascript,
 }, null, 2)}\n`);

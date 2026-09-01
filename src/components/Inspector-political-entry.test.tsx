@@ -5,6 +5,7 @@ import type { CountryInspectorData } from './Inspector';
 import { Inspector } from './Inspector';
 import { CourtProjection } from './CourtProjection';
 import type { CourtProjectionView } from '../view/court-projection';
+import type { CourtFocusRequest } from '../view/observer-navigation';
 
 const hooks = vi.hoisted(() => ({
   states: [] as unknown[],
@@ -99,6 +100,30 @@ const court: CourtProjectionView = {
   relations: [],
 };
 
+const secondPosition: CourtProjectionView['factionPositions'][number] = {
+  factionId: 'faction-b',
+  name: '清议社',
+  leaderId: 'person-b',
+  leader: '裴观澜',
+  agenda: '约束权门',
+  power: 41,
+  cohesion: 66,
+  seatIds: [],
+  seatLabels: [],
+  nearestBand: 3,
+  positionLabel: '外班',
+  dominant: false,
+  foundedLabel: '初元二年秋立派',
+  topRoots: [{ key: 'family_network', label: '门第声望', value: 17 }],
+  recentMovement: null,
+};
+
+const twoFactionCourt: CourtProjectionView = {
+  ...court,
+  factionPositions: [...court.factionPositions, secondPosition],
+  graphFactionIds: ['faction-a', 'faction-b'],
+};
+
 const country: CountryInspectorData = {
   id: 'polity-yan',
   name: '燕国',
@@ -121,17 +146,39 @@ const country: CountryInspectorData = {
     power: 62,
     cohesion: 71,
     agenda: '整饬吏治',
+  }, {
+    id: 'faction-b',
+    name: '清议社',
+    kind: '士人',
+    leaderId: 'person-b',
+    leader: '裴观澜',
+    power: 41,
+    cohesion: 66,
+    agenda: '约束权门',
   }],
 };
 
-function renderCountry(initialTab?: 'court', tabRequestKey?: number) {
+function renderCountry(initialTab?: 'court', tabRequestKey?: number, courtFocus?: CourtFocusRequest) {
   hooks.begin();
   return renderToStaticMarkup(createElement(Inspector, {
     kind: 'country',
     data: country,
     initialTab,
     tabRequestKey,
+    courtFocus,
   }));
+}
+
+function renderProjection(
+  projection: CourtProjectionView,
+  focusRequest?: CourtFocusRequest,
+): ReactElement<Record<string, unknown>> {
+  hooks.begin();
+  return CourtProjection({
+    court: projection,
+    factions: country.factions ?? [],
+    focusRequest,
+  }) as ReactElement<Record<string, unknown>>;
 }
 
 function findElement(
@@ -178,6 +225,79 @@ describe('country political map entry', () => {
     const reopened = renderCountry('court', 2);
     expect(reopened).toContain('data-testid="court-projection"');
     expect(reopened).not.toContain('国计');
+  });
+
+  it('lets a precise focus request open 朝局 without a separate tab hint', () => {
+    const request = { requestKey: 1, polityId: country.id, factionId: 'faction-a' };
+    const markup = renderCountry(undefined, undefined, request);
+
+    expect(markup).toContain('data-testid="court-projection"');
+    expect(markup).toContain('data-court-focused-faction-id="faction-a"');
+    expect(markup).toContain('朝局速览');
+    expect(markup).toContain('看朝局');
+  });
+
+  it('replays only changed request keys and precisely replaces a local faction focus', () => {
+    const firstRequest = { requestKey: 1, polityId: court.polityId, factionId: 'faction-b' };
+    let tree = renderProjection(twoFactionCourt, firstRequest);
+    expect(tree.props['data-court-focused-faction-id']).toBe('faction-b');
+
+    const firstRank = findElement(tree, (element) => element.props['data-court-rank'] === 'faction-a');
+    (firstRank?.props.onClick as (() => void) | undefined)?.();
+    tree = renderProjection(twoFactionCourt, firstRequest);
+    expect(tree.props['data-court-focused-faction-id']).toBe('faction-a');
+
+    const replayedRequest = { ...firstRequest, requestKey: 2 };
+    renderProjection(twoFactionCourt, replayedRequest);
+    tree = renderProjection(twoFactionCourt, replayedRequest);
+    expect(tree.props['data-court-focused-faction-id']).toBe('faction-b');
+  });
+
+  it('fails closed on a changed invalid request and does not select the first faction', () => {
+    renderProjection(twoFactionCourt, {
+      requestKey: 1,
+      polityId: court.polityId,
+      factionId: 'faction-b',
+    });
+    const invalidRequest = {
+      requestKey: 2,
+      polityId: 'polity-wu',
+      factionId: 'faction-a',
+    };
+    renderProjection(twoFactionCourt, invalidRequest);
+    const tree = renderProjection(twoFactionCourt, invalidRequest);
+
+    expect(tree.props['data-court-focus-state']).toBe('unavailable');
+    expect(tree.props['data-court-focused-faction-id']).toBeUndefined();
+  });
+
+  it('falls back honestly, then reaches an empty state when a local focus disappears', () => {
+    let tree = renderProjection(twoFactionCourt);
+    const secondRank = findElement(tree, (element) => element.props['data-court-rank'] === 'faction-b');
+    (secondRank?.props.onClick as (() => void) | undefined)?.();
+    tree = renderProjection(twoFactionCourt);
+    expect(tree.props['data-court-focused-faction-id']).toBe('faction-b');
+
+    const onlyFirstFaction = {
+      ...twoFactionCourt,
+      factionPositions: court.factionPositions,
+      graphFactionIds: court.graphFactionIds,
+    };
+    renderProjection(onlyFirstFaction);
+    tree = renderProjection(onlyFirstFaction);
+    expect(tree.props['data-court-focused-faction-id']).toBe('faction-a');
+
+    const emptyCourt = {
+      ...onlyFirstFaction,
+      ruler: null,
+      seats: [],
+      factionPositions: [],
+      graphFactionIds: [],
+    };
+    renderProjection(emptyCourt);
+    tree = renderProjection(emptyCourt);
+    expect(tree.props['data-court-focus-state']).toBe('empty');
+    expect(tree.props['data-court-focused-faction-id']).toBeUndefined();
   });
 
   it('returns the currently focused faction from the 舆图看根基 action', () => {

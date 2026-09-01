@@ -20,7 +20,7 @@ Current Phase A request: 按已冻结的 vNext Roadmap 完成 Phase A 真实性�
 
 Current Phase B request: 在已完成 B01/B03 军权纵切的基础上完成 B04：让君主寿命、继承候选、家族、派系、官职与军队支持形成权威、可追溯的继承危机；复用同一 Situation reducer，并以类型配额保持叙事多样性。
 
-Current v1.18 request: POL06/B05 已完成权势资源、朝堂行动与“朝堂权斗”纵切；下一项只进入 POL07/POL08，统一首都印记、国家、人物、家族与史事入口，并以长期审计收口可见性和真实性。
+Current v1.19 request: POL07/POL08 收口政治观察链；首都印记、人物、家族、史事与 Situation 需精确进入同一派系，已退场派系不得假回退，并以长纪年权势分布、首屏可见、真实根基、领袖更替与分合审计完成政治纵切。
 
 ## Product thesis
 
@@ -298,3 +298,7 @@ Current v1.18 request: POL06/B05 已完成权势资源、朝堂行动与“朝�
 - 2026-09-01 POL06 audit: 双地图政治审计覆盖朝堂 Fact → 权势账 → Situation、直推重放及存档续跑；双地图、双种子共 4 局 / 256 季自然产生 54 次朝堂行动、38 条有分类账根基的朝堂权斗，27 次行动进入局势事实链，32+32 续推与直推一致，全部无失败。
 - 2026-09-01 POL06 final truthfulness close: 权臣任期改由有界热 Fact 与活性 pin 维持，派系终结、政权灭亡、人物死亡、正常继位及夺位边界均有回归；清洗必须实际削去官职、影响、成员或权势根基，仅降忠诚不再冒充成功。朝局卷、观察线索和史事文案只列 Fact 冻结证据与实际非零 driver。最终 10 files / 69 tests、`npx tsc -b` 与 `git diff --check` 全绿。
 - 2026-09-01 v1.18.0 release gate: 完整 `npm run test:release` 无中断全绿：89 files / 562 tests；架构扫描为 153 个生产文件 / 61,460 行、351 runtime / 212 type-only imports、0 runtime cycle、0 跨层违例。个人/参赛 JS gzip 为 427,856 / 419,179 bytes，CSS gzip 均为 39,691 bytes；主试玩、FUX01/FUX03、TRIM01、名录、人物关系、双地图六场、政治 1440/390/640/768 触控链、参赛隔离与更新安全刷新全部通过。双地图双种子 256 季自然产生 54 次朝堂行动、38 条朝堂权斗，27 次行动进入局势事实链，重放与 32+32 续推精确；T400 冷史为 21 卷 / 11.564MiB / 首屏约 0.41ms，V0.3 的 320 季 P95 104.777ms、最大存档 8.735MiB，所有审计 `failures: []`。POL06 正式关闭；下一纵切为 POL07 政治入口互通，并以前置包体减重恢复工程余量。
+- 2026-09-01 v1.19.0 POL07 implementation close: 新增只读 `PoliticalFocusLink`，人物只认自身 `factionId`，家族只认在职族人或 `family_backing` 账本支点，史事只遍历冷热 `sourceFactIds`，Situation 只认 `participants.factionIds`；不从姓名或摘要猜归属。四类入口与首都印记共用 exact `polityId + factionId` 请求，无效/已退场对象明确失败，不改选默认派，也不改写地图派系 overlay 焦点。政治 E2E 已在个人版 390/640/768/1440 与参赛版 390/1440 六场走通首都、人物、家族、史事和 Situation 往返，窄屏新入口均为可见且无遮挡的 44px 真实触控。
+- 2026-09-01 v1.19.0 map payload boundary: 个人/参赛构建按 allowlist 把地图 profile 安全写入 HTML `application/json`，浏览器 registry 同步校验与冻结；参赛 HTML 只含 `contest-v01`，两种产物的主 JavaScript 均不再含 profile payload。`maps` chunk gzip 降至 2,822 bytes，政治领域另成 41,728-byte 缓存边界，主 simulation chunk 从 597,260 降至 555,770 bytes；个人/参赛 JavaScript gzip 总量为 416,511 / 416,421 bytes，CSS 均为 39,796 bytes。HTML 载荷会小幅增加总传输，本优化只宣称降低 JS 解析/执行与恢复单文件工程余量。架构门为 155 files / 62,061 lines / 358 runtime + 220 type-only imports，0 cycle、0 violation；`App.tsx` 2,563/2,600，`WorldMap.tsx` 1,088/1,100。
+- 2026-09-01 v1.19.0 POL08 truthfulness close: 默认 64 季审计保持发布门时长，新增手动 `--deep=160..256`。硬门只拒绝权势账越界/缓存不精确、主导或权势≥60派首屏遗漏、无领域 owner 的地图根基、死亡/转籍/失效活动领袖、生命周期 Fact 错误与重放/续推分叉。release 4 局 / 256 季核对 9,676 份 ledger、265 个政权首屏、22,111 个根基观察和 9,676 次活动领袖观察，全部 0 failure；deep 4 局 / 640 季自然产生 split 4、merge 1、rivalry 4/1 与 147 次领袖更替，4/4 重放与 4/4 80+80 续推 digest 精确。`=100/≥98`、地方官垄断率、分合和关系数都只统计不设平衡阈值；本轮未修改模拟数值。
+- 2026-09-01 v1.19.0 release gate: 完整 `npm run test:release` 无中断全绿；终审发现并修复“精确目标派系退场后静默回退主导派”的 observer-only 边界，随后在最终代码上重跑 91 files / 579 tests、严格 TypeScript、架构门、个人/参赛双构建及政治六视口 E2E，全部通过。个人/参赛 JS gzip 为 416,511 / 416,421 bytes，CSS 均为 39,796 bytes；地图 payload 隔离 328 项私人标记。Phase A/B/C、Agency、政治、地方治理、双地图、百年冷热史与 V0.3 审计均 0 failure；MAP05 的 320 季 P95 104.870ms 且 31+49 续推精确，T400 为 21 卷 / 11.564MiB / 首屏 0.339ms，V0.3 的 320 季 P95 112.713ms、最大存档 8.735MiB。

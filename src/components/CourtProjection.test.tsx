@@ -2,7 +2,7 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it } from 'vitest';
 import type { CourtProjectionView } from '../view/court-projection';
-import { CourtProjection } from './CourtProjection';
+import { CourtProjection, reconcileCourtFocusAfterUpdate } from './CourtProjection';
 
 const court: CourtProjectionView = {
   polityId: 'polity-yan',
@@ -34,17 +34,29 @@ const court: CourtProjectionView = {
   relations: [],
 };
 
+const secondPosition: CourtProjectionView['factionPositions'][number] = {
+  factionId: 'faction-b', name: '清议社', leaderId: 'person-b', leader: '裴观澜', agenda: '约束权门',
+  power: 41, cohesion: 66, seatIds: [], seatLabels: [], nearestBand: 3, positionLabel: '外班',
+  dominant: false, foundedLabel: '第2年秋季立派',
+  topRoots: [{ key: 'family_network', label: '门第声望', value: 17 }], recentMovement: null,
+};
+
+const factions = [{
+  id: 'faction-a', name: '宣政社', kind: '官僚', leaderId: 'person-chancellor', leader: '隋行简',
+  power: 62, cohesion: 71, agenda: '扩张权势', resources: [{
+    id: 'office:chancellor', label: '宰辅', detail: '隋行简占据正式席位', value: 10,
+    sourceEventId: 'event-chancellor',
+  }],
+}, {
+  id: 'faction-b', name: '清议社', kind: '士人', leaderId: 'person-b', leader: '裴观澜',
+  power: 41, cohesion: 66, agenda: '约束权门',
+}];
+
 describe('CourtProjection', () => {
   it('renders one shared focus ledger plus desktop and ordered mobile seat views', () => {
     const markup = renderToStaticMarkup(createElement(CourtProjection, {
       court,
-      factions: [{
-        id: 'faction-a', name: '宣政社', kind: '官僚', leaderId: 'person-chancellor', leader: '隋行简',
-        power: 62, cohesion: 71, agenda: '扩张权势', resources: [{
-          id: 'office:chancellor', label: '宰辅', detail: '隋行简占据正式席位', value: 10,
-          sourceEventId: 'event-chancellor',
-        }],
-      }],
+      factions,
       onSelectPerson: () => undefined,
       onSelectEvent: () => undefined,
     }));
@@ -101,5 +113,67 @@ describe('CourtProjection', () => {
     expect(markup).toContain('为何任此职');
     expect(markup).toContain('顾庭芳承继君位并承担统治职责');
     expect(markup).not.toContain('查看任命史事');
+  });
+
+  it('focuses the requested active faction instead of the dominant first faction', () => {
+    const markup = renderToStaticMarkup(createElement(CourtProjection, {
+      court: {
+        ...court,
+        factionPositions: [...court.factionPositions, secondPosition],
+        graphFactionIds: ['faction-a', 'faction-b'],
+      },
+      factions,
+      focusRequest: {
+        requestKey: 1,
+        polityId: court.polityId,
+        factionId: 'faction-b',
+      },
+    }));
+
+    expect(markup).toContain('data-court-focused-faction-id="faction-b"');
+    expect(markup).toContain('<h4>清议社</h4>');
+    expect(markup).toContain('以裴观澜为首');
+  });
+
+  it.each([
+    ['another polity', { requestKey: 2, polityId: 'polity-wu', factionId: 'faction-a' }],
+    ['an inactive faction', { requestKey: 3, polityId: court.polityId, factionId: 'faction-retired' }],
+  ])('fails closed for %s instead of impersonating the dominant faction', (_label, focusRequest) => {
+    const markup = renderToStaticMarkup(createElement(CourtProjection, {
+      court,
+      factions,
+      focusRequest,
+    }));
+
+    expect(markup).toContain('data-court-focus-state="unavailable"');
+    expect(markup).not.toContain('data-court-focused-faction-id=');
+    expect(markup).not.toContain('aria-pressed="true"');
+    expect(markup).toContain('所请求派系不在当前朝局，未作替代选择。');
+    expect(markup).not.toContain('以隋行简为首');
+  });
+
+  it('fails closed when the same requested faction retires after it was focused', () => {
+    const request = {
+      requestKey: 4,
+      polityId: court.polityId,
+      factionId: secondPosition.factionId,
+    };
+    const current = { kind: 'faction', id: secondPosition.factionId } as const;
+
+    expect(reconcileCourtFocusAfterUpdate(current, court, factions, request)).toEqual({
+      kind: 'request-miss',
+      requestKey: request.requestKey,
+    });
+  });
+
+  it('preserves a valid manual court choice after leaving the requested faction', () => {
+    const request = {
+      requestKey: 5,
+      polityId: court.polityId,
+      factionId: secondPosition.factionId,
+    };
+    const manualChoice = { kind: 'faction', id: 'faction-a' } as const;
+
+    expect(reconcileCourtFocusAfterUpdate(manualChoice, court, factions, request)).toBe(manualChoice);
   });
 });

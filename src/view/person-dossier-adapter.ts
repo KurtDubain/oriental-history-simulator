@@ -39,6 +39,18 @@ import {
   uniqueArchiveLinks,
   worldRelationships,
 } from './dossier-adapter-shared';
+import {
+  projectPersonPoliticalFocus,
+  type PoliticalFocusLink,
+} from './political-focus';
+
+export type PersonInspectorProjection = PersonInspectorData & {
+  politicalFocus: readonly PoliticalFocusLink[];
+};
+
+export type PersonArchiveProjection = ArchiveDossier & {
+  politicalFocus: readonly PoliticalFocusLink[];
+};
 
 interface PersonExperienceEntry {
   turn: number;
@@ -790,7 +802,7 @@ export function toPersonInspector(
   world: WorldState,
   item: CharacterState,
   options: PersonAgencyDossierOptions = {},
-): PersonInspectorData {
+): PersonInspectorProjection {
   const owner = polity(world, item.polityId);
   const home = region(world, item.locationRegionId);
   const personFamily = family(world, item.familyId);
@@ -887,6 +899,7 @@ export function toPersonInspector(
     traits: characterTraits(item),
     relationships,
     experiences,
+    politicalFocus: projectPersonPoliticalFocus(world, item),
     summary: commandRequest && ['submitted', 'approved', 'blocked'].includes(commandRequest.stage)
       ? `请令：${commandRequest.title}。${commandRequest.summary}`
       : agency.primaryGoal
@@ -903,7 +916,7 @@ export function toPersonArchive(
   world: WorldState,
   item: CharacterState,
   options: PersonAgencyDossierOptions = {},
-): ArchiveDossier {
+): PersonArchiveProjection {
   const inspector = toPersonInspector(world, item, options);
   const owner = polity(world, item.polityId);
   const personFamily = family(world, item.familyId);
@@ -946,6 +959,7 @@ export function toPersonArchive(
       { id: 'mind', title: '心志与关系', paragraphs: [`${desireSentence}。${goalSentence}${agencyActionSentence}`, relationships.length ? `与其关系最深者包括${relationships.slice(0, 4).map((relation) => `${relation.name}（${relation.sentiment}）`).join('、')}。` : '现存史料未留下足以构成长期记忆的人际关系。'] },
     ],
     records,
+    politicalFocus: inspector.politicalFocus,
     links: uniqueArchiveLinks([
       personFamily ? { id: personFamily.id, kind: 'family', label: personFamily.name, detail: '所属家族' } : null,
       owner ? { id: owner.id, kind: 'country', label: owner.name, detail: '所仕政权' } : null,

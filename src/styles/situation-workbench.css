@@ -575,6 +575,28 @@
   cursor: pointer;
 }
 
+.situation-workbench__participants dd button:disabled {
+  color: var(--observer-ink-faint, #858174);
+  cursor: default;
+  opacity: .72;
+}
+
+.situation-workbench__participants .situation-workbench__court-link {
+  display: grid;
+  justify-items: start;
+  gap: 1px;
+}
+
+.situation-workbench__court-link strong {
+  font: inherit;
+  font-weight: 680;
+}
+
+.situation-workbench__court-link small {
+  color: var(--observer-ink-faint, #858174);
+  font-size: 8px;
+}
+
 .situation-workbench__timeline > ol {
   position: relative;
   margin: 0;

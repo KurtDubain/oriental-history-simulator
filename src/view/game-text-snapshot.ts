@@ -505,7 +505,10 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         active: options.historicalTurn === null && options.overlay === 'political',
         focusedPolityId: focusedPoliticalFaction?.polityId ?? null,
         focusedFactionId: focusedPoliticalFaction?.id ?? null,
-        courtEntryActive: options.selection?.kind === 'country' && options.selection.initialTab === 'court',
+        courtEntryActive: options.selection?.kind === 'country'
+          && (options.selection.initialTab === 'court' || Boolean(options.selection.courtFocus)),
+        courtFocusedPolityId: options.selection?.kind === 'country' ? options.selection.courtFocus?.polityId ?? null : null,
+        courtFocusedFactionId: options.selection?.kind === 'country' ? options.selection.courtFocus?.factionId ?? null : null,
         visiblePulses: politicalMarkers.filter((marker) => marker.kind === 'capitalPulse').map((marker) => ({
           id: marker.id, polityId: marker.polityId, factionId: marker.factionId ?? null,
           label: marker.label, status: marker.categoryLabel, summary: marker.detail,

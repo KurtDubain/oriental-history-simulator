@@ -43,4 +43,35 @@ describe('CausalDrawer reading layer', () => {
     }));
     expect(markup).toBe('');
   });
+
+  it('links explicit living-court factions and keeps ended factions as disabled history', () => {
+    const markup = renderToStaticMarkup(createElement(CausalDrawer, {
+      open: true,
+      event: {
+        ...event,
+        politicalFocus: [{
+          polityId: 'polity-1',
+          polityName: '燕国',
+          factionId: 'faction-active',
+          factionName: '北府派',
+          active: true,
+          detail: '本事明载此派参与的朝堂行动',
+        }, {
+          polityId: 'polity-1',
+          polityName: '燕国',
+          factionId: 'faction-ended',
+          factionName: '故相党',
+          active: false,
+          detail: '此派已退出当下朝局',
+        }],
+      },
+      onClose: () => undefined,
+      onSelectCourtFaction: () => undefined,
+    }));
+
+    expect(markup).toContain('本事所系朝局');
+    expect(markup).toContain('data-court-focus-faction="faction-active"');
+    expect(markup).toContain('燕国 · 看其朝局');
+    expect(markup).toMatch(/data-court-focus-faction="faction-ended"[^>]*disabled/);
+  });
 });

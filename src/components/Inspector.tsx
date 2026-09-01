@@ -7,6 +7,7 @@ import {
   ChevronUp,
   Handshake,
   HeartPulse,
+  Landmark,
   MapPin,
   Network,
   Route,
@@ -31,6 +32,8 @@ import type { ArchiveEntityKind } from './HistoricalArchive';
 import { gameAudio } from '../audio';
 import type { PersonEmbodimentView } from '../view/embodiment-view';
 import type { CourtProjectionView } from '../view/court-projection';
+import type { CourtFactionTarget, CourtFocusRequest } from '../view/observer-navigation';
+import type { PoliticalFocusLink } from '../view/political-focus';
 import { CourtProjection } from './CourtProjection';
 import '../styles/observer-ui.css';
 
@@ -306,6 +309,7 @@ export interface PersonInspectorData {
   traits?: string[];
   relationships?: PersonRelationshipView[];
   experiences?: InspectorRecord[];
+  politicalFocus?: readonly PoliticalFocusLink[];
   summary?: string;
 }
 
@@ -348,6 +352,7 @@ export interface FamilyInspectorData {
   alliances?: FamilyAllianceView[];
   members?: FamilyMemberView[];
   history?: InspectorRecord[];
+  politicalFocus?: readonly PoliticalFocusLink[];
   summary?: string;
 }
 
@@ -380,6 +385,7 @@ interface InspectorSharedProps {
   onOpenArchive?: () => void;
   onSelectEntity?: (kind: ArchiveEntityKind, id: string) => void;
   onSelectEvent?: (eventId: string) => void;
+  onSelectCourtFaction?: (target: CourtFactionTarget) => void;
   embodiment?: PersonEmbodimentView;
   onEnterEmbodiment?: () => void;
   onLeaveEmbodiment?: () => void;
@@ -400,6 +406,7 @@ export type InspectorProps =
       data: CountryInspectorData;
       initialTab?: 'court';
       tabRequestKey?: number;
+      courtFocus?: CourtFocusRequest;
       onShowFactionRoots?: (factionId: string) => void;
     })
   | (InspectorSharedProps & { kind: 'family'; data: FamilyInspectorData })
@@ -427,6 +434,27 @@ function Meter({ label, value }: { label: string; value: number }) {
 function Fact({ label, value }: { label: string; value?: DisplayValue }) {
   if (value === undefined || value === '') return null;
   return <div className="observer-fact"><dt>{label}</dt><dd>{display(value)}</dd></div>;
+}
+
+function PoliticalFocusList({ links, onSelect }: { links: readonly PoliticalFocusLink[]; onSelect?: (target: CourtFactionTarget) => void }) {
+  return (
+    <ul className="observer-entity-list observer-political-focus-list">
+      {links.map((link) => (
+        <li key={link.factionId} data-muted={!link.active || undefined}>
+          <button
+            type="button"
+            data-court-focus-faction={link.factionId}
+            disabled={!link.active || !onSelect}
+            title={link.detail}
+            onClick={() => onSelect?.(link)}
+          >
+            <span><strong>{link.factionName}</strong><small>{link.polityName} · {link.detail}</small></span>
+            <b>{link.active ? '看其朝局' : '已退场'}</b>
+          </button>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 function InspectorActions({ label, isFollowing, onToggleFollow, onClose, entrySource, returnToOrigin, returnLabel }: InspectorSharedProps & { label: string }) {
@@ -629,10 +657,11 @@ function RegionInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
   );
 }
 
-function CountryInspector({ data, initialTab, tabRequestKey, onShowFactionRoots, ...actions }: Extract<InspectorProps, { kind: 'country' }>) {
-  const [tab, setTab] = useState<'realm' | 'court' | 'maritime' | 'diplomacy' | 'history'>(initialTab ?? 'realm');
+function CountryInspector({ data, initialTab, tabRequestKey, courtFocus, onShowFactionRoots, ...actions }: Extract<InspectorProps, { kind: 'country' }>) {
+  const requestedTab = initialTab === 'court' || courtFocus ? 'court' : 'realm';
+  const [tab, setTab] = useState<'realm' | 'court' | 'maritime' | 'diplomacy' | 'history'>(requestedTab);
   const tabsId = useId();
-  useEffect(() => setTab(initialTab ?? 'realm'), [data.id, initialTab, tabRequestKey]);
+  useEffect(() => setTab(requestedTab), [data.id, requestedTab, tabRequestKey, courtFocus?.requestKey]);
   return (
     <>
       <div className="observer-inspector__header">
@@ -658,6 +687,7 @@ function CountryInspector({ data, initialTab, tabRequestKey, onShowFactionRoots,
             <CourtProjection
               court={data.court}
               factions={data.factions ?? []}
+              focusRequest={courtFocus}
               onSelectPerson={(personId) => actions.onSelectEntity?.('person', personId)}
               onSelectEvent={actions.onSelectEvent}
               onShowFactionRoots={onShowFactionRoots}
@@ -696,6 +726,7 @@ function FamilyInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
       {tab === 'standing' ? <div role="tabpanel">
         <section className="observer-inspector__section" aria-labelledby="family-ledger-heading"><h3 id="family-ledger-heading">门第帐</h3><dl className="observer-facts"><Fact label="始祖" value={data.founder} /><Fact label="家主" value={data.head} /><Fact label="立族" value={data.founded} /><Fact label="家产" value={data.wealth} /></dl>{data.polity && data.polityId ? <p className="observer-inspector__jump"><Castle size={13} aria-hidden="true" /><LinkedName kind="country" id={data.polityId} onSelect={actions.onSelectEntity}>{data.polity}</LinkedName></p> : null}</section>
         <section className="observer-inspector__section" aria-labelledby="family-standing-heading"><h3 id="family-standing-heading">家势与传统</h3><Meter label="家族声望" value={data.prestige} /><Meter label="政治影响" value={data.politicalInfluence} /><Meter label="从政传统" value={data.traditions.political} /><Meter label="军旅传统" value={data.traditions.military} /><Meter label="商业传统" value={data.traditions.commercial} /><Meter label="学术传统" value={data.traditions.scholarly} /></section>
+        {data.politicalFocus?.length ? <section className="observer-inspector__section" aria-labelledby="family-court-heading"><h3 id="family-court-heading"><Landmark size={14} aria-hidden="true" />族人在朝</h3><PoliticalFocusList links={data.politicalFocus} onSelect={actions.onSelectCourtFaction} /></section> : null}
         {data.alliances?.length ? <section className="observer-inspector__section" aria-labelledby="family-alliance-heading"><h3 id="family-alliance-heading"><Handshake size={14} aria-hidden="true" />婚姻盟族</h3><ul className="observer-entity-list">{data.alliances.map((alliance) => <li key={alliance.id}><button type="button" onClick={() => actions.onSelectEntity?.('family', alliance.id)}><span><strong>{alliance.name}</strong><small>{alliance.detail}</small></span></button></li>)}</ul></section> : null}
       </div> : null}
       {tab === 'members' ? <div role="tabpanel"><section className="observer-inspector__section" aria-labelledby="family-members-heading"><h3 id="family-members-heading"><UsersRound size={14} aria-hidden="true" />族中人物</h3>{data.members?.length ? <ul className="observer-entity-list">{data.members.map((member) => <li key={member.id} data-muted={!member.alive || undefined}><button type="button" onClick={() => actions.onSelectEntity?.('person', member.id)}><span><strong>{member.name}</strong><small>{member.alive ? `${member.age}岁 · ${member.role}` : '已故 · 载于族谱'}</small></span><b>{Math.round(member.influence)}</b></button></li>)}</ul> : <p className="observer-inspector__empty">族谱中尚无可展开的人物。</p>}</section></div> : null}
@@ -745,13 +776,17 @@ function agencyEmptyGoalCopy(agency: PersonAgencyView) {
 
 export function PersonAgencySections({
   agency,
+  politicalFocus = [],
   onSelectEvent,
+  onSelectCourtFaction,
   embodiment,
   onChooseEmbodiedAction,
   onCancelEmbodiedAction,
 }: {
   agency: PersonAgencyView;
+  politicalFocus?: readonly PoliticalFocusLink[];
   onSelectEvent?: (eventId: string) => void;
+  onSelectCourtFaction?: (target: CourtFactionTarget) => void;
   embodiment?: PersonEmbodimentView;
   onChooseEmbodiedAction?: (actionId: string) => void;
   onCancelEmbodiedAction?: () => void;
@@ -845,7 +880,7 @@ export function PersonAgencySections({
             <h3 id="person-power-position-heading">手中权势</h3>
             <span><strong>{agency.powerPosition.standing}</strong>{agency.powerPosition.total}</span>
           </div>
-          {agency.powerPosition.groupName ? <p className="observer-power-position__faction">身在 {agency.powerPosition.groupName}</p> : null}
+          {politicalFocus.length ? <PoliticalFocusList links={politicalFocus} onSelect={onSelectCourtFaction} /> : agency.powerPosition.groupName ? <p className="observer-power-position__faction">身在 {agency.powerPosition.groupName}</p> : null}
           {agency.powerPosition.resources.length ? (
             <ol className="observer-power-position__resources">
               {agency.powerPosition.resources.map((resource) => (
@@ -1087,7 +1122,7 @@ function PersonInspector({ data, onOpenMind, mobileMindRequest = 0, ...actions }
         <section className="observer-inspector__section" aria-labelledby="person-origin-heading"><h3 id="person-origin-heading">身世与处境</h3><dl className="observer-facts"><Fact label="性别" value={data.gender} /><Fact label="出身" value={data.origin} /><Fact label="阶层" value={data.politicalClass} /><Fact label="家族" value={data.family} /><Fact label="影响" value={data.influence} /><Fact label="私产" value={data.personalWealth} /></dl>{data.family ? <p className="observer-inspector__jump"><Network size={13} aria-hidden="true" /><LinkedName kind="family" id={data.familyId} onSelect={actions.onSelectEntity}>{data.family}</LinkedName></p> : null}{data.health !== undefined ? <div className="observer-health"><HeartPulse size={14} aria-hidden="true" /><Meter label="健康" value={data.health} /></div> : null}</section>
         <section className="observer-inspector__section" aria-labelledby="person-ability-heading"><h3 id="person-ability-heading">才能</h3><div className="observer-ability-grid">{abilities.map(([label, value]) => <div className="observer-ability" key={label}><span>{label}</span><strong>{Math.round(value)}</strong></div>)}</div><dl className="observer-facts observer-facts--after-grid"><Fact label="功绩" value={data.merit} /><Fact label="副将历练" value={data.deputyExperience} /></dl></section>
       </div> : null}
-      {tab === 'mind' ? <div id={`${tabsId}-panel-mind`} role="tabpanel" aria-labelledby={`${tabsId}-tab-mind`}>{data.agency ? <PersonAgencySections key={data.id} agency={data.agency} onSelectEvent={actions.onSelectEvent} embodiment={actions.embodiment} onChooseEmbodiedAction={actions.onChooseEmbodiedAction} onCancelEmbodiedAction={actions.onCancelEmbodiedAction} /> : <section className="observer-inspector__section" aria-labelledby="person-motive-heading"><h3 id="person-motive-heading">心志与打算</h3><p className="observer-inspector__empty">现有记载不足以判断此人的打算。</p></section>}</div> : null}
+      {tab === 'mind' ? <div id={`${tabsId}-panel-mind`} role="tabpanel" aria-labelledby={`${tabsId}-tab-mind`}>{data.agency ? <PersonAgencySections key={data.id} agency={data.agency} politicalFocus={data.politicalFocus} onSelectEvent={actions.onSelectEvent} onSelectCourtFaction={actions.onSelectCourtFaction} embodiment={actions.embodiment} onChooseEmbodiedAction={actions.onChooseEmbodiedAction} onCancelEmbodiedAction={actions.onCancelEmbodiedAction} /> : <section className="observer-inspector__section" aria-labelledby="person-motive-heading"><h3 id="person-motive-heading">心志与打算</h3><p className="observer-inspector__empty">现有记载不足以判断此人的打算。</p></section>}</div> : null}
       {tab === 'relations' ? <div id={`${tabsId}-panel-relations`} role="tabpanel" aria-labelledby={`${tabsId}-tab-relations`}><section className="observer-inspector__section" aria-labelledby="person-relation-heading"><h3 id="person-relation-heading"><Network size={14} aria-hidden="true" />关系与记忆</h3>{data.relationships?.length ? <><RelationshipConstellation name={data.name} relationships={data.relationships} onSelect={actions.onSelectEntity} /><ul className="observer-relation-list">{data.relationships.map((relation) => <li key={relation.id}><button type="button" data-related-person-id={relation.targetId} onClick={() => actions.onSelectEntity?.('person', relation.targetId)}><span><strong>{relation.name}</strong><small>{relation.relation} · {relation.sentiment}</small></span></button>{relation.detail || relation.memories?.length ? <p>{[relation.detail, ...(relation.memories ?? [])].filter(Boolean).join('；')}</p> : null}</li>)}</ul></> : <p className="observer-inspector__empty">此人尚无足以入档的人际记忆。</p>}</section></div> : null}
       {tab === 'history' ? <div id={`${tabsId}-panel-history`} role="tabpanel" aria-labelledby={`${tabsId}-tab-history`}><section className="observer-inspector__section" aria-labelledby="person-history-heading"><h3 id="person-history-heading"><ScrollText size={14} aria-hidden="true" />生平纪年</h3><RecordList records={data.experiences ?? []} onSelectEvent={actions.onSelectEvent} />{actions.onOpenArchive ? <EntityHistoryGateway kind="person" label="读完整人物传" onOpen={actions.onOpenArchive} /> : null}</section></div> : null}
     </>
@@ -1152,16 +1187,19 @@ function mobileQuickLookFor(props: InspectorProps): MobileQuickLookView {
     current: `${props.data.summary ?? `${props.data.terrain}地势。`} 人口${display(props.data.population)}，粮况${display(props.data.food)}，动荡${Math.round(props.data.unrest)}。`,
     destination: '地方帐簿、局势与往来',
   };
-  if (props.kind === 'country') return {
-    eyebrow: props.initialTab === 'court' ? '朝局速览' : '国势速览',
-    name: props.data.name,
-    ownerLabel: props.initialTab === 'court' ? '都城' : '中枢',
-    owner: [props.data.government, `都于${props.data.capital}`].filter(Boolean).join(' · '),
-    current: props.initialTab === 'court'
-      ? props.data.court?.summary ?? `君主${props.data.ruler}，朝中派系格局尚待查考。`
-      : props.data.status ?? `治下${props.data.regionCount}郡，君主${props.data.ruler}。`,
-    destination: props.initialTab === 'court' ? '君位、朝班与派系根基' : '国势、朝局、邦交与国史',
-  };
+  if (props.kind === 'country') {
+    const targetsCourt = props.initialTab === 'court' || Boolean(props.courtFocus);
+    return {
+      eyebrow: targetsCourt ? '朝局速览' : '国势速览',
+      name: props.data.name,
+      ownerLabel: targetsCourt ? '都城' : '中枢',
+      owner: [props.data.government, `都于${props.data.capital}`].filter(Boolean).join(' · '),
+      current: targetsCourt
+        ? props.data.court?.summary ?? `君主${props.data.ruler}，朝中派系格局尚待查考。`
+        : props.data.status ?? `治下${props.data.regionCount}郡，君主${props.data.ruler}。`,
+      destination: targetsCourt ? '君位、朝班与派系根基' : '国势、朝局、邦交与国史',
+    };
+  }
   if (props.kind === 'family') return {
     eyebrow: '门第速览',
     name: props.data.name,
@@ -1339,7 +1377,7 @@ export function Inspector(props: InspectorProps) {
                     setMobileExpanded(true);
                     if (props.kind === 'person') setMobileMindRequest((current) => current + 1);
                   }}
-                >{props.kind === 'person' ? '看所图' : props.kind === 'country' && props.initialTab === 'court' ? '看朝局' : '完整档案'}</button>
+                >{props.kind === 'person' ? '看所图' : props.kind === 'country' && (props.initialTab === 'court' || props.courtFocus) ? '看朝局' : '完整档案'}</button>
                 {props.onClose ? <button type="button" onClick={props.onClose}>{returnsToRoster ? mobileReturnLabel : '收起'}</button> : null}
               </div>
             </footer>

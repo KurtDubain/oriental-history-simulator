@@ -1,12 +1,12 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，v1.18.0 更新于 2026-09-01，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.19.0 更新于 2026-09-01，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
-- `src` 下生产 TypeScript / TSX：153 个文件，61,460 行（测试排除）。
-- 相对模块依赖：563 条，其中 351 条 runtime、212 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环。
-- 当前热点：`engine.ts` 3,120/3,120 行、`invariants.ts` 2,642/2,665 行、`App.tsx` 2,543/2,600 行（实际/门禁）。
+- `src` 下生产 TypeScript / TSX：155 个文件，62,061 行（测试排除）。
+- 相对模块依赖：578 条，其中 358 条 runtime、220 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环。
+- 当前热点：`engine.ts` 3,120/3,120 行、`invariants.ts` 2,642/2,665 行、`App.tsx` 2,563/2,600 行（实际/门禁）。
 - 其次为 `v02.ts` 2,321 行、`agency/decision.ts` 1,961 行、`v03-ocean.ts` 1,951 行、`v1-agency-shadow.ts` 1,479 行。`WorldMap.tsx` 为 1,088/1,100 行，仍由已拆分的 Scene / renderer / gesture 契约支撑；`view/adapters.ts` 为 53/100 行。
 
 行数是增长预警，不是机械拆文件指标。新增领域规则不得再默认进入四个最高热点；只有形成稳定输入、输出和所有权后才拆分。
@@ -22,17 +22,17 @@ v1.10.1 的扫描已从正则匹配改为 TypeScript AST 与 Tarjan SCC，能区
 ## 本纵切的所有权
 
 ```text
-engine.ts（季度顺序与提交）
-  → turn-pipeline.ts（阶段顺序、一次执行、计时）
-    → agency/decision.ts（支持行动、军令 Intent、机构回应）
-      → typed Facts（权威发生）
-        → PersonalMemory / Situation / 玩家投影（下游读取）
+WorldState 显式人物归属 / 家族在朝支点 / Fact / Situation participants
+  → political-focus.ts（纯证据投影）
+    → 人物 / 家族 / 史事 / Situation 既有档案
+      → CourtFocusRequest（observer-only 精确导航）
+        → CourtProjection（同一席位、权势账与地图根基入口）
 ```
 
-- `AgencyDecisionSystemState` 继续是人物权力行动的唯一持久化 owner。
-- `agency_support_resolved` 与 `agency_intent_*` 是支持、请令和回应的权威事实；Chronicle、传记和 UI 不反向决定结果。
-- `turn-pipeline.ts` 不接触 `WorldState`，只保证既定阶段按顺序执行一次并产出计时；领域模块仍独立拥有状态变化。
-- 本轮没有向 `App.tsx`、`WorldMap.tsx` 或 `engine.ts` 增加新玩法规则。
+- `political-focus.ts` 只读结构化 ID 与 Fact 因果链，禁止从名称或叙事文案猜归属；历史派系失效时原 ID 保留且跳转关闭。
+- `CourtFocusRequest` 只属于观察导航，不进入 `WorldState`、存档、Fact、Chronicle 或 hash；它也不改写地图的派系 overlay 焦点。
+- 构建按个人版/参赛版 allowlist 把地图 profile 序列化为安全 `application/json` HTML 载荷；浏览器 registry 同步校验和冻结，SSR/审计仍读静态 catalog。
+- 本轮没有改动 `engine.ts`、`invariants.ts`、存档 schema 或任何模拟数值；`App.tsx` 只增加唯一精确朝局导航出口。
 
 ## 后续收缩顺序
 
@@ -88,3 +88,10 @@ engine.ts（季度顺序与提交）
 - 架构门直接拒绝 runtime SCC、禁止的跨层依赖、type-only 债务增长和热点预算超标。当前预算为 `App.tsx` 2,600、`engine.ts` 3,120、`invariants.ts` 2,665、`WorldMap.tsx` 1,100、`view/adapters.ts` 100 行；这些是防反弹上限，不是为了凑行数填满的目标。
 - Vite 将 framework、simulation、maps 和应用入口分为稳定产物边界。v1.18.0 为第四类权威 Situation 与持久 Fact 校验将个人版/参赛版的紧约束统一收在：单 JS raw 585 KiB、JS gzip 总量 418 KiB、CSS gzip 总量 40 KiB。该上限只比本次实测留出约 1% 余量，后续功能若继续增长，优先做可证明的代码拆分或删除，不能无依据放宽门禁。
 - `.github/workflows/quality.yml` 在 Pull Request 和 `main` 推送上使用 `.nvmrc` 固定 Node 22，以 `npm ci` 从锁文件安装，依次执行单测、架构门、两种构建/产物预算、安全更新与关键浏览器链；失败时上传 `output/` 以便复现。发布检查同时约束 `package.json` / lockfile / 个人版更新记录 / 参赛版更新记录一致，并在生产变更时要求版本递增。
+
+## v1.19.0 政治投影与地图载荷边界
+
+- `PoliticalFocusLink` 是人物、家族、史事和 Situation 到朝局的唯一跨入口 DTO；四类投影均为纯函数，不修改世界，不扩充 `ArchiveEntityKind`。同一 `CourtFocusRequest` 通过一个 App handler 关闭旧卷、打开国家朝局并聚焦 exact faction；无效或跨政权请求明确失败，不选默认替身。
+- 地图 catalog 不再编入浏览器 maps chunk，而是按 allowlist 写入 HTML `application/json` 数据节点。`<`、U+2028 与 U+2029 在构建时转义，registry 解析后仍执行完整 profile validation 和深冻结。参赛产物仅含 `contest-v01`，328 项私人令牌扫描与模块图隔离继续作为硬门。
+- 实测个人/参赛 `maps` chunk gzip 均为 2,822 bytes；无反向运行依赖的 `sim/politics` 另成 41,728-byte 缓存边界，使主 simulation chunk 从 597,260 降至 555,770 bytes，不再只剩约 1.8 KiB 的单文件余量。总 JavaScript gzip 为 416,511 / 416,421 bytes，CSS gzip 均为 39,796 bytes，原预算不放宽。HTML 载荷会增加少量压缩传输体积，本次优化的明确目标是降低 JavaScript 解析/执行并恢复单文件工程余量，不宣称总下载量减少。
+- 最终架构门为 155 个生产文件 / 62,061 行 / 358 runtime + 220 type-only imports，0 runtime cycle、0 跨层违例；`App.tsx` 与 `WorldMap.tsx` 分别为 2,563/2,600 与 1,088/1,100 行。

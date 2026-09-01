@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.19.0',
+    date: '2026-09-01',
+    title: '朝局一脉，权势可寻',
+    items: [
+      '都城印记、人物、家族、具体史事与朝堂权斗卷宗现在能直达同一个真实派系，不再只跳到政权总页。',
+      '已退场派系只保留史迹，不会暗中改选其他派系；桌面朝堂与移动席位共用同一精确聚焦，窄屏入口保持可靠点按。',
+      '长纪年审计继续核对权势分布、首屏可见、真实地图根基、领袖更替与派系分合；地图内容移出主 JavaScript 包，存档、确定性与世界 hash 规则不变。',
+    ],
+  },
+  {
     version: '1.18.0',
     date: '2026-09-01',
     title: '朝权成局，兴替有因',

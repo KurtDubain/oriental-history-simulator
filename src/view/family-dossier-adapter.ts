@@ -12,6 +12,18 @@ import {
   turnLabel,
   uniqueArchiveLinks,
 } from './dossier-adapter-shared';
+import {
+  projectFamilyPoliticalFocus,
+  type PoliticalFocusLink,
+} from './political-focus';
+
+export type FamilyInspectorProjection = FamilyInspectorData & {
+  politicalFocus: readonly PoliticalFocusLink[];
+};
+
+export type FamilyArchiveProjection = ArchiveDossier & {
+  politicalFocus: readonly PoliticalFocusLink[];
+};
 
 function familyEvent(item: FamilyState, event: HistoryEvent) {
   const memberIds = new Set(item.memberIds);
@@ -19,7 +31,7 @@ function familyEvent(item: FamilyState, event: HistoryEvent) {
     || event.stateDeltas.some((delta) => delta.entityType === 'family' && delta.entityId === item.id);
 }
 
-export function toFamilyInspector(world: WorldState, item: FamilyState): FamilyInspectorData {
+export function toFamilyInspector(world: WorldState, item: FamilyState): FamilyInspectorProjection {
   const owner = polity(world, item.polityId);
   const founder = character(world, item.founderId);
   const head = character(world, item.headId);
@@ -62,6 +74,7 @@ export function toFamilyInspector(world: WorldState, item: FamilyState): FamilyI
       alive: member.alive,
     })),
     history: scopedHistory(world, (event) => familyEvent(item, event)),
+    politicalFocus: projectFamilyPoliticalFocus(world, item),
     summary: item.politicalInfluence >= 65
       ? `${item.name}已成为${owner?.name ?? '当世'}朝局中不可忽视的门第，以${traditionLabel}传统维系声名。`
       : item.prestige >= 60
@@ -70,7 +83,7 @@ export function toFamilyInspector(world: WorldState, item: FamilyState): FamilyI
   };
 }
 
-export function toFamilyArchive(world: WorldState, item: FamilyState): ArchiveDossier {
+export function toFamilyArchive(world: WorldState, item: FamilyState): FamilyArchiveProjection {
   const inspector = toFamilyInspector(world, item);
   const founder = character(world, item.founderId);
   const head = character(world, item.headId);
@@ -99,6 +112,7 @@ export function toFamilyArchive(world: WorldState, item: FamilyState): ArchiveDo
       { id: 'marriage', title: '婚盟与人脉', paragraphs: [inspector.alliances?.length ? `${item.name}已与${inspector.alliances.map((alliance) => alliance.name).join('、')}结为婚盟。` : '此族尚无稳定婚盟，政治风险更多由本族独自承担。', `族中现有${inspector.members?.filter((member) => member.alive).length ?? 0}名在世人物可查，其中${inspector.members?.[0]?.name ?? '尚无人'}影响最著。`] },
     ],
     records,
+    politicalFocus: inspector.politicalFocus,
     links: uniqueArchiveLinks([
       head ? { id: head.id, kind: 'person', label: head.name, detail: '当代家主' } : null,
       founder ? { id: founder.id, kind: 'person', label: founder.name, detail: '家族始祖' } : null,

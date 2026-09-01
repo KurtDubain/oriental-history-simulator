@@ -1,8 +1,37 @@
-import { MAP_PROFILE_CATALOG } from '@map-profile-catalog';
+import { MAP_PROFILE_CATALOG as STATIC_MAP_PROFILE_CATALOG } from '@map-profile-catalog';
 import type { MapContentVersion, MapProfile, MapProfileId } from './types';
 import { assertValidMapProfile } from './validation';
 
-const PROFILES = MAP_PROFILE_CATALOG;
+const MAP_PROFILE_DATA_ELEMENT_ID = 'canghai-map-profile-data';
+
+function deepFreeze<T>(value: T): T {
+  if (value === null || typeof value !== 'object' || Object.isFrozen(value)) return value;
+  for (const child of Object.values(value as Record<string, unknown>)) deepFreeze(child);
+  return Object.freeze(value);
+}
+
+function readHtmlMapProfiles(): readonly MapProfile[] {
+  if (typeof document === 'undefined') {
+    throw new Error('地图 profile 数据只能从构建产物 HTML 读取');
+  }
+  const element = document.getElementById(MAP_PROFILE_DATA_ELEMENT_ID);
+  if (!element || element.getAttribute('type') !== 'application/json') {
+    throw new Error(`缺少地图 profile 数据节点 #${MAP_PROFILE_DATA_ELEMENT_ID}`);
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(element.textContent ?? '');
+  } catch (error) {
+    throw new Error('地图 profile HTML 数据不是有效 JSON', { cause: error });
+  }
+  if (!Array.isArray(parsed)) throw new Error('地图 profile HTML 数据必须是数组');
+  return deepFreeze(parsed as MapProfile[]);
+}
+
+// Vite resolves this import to the source catalog only for SSR (tests/audits).
+// Browser bundles receive `undefined` and synchronously hydrate from index.html.
+const PROFILES = (STATIC_MAP_PROFILE_CATALOG as readonly MapProfile[] | undefined)
+  ?? readHtmlMapProfiles();
 
 if (PROFILES.length === 0) throw new Error('地图内容清单不能为空');
 

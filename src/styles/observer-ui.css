@@ -2045,6 +2045,15 @@
   color: var(--observer-vermilion-dark);
 }
 
+.observer-political-focus-list {
+  margin-top: 7px;
+  border-top: 1px dotted var(--observer-line-strong);
+}
+
+.observer-political-focus-list button:disabled {
+  cursor: default;
+}
+
 .observer-faction {
   padding: 12px 0 14px;
   border-top: 1px dotted var(--observer-line-strong);
@@ -2659,6 +2668,13 @@
   color: var(--observer-vermilion-dark);
 }
 
+.observer-causal-subjects button:disabled {
+  border-color: var(--observer-line);
+  color: var(--observer-ink-faint);
+  cursor: default;
+  opacity: .72;
+}
+
 .observer-causal-subjects strong {
   font-family: var(--observer-serif);
   font-size: 9px;
@@ -2678,6 +2694,13 @@
 }
 
 .observer-causal-subjects--next > p {
+  margin: -3px 0 10px;
+  color: var(--observer-ink-faint);
+  font-size: 9px;
+  line-height: 1.55;
+}
+
+.observer-causal-subjects--court > p {
   margin: -3px 0 10px;
   color: var(--observer-ink-faint);
   font-size: 9px;

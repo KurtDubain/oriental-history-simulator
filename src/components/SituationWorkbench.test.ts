@@ -68,4 +68,44 @@ describe('SituationWorkbench', () => {
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('已关注');
   });
+
+  it('turns an explicit faction participant into an exact living-court link', () => {
+    const world = advanceWorldBy(createWorld('朝局卷宗精确往返'), 2);
+    const projection = projectSituationWorkbench(world);
+    const selected = projection.selected;
+    const faction = world.factions.find((item) => item.active && world.polities.some((polity) => polity.id === item.polityId && polity.alive));
+    if (!selected || !faction) throw new Error('expected a selected Situation and an active faction');
+    const polity = world.polities.find((item) => item.id === faction.polityId);
+    if (!polity) throw new Error('expected faction polity');
+    const focusedProjection = {
+      ...projection,
+      selected: {
+        ...selected,
+        participants: [
+          ...selected.participants.filter((group) => group.key !== 'factionIds'),
+          { key: 'factionIds' as const, label: '朝局派系', entities: [{ id: faction.id, label: faction.name }] },
+        ],
+        politicalFocus: [{
+          polityId: polity.id,
+          polityName: polity.name,
+          factionId: faction.id,
+          factionName: faction.name,
+          active: true,
+          detail: '卷宗的参与派系列有此派',
+        }],
+      },
+    };
+    const markup = renderToStaticMarkup(createElement(SituationWorkbench, {
+      open: true,
+      projection: focusedProjection,
+      onClose: () => undefined,
+      onSelectSituation: () => undefined,
+      onSelectEntity: () => undefined,
+      onSelectHistoryEvent: () => undefined,
+      onSelectCourtFaction: () => undefined,
+    }));
+
+    expect(markup).toContain(`data-court-focus-faction="${faction.id}"`);
+    expect(markup).toContain('看其朝局');
+  });
 });

@@ -166,6 +166,7 @@ export interface SituationDetailProjection {
     resultFactIds: string[];
   };
   participants: SituationSnapshotParticipantGroup[];
+  politicalFocus: SituationSnapshotItem['politicalFocus'];
   publicDrivers: SituationDetailDriver[];
   scenes: HistoricalScene[];
   timeline: SituationDetailTimelineItem[];
@@ -740,6 +741,7 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
       ...group,
       entities: group.entities.map((entity) => ({ ...entity })),
     })),
+    politicalFocus: item.politicalFocus.map((link) => ({ ...link })),
     publicDrivers: publicDrivers(drivers),
     scenes,
     timeline,

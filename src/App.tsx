@@ -211,6 +211,7 @@ import { useObserverNavigation } from './view/use-observer-navigation';
 import {
   observerLayerIsOpen,
   observerNavigationIsBlocking,
+  type CourtFactionTarget,
 } from './view/observer-navigation';
 import {
   useObserverPlayback,
@@ -403,7 +404,7 @@ export function App() {
   const agencyShadowLedgerRef = useRef(agencyShadowLedger);
   const agencyShadowBranchIdRef = useRef<string | null>(agencyShadowBranchId);
   const embodimentObserverRef = useRef<EmbodimentObserverState>(embodimentObserver);
-  const capitalPulseRequestRef = useRef(0);
+  const courtFocusRequestRef = useRef(0);
   const shouldRestoreArchiveFocus = useCallback(() => archiveFocusRestoreAllowedRef.current, []);
   const shouldRestoreCausalFocus = useCallback(() => causalFocusRestoreAllowedRef.current, []);
   useEffect(() => startAppUpdateMonitor(), []);
@@ -1804,6 +1805,22 @@ export function App() {
     window.setTimeout(() => document.querySelector<HTMLCanvasElement>('.world-map__canvas')?.focus({ preventScroll: true }), 0);
   }, [clearRosterDossier, navigation]);
 
+  const handleOpenCourtFaction = useCallback((target: CourtFactionTarget, expand = true) => {
+    const current = worldRef.current;
+    const faction = current?.factions.find((item) => item.id === target.factionId && item.active && item.polityId === target.polityId);
+    if (!current?.polities.some((item) => item.id === target.polityId && item.alive) || !faction) {
+      setToast('这支派系已退出当下朝局，未替你改选别派。');
+      return;
+    }
+    courtFocusRequestRef.current += 1;
+    const courtFocus = { ...target, requestKey: courtFocusRequestRef.current };
+    archiveFocusRestoreAllowedRef.current = false; causalFocusRestoreAllowedRef.current = false; situationFocusRestoreAllowedRef.current = false;
+    clearRosterDossier(); setMobileInspectorExpanded(expand);
+    setSelection({ kind: 'country', id: target.polityId, initialTab: 'court', tabRequestKey: courtFocus.requestKey, courtFocus });
+    navigation.reset({ view: 'world', powerRosterSection, layers: [] });
+    gameAudio.play('open', 0.48);
+  }, [clearRosterDossier, navigation, powerRosterSection]);
+
   const inspector = useMemo<ReactNode>(() => {
     if (!world || !selection) return null;
     const followKey = `${selection.kind}:${selection.id}`;
@@ -1827,6 +1844,7 @@ export function App() {
       } : undefined,
       onSelectEntity: handleSelectArchiveEntity,
       onSelectEvent: handleSelectScopedEvent,
+      onSelectCourtFaction: handleOpenCourtFaction,
     };
     if (selection.kind === 'region') {
       const item = world.regions.find((candidate) => candidate.id === selection.id);
@@ -1839,6 +1857,7 @@ export function App() {
         data={toCountryInspector(world, item)}
         initialTab={selection.initialTab}
         tabRequestKey={selection.tabRequestKey}
+        courtFocus={selection.courtFocus}
         onShowFactionRoots={handleShowFactionRoots}
         {...shared}
       /> : null;
@@ -1886,6 +1905,7 @@ export function App() {
     handleEnterEmbodiment,
     handleDismissEmbodimentClosure,
     handleLeaveEmbodiment,
+    handleOpenCourtFaction,
     handleShowFactionRoots,
     handleSelectArchiveEntity,
     handleSelectScopedEvent,
@@ -2160,17 +2180,15 @@ export function App() {
                 clearRosterDossier(); setSelection({ kind: 'region', id });
                 navigation.goToView('world');
               }}
-              onSelectObject={(kind, id) => {
+              onSelectObject={(kind, id, marker) => {
                 gameAudio.play('select', 0.52);
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
                 if (kind === 'army' || kind === 'fleet') setFocusedArmyId(id);
-                if (kind === 'country') {
-                  capitalPulseRequestRef.current += 1;
-                  setFocusedPoliticalFactionId(null);
-                }
+                if (kind === 'country' && marker?.factionId) { handleOpenCourtFaction({ polityId: id, factionId: marker.factionId }, false); return; }
+                if (kind === 'country') courtFocusRequestRef.current += 1;
                 clearRosterDossier(); setSelection(kind === 'country'
-                  ? { kind, id, initialTab: 'court', tabRequestKey: capitalPulseRequestRef.current }
+                  ? { kind, id, initialTab: 'court', tabRequestKey: courtFocusRequestRef.current }
                   : { kind, id });
                 navigation.goToView('world');
               }}
@@ -2405,6 +2423,7 @@ export function App() {
           situationFocusRestoreAllowedRef.current = false;
           handleSelectNarrativeEntity(kind, id);
         }}
+        onSelectCourtFaction={handleOpenCourtFaction}
       />
 
       <MapPrimer
@@ -2469,6 +2488,7 @@ export function App() {
         onSelectSituation={handleSelectSituation}
         onSelectEntity={handleSelectSituationEntity}
         onSelectHistoryEvent={handleSelectSituationHistory}
+        onSelectCourtFaction={handleOpenCourtFaction}
         isWatched={Boolean(selectedSituationId && followed.has(`situation:${selectedSituationId}`))}
         onToggleWatch={handleToggleSelectedSituation}
         returnFocusTo={situationReturnFocusRef.current}

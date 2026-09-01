@@ -29,8 +29,39 @@ const configuredSeeds = process.env.POLITICS_AUDIT_SEEDS
   .map((seed) => seed.trim())
   .filter(Boolean);
 const seeds = configuredSeeds?.length ? configuredSeeds : [...DEFAULT_SEEDS];
-const requestedTurns = Number.parseInt(process.env.POLITICS_AUDIT_TURNS ?? '64', 10);
+const DEFAULT_RELEASE_TURNS = 64;
+const DEFAULT_DEEP_TURNS = 192;
+const MINIMUM_DEEP_TURNS = 160;
+const MAXIMUM_DEEP_TURNS = 256;
+const deepArguments = process.argv.slice(2).filter((argument) => argument === '--deep' || argument.startsWith('--deep='));
+if (deepArguments.length > 1) throw new Error('POL08 deep 审计只能指定一次 --deep[=160..256]');
+const deepArgument = deepArguments[0];
+const explicitDeepValue = deepArgument?.startsWith('--deep=')
+  ? deepArgument.slice('--deep='.length)
+  : null;
+if (explicitDeepValue !== null && !/^\d+$/.test(explicitDeepValue)) {
+  throw new Error('POL08 deep 审计参数必须是完整整数 --deep=160..256');
+}
+const requestedDeepTurns = deepArgument === '--deep'
+  ? DEFAULT_DEEP_TURNS
+  : explicitDeepValue !== null
+    ? Number.parseInt(explicitDeepValue, 10)
+    : null;
+if (requestedDeepTurns !== null && (
+  !Number.isSafeInteger(requestedDeepTurns)
+  || requestedDeepTurns < MINIMUM_DEEP_TURNS
+  || requestedDeepTurns > MAXIMUM_DEEP_TURNS
+)) {
+  throw new Error(`POL08 deep 审计季数必须在${MINIMUM_DEEP_TURNS}..${MAXIMUM_DEEP_TURNS}之间`);
+}
+const requestedTurns = requestedDeepTurns
+  ?? Number.parseInt(process.env.POLITICS_AUDIT_TURNS ?? String(DEFAULT_RELEASE_TURNS), 10);
 const turns = Number.isSafeInteger(requestedTurns) ? Math.max(16, requestedTurns) : 64;
+const auditMode = requestedDeepTurns !== null
+  ? 'deep'
+  : turns === DEFAULT_RELEASE_TURNS
+    ? 'release'
+    : 'custom';
 const splitTurn = Math.max(8, Math.min(turns - 1, Math.floor(turns / 2)));
 const VALIDATION_INTERVAL = 8;
 const CENTRAL_OFFICES = new Set(['君主', '宰辅', '枢密使', '廷臣']);
@@ -51,6 +82,7 @@ interface PoliticalFingerprint {
   historyDigest: string;
   factionDigest: string;
   politicalSpatialDigest: string;
+  distributionDigest: string;
 }
 
 interface TransitionCounts {
@@ -68,10 +100,149 @@ interface RelationCounts {
   rivalryEnded: number;
 }
 
+interface LeaderTransitionCounts {
+  total: number;
+  death: number;
+  transferred: number;
+  otherUnavailable: number;
+  invalidFacts: number;
+}
+
+interface PowerBands {
+  from0To19: number;
+  from20To39: number;
+  from40To59: number;
+  from60To79: number;
+  from80To97: number;
+  from98To99: number;
+  exact100: number;
+}
+
+interface LongRunMetrics {
+  stateSamples: number;
+  power: {
+    activeFactionPowerObservations: number;
+    ledgerCacheChecks: number;
+    total: number;
+    minimum: number | null;
+    maximum: number | null;
+    exact100: number;
+    saturated98OrMore: number;
+    cacheMismatches: number;
+    outOfRange: number;
+    bands: PowerBands;
+  };
+  visibility: {
+    livingPolityScreens: number;
+    dominantRequired: number;
+    dominantMissing: number;
+    highPowerRequired: number;
+    highPowerMissing: number;
+  };
+  spatialRoots: {
+    projected: number;
+    falseRoots: number;
+  };
+  governorMonopoly: {
+    politySamples: number;
+    governorAppointments: number;
+    factionalAppointments: number;
+    largestFactionAppointments: number;
+    largestLocalFactionAppointments: number;
+    rateTotal: number;
+    localFactionRateTotal: number;
+    maximumRate: number;
+    maximumLocalFactionRate: number;
+    fullyMonopolizedSamples: number;
+    fullyLocalFactionMonopolizedSamples: number;
+  };
+  leaders: {
+    activeLeaderChecks: number;
+    dead: number;
+    transferred: number;
+    invalid: number;
+  };
+}
+
+interface FinalLongRunMetrics {
+  stateSamples: number;
+  power: LongRunMetrics['power'] & {
+    average: number | null;
+    exact100Rate: number | null;
+    saturated98OrMoreRate: number | null;
+  };
+  visibility: LongRunMetrics['visibility'];
+  spatialRoots: LongRunMetrics['spatialRoots'];
+  governorMonopoly: LongRunMetrics['governorMonopoly'] & {
+    weightedRate: number | null;
+    meanRate: number | null;
+    weightedLocalFactionRate: number | null;
+    meanLocalFactionRate: number | null;
+    fullyMonopolizedSampleRate: number | null;
+    fullyLocalFactionMonopolizedSampleRate: number | null;
+  };
+  leaders: LongRunMetrics['leaders'];
+}
+
+interface LedgerDistributionRow {
+  factionId: string;
+  polityId: string;
+  total: number;
+  cachedPower: number;
+  cacheChecked: boolean;
+  cacheExact: boolean;
+  inRange: boolean;
+}
+
+interface CourtVisibilityRow {
+  polityId: string;
+  activeFactionIds: readonly string[];
+  factionPositionIds: readonly string[];
+  firstScreenFactionIds: readonly string[];
+  dominantFactionId: string | null;
+  highPowerFactionIds: readonly string[];
+  missingPositionIds: readonly string[];
+  missingFirstScreenIds: readonly string[];
+}
+
+interface GovernorMonopolyRow {
+  polityId: string;
+  governorCount: number;
+  factionalGovernorCount: number;
+  largestFactionId: string | null;
+  largestFactionCount: number;
+  largestLocalFactionId: string | null;
+  largestLocalFactionCount: number;
+  rate: number;
+  localFactionRate: number;
+}
+
+interface ActiveLeaderRow {
+  factionId: string;
+  leaderId: string;
+  dead: boolean;
+  transferred: boolean;
+  invalid: boolean;
+}
+
+interface PoliticalDistributionObservation {
+  digest: string;
+  ledgerRows: readonly LedgerDistributionRow[];
+  visibilityRows: readonly CourtVisibilityRow[];
+  governorRows: readonly GovernorMonopolyRow[];
+  leaderRows: readonly ActiveLeaderRow[];
+  falseRootIds: readonly string[];
+  currentAlliances: readonly string[];
+  currentRivalries: readonly string[];
+  courtsByPolityId: ReadonlyMap<string, CourtProjectionView>;
+  politicalMap: PoliticalMapProjectionView;
+}
+
 interface AuditRun {
   world: WorldState;
   sequence: PoliticalFingerprint[];
   splitSave: string;
+  longRun: FinalLongRunMetrics;
   peakActiveFactions: number;
   peakCourtSeats: number;
   peakSpatialRoots: number;
@@ -93,6 +264,9 @@ interface AuditSample {
   peakSpatialRoots: number;
   lifecycle: TransitionCounts;
   relations: RelationCounts;
+  leaderTransitions: LeaderTransitionCounts;
+  longRun: FinalLongRunMetrics;
+  distributionDigest: string;
   courtActions: number;
   courtSituations: number;
   linkedCourtActions: number;
@@ -103,6 +277,8 @@ interface AuditSample {
   spatialRootChecks: number;
   replayExact: boolean;
   resumeExact: boolean;
+  replayDistributionExact: boolean;
+  resumeDistributionExact: boolean;
 }
 
 interface CourtChainCounts {
@@ -135,8 +311,458 @@ function unique(values: readonly string[]): boolean {
   return new Set(values).size === values.length;
 }
 
-function politicalFingerprint(world: WorldState): PoliticalFingerprint {
+function roundedRatio(numerator: number, denominator: number): number {
+  return denominator > 0 ? Math.round((numerator / denominator) * 10_000) / 10_000 : 0;
+}
+
+function emptyPowerBands(): PowerBands {
+  return {
+    from0To19: 0,
+    from20To39: 0,
+    from40To59: 0,
+    from60To79: 0,
+    from80To97: 0,
+    from98To99: 0,
+    exact100: 0,
+  };
+}
+
+function emptyLongRunMetrics(): LongRunMetrics {
+  return {
+    stateSamples: 0,
+    power: {
+      activeFactionPowerObservations: 0,
+      ledgerCacheChecks: 0,
+      total: 0,
+      minimum: null,
+      maximum: null,
+      exact100: 0,
+      saturated98OrMore: 0,
+      cacheMismatches: 0,
+      outOfRange: 0,
+      bands: emptyPowerBands(),
+    },
+    visibility: {
+      livingPolityScreens: 0,
+      dominantRequired: 0,
+      dominantMissing: 0,
+      highPowerRequired: 0,
+      highPowerMissing: 0,
+    },
+    spatialRoots: { projected: 0, falseRoots: 0 },
+    governorMonopoly: {
+      politySamples: 0,
+      governorAppointments: 0,
+      factionalAppointments: 0,
+      largestFactionAppointments: 0,
+      largestLocalFactionAppointments: 0,
+      rateTotal: 0,
+      localFactionRateTotal: 0,
+      maximumRate: 0,
+      maximumLocalFactionRate: 0,
+      fullyMonopolizedSamples: 0,
+      fullyLocalFactionMonopolizedSamples: 0,
+    },
+    leaders: { activeLeaderChecks: 0, dead: 0, transferred: 0, invalid: 0 },
+  };
+}
+
+function incrementPowerBand(bands: PowerBands, power: number): void {
+  if (power === 100) bands.exact100 += 1;
+  else if (power >= 98) bands.from98To99 += 1;
+  else if (power >= 80) bands.from80To97 += 1;
+  else if (power >= 60) bands.from60To79 += 1;
+  else if (power >= 40) bands.from40To59 += 1;
+  else if (power >= 20) bands.from20To39 += 1;
+  else bands.from0To19 += 1;
+}
+
+function currentRelationPairs(
+  factions: readonly FactionState[],
+  relation: 'alliance' | 'rivalry',
+): string[] {
+  const activeIds = new Set(factions.map((faction) => faction.id));
+  const pairs = new Set<string>();
+  for (const faction of factions) {
+    const relatedIds = relation === 'alliance' ? faction.alliedFactionIds : faction.rivalFactionIds;
+    for (const otherId of relatedIds) {
+      if (activeIds.has(otherId)) pairs.add(canonicalPair(faction.id, otherId));
+    }
+  }
+  return [...pairs].sort(stableCompare);
+}
+
+function governorMonopolyRows(world: WorldState): GovernorMonopolyRow[] {
+  const activeFactionById = new Map(world.factions
+    .filter((faction) => faction.active)
+    .map((faction) => [faction.id, faction]));
+  return world.polities
+    .filter((polity) => polity.alive)
+    .sort((left, right) => stableCompare(left.id, right.id))
+    .map((polity) => {
+      const governors = world.offices
+        .filter((office) => {
+          if (!office.active || office.kind !== '地方长官' || office.polityId !== polity.id || !office.regionId) return false;
+          const holder = world.characters.find((character) => character.id === office.holderId);
+          const region = world.regions.find((candidate) => candidate.id === office.regionId);
+          return Boolean(
+            holder?.alive
+            && holder.polityId === polity.id
+            && holder.governedRegionId === office.regionId
+            && region?.controllerId === polity.id
+          );
+        })
+        .sort((left, right) => stableCompare(left.id, right.id));
+      const byFaction = new Map<string, number>();
+      for (const office of governors) {
+        const holder = world.characters.find((character) => character.id === office.holderId);
+        const faction = holder?.factionId ? activeFactionById.get(holder.factionId) : null;
+        if (!faction || faction.polityId !== polity.id) continue;
+        byFaction.set(faction.id, (byFaction.get(faction.id) ?? 0) + 1);
+      }
+      const ranked = [...byFaction.entries()].sort((left, right) => (
+        right[1] - left[1] || stableCompare(left[0], right[0])
+      ));
+      const rankedLocal = ranked.filter(([factionId]) => activeFactionById.get(factionId)?.kind === '地方');
+      const largest = ranked[0] ?? null;
+      const largestLocal = rankedLocal[0] ?? null;
+      const factionalGovernorCount = [...byFaction.values()].reduce((sum, count) => sum + count, 0);
+      return {
+        polityId: polity.id,
+        governorCount: governors.length,
+        factionalGovernorCount,
+        largestFactionId: largest?.[0] ?? null,
+        largestFactionCount: largest?.[1] ?? 0,
+        largestLocalFactionId: largestLocal?.[0] ?? null,
+        largestLocalFactionCount: largestLocal?.[1] ?? 0,
+        rate: roundedRatio(largest?.[1] ?? 0, governors.length),
+        localFactionRate: roundedRatio(largestLocal?.[1] ?? 0, governors.length),
+      } satisfies GovernorMonopolyRow;
+    });
+}
+
+function observePoliticalDistribution(
+  world: WorldState,
+  includeLedgerAudit = false,
+  includeDetailedAudit = false,
+): PoliticalDistributionObservation {
+  // Retired factions preserve historical fields and are not refreshed. POL08's
+  // cache contract therefore applies to every currently active faction ledger.
+  const activeFactions = world.factions
+    .filter((faction) => faction.active)
+    .sort((left, right) => stableCompare(left.id, right.id));
+  const ledgerRows = activeFactions.map((faction) => {
+    const ledger = includeLedgerAudit ? calculateFactionPowerLedger(world, faction) : null;
+    return {
+      factionId: faction.id,
+      polityId: faction.polityId,
+      total: ledger?.total ?? faction.power,
+      cachedPower: faction.power,
+      cacheChecked: ledger !== null,
+      cacheExact: ledger === null || faction.power === ledger.total,
+      inRange: Number.isFinite(ledger?.total ?? faction.power)
+        && (ledger?.total ?? faction.power) >= 0
+        && (ledger?.total ?? faction.power) <= 100,
+    } satisfies LedgerDistributionRow;
+  });
+  const ledgerByFactionId = new Map(ledgerRows.map((row) => [row.factionId, row]));
+  const livingPolities = world.polities
+    .filter((polity) => polity.alive)
+    .sort((left, right) => stableCompare(left.id, right.id));
+  const courtsByPolityId = includeDetailedAudit
+    ? new Map(livingPolities.map((polity) => [polity.id, projectCourt(world, polity.id)]))
+    : new Map<string, CourtProjectionView>();
+  const visibilityRows = includeDetailedAudit ? livingPolities.map((polity) => {
+    const activeFactionIds = activeFactions
+      .filter((faction) => faction.polityId === polity.id)
+      .map((faction) => faction.id);
+    const court = courtsByPolityId.get(polity.id) as CourtProjectionView;
+    const factionPositionIds = court.factionPositions.map((position) => position.factionId);
+    const firstScreenFactionIds = [...court.graphFactionIds];
+    const dominantFactionId = court.factionPositions.find((position) => position.dominant)?.factionId ?? null;
+    const highPowerFactionIds = activeFactionIds
+      .filter((factionId) => (ledgerByFactionId.get(factionId)?.total ?? -1) >= 60)
+      .sort(stableCompare);
+    const requiredIds = [...new Set([
+      ...(dominantFactionId ? [dominantFactionId] : []),
+      ...highPowerFactionIds,
+    ])].sort(stableCompare);
+    return {
+      polityId: polity.id,
+      activeFactionIds,
+      factionPositionIds,
+      firstScreenFactionIds,
+      dominantFactionId,
+      highPowerFactionIds,
+      missingPositionIds: requiredIds.filter((factionId) => !factionPositionIds.includes(factionId)),
+      missingFirstScreenIds: requiredIds.filter((factionId) => !firstScreenFactionIds.includes(factionId)),
+    } satisfies CourtVisibilityRow;
+  }) : [];
   const politicalMap = projectPoliticalMap(world, 'active');
+  const falseRootIds = politicalMap.roots
+    .filter((root) => !isTruthfulSpatialRoot(world, root))
+    .map((root) => root.id)
+    .sort(stableCompare);
+  const governorRows = governorMonopolyRows(world);
+  const leaderRows = activeFactions.map((faction) => {
+    const leader = world.characters.find((character) => character.id === faction.leaderId);
+    const dead = !leader?.alive;
+    const transferred = Boolean(leader?.alive && leader.polityId !== faction.polityId);
+    const invalid = !leader
+      || !leader.alive
+      || leader.age < 16
+      || leader.polityId !== faction.polityId
+      || leader.factionId !== faction.id
+      || !faction.memberIds.includes(leader.id)
+      || !faction.coreMemberIds.includes(leader.id);
+    return { factionId: faction.id, leaderId: faction.leaderId, dead, transferred, invalid };
+  });
+  const currentAlliances = currentRelationPairs(activeFactions, 'alliance');
+  const currentRivalries = currentRelationPairs(activeFactions, 'rivalry');
+  const digest = stableHash({
+    // The every-quarter digest uses the persisted cache. Detailed POL01
+    // recalculation below proves that cache exact at each validation checkpoint.
+    ledgers: ledgerRows.map((row) => ({
+      factionId: row.factionId,
+      polityId: row.polityId,
+      power: row.cachedPower,
+    })),
+    governorMonopoly: governorRows,
+    leaders: leaderRows,
+    currentAlliances,
+    currentRivalries,
+    spatialRoots: politicalMap.roots.map((root) => ({
+      id: root.id,
+      factionId: root.factionId,
+      kind: root.kind,
+      anchor: [root.anchor.kind, root.anchor.id],
+      assetCount: root.assetCount,
+      assets: root.assets.map((asset) => [asset.kind, asset.id, asset.holderId, asset.ledgerResourceId]),
+      truthful: !falseRootIds.includes(root.id),
+    })),
+  });
+  return {
+    digest,
+    ledgerRows,
+    visibilityRows,
+    governorRows,
+    leaderRows,
+    falseRootIds,
+    currentAlliances,
+    currentRivalries,
+    courtsByPolityId,
+    politicalMap,
+  };
+}
+
+function auditDistributionObservation(
+  observation: PoliticalDistributionObservation,
+  scope: string,
+): void {
+  for (const row of observation.ledgerRows) {
+    if (!row.inRange) fail(scope, `${row.factionId}真实权势总值${row.total}越出0..100`);
+    if (row.cacheChecked && !row.cacheExact) {
+      fail(scope, `${row.factionId}权势cache ${row.cachedPower}与POL01总账${row.total}不精确一致`);
+    }
+  }
+  for (const row of observation.visibilityRows) {
+    if (!unique(row.factionPositionIds) || !unique(row.firstScreenFactionIds)) {
+      fail(scope, `${row.polityId}的朝局首屏或派系次序存在重复`);
+    }
+    if (
+      row.activeFactionIds.length !== row.factionPositionIds.length
+      || row.activeFactionIds.some((factionId) => !row.factionPositionIds.includes(factionId))
+    ) {
+      fail(scope, `${row.polityId}的factionPositions没有完整覆盖活动派系`);
+    }
+    if (row.missingPositionIds.length > 0) {
+      fail(scope, `${row.polityId}的factionPositions遗漏主导/高权势派${row.missingPositionIds.join('、')}`);
+    }
+    if (row.missingFirstScreenIds.length > 0) {
+      fail(scope, `${row.polityId}首屏遗漏主导/真实权势>=60派${row.missingFirstScreenIds.join('、')}`);
+    }
+    if (row.firstScreenFactionIds.some((factionId) => !row.factionPositionIds.includes(factionId))) {
+      fail(scope, `${row.polityId}首屏引用了非factionPositions派系`);
+    }
+  }
+  for (const rootId of observation.falseRootIds) fail(scope, `${rootId}没有真实地方长官/军团主帅/舰队提督根基`);
+  for (const row of observation.leaderRows) {
+    if (!row.invalid) continue;
+    const reason = row.dead ? '领袖已死亡' : row.transferred ? '领袖已转籍' : '领袖成员/核心身份失效';
+    fail(scope, `${row.factionId}${reason}，仍被记为活动派系领袖`);
+  }
+  if (observation.politicalMap.roots.length > POLITICAL_MAP_PROJECTION_LIMITS.rootsPerWorld) {
+    fail(scope, `空间权势根基${observation.politicalMap.roots.length}个，超过世界上限`);
+  }
+  if (!unique(observation.politicalMap.roots.map((root) => root.id))) fail(scope, '空间权势根基 ID 重复');
+  // Governor monopoly is an observational distribution, not a balance gate.
+  // A 100% sample remains visible in the report and is never "fixed" here.
+  for (const row of observation.governorRows) {
+    if (row.rate < 0 || row.rate > 1 || row.localFactionRate < 0 || row.localFactionRate > 1) {
+      fail(scope, `${row.polityId}地方长官派系垄断率越界`);
+    }
+  }
+}
+
+function accumulateLongRunMetrics(
+  metrics: LongRunMetrics,
+  observation: PoliticalDistributionObservation,
+): void {
+  metrics.stateSamples += 1;
+  for (const row of observation.ledgerRows) {
+    metrics.power.activeFactionPowerObservations += 1;
+    metrics.power.total += row.total;
+    metrics.power.minimum = metrics.power.minimum === null ? row.total : Math.min(metrics.power.minimum, row.total);
+    metrics.power.maximum = metrics.power.maximum === null ? row.total : Math.max(metrics.power.maximum, row.total);
+    if (row.total === 100) metrics.power.exact100 += 1;
+    if (row.total >= 98) metrics.power.saturated98OrMore += 1;
+    if (row.cacheChecked) metrics.power.ledgerCacheChecks += 1;
+    if (row.cacheChecked && !row.cacheExact) metrics.power.cacheMismatches += 1;
+    if (!row.inRange) metrics.power.outOfRange += 1;
+    incrementPowerBand(metrics.power.bands, row.total);
+  }
+  metrics.visibility.livingPolityScreens += observation.visibilityRows.length;
+  for (const row of observation.visibilityRows) {
+    metrics.visibility.dominantRequired += Number(row.dominantFactionId !== null);
+    metrics.visibility.dominantMissing += Number(
+      row.dominantFactionId !== null && row.missingFirstScreenIds.includes(row.dominantFactionId),
+    );
+    metrics.visibility.highPowerRequired += row.highPowerFactionIds.length;
+    metrics.visibility.highPowerMissing += row.highPowerFactionIds.filter((factionId) => (
+      row.missingFirstScreenIds.includes(factionId)
+    )).length;
+  }
+  metrics.spatialRoots.projected += observation.politicalMap.roots.length;
+  metrics.spatialRoots.falseRoots += observation.falseRootIds.length;
+  for (const row of observation.governorRows.filter((item) => item.governorCount > 0)) {
+    metrics.governorMonopoly.politySamples += 1;
+    metrics.governorMonopoly.governorAppointments += row.governorCount;
+    metrics.governorMonopoly.factionalAppointments += row.factionalGovernorCount;
+    metrics.governorMonopoly.largestFactionAppointments += row.largestFactionCount;
+    metrics.governorMonopoly.largestLocalFactionAppointments += row.largestLocalFactionCount;
+    metrics.governorMonopoly.rateTotal += row.rate;
+    metrics.governorMonopoly.localFactionRateTotal += row.localFactionRate;
+    metrics.governorMonopoly.maximumRate = Math.max(metrics.governorMonopoly.maximumRate, row.rate);
+    metrics.governorMonopoly.maximumLocalFactionRate = Math.max(
+      metrics.governorMonopoly.maximumLocalFactionRate,
+      row.localFactionRate,
+    );
+    if (row.largestFactionCount === row.governorCount) metrics.governorMonopoly.fullyMonopolizedSamples += 1;
+    if (row.largestLocalFactionCount === row.governorCount) {
+      metrics.governorMonopoly.fullyLocalFactionMonopolizedSamples += 1;
+    }
+  }
+  metrics.leaders.activeLeaderChecks += observation.leaderRows.length;
+  metrics.leaders.dead += observation.leaderRows.filter((row) => row.dead).length;
+  metrics.leaders.transferred += observation.leaderRows.filter((row) => row.transferred).length;
+  metrics.leaders.invalid += observation.leaderRows.filter((row) => row.invalid).length;
+}
+
+function finalizeLongRunMetrics(metrics: LongRunMetrics): FinalLongRunMetrics {
+  const governor = metrics.governorMonopoly;
+  return {
+    stateSamples: metrics.stateSamples,
+    power: {
+      ...metrics.power,
+      average: metrics.power.activeFactionPowerObservations > 0
+        ? Math.round((metrics.power.total / metrics.power.activeFactionPowerObservations) * 100) / 100
+        : null,
+      exact100Rate: metrics.power.activeFactionPowerObservations > 0
+        ? roundedRatio(metrics.power.exact100, metrics.power.activeFactionPowerObservations)
+        : null,
+      saturated98OrMoreRate: metrics.power.activeFactionPowerObservations > 0
+        ? roundedRatio(metrics.power.saturated98OrMore, metrics.power.activeFactionPowerObservations)
+        : null,
+    },
+    visibility: { ...metrics.visibility },
+    spatialRoots: { ...metrics.spatialRoots },
+    governorMonopoly: {
+      ...governor,
+      rateTotal: Math.round(governor.rateTotal * 10_000) / 10_000,
+      localFactionRateTotal: Math.round(governor.localFactionRateTotal * 10_000) / 10_000,
+      weightedRate: governor.governorAppointments > 0
+        ? roundedRatio(governor.largestFactionAppointments, governor.governorAppointments)
+        : null,
+      meanRate: governor.politySamples > 0
+        ? Math.round((governor.rateTotal / governor.politySamples) * 10_000) / 10_000
+        : null,
+      weightedLocalFactionRate: governor.governorAppointments > 0
+        ? roundedRatio(governor.largestLocalFactionAppointments, governor.governorAppointments)
+        : null,
+      meanLocalFactionRate: governor.politySamples > 0
+        ? Math.round((governor.localFactionRateTotal / governor.politySamples) * 10_000) / 10_000
+        : null,
+      fullyMonopolizedSampleRate: governor.politySamples > 0
+        ? roundedRatio(governor.fullyMonopolizedSamples, governor.politySamples)
+        : null,
+      fullyLocalFactionMonopolizedSampleRate: governor.politySamples > 0
+        ? roundedRatio(governor.fullyLocalFactionMonopolizedSamples, governor.politySamples)
+        : null,
+    },
+    leaders: { ...metrics.leaders },
+  };
+}
+
+function aggregateLongRunMetrics(runs: readonly FinalLongRunMetrics[]): FinalLongRunMetrics {
+  const aggregate = emptyLongRunMetrics();
+  for (const run of runs) {
+    aggregate.stateSamples += run.stateSamples;
+    aggregate.power.activeFactionPowerObservations += run.power.activeFactionPowerObservations;
+    aggregate.power.ledgerCacheChecks += run.power.ledgerCacheChecks;
+    aggregate.power.total += run.power.total;
+    aggregate.power.minimum = run.power.minimum === null
+      ? aggregate.power.minimum
+      : aggregate.power.minimum === null
+        ? run.power.minimum
+        : Math.min(aggregate.power.minimum, run.power.minimum);
+    aggregate.power.maximum = run.power.maximum === null
+      ? aggregate.power.maximum
+      : aggregate.power.maximum === null
+        ? run.power.maximum
+        : Math.max(aggregate.power.maximum, run.power.maximum);
+    aggregate.power.exact100 += run.power.exact100;
+    aggregate.power.saturated98OrMore += run.power.saturated98OrMore;
+    aggregate.power.cacheMismatches += run.power.cacheMismatches;
+    aggregate.power.outOfRange += run.power.outOfRange;
+    for (const key of Object.keys(aggregate.power.bands) as Array<keyof PowerBands>) {
+      aggregate.power.bands[key] += run.power.bands[key];
+    }
+    for (const key of Object.keys(aggregate.visibility) as Array<keyof LongRunMetrics['visibility']>) {
+      aggregate.visibility[key] += run.visibility[key];
+    }
+    aggregate.spatialRoots.projected += run.spatialRoots.projected;
+    aggregate.spatialRoots.falseRoots += run.spatialRoots.falseRoots;
+    aggregate.governorMonopoly.politySamples += run.governorMonopoly.politySamples;
+    aggregate.governorMonopoly.governorAppointments += run.governorMonopoly.governorAppointments;
+    aggregate.governorMonopoly.factionalAppointments += run.governorMonopoly.factionalAppointments;
+    aggregate.governorMonopoly.largestFactionAppointments += run.governorMonopoly.largestFactionAppointments;
+    aggregate.governorMonopoly.largestLocalFactionAppointments += run.governorMonopoly.largestLocalFactionAppointments;
+    aggregate.governorMonopoly.rateTotal += run.governorMonopoly.rateTotal;
+    aggregate.governorMonopoly.localFactionRateTotal += run.governorMonopoly.localFactionRateTotal;
+    aggregate.governorMonopoly.maximumRate = Math.max(
+      aggregate.governorMonopoly.maximumRate,
+      run.governorMonopoly.maximumRate,
+    );
+    aggregate.governorMonopoly.maximumLocalFactionRate = Math.max(
+      aggregate.governorMonopoly.maximumLocalFactionRate,
+      run.governorMonopoly.maximumLocalFactionRate,
+    );
+    aggregate.governorMonopoly.fullyMonopolizedSamples += run.governorMonopoly.fullyMonopolizedSamples;
+    aggregate.governorMonopoly.fullyLocalFactionMonopolizedSamples += (
+      run.governorMonopoly.fullyLocalFactionMonopolizedSamples
+    );
+    for (const key of Object.keys(aggregate.leaders) as Array<keyof LongRunMetrics['leaders']>) {
+      aggregate.leaders[key] += run.leaders[key];
+    }
+  }
+  return finalizeLongRunMetrics(aggregate);
+}
+
+function politicalFingerprint(
+  world: WorldState,
+  observation: PoliticalDistributionObservation = observePoliticalDistribution(world, false, false),
+): PoliticalFingerprint {
+  const politicalMap = observation.politicalMap;
   return {
     turn: world.turn,
     hash: world.hash,
@@ -171,6 +797,7 @@ function politicalFingerprint(world: WorldState): PoliticalFingerprint {
             .map((asset) => [asset.kind, asset.id, asset.holderId, asset.ledgerResourceId]),
         })),
     }),
+    distributionDigest: observation.digest,
   };
 }
 
@@ -180,7 +807,8 @@ function sameFingerprint(left: PoliticalFingerprint, right: PoliticalFingerprint
     && left.factDigest === right.factDigest
     && left.historyDigest === right.historyDigest
     && left.factionDigest === right.factionDigest
-    && left.politicalSpatialDigest === right.politicalSpatialDigest;
+    && left.politicalSpatialDigest === right.politicalSpatialDigest
+    && left.distributionDigest === right.distributionDigest;
 }
 
 function latestRelationFact(
@@ -707,6 +1335,65 @@ function currentFleetAnchor(
   return port ? { kind: 'region', id: port.id, name: port.name } : null;
 }
 
+function isAuthoritativeSpatialAsset(
+  world: WorldState,
+  root: FactionSpatialPowerRootView,
+  asset: FactionSpatialPowerRootView['assets'][number],
+): boolean {
+  const holder = world.characters.find((character) => character.id === asset.holderId);
+  if (
+    !holder?.alive
+    || holder.polityId !== root.polityId
+    || holder.factionId !== root.factionId
+    || holder.name !== asset.holder
+  ) return false;
+  if (asset.kind === 'governorship') {
+    return root.kind === 'regional_governance'
+      && root.anchor.kind === 'region'
+      && root.anchor.id === root.regionId
+      && asset.id === holder.id
+      && holder.governedRegionId === root.regionId
+      && world.regions.some((region) => (
+        region.id === root.regionId && region.controllerId === root.polityId
+      ))
+      && world.offices.some((office) => (
+        office.active
+        && office.kind === '地方长官'
+        && office.polityId === root.polityId
+        && office.holderId === holder.id
+        && office.regionId === root.regionId
+      ));
+  }
+  if (asset.kind === 'army') {
+    // Army/Fleet state plus the character's reverse command pointer is the
+    // authoritative current command. Opening fleets can truthfully exist at
+    // T0 before the formal appointment ledger is generated on the first tick.
+    const army = world.armies.find((candidate) => candidate.id === asset.id);
+    return root.kind === 'army_command'
+      && root.anchor.kind === 'region'
+      && Boolean(army)
+      && army?.polityId === root.polityId
+      && army.regionId === root.regionId
+      && root.anchor.id === army.regionId
+      && army.soldiers > 0
+      && army.commanderId === holder.id
+      && holder.commandingArmyId === army.id;
+  }
+  const fleet = world.fleets.find((candidate) => candidate.id === asset.id);
+  const anchor = fleet ? currentFleetAnchor(world, fleet) : null;
+  return root.kind === 'fleet_command'
+    && Boolean(fleet)
+    && fleet?.polityId === root.polityId
+    && fleet.homePortRegionId === root.regionId
+    && fleet.warships + fleet.transports + fleet.patrolShips > 0
+    && fleet.commanderId === holder.id
+    && holder.commandingFleetId === fleet.id
+    && Boolean(anchor)
+    && anchor?.kind === root.anchor.kind
+    && anchor.id === root.anchor.id
+    && anchor.name === root.anchor.name;
+}
+
 function matchingRootAssetCount(world: WorldState, root: FactionSpatialPowerRootView): number {
   if (root.kind === 'regional_governance') {
     return world.characters.filter((holder) => (
@@ -755,6 +1442,27 @@ function matchingRootAssetCount(world: WorldState, root: FactionSpatialPowerRoot
     && anchor.id === root.anchor.id
     ? 1
     : 0;
+}
+
+function isTruthfulSpatialRoot(world: WorldState, root: FactionSpatialPowerRootView): boolean {
+  const faction = world.factions.find((candidate) => candidate.id === root.factionId);
+  const polity = world.polities.find((candidate) => candidate.id === root.polityId);
+  const region = world.regions.find((candidate) => candidate.id === root.regionId);
+  const anchor = root.anchor.kind === 'region'
+    ? world.regions.find((candidate) => candidate.id === root.anchor.id)
+    : world.seaZones.find((candidate) => candidate.id === root.anchor.id);
+  if (
+    !faction?.active
+    || !polity?.alive
+    || faction.polityId !== polity.id
+    || !region
+    || !anchor
+    || root.assets.length === 0
+  ) return false;
+  const currentAssetCount = matchingRootAssetCount(world, root);
+  return root.assetCount === currentAssetCount
+    && root.assetCount >= root.assets.length
+    && root.assets.every((asset) => isAuthoritativeSpatialAsset(world, root, asset));
 }
 
 function auditSpatialPowerRoot(
@@ -916,7 +1624,14 @@ function auditPoliticalMapProjection(
   };
 }
 
-function auditWorld(profile: MapProfile, seed: string, world: WorldState): {
+function auditWorld(
+  profile: MapProfile,
+  seed: string,
+  world: WorldState,
+  observation: PoliticalDistributionObservation,
+  beforeProjection: string,
+  beforeProjectionHash: string,
+): {
   activePeak: number;
   courtSeatPeak: number;
   spatialRootCount: number;
@@ -938,19 +1653,20 @@ function auditWorld(profile: MapProfile, seed: string, world: WorldState): {
   }
   const activePeak = auditFactionIdentity(world, facts, scope);
   auditCourtPowerChains(world, facts, scope);
-  const beforeProjection = serializeWorld(world);
-  const beforeProjectionHash = world.hash;
   let courtSeatPeak = 0;
   let projectionChecks = 0;
-  const courtsByPolityId = new Map<string, CourtProjectionView>();
+  const courtsByPolityId = observation.courtsByPolityId;
   for (const polity of world.polities.filter((item) => item.alive).sort((left, right) => stableCompare(left.id, right.id))) {
-    const court = projectCourt(world, polity.id);
-    courtsByPolityId.set(polity.id, court);
+    const court = courtsByPolityId.get(polity.id);
+    if (!court) {
+      fail(scope, `${polity.id}缺少POL08当季朝堂投影`);
+      continue;
+    }
     projectionChecks += 1;
     courtSeatPeak = Math.max(courtSeatPeak, court.seats.length);
     auditCourtProjection(world, polity.id, court, facts, scope);
   }
-  const politicalMap = projectPoliticalMap(world, 'active');
+  const politicalMap = observation.politicalMap;
   projectionChecks += 1;
   const politicalChecks = auditPoliticalMapProjection(world, politicalMap, courtsByPolityId, scope);
   if (serializeWorld(world) !== beforeProjection || world.hash !== beforeProjectionHash) {
@@ -968,6 +1684,7 @@ function auditWorld(profile: MapProfile, seed: string, world: WorldState): {
 function run(profile: MapProfile, seed: string, withAudit: boolean): AuditRun {
   let world = createWorld(seed, profile.id);
   const sequence: PoliticalFingerprint[] = [];
+  const longRun = emptyLongRunMetrics();
   let splitSave = '';
   let peakActiveFactions = 0;
   let peakCourtSeats = 0;
@@ -977,10 +1694,27 @@ function run(profile: MapProfile, seed: string, withAudit: boolean): AuditRun {
   let capitalPulseChecks = 0;
   let spatialRootChecks = 0;
   for (let step = 0; step <= turns; step += 1) {
-    sequence.push(politicalFingerprint(world));
+    const detailedAuditDue = withAudit && (world.turn % VALIDATION_INTERVAL === 0 || world.turn === turns);
+    const beforeProjection = detailedAuditDue ? serializeWorld(world) : '';
+    const beforeProjectionHash = world.hash;
+    const observation = observePoliticalDistribution(world, withAudit, detailedAuditDue);
+    sequence.push(politicalFingerprint(world, observation));
+    if (withAudit) {
+      const scope = scoped(profile, seed, world.turn);
+      auditDistributionObservation(observation, scope);
+      accumulateLongRunMetrics(longRun, observation);
+      peakSpatialRoots = Math.max(peakSpatialRoots, observation.politicalMap.roots.length);
+    }
     if (world.turn === splitTurn) splitSave = serializeWorld(world);
-    if (withAudit && (world.turn % VALIDATION_INTERVAL === 0 || world.turn === turns)) {
-      const result = auditWorld(profile, seed, world);
+    if (detailedAuditDue) {
+      const result = auditWorld(
+        profile,
+        seed,
+        world,
+        observation,
+        beforeProjection,
+        beforeProjectionHash,
+      );
       validationChecks += 1;
       projectionChecks += result.projectionChecks;
       peakActiveFactions = Math.max(peakActiveFactions, result.activePeak);
@@ -996,6 +1730,7 @@ function run(profile: MapProfile, seed: string, withAudit: boolean): AuditRun {
     world,
     sequence,
     splitSave,
+    longRun: finalizeLongRunMetrics(longRun),
     peakActiveFactions,
     peakCourtSeats,
     peakSpatialRoots,
@@ -1026,6 +1761,66 @@ function relationCounts(facts: readonly SimulationFact[]): RelationCounts {
   return result;
 }
 
+function leaderTransitionCounts(
+  facts: readonly SimulationFact[],
+  scope?: string,
+): LeaderTransitionCounts {
+  const result: LeaderTransitionCounts = {
+    total: 0,
+    death: 0,
+    transferred: 0,
+    otherUnavailable: 0,
+    invalidFacts: 0,
+  };
+  const factById = new Map(facts.map((fact) => [fact.id, fact]));
+  for (const fact of facts) {
+    if (fact.kind !== 'faction_lifecycle' || fact.payload.transition !== 'leader_changed') continue;
+    result.total += 1;
+    const previousLeaderId = fact.payload.previousLeaderId;
+    const nextLeaderId = fact.payload.nextLeaderId;
+    const beforeMatches = previousLeaderId !== null && fact.payload.before.some((snapshot) => (
+      fact.payload.affectedFactionIds.includes(snapshot.factionId)
+      && snapshot.leaderId === previousLeaderId
+    ));
+    const afterMatches = nextLeaderId !== null && fact.payload.after.some((snapshot) => (
+      fact.payload.affectedFactionIds.includes(snapshot.factionId)
+      && snapshot.leaderId === nextLeaderId
+    ));
+    const structurallyValid = previousLeaderId !== null
+      && nextLeaderId !== null
+      && previousLeaderId !== nextLeaderId
+      && beforeMatches
+      && afterMatches;
+    if (!structurallyValid) {
+      result.invalidFacts += 1;
+      if (scope) fail(scope, `${fact.id}领袖更替缺少可核对的前任/后任快照`);
+    }
+    const sources = fact.sourceFactIds
+      .map((factId) => factById.get(factId))
+      .filter((source): source is SimulationFact => Boolean(source));
+    const death = Boolean(previousLeaderId && sources.some((source) => (
+      source.kind === 'character_death' && source.payload.characterId === previousLeaderId
+    )));
+    const transferred = Boolean(previousLeaderId && sources.some((source) => source.stateDeltas.some((delta) => (
+      delta.entityType === 'character'
+      && delta.entityId === previousLeaderId
+      && delta.field === 'factionId'
+      && fact.payload.affectedFactionIds.includes(String(delta.before))
+      && delta.after === null
+    ))));
+    if (death) result.death += 1;
+    else if (transferred || fact.payload.reasonCode === 'leader_departed') result.transferred += 1;
+    else result.otherUnavailable += 1;
+    if (scope && fact.payload.reasonCode === 'leader_departed' && !transferred) {
+      fail(scope, `${fact.id}转籍领袖更替没有人物离派来源差量`);
+    }
+    if (scope && fact.payload.reasonCode === 'leader_unavailable' && !death && fact.sourceFactIds.length === 0) {
+      fail(scope, `${fact.id}失效领袖更替没有任何来源 Fact`);
+    }
+  }
+  return result;
+}
+
 const profiles = listMapProfiles();
 if (profiles.length < 2) {
   throw new Error(`POL02/POL03审计需要两张地图，当前只发现${profiles.length}张`);
@@ -1036,37 +1831,54 @@ for (const profile of profiles) {
   for (const seed of seeds) {
     const first = run(profile, seed, true);
     const replay = run(profile, seed, false);
+    const replayDistributionExact = first.sequence.length === replay.sequence.length
+      && first.sequence.every((entry, index) => (
+        entry.distributionDigest === replay.sequence[index]?.distributionDigest
+      ));
     const replayExact = first.sequence.length === replay.sequence.length
       && first.sequence.every((entry, index) => sameFingerprint(entry, replay.sequence[index] as PoliticalFingerprint))
       && serializeWorld(first.world) === serializeWorld(replay.world);
     if (!replayExact) fail(scoped(profile, seed, turns), '同地图同种子直推的派系序列不确定');
+    if (!replayDistributionExact) fail(scoped(profile, seed, turns), '直推/重放的POL08分布digest不一致');
 
     let resumed: WorldState | null = null;
     let resumeExact = false;
+    let resumeDistributionExact = false;
     try {
       resumed = deserializeWorld(first.splitSave);
-      resumeExact = sameFingerprint(
-        politicalFingerprint(resumed),
-        first.sequence[splitTurn] as PoliticalFingerprint,
-      );
+      const restoredFingerprint = politicalFingerprint(resumed);
+      const splitFingerprint = first.sequence[splitTurn] as PoliticalFingerprint;
+      resumeExact = sameFingerprint(restoredFingerprint, splitFingerprint);
+      resumeDistributionExact = restoredFingerprint.distributionDigest === splitFingerprint.distributionDigest;
       for (let turn = splitTurn + 1; turn <= turns; turn += 1) {
         resumed = advanceWorld(resumed);
-        if (!sameFingerprint(politicalFingerprint(resumed), first.sequence[turn] as PoliticalFingerprint)) {
+        const resumedFingerprint = politicalFingerprint(resumed);
+        const directFingerprint = first.sequence[turn] as PoliticalFingerprint;
+        if (resumedFingerprint.distributionDigest !== directFingerprint.distributionDigest) {
+          resumeDistributionExact = false;
+        }
+        if (!sameFingerprint(resumedFingerprint, directFingerprint)) {
           resumeExact = false;
-          break;
         }
       }
       resumeExact = resumeExact && serializeWorld(resumed) === serializeWorld(first.world);
     } catch (error) {
+      resumeExact = false;
+      resumeDistributionExact = false;
       fail(
         scoped(profile, seed, splitTurn),
         `政治存档无法恢复：${error instanceof Error ? error.message : String(error)}`,
       );
     }
     if (!resumeExact) fail(scoped(profile, seed, turns), `T${splitTurn}存读档后的派系演化分叉`);
+    if (!resumeDistributionExact) {
+      fail(scoped(profile, seed, turns), `${splitTurn}+${turns - splitTurn}续推的POL08分布digest不一致`);
+    }
 
     const facts = readWorldFacts(first.world);
-    const courtChains = auditCourtPowerChains(first.world, facts, scoped(profile, seed, turns));
+    const finalScope = scoped(profile, seed, turns);
+    const courtChains = auditCourtPowerChains(first.world, facts, finalScope);
+    const leaderTransitions = leaderTransitionCounts(facts, finalScope);
     samples.push({
       profileId: profile.id,
       revision: profile.revision,
@@ -1079,6 +1891,9 @@ for (const profile of profiles) {
       peakSpatialRoots: first.peakSpatialRoots,
       lifecycle: transitionCounts(facts),
       relations: relationCounts(facts),
+      leaderTransitions,
+      longRun: first.longRun,
+      distributionDigest: first.sequence.at(-1)?.distributionDigest ?? '',
       courtActions: courtChains.actions,
       courtSituations: courtChains.situations,
       linkedCourtActions: courtChains.linkedActions,
@@ -1089,6 +1904,8 @@ for (const profile of profiles) {
       spatialRootChecks: first.spatialRootChecks,
       replayExact,
       resumeExact,
+      replayDistributionExact,
+      resumeDistributionExact,
     });
   }
 }
@@ -1102,7 +1919,16 @@ const aggregate = samples.reduce((sum, sample) => ({
   split: sum.split + sample.lifecycle.split,
   merged: sum.merged + sample.lifecycle.merged,
   ended: sum.ended + sample.lifecycle.ended,
-  relationsFormed: sum.relationsFormed + sample.relations.allianceFormed + sample.relations.rivalryFormed,
+  allianceFormed: sum.allianceFormed + sample.relations.allianceFormed,
+  allianceEnded: sum.allianceEnded + sample.relations.allianceEnded,
+  rivalryFormed: sum.rivalryFormed + sample.relations.rivalryFormed,
+  rivalryEnded: sum.rivalryEnded + sample.relations.rivalryEnded,
+  leaderTransitionDeath: sum.leaderTransitionDeath + sample.leaderTransitions.death,
+  leaderTransitionTransferred: sum.leaderTransitionTransferred + sample.leaderTransitions.transferred,
+  leaderTransitionOtherUnavailable: sum.leaderTransitionOtherUnavailable + sample.leaderTransitions.otherUnavailable,
+  invalidLeaderTransitionFacts: sum.invalidLeaderTransitionFacts + sample.leaderTransitions.invalidFacts,
+  replayDistributionExact: sum.replayDistributionExact + Number(sample.replayDistributionExact),
+  resumeDistributionExact: sum.resumeDistributionExact + Number(sample.resumeDistributionExact),
   projectionChecks: sum.projectionChecks + sample.projectionChecks,
   capitalPulseChecks: sum.capitalPulseChecks + sample.capitalPulseChecks,
   spatialRootChecks: sum.spatialRootChecks + sample.spatialRootChecks,
@@ -1119,7 +1945,16 @@ const aggregate = samples.reduce((sum, sample) => ({
   split: 0,
   merged: 0,
   ended: 0,
-  relationsFormed: 0,
+  allianceFormed: 0,
+  allianceEnded: 0,
+  rivalryFormed: 0,
+  rivalryEnded: 0,
+  leaderTransitionDeath: 0,
+  leaderTransitionTransferred: 0,
+  leaderTransitionOtherUnavailable: 0,
+  invalidLeaderTransitionFacts: 0,
+  replayDistributionExact: 0,
+  resumeDistributionExact: 0,
   projectionChecks: 0,
   capitalPulseChecks: 0,
   spatialRootChecks: 0,
@@ -1129,8 +1964,12 @@ const aggregate = samples.reduce((sum, sample) => ({
   ledgerGroundedCourtSituations: 0,
 });
 
+const longRun = aggregateLongRunMetrics(samples.map((sample) => sample.longRun));
+
 if (aggregate.formed === 0) fail('aggregate', '固定样本没有建立任何权威派系');
-if (aggregate.relationsFormed === 0) fail('aggregate', '固定样本没有形成任何有 Fact 的派系关系');
+if (aggregate.allianceFormed + aggregate.rivalryFormed === 0) {
+  fail('aggregate', '固定样本没有形成任何有 Fact 的派系关系');
+}
 if (aggregate.projectionChecks === 0) fail('aggregate', '没有执行任何朝堂投影真实性检查');
 if (aggregate.capitalPulseChecks === 0) fail('aggregate', '没有核验任何首都朝局脉搏');
 if (aggregate.spatialRootChecks === 0) fail('aggregate', '固定样本没有形成任何可核验的空间权势根基');
@@ -1138,17 +1977,47 @@ if (aggregate.courtActions === 0) fail('aggregate', '固定样本没有形成任
 if (aggregate.courtSituations === 0) fail('aggregate', '固定样本没有形成任何朝堂权斗Situation');
 if (aggregate.linkedCourtActions === 0) fail('aggregate', '没有朝堂行动Fact进入同政权Situation因果链');
 if (aggregate.ledgerGroundedCourtSituations === 0) fail('aggregate', '没有朝堂Situation由至少两类POL01权势根基支撑');
+if (longRun.power.outOfRange > 0) fail('aggregate', `权势账有${longRun.power.outOfRange}次越出0..100`);
+if (longRun.power.cacheMismatches > 0) fail('aggregate', `权势cache有${longRun.power.cacheMismatches}次不精确`);
+if (longRun.visibility.dominantMissing > 0 || longRun.visibility.highPowerMissing > 0) {
+  fail('aggregate', `首屏遗漏主导派${longRun.visibility.dominantMissing}次、>=60派${longRun.visibility.highPowerMissing}次`);
+}
+if (longRun.spatialRoots.falseRoots > 0) fail('aggregate', `存在${longRun.spatialRoots.falseRoots}个伪空间根基观测`);
+if (longRun.leaders.invalid > 0) fail('aggregate', `存在${longRun.leaders.invalid}次死亡/转籍/失效活动领袖观测`);
+if (aggregate.invalidLeaderTransitionFacts > 0) {
+  fail('aggregate', `存在${aggregate.invalidLeaderTransitionFacts}条不完整领袖更替 Fact`);
+}
+// Split, merge and rivalry are sparse emergent outcomes. POL08 reports their
+// exact distribution below but deliberately sets no minimum occurrence gate.
 
 console.log(JSON.stringify({
-  phase: 'POL02-POL06 political identity, court, map and struggle gate',
+  phase: 'POL02-POL08 political identity, visibility and long-run truthfulness gate',
+  policy: {
+    hardTruthfulness: [
+      'POL01 ledger total outside 0..100 or active FactionState.power cache mismatch',
+      'dominant or real power >=60 active faction absent from first-screen court projection',
+      'spatial root without authoritative governor/army commander/fleet commander backing',
+      'dead, transferred or otherwise invalid leader retained by an active faction',
+      'malformed lifecycle/relation evidence or direct/replay/resume distribution digest drift',
+    ],
+    observationalOnly: [
+      'power=100 and power>=98 saturation counts',
+      'single-faction and local-faction governor monopoly rates',
+      'leader-change cause counts',
+      'formed/leader_changed/split/merged/ended and alliance/rivalry distributions',
+    ],
+  },
   scope: {
     profiles: profiles.map((profile) => `${profile.id}@${profile.revision}`),
     seeds,
+    mode: auditMode,
     turnsPerWorld: turns,
     resume: `${splitTurn}+${turns - splitTurn}`,
     validationInterval: VALIDATION_INTERVAL,
+    optionalDeep: `--deep[=${MINIMUM_DEEP_TURNS}..${MAXIMUM_DEEP_TURNS}] (default ${DEFAULT_DEEP_TURNS})`,
   },
   aggregate,
+  longRun,
   samples,
   failures,
 }, null, 2));

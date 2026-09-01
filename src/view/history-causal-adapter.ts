@@ -8,6 +8,7 @@ import {
   region,
   uniqueArchiveLinks,
 } from './dossier-adapter-shared';
+import { projectHistoryEventPoliticalFocus } from './political-focus';
 
 function tone(category: EventCategory, kind: string): ChronicleTone {
   if (kind.includes('继承') || kind.includes('即位') || kind.includes('建国')) return 'succession';
@@ -144,6 +145,7 @@ export function toCausalEvent(world: WorldState, item: HistoryEvent): CausalEven
     title: item.title,
     summary: item.summary,
     factors,
+    politicalFocus: projectHistoryEventPoliticalFocus(world, item),
     subjects: uniqueArchiveLinks([
       ...item.actorIds.map((id) => {
         const actor = character(world, id);
@@ -165,4 +167,3 @@ export function toCausalEvent(world: WorldState, item: HistoryEvent): CausalEven
     consequence: item.stateDeltas.slice(0, 2).map((delta) => `${delta.field}：${String(delta.before)} → ${String(delta.after)}`).join('；'),
   };
 }
-

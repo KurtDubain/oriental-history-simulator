@@ -1,7 +1,7 @@
 {
   "name": "oriental-history-simulator",
   "private": true,
-  "version": "1.18.0",
+  "version": "1.19.0",
   "type": "module",
   "engines": {
     "node": ">=20 <23",
@@ -44,6 +44,7 @@
     "test:audit:agency-intent": "vite-node scripts/phase-c-intent-audit.ts",
     "test:audit:power-narrative": "vite-node scripts/power-narrative-audit.ts",
     "test:audit:politics": "vite-node scripts/politics-audit.ts",
+    "test:audit:politics:deep": "vite-node scripts/politics-audit.ts --deep",
     "test:audit:local-governance": "vite-node scripts/local-governance-audit.ts",
     "test:audit:maps": "vite-node scripts/map-profile-audit.ts",
     "test:audit:archive": "vite-node scripts/archive-capacity-audit.ts",
