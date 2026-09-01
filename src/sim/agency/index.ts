@@ -47,6 +47,7 @@ export {
 
 export {
   EMBODIED_ACTION_KINDS,
+  EMBODIED_COURT_ACTION_KINDS,
   EMBODIED_IDENTITY_ACTION_KINDS,
   EMBODIED_LOCAL_GOVERNANCE_ACTION_KINDS,
   EMBODIED_MILITARY_ACTION_KINDS,
@@ -54,6 +55,14 @@ export {
   projectEmbodiedActions,
   resolveEmbodiedAction,
 } from './embodiment';
+
+export {
+  embodiedCommandsMatch,
+  isEmbodiedIdentityAction,
+  mergeEmbodiedQueueCandidate,
+  resolveEmbodiedIdentityEnvelope,
+  submitEmbodiedIdentityAction,
+} from './embodied-identity';
 
 export {
   LOCAL_GOVERNANCE_ACTION_COOLDOWN_TURNS,
@@ -64,6 +73,14 @@ export {
   projectEmbodiedLocalGovernanceActions,
 } from './embodied-governance';
 
+export {
+  courtAllianceIdentityFromCommand,
+  isEmbodiedCourtAction,
+  projectEmbodiedCourtAction,
+} from './embodied-court';
+
+export type { EmbodiedCourtAllianceRequest } from './embodied-court';
+
 export type {
   EmbodiedActionCommand,
   EmbodiedActionKind,
@@ -72,6 +89,13 @@ export type {
   EmbodiedActionTurnContext,
   EmitEmbodiedActionEvent,
 } from './embodiment';
+
+export type {
+  EmbodiedIdentityActionKind,
+  EmbodiedIdentityResolutionInput,
+  EmbodiedIdentityResolvedFactInput,
+  EmbodiedIdentitySubmittedFactInput,
+} from './embodied-identity';
 
 export type {
   AgencyDecisionEventInput,

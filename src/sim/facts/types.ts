@@ -310,7 +310,8 @@ export type EmbodiedActionFactKind =
   | 'request_backing'
   | 'request_independent_command'
   | 'open_granary'
-  | 'reduce_levy';
+  | 'reduce_levy'
+  | 'form_court_alliance';
 export type EmbodiedActionTargetKind = 'character' | 'faction' | 'army' | 'region';
 export type EmbodiedActionOutcome = 'succeeded' | 'deferred' | 'refused' | 'invalidated';
 

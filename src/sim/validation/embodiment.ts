@@ -62,7 +62,16 @@ export function validateRuntimeEmbodiedActions(
       && domain.payload.actorId === resolution.payload.actorId
       && domain.payload.action === resolution.payload.action
       && domain.payload.regionId === resolution.payload.targetId;
-    if (!matchingSupport && !matchingIntent && !matchingLocalGovernance) {
+    const matchingCourtAlliance = domain?.kind === 'faction_relation_changed'
+      && resolution.payload.action === 'form_court_alliance'
+      && resolution.payload.targetKind === 'faction'
+      && domain.payload.relation === 'alliance'
+      && domain.payload.action === 'formed'
+      && domain.payload.reasonCode === 'court_support_exchange'
+      && domain.payload.leftLeaderId === resolution.payload.actorId
+      && domain.payload.rightFactionId === resolution.payload.targetId
+      && resolution.polityIds.includes(domain.payload.polityId);
+    if (!matchingSupport && !matchingIntent && !matchingLocalGovernance && !matchingCourtAlliance) {
       violations.push(violation(
         'runtime.embodied-action-domain',
         `${resolution.id}没有链接同一人物与行动的领域裁决事实`,

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { mergeEmbodiedQueueCandidate } from './embodied-military';
+import { mergeEmbodiedQueueCandidate } from './embodied-identity';
 
 describe('embodied military queue boundary', () => {
   it('replaces an actor autonomous proposal without granting queue priority', () => {

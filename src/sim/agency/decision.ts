@@ -17,13 +17,18 @@ import {
 import {
   embodiedCommandsMatch,
   isEmbodiedIdentityAction,
-  isEmbodiedMilitaryAction,
   mergeEmbodiedQueueCandidate,
+  resolveEmbodiedIdentityEnvelope as emitEmbodiedIdentityEnvelope,
+  submitEmbodiedIdentityAction as emitEmbodiedIdentitySubmission,
+  type EmbodiedIdentityActionKind,
+  type EmbodiedIdentityResolutionInput,
+} from './embodied-identity';
+import {
+  isEmbodiedMilitaryAction,
   projectEmbodiedMilitaryAction,
-  resolveEmbodiedIdentityEnvelope,
-  submitEmbodiedIdentityAction,
   type EmbodiedMilitaryActionCandidate,
 } from './embodied-military';
+import { isEmbodiedCourtAction, projectEmbodiedCourtAction } from './embodied-court';
 import {
   MAX_LOCAL_GOVERNANCE_ACTIONS_PER_TURN,
   compareLocalGovernanceCandidates,
@@ -1092,6 +1097,8 @@ export function projectCharacterEmbodiedActions(
       ...localGovernance,
     ];
   }
+  const court = projectEmbodiedCourtAction(world, actorId);
+  if (court) return [...generic, court];
   const actorState = world.agencyDecisionSystem.actors.find((item) => item.characterId === actorId);
   const military = actorState ? embodiedMilitaryActionFor(world, actorState) : null;
   return military ? [...generic, military.projection] : generic;
@@ -1533,6 +1540,38 @@ export function createAgencyDecisionSystemState(reviewedThroughTurn = -1): Agenc
   return { version: 1, reviewedThroughTurn, actors: [] };
 }
 
+function submitEmbodiedIdentityAction(
+  world: WorldState,
+  context: FactTurnBuffer,
+  command: EmbodiedActionCommand,
+  option: EmbodiedActionProjection | null,
+): Extract<SimulationFact, { kind: 'embodied_action_submitted' }> {
+  return emitEmbodiedIdentitySubmission(
+    world,
+    command as EmbodiedActionCommand & { kind: EmbodiedIdentityActionKind },
+    option,
+    (input) => emitSimulationFact(world, context, input) as Extract<SimulationFact, { kind: 'embodied_action_submitted' }>,
+  );
+}
+
+function resolveEmbodiedIdentityEnvelope(
+  world: WorldState,
+  context: FactTurnBuffer,
+  command: EmbodiedActionCommand,
+  option: EmbodiedActionProjection | null,
+  submission: Extract<SimulationFact, { kind: 'embodied_action_submitted' }>,
+  result: EmbodiedIdentityResolutionInput,
+): Extract<SimulationFact, { kind: 'embodied_action_resolved' }> {
+  return emitEmbodiedIdentityEnvelope(
+    world,
+    command as EmbodiedActionCommand & { kind: EmbodiedIdentityActionKind },
+    option,
+    submission,
+    result,
+    (input) => emitSimulationFact(world, context, input) as Extract<SimulationFact, { kind: 'embodied_action_resolved' }>,
+  );
+}
+
 /**
  * Reviews persistent goals, fills a turn-local intent buffer, and resolves every
  * intent before returning. It never reads Chronicle or observer state.
@@ -1551,6 +1590,7 @@ export function processAgencyDecisionSystem(
   const actorById = new Map(actors.map((actor) => [actor.characterId, actor]));
   const requested = context.embodiedActionCommand;
   const identityRequested = isEmbodiedIdentityAction(requested);
+  const courtIdentityRequested = isEmbodiedCourtAction(requested);
   const militaryIdentityRequested = isEmbodiedMilitaryAction(requested);
   const localIdentityRequested = isEmbodiedLocalGovernanceAction(requested);
   let embodiedActorId: string | null = null;
@@ -1559,7 +1599,27 @@ export function processAgencyDecisionSystem(
   let playerSupportAction: AgencySupportTurnAction | null = null;
   let playerIntent: AgencyTurnIntent | null = null;
   let playerLocalGovernance: LocalGovernanceActionCandidate | null = null;
-  if (identityRequested && militaryIdentityRequested) {
+  if (identityRequested && courtIdentityRequested) {
+    embodiedActorId = world.characters.some((item) => item.id === requested.actorId) ? requested.actorId : null;
+    const alreadyHandled = world.facts.some((fact) => (
+      fact.turn === context.turn
+      && fact.kind === 'embodied_action_submitted'
+      && fact.payload.actionId === requested.actionId
+    ));
+    if (!alreadyHandled) {
+      const projected = projectEmbodiedCourtAction(world, requested.actorId);
+      identityOption = projected && embodiedCommandsMatch(projected.command, requested) ? projected : null;
+      identitySubmission = submitEmbodiedIdentityAction(world, context, requested, identityOption);
+      resolveEmbodiedIdentityEnvelope(world, context, requested, identityOption, identitySubmission, {
+        outcome: 'invalidated',
+        reasonCode: 'conditions_changed',
+        score: 0,
+        threshold: 0,
+        summary: '这项议约没有进入本季朝中裁决，未产生任何朝局变化。',
+        domainFact: null,
+      });
+    }
+  } else if (identityRequested && militaryIdentityRequested) {
     embodiedActorId = world.characters.some((item) => item.id === requested.actorId) ? requested.actorId : null;
     const actorState = actorById.get(requested.actorId);
     const candidate = actorState ? embodiedMilitaryActionFor(world, actorState) : null;

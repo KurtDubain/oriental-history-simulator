@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.20.0',
+    date: '2026-09-01',
+    title: '朝臣入局，一诺成盟',
+    items: [
+      '冬季代入一位在中枢任职、又亲自领导派系的朝臣，可在“所图”中与本国另一派交换来年朝中支持。',
+      '同一政权每季至多议成一项盟约；若朝局先变或本季已有结盟，决定会如实留待后议或失效，不产生额外好处。',
+      '议约成事后会留下联盟承诺、双方恩义、人物传记、个人记忆、权势变化与同一条可追溯史事。',
+    ],
+  },
+  {
     version: '1.19.0',
     date: '2026-09-01',
     title: '朝局一脉，权势可寻',

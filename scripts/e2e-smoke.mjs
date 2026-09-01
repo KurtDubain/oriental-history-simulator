@@ -372,6 +372,79 @@ async function advanceTo(page, turn) {
   return current;
 }
 
+async function exerciseEmbodiedCourtMobile(browser) {
+  const context = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 3,
+  });
+  const page = await context.newPage();
+  const errors = [];
+  collectBrowserErrors(page, errors);
+  try {
+    await openFreshWorld(page, '朝臣议事');
+    await page.locator('[data-map-primer-skip]').click();
+    await dismissAudioInvitationIfVisible(page);
+    const winter = await advanceTo(page, 3);
+    assert.equal(winter.time.season, '冬', '朝臣议事验收必须在自然推进到冬季后进行');
+
+    await page.click('button[data-observer-view="people"]');
+    await page.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
+    await page.getByLabel('检索时人群像').fill('李行简');
+    await page.locator('.roster-panel button[data-roster-id="c_014"]').click();
+    const selected = await waitForSnapshot(page, (state) => (
+      state.interface.selected?.kind === 'person'
+      && state.interface.selected.id === 'c_014'
+    ));
+    assert.equal(selected.interface.selectedDetail.name, '李行简', '冻结种子应稳定定位朝臣派系领袖');
+
+    await page.getByRole('button', { name: '以此人入世' }).click();
+    const panel = page.locator('[data-testid="embodiment-actions"]');
+    await panel.waitFor();
+    const entered = await snapshot(page);
+    const courtActions = entered.observer.embodiment.actions.filter((action) => (
+      action.identityLabel === '朝臣议事'
+    ));
+    assert.equal(entered.observer.embodiment.actions.length, 4, '朝臣派系领袖应保留三项通用行动与一项朝臣行动');
+    assert.equal(courtActions.length, 1, '人物档案只应出现一项明确的朝臣议事行动');
+    assert.equal(courtActions[0].label, '交换朝中支持');
+    assert.equal(courtActions[0].available, true, '冻结种子的冬季朝议应可提交');
+
+    const actionButton = panel.locator('button[data-embodied-action-kind="form_court_alliance"]:not(:disabled)');
+    assert.equal(await actionButton.count(), 1, '朝臣领域行动应有唯一稳定点击目标');
+    await actionButton.scrollIntoViewIfNeeded();
+    await waitForVisualSettled(page.locator('.observer-inspector'));
+    await assertWithinViewport(page, '.observer-inspector', '移动端朝臣议事不可横向溢出');
+    await assertUnobstructedTapTarget(actionButton, '移动端朝臣议事按钮');
+    await page.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-court-action-390x844.png`, fullPage: true });
+
+    await actionButton.click();
+    const queued = await waitForSnapshot(page, (state, actionId) => (
+      state.observer.embodiment.pending?.actionId === actionId
+    ), courtActions[0].actionId);
+    assert.equal(queued.deterministicWorldHash, entered.deterministicWorldHash, '朝臣议事排队不得提前修改世界');
+
+    const settled = await advanceOneQuarter(page);
+    assert.equal(settled.observer.embodiment.pending, null, '季度推进必须唯一消费朝臣议事');
+    const result = page.locator('.observer-embodiment-result');
+    await result.waitFor();
+    assert.equal(await result.count(), 1, '朝臣议事提交后只应展示一次裁决结果');
+    assert.equal(await result.getAttribute('data-outcome'), 'succeeded', '冻结自然路径应由同一朝局裁决成功');
+    assert.match(await result.textContent(), /上次结果.*(朝中支持|结成同盟|朝局)/s);
+    assert.equal(
+      settled.interface.selectedDetail.biography.filter((item) => item.factId && /政治联盟/.test(item.kind)).length,
+      1,
+      '同一次朝臣议事只应写入一条领域传记',
+    );
+    await result.scrollIntoViewIfNeeded();
+    await page.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-court-result-390x844.png`, fullPage: true });
+    assert.deepEqual(errors, []);
+  } finally {
+    await context.close();
+  }
+}
+
 function assertChineseSituationCopy(value, message) {
   assert.equal(typeof value, 'string', message);
   assert.match(value, /[\p{Script=Han}]/u, message);
@@ -1913,6 +1986,8 @@ try {
   assert.match(governanceHistory.interface.selectedEvent.summary, /(开仓|赈济|减免|减赋|赋款)/);
   assert.deepEqual(governanceErrors, []);
   await governanceContext.close();
+
+  await exerciseEmbodiedCourtMobile(browser);
 
   const mobileContext = await browser.newContext({
     viewport: { width: 390, height: 844 },

@@ -1,4 +1,5 @@
 import {
+  EMBODIED_COURT_ACTION_KINDS,
   EMBODIED_LOCAL_GOVERNANCE_ACTION_KINDS,
   EMBODIED_MILITARY_ACTION_KINDS,
   projectCharacterEmbodiedActions,
@@ -10,6 +11,7 @@ import type { EmbodimentClosure } from './embodiment-observer';
 
 export interface PersonEmbodiedActionView {
   actionId: string;
+  kind: EmbodiedActionKind;
   identityLabel?: string | null;
   label: string;
   targetLabel: string;
@@ -65,7 +67,7 @@ export interface EmbodimentTextSnapshotView {
   } | null;
   actions: readonly Pick<
     PersonEmbodiedActionView,
-    'actionId' | 'identityLabel' | 'label' | 'targetLabel' | 'available' | 'unavailableReason'
+    'actionId' | 'kind' | 'identityLabel' | 'label' | 'targetLabel' | 'available' | 'unavailableReason'
   >[];
 }
 
@@ -82,12 +84,16 @@ export function embodiedActionIdentityLabel(kind: EmbodiedActionKind): string | 
   if (EMBODIED_LOCAL_GOVERNANCE_ACTION_KINDS.includes(kind as (typeof EMBODIED_LOCAL_GOVERNANCE_ACTION_KINDS)[number])) {
     return '地方施政';
   }
+  if (EMBODIED_COURT_ACTION_KINDS.includes(kind as (typeof EMBODIED_COURT_ACTION_KINDS)[number])) {
+    return '朝臣议事';
+  }
   return null;
 }
 
 function projectActionViews(world: WorldState, characterId: string): PersonEmbodiedActionView[] {
   return projectCharacterEmbodiedActions(world, characterId).map((item) => ({
     actionId: item.command.actionId,
+    kind: item.command.kind,
     identityLabel: embodiedActionIdentityLabel(item.command.kind),
     label: item.label,
     targetLabel: item.targetLabel,
@@ -192,6 +198,7 @@ export function projectEmbodimentTextSnapshot(
     } : null,
     actions: actions.map((action) => ({
       actionId: action.actionId,
+      kind: action.kind,
       identityLabel: action.identityLabel,
       label: action.label,
       targetLabel: action.targetLabel,

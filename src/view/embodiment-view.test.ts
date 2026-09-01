@@ -9,6 +9,7 @@ import {
   type WorldState,
 } from '../sim';
 import {
+  embodiedActionIdentityLabel,
   projectEmbodimentTextSnapshot,
   projectPersonEmbodimentView,
 } from './embodiment-view';
@@ -23,6 +24,10 @@ function playableAction(world: WorldState): EmbodiedActionCommand {
 }
 
 describe('embodiment view projection boundary', () => {
+  it('uses player-facing role labels for court business', () => {
+    expect(embodiedActionIdentityLabel('form_court_alliance')).toBe('朝臣议事');
+  });
+
   it('keeps the dossier and text snapshot on one pure action projection', () => {
     const world = createWorld('入世视图单一投影');
     const command = playableAction(world);
@@ -34,6 +39,7 @@ describe('embodiment view projection boundary', () => {
     const snapshot = projectEmbodimentTextSnapshot(world, actor.id, command, null);
     const dossierSummary = dossier.actions.map((action) => ({
       actionId: action.actionId,
+      kind: action.kind,
       identityLabel: action.identityLabel,
       label: action.label,
       targetLabel: action.targetLabel,

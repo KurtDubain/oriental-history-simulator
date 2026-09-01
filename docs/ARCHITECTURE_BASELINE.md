@@ -1,13 +1,13 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，v1.19.0 更新于 2026-09-01，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.20.0 更新于 2026-09-01，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
-- `src` 下生产 TypeScript / TSX：155 个文件，62,061 行（测试排除）。
-- 相对模块依赖：578 条，其中 358 条 runtime、220 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环。
+- `src` 下生产 TypeScript / TSX：159 个文件，63,010 行（测试排除）。
+- 相对模块依赖：597 条，其中 373 条 runtime、224 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环，正好落在 12/12 的不增长预算内。
 - 当前热点：`engine.ts` 3,120/3,120 行、`invariants.ts` 2,642/2,665 行、`App.tsx` 2,563/2,600 行（实际/门禁）。
-- 其次为 `v02.ts` 2,321 行、`agency/decision.ts` 1,961 行、`v03-ocean.ts` 1,951 行、`v1-agency-shadow.ts` 1,479 行。`WorldMap.tsx` 为 1,088/1,100 行，仍由已拆分的 Scene / renderer / gesture 契约支撑；`view/adapters.ts` 为 53/100 行。
+- 其次为 `v02.ts` 2,481 行、`agency/decision.ts` 2,021 行、`v03-ocean.ts` 1,951 行、`v1-agency-shadow.ts` 1,479 行、`Inspector.tsx` 1,396 行。`WorldMap.tsx` 为 1,088/1,100 行，仍由已拆分的 Scene / renderer / gesture 契约支撑；`view/adapters.ts` 为 53/100 行。
 
 行数是增长预警，不是机械拆文件指标。新增领域规则不得再默认进入四个最高热点；只有形成稳定输入、输出和所有权后才拆分。
 
@@ -95,3 +95,19 @@ WorldState 显式人物归属 / 家族在朝支点 / Fact / Situation participan
 - 地图 catalog 不再编入浏览器 maps chunk，而是按 allowlist 写入 HTML `application/json` 数据节点。`<`、U+2028 与 U+2029 在构建时转义，registry 解析后仍执行完整 profile validation 和深冻结。参赛产物仅含 `contest-v01`，328 项私人令牌扫描与模块图隔离继续作为硬门。
 - 实测个人/参赛 `maps` chunk gzip 均为 2,822 bytes；无反向运行依赖的 `sim/politics` 另成 41,728-byte 缓存边界，使主 simulation chunk 从 597,260 降至 555,770 bytes，不再只剩约 1.8 KiB 的单文件余量。总 JavaScript gzip 为 416,511 / 416,421 bytes，CSS gzip 均为 39,796 bytes，原预算不放宽。HTML 载荷会增加少量压缩传输体积，本次优化的明确目标是降低 JavaScript 解析/执行并恢复单文件工程余量，不宣称总下载量减少。
 - 最终架构门为 155 个生产文件 / 62,061 行 / 358 runtime + 220 type-only imports，0 runtime cycle、0 跨层违例；`App.tsx` 与 `WorldMap.tsx` 分别为 2,563/2,600 与 1,088/1,100 行。
+
+## v1.20.0 朝臣身份与政治结盟边界
+
+```text
+人物“所图”纯投影（embodied-court）
+  → EmbodiedActionCommand（exact actor + target faction）
+    → 朝局单席候选队列（court-alliance-actions）
+      → 原 faction relation 领域裁决
+        → faction_relation_changed
+          → 承诺 / 双向恩义 / 传记 / PersonalMemory / 权势账 / Chronicle
+```
+
+- `court-alliance-contract.ts` 只拥有结盟门槛、期限与每政权单席容量；`court-alliance-actions.ts` 拥有自然候选发现、精确对象重验、稳定排序、容量仲裁和唯一领域写入。玩家命令没有另一套成功率、排序权或状态写入路径。
+- `embodied-court.ts` 只读人物身份、官职与精确派系 ID，负责展示和把命令重建为领域候选；`embodied-identity.ts` 收拢各身份行动共用的提交/结果信封。角色结果的 `stateDeltas` 保持为空，只以 `domainFactId` 反链原 `faction_relation_changed`。
+- 请求过季、跨政权、派系退场、领袖更替或条件不足时，领域裁决不产生差量；同政权单席竞争落选只生成留待后议结果。成功后，政治联盟承诺与双方恩义继续由原政治领域持有，不在 Agency 层复制第二份联盟状态。
+- 两个固定种子的十二季无玩家 world hash、Fact digest 与 History digest 与 v1.19.0 逐字一致；新增身份路径不会改写普通世界自行演化的顺序。当前 AST 门为 159 个生产文件 / 63,010 行 / 373 runtime + 224 type-only imports，0 runtime cycle、0 跨层违例，type-only 契约环保持 12/12。

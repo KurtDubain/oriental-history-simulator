@@ -22,6 +22,8 @@ Current Phase B request: 在已完成 B01/B03 军权纵切的基础上完成 B04
 
 Current v1.19 request: POL07/POL08 收口政治观察链；首都印记、人物、家族、史事与 Situation 需精确进入同一派系，已退场派系不得假回退，并以长纪年权势分布、首屏可见、真实根基、领袖更替与分合审计完成政治纵切。
 
+Current v1.20 request: 完成一个克制的朝臣 EMB05/EMB06 小纵切；冬季允许真实在朝任职且领导活动派系的朝臣“交换朝中支持”，玩家与自然朝局共用 exact faction 单席队列和原政治结盟裁决，成功后进入承诺、关系、传记、个人记忆、权势账与史册。用户明确 v1.20.0 完成后暂停，不自动继续下一阶段。
+
 ## Product thesis
 
 - Visual thesis: 墨色舆图 × 朱砂史册；暖纸底、炭墨信息、单一朱砂交互色，像一座可操作的历史观测台。
@@ -302,3 +304,8 @@ Current v1.19 request: POL07/POL08 收口政治观察链；首都印记、人物
 - 2026-09-01 v1.19.0 map payload boundary: 个人/参赛构建按 allowlist 把地图 profile 安全写入 HTML `application/json`，浏览器 registry 同步校验与冻结；参赛 HTML 只含 `contest-v01`，两种产物的主 JavaScript 均不再含 profile payload。`maps` chunk gzip 降至 2,822 bytes，政治领域另成 41,728-byte 缓存边界，主 simulation chunk 从 597,260 降至 555,770 bytes；个人/参赛 JavaScript gzip 总量为 416,511 / 416,421 bytes，CSS 均为 39,796 bytes。HTML 载荷会小幅增加总传输，本优化只宣称降低 JS 解析/执行与恢复单文件工程余量。架构门为 155 files / 62,061 lines / 358 runtime + 220 type-only imports，0 cycle、0 violation；`App.tsx` 2,563/2,600，`WorldMap.tsx` 1,088/1,100。
 - 2026-09-01 v1.19.0 POL08 truthfulness close: 默认 64 季审计保持发布门时长，新增手动 `--deep=160..256`。硬门只拒绝权势账越界/缓存不精确、主导或权势≥60派首屏遗漏、无领域 owner 的地图根基、死亡/转籍/失效活动领袖、生命周期 Fact 错误与重放/续推分叉。release 4 局 / 256 季核对 9,676 份 ledger、265 个政权首屏、22,111 个根基观察和 9,676 次活动领袖观察，全部 0 failure；deep 4 局 / 640 季自然产生 split 4、merge 1、rivalry 4/1 与 147 次领袖更替，4/4 重放与 4/4 80+80 续推 digest 精确。`=100/≥98`、地方官垄断率、分合和关系数都只统计不设平衡阈值；本轮未修改模拟数值。
 - 2026-09-01 v1.19.0 release gate: 完整 `npm run test:release` 无中断全绿；终审发现并修复“精确目标派系退场后静默回退主导派”的 observer-only 边界，随后在最终代码上重跑 91 files / 579 tests、严格 TypeScript、架构门、个人/参赛双构建及政治六视口 E2E，全部通过。个人/参赛 JS gzip 为 416,511 / 416,421 bytes，CSS 均为 39,796 bytes；地图 payload 隔离 328 项私人标记。Phase A/B/C、Agency、政治、地方治理、双地图、百年冷热史与 V0.3 审计均 0 failure；MAP05 的 320 季 P95 104.870ms 且 31+49 续推精确，T400 为 21 卷 / 11.564MiB / 首屏 0.339ms，V0.3 的 320 季 P95 112.713ms、最大存档 8.735MiB。
+- 2026-09-01 v1.20.0 court identity slice: 符合条件的朝臣必须存活成年、不是君主、实际担任宰辅/枢密使/廷臣中枢官职，并精确领导同国活动派系；人物“所图”在冬季投影“交换朝中支持”，只指向同国另一支活动派系。玩家候选与原自然朝局候选进入同一政权单席队列，使用同一排序、门槛和 `faction_relation_changed` 领域结盟裁决，没有玩家加分、优先权或资源豁免。
+- 2026-09-01 v1.20.0 causal close: 成功议约由同一个领域 Fact 形成最长 16 季的政治联盟承诺，写入双方“恩义”关系记忆、人物传记、玩家 PersonalMemory、派系权势账与 Chronicle；入世结果只反链领域 Fact，`stateDeltas` 为空。跨政权、派系退场、领袖更替、过季或其他条件失效均零领域差量；同政权单席竞争落选记为留待后议，不改选另一目标。
+- 2026-09-01 v1.20.0 focused regression: 两个固定种子分别连续推进 12 季，无玩家命令时的 world hash、Fact digest 与 History digest 与 v1.19.0 基线逐字一致；自然冬季世界可发现这项朝臣行动。架构扫描为 159 个生产文件 / 63,010 行 / 373 runtime + 224 type-only imports，0 runtime cycle、0 跨层违例，type-only 契约环为 12/12 模块预算。完整发布门与浏览器总数在最终验收后另记，本条不预报未完成数字。
+- 2026-09-01 v1.20.0 release gate: 完整 `npm run test:release` 无中断全绿：94 files / 598 tests；个人/参赛双构建 JavaScript gzip 为 420,094 / 419,968 bytes，CSS 均为 39,796 bytes，版本、地图载荷隔离与包体预算通过。主试玩新增自然冬季朝臣议事的 390px 路径，连同移动地图、设置、季度节奏、名录、人物关系、政治六场、双地图六场和参赛缺图保护全部通过。Phase A/B/C、Agency、观察连续性、行动意图、权势叙事、政治、地方治理、双地图、百年冷热史与 V0.3 审计均为 0 failure；MAP05 的 320 个基准季度 P95 109.831ms 且 31+49 续推精确，T400 为 21 卷 / 11.564MiB / 首屏 0.402ms，V0.3 的 320 季 P95 111.25ms、最大存档 8.735MiB。发布前只读终审无 P0/P1，最终架构数字已与扫描同步。
+- 2026-09-01 v1.20.0 work boundary: EMB05/EMB06 的朝臣小纵切标记完成；家主、君主与三项通用行动的总任务仍保持开放。按用户最新决定，本版完成最终发布验收后暂停，不接着启动 C14/C15 或其他 Roadmap 项。

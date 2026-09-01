@@ -8,24 +8,21 @@ import type {
   StateDelta,
   WorldState,
 } from '../types';
+import {
+  createEmbodiedCommand,
+  EMBODIED_IDENTITY_ACTION_KINDS,
+} from './embodied-identity';
+
+export {
+  EMBODIED_COURT_ACTION_KINDS,
+  EMBODIED_IDENTITY_ACTION_KINDS,
+} from './embodied-identity';
 
 export const EMBODIED_ACTION_KINDS = [
   'strengthen_relationship',
   'seek_opportunity',
   'declare_stance',
-  'cultivate_military_support',
-  'request_backing',
-  'request_independent_command',
-  'open_granary',
-  'reduce_levy',
-] as const;
-
-export const EMBODIED_IDENTITY_ACTION_KINDS = [
-  'cultivate_military_support',
-  'request_backing',
-  'request_independent_command',
-  'open_granary',
-  'reduce_levy',
+  ...EMBODIED_IDENTITY_ACTION_KINDS,
 ] as const;
 
 export const EMBODIED_MILITARY_ACTION_KINDS = [
@@ -94,16 +91,6 @@ function directedRelationship(world: WorldState, sourceId: string, targetId: str
   return world.relationships.find((item) => item.sourceId === sourceId && item.targetId === targetId);
 }
 
-function actionId(
-  world: WorldState,
-  actorId: string,
-  kind: EmbodiedActionKind,
-  targetId: string,
-  stance: EmbodiedActionStance,
-): string {
-  return `emb_${stableHash([world.seed, world.turn, actorId, kind, targetId, stance, 'embodied-action-v1']).slice(0, 14)}`;
-}
-
 export function createEmbodiedActionCommand(
   world: WorldState,
   actorId: string,
@@ -112,15 +99,7 @@ export function createEmbodiedActionCommand(
   targetId: string,
   stance: EmbodiedActionStance = null,
 ): EmbodiedActionCommand {
-  return {
-    actionId: actionId(world, actorId, kind, targetId, stance),
-    issuedTurn: world.turn,
-    actorId,
-    kind,
-    targetKind,
-    targetId,
-    stance,
-  };
+  return createEmbodiedCommand(world.seed, world.turn, actorId, kind, targetKind, targetId, stance);
 }
 
 function characterTargetCandidates(world: WorldState, actor: CharacterState): CharacterState[] {
@@ -345,13 +324,9 @@ export function resolveEmbodiedAction(
   const actor = world.characters.find((item) => item.id === requested.actorId);
   const projected = projectEmbodiedActions(world, requested.actorId);
   let option = projected.find((item) => commandMatches(item.command, requested));
-  if (!option && actor && requested.issuedTurn === context.turn && requested.actionId === actionId(
-    world,
-    requested.actorId,
-    requested.kind,
-    requested.targetId,
-    requested.stance,
-  )) {
+  if (!option && actor && requested.issuedTurn === context.turn && requested.actionId === createEmbodiedActionCommand(
+    world, requested.actorId, requested.kind, requested.targetKind, requested.targetId, requested.stance,
+  ).actionId) {
     const template = projected.find((item) => item.command.kind === requested.kind);
     const targetCharacter = requested.targetKind === 'character'
       ? world.characters.find((item) => item.id === requested.targetId && item.alive)

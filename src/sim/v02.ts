@@ -2,6 +2,19 @@ import { FAMILY_NAMES, GIVEN_NAMES } from './names';
 import { findMapProfileForContentVersion } from '../maps';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
 import { emitSimulationFact, projectFactLinks, type FactTurnBuffer } from './facts';
+import {
+  courtAllianceIdentityFromCommand,
+  isEmbodiedCourtAction,
+} from './agency/embodied-court';
+import {
+  resolveEmbodiedIdentityEnvelope,
+  submitEmbodiedIdentityAction,
+  type EmbodiedIdentityResolutionInput,
+} from './agency/embodied-identity';
+import type {
+  EmbodiedActionCommand,
+  EmbodiedActionProjection,
+} from './agency/embodiment';
 import { calculateFactionPowerLedger, refreshFactionPowerLedgers } from './politics/power-ledger';
 import {
   emitCourtActionResolvedFact,
@@ -9,11 +22,18 @@ import {
 } from './politics/court-actions';
 import {
   bootstrapFactionModel,
-  changeFactionRelation,
   expelFactionMembers,
   invalidatePoliticalAllianceCommitment,
   processFactionLifecycle,
 } from './politics/faction-lifecycle';
+import {
+  COURT_ALLIANCE_COMBINED_COHESION_THRESHOLD,
+  buildCourtAllianceActionQueue,
+  courtAllianceCandidateFor,
+  discoverCourtAllianceCandidates,
+  resolveCourtAllianceAction,
+  type CourtAllianceCandidate,
+} from './politics/court-alliance-actions';
 import {
   firstPoliticalAllianceEndFact,
   legacyPoliticalAllianceRelationIsActive,
@@ -47,6 +67,7 @@ interface V02TurnContext {
   season: Season;
   events: HistoryEvent[];
   facts: SimulationFact[];
+  embodiedActionCommand?: EmbodiedActionCommand | null;
   appointmentSourceFactIdsByArmyId?: Record<string, string>;
 }
 
@@ -71,6 +92,50 @@ interface V02EventInput {
 }
 
 type EmitEvent = (input: V02EventInput) => HistoryEvent;
+
+function submitEmbodiedCourtAction(
+  world: WorldState,
+  context: FactTurnBuffer,
+  command: EmbodiedActionCommand & { kind: 'form_court_alliance' },
+  option: EmbodiedActionProjection | null,
+): Extract<SimulationFact, { kind: 'embodied_action_submitted' }> {
+  return submitEmbodiedIdentityAction(
+    world,
+    command,
+    option,
+    (input) => emitSimulationFact(world, context, input) as Extract<SimulationFact, { kind: 'embodied_action_submitted' }>,
+  );
+}
+
+function resolveEmbodiedCourtEnvelope(
+  world: WorldState,
+  context: FactTurnBuffer,
+  command: EmbodiedActionCommand & { kind: 'form_court_alliance' },
+  option: EmbodiedActionProjection | null,
+  submission: Extract<SimulationFact, { kind: 'embodied_action_submitted' }>,
+  result: EmbodiedIdentityResolutionInput,
+): Extract<SimulationFact, { kind: 'embodied_action_resolved' }> {
+  return resolveEmbodiedIdentityEnvelope(
+    world,
+    command,
+    option,
+    submission,
+    result,
+    (input) => emitSimulationFact(world, context, input) as Extract<SimulationFact, { kind: 'embodied_action_resolved' }>,
+  );
+}
+
+function courtAllianceRequestFromCommand(
+  world: WorldState,
+  context: V02TurnContext,
+  command: EmbodiedActionCommand & { kind: 'form_court_alliance' },
+): { option: EmbodiedActionProjection | null; candidate: CourtAllianceCandidate | null } {
+  const identity = courtAllianceIdentityFromCommand(world, command);
+  const candidate = identity.valid && identity.actorFactionId && identity.targetFactionId
+    ? courtAllianceCandidateFor(world, context, identity.actorFactionId, identity.targetFactionId)
+    : null;
+  return { option: identity.option, candidate };
+}
 
 const MAX_MEMORIES_PER_RELATIONSHIP = 8;
 const MAX_BIOGRAPHY_FACTS = 80;
@@ -1373,6 +1438,18 @@ function factionLedgerEvidence(world: WorldState, faction: FactionState): string
 
 
 export function processV02Politics(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
+  const requestedCourtAction = isEmbodiedCourtAction(context.embodiedActionCommand)
+    ? context.embodiedActionCommand
+    : null;
+  const initialCourtRequest = requestedCourtAction
+    ? courtAllianceRequestFromCommand(world, context, requestedCourtAction)
+    : null;
+  const courtSubmission = requestedCourtAction
+    ? submitEmbodiedCourtAction(world, context, requestedCourtAction, initialCourtRequest?.option ?? null)
+    : null;
+  let courtRequestResolved = false;
+  let courtRequestBlockedByPriorBusiness = false;
+
   // Capture the Fact-backed identity before lifecycle maintenance can dissolve
   // the carrier and clear CharacterState.factionId in this same quarter.
   const currentPowerBrokers = currentPowerBrokerStates(world);
@@ -1392,6 +1469,19 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       ruler.influence * 0.4 + polity.authority * 0.35 + polity.administration * 0.25 - Math.max(0, dominant.power - 55) * 0.25,
     ));
 
+    const rebuiltCourtRequest = requestedCourtAction
+      && initialCourtRequest?.candidate?.polityId === polity.id
+      ? courtAllianceRequestFromCommand(world, context, requestedCourtAction)
+      : null;
+    const liveCourtRequest = rebuiltCourtRequest?.candidate
+      && initialCourtRequest?.candidate
+      && rebuiltCourtRequest.candidate.actorFactionId === initialCourtRequest.candidate.actorFactionId
+      && rebuiltCourtRequest.candidate.targetFactionId === initialCourtRequest.candidate.targetFactionId
+      && rebuiltCourtRequest.candidate.actorId === initialCourtRequest.candidate.actorId
+      && rebuiltCourtRequest.candidate.targetId === initialCourtRequest.candidate.targetId
+      ? rebuiltCourtRequest
+      : null;
+
     const fallenBroker = world.characters
       .filter((character) => (
         character.alive && currentPowerBrokers.get(character.id)?.polityId === polity.id
@@ -1410,6 +1500,9 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       ))
       .sort((left, right) => stableCompare(left.character.id, right.character.id))[0];
     if (fallenBroker) {
+      if (liveCourtRequest?.candidate?.polityId === polity.id) {
+        courtRequestBlockedByPriorBusiness = true;
+      }
       const brokerFaction = fallenBroker.faction;
       const evidence = brokerFaction?.active
         ? factionLedgerEvidence(world, brokerFaction)
@@ -1459,26 +1552,63 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       continue;
     }
 
-    if (context.season === '冬' && factions.length >= 2) {
-      const partner = factions.find((faction) => (
-        faction.id !== dominant.id
-        && !dominant.alliedFactionIds.includes(faction.id)
-        && faction.cohesion >= 48
-      ));
-      const partnerLeader = partner
-        ? world.characters.find((character) => character.id === partner.leaderId && character.alive)
-        : undefined;
-      if (partner && partnerLeader && dominant.cohesion + partner.cohesion >= 104) {
-        const relationFact = changeFactionRelation(world, context, dominant.id, partner.id, 'alliance', 'formed', 'court_support_exchange', emit);
-        const event = relationFact
-          ? [...context.events].reverse().find((item) => item.sourceFactIds.includes(relationFact.id))
-          : undefined;
-        if (event) {
-          createCommitment(world, '政治联盟', leader.id, partnerLeader.id, [polity.id], '在朝廷议程中互相支持且不以清洗夺取盟友席位', event.id, context.turn + 16, 18);
-          remember(world, leader.id, partnerLeader.id, '恩义', 10, event.summary, event.id);
-          remember(world, partnerLeader.id, leader.id, '恩义', 10, event.summary, event.id);
-        }
-        if (relationFact) refreshFactionPowerLedgers(world, polity.id);
+    const autonomousCourtCandidates = discoverCourtAllianceCandidates(world, context, [polity.id]);
+    const playerCourtCandidate = liveCourtRequest?.candidate ?? null;
+    const courtCandidates: CourtAllianceCandidate[] = playerCourtCandidate
+      ? [
+          ...autonomousCourtCandidates.filter((candidate) => candidate.actorId !== playerCourtCandidate.actorId),
+          playerCourtCandidate,
+        ]
+      : autonomousCourtCandidates;
+    const [courtAllianceCandidate] = buildCourtAllianceActionQueue(courtCandidates);
+    if (courtAllianceCandidate) {
+      const resolution = resolveCourtAllianceAction(world, context, courtAllianceCandidate, emit, {
+        createCommitment,
+        remember,
+      });
+      if (requestedCourtAction && courtSubmission && courtAllianceCandidate === playerCourtCandidate) {
+        courtRequestResolved = true;
+        resolveEmbodiedCourtEnvelope(
+          world,
+          context,
+          requestedCourtAction,
+          initialCourtRequest?.option ?? liveCourtRequest?.option ?? null,
+          courtSubmission,
+          resolution.fact
+            ? {
+                outcome: 'succeeded',
+                reasonCode: 'accepted',
+                score: resolution.score,
+                threshold: resolution.threshold,
+                summary: `${(resolution.event?.summary ?? '双方已经议定朝中相助').replace(/[。！？!?]+$/u, '')}，这项承诺已进入朝局。`,
+                domainFact: resolution.fact,
+              }
+            : {
+                outcome: 'invalidated',
+                reasonCode: 'conditions_changed',
+                score: resolution.score,
+                threshold: resolution.threshold,
+                summary: '议约前朝中席位、派系领袖或双方关系已经变化，此事没有生效。',
+                domainFact: null,
+              },
+        );
+      } else if (requestedCourtAction && courtSubmission && playerCourtCandidate) {
+        courtRequestResolved = true;
+        resolveEmbodiedCourtEnvelope(
+          world,
+          context,
+          requestedCourtAction,
+          initialCourtRequest?.option ?? liveCourtRequest?.option ?? null,
+          courtSubmission,
+          {
+            outcome: 'deferred',
+            reasonCode: 'insufficient_support',
+            score: playerCourtCandidate.actorPower,
+            threshold: courtAllianceCandidate.actorPower,
+            summary: `${polity.shortName}本季先受理了权势更强的一项朝中议约，这项提议留待后议。`,
+            domainFact: null,
+          },
+        );
       }
     }
 
@@ -1775,6 +1905,36 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       addBiography(leader, event, '遭到清洗');
       remember(world, leader.id, ruler.id, '羞辱', 28, event.summary, event.id);
     }
+  }
+
+  if (requestedCourtAction && courtSubmission && !courtRequestResolved) {
+    const candidate = initialCourtRequest?.candidate ?? null;
+    resolveEmbodiedCourtEnvelope(
+      world,
+      context,
+      requestedCourtAction,
+      initialCourtRequest?.option ?? null,
+      courtSubmission,
+      courtRequestBlockedByPriorBusiness && candidate
+        ? {
+            outcome: 'deferred',
+            reasonCode: 'insufficient_support',
+            score: candidate.actorPower,
+            threshold: candidate.actorPower,
+            summary: '本季朝中先处置了权臣失势与席位重整，这项议约未进入裁决，留待后议。',
+            domainFact: null,
+          }
+        : {
+            outcome: 'invalidated',
+            reasonCode: 'conditions_changed',
+            score: candidate ? candidate.actorCohesion + candidate.targetCohesion : 0,
+            threshold: COURT_ALLIANCE_COMBINED_COHESION_THRESHOLD,
+            summary: world.characters.some((character) => character.id === requestedCourtAction.actorId && character.alive)
+              ? '原定议约因时令、官职、派系领袖、对象或双方关系变化，未能进入朝议。'
+              : '原定人物已经失去行动载体，这项朝中议约未能进行。',
+            domainFact: null,
+          },
+    );
   }
 }
 

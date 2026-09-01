@@ -113,6 +113,7 @@ describe('embodied character action reading flow', () => {
     usedThisQuarter: false,
     actions: [{
       actionId: 'emb-action',
+      kind: 'strengthen_relationship',
       label: '经营关系',
       targetLabel: '顾云岫',
       intent: '亲自与顾云岫往来，争取更多信任。',
@@ -157,6 +158,7 @@ describe('embodied character action reading flow', () => {
     const identityAction = {
       ...embodiment.actions[0],
       actionId: 'emb-military',
+      kind: 'cultivate_military_support' as const,
       identityLabel: '副将行事',
       label: '联络本军将校',
       targetLabel: '燕京中军将校',
@@ -171,7 +173,8 @@ describe('embodied character action reading flow', () => {
     expect(markup).toContain('副将行事');
     expect(markup).toContain('联络本军将校');
     expect(markup).toContain('燕京中军将校');
-    expect(markup).not.toMatch(/Intent|Resolver|request_backing|cultivate_military_support/i);
+    expect(markup).toContain('data-embodied-action-kind="cultivate_military_support"');
+    expect(markup).not.toMatch(/Intent|Resolver|request_backing/i);
   });
 
   it('keeps local governance inside the same four-action reading surface', () => {
@@ -179,6 +182,7 @@ describe('embodied character action reading flow', () => {
       {
         ...embodiment.actions[0],
         actionId: 'emb-relief',
+        kind: 'open_granary' as const,
         identityLabel: '地方施政',
         label: '开仓赈济',
         targetLabel: '河间',
@@ -188,6 +192,7 @@ describe('embodied character action reading flow', () => {
       {
         ...embodiment.actions[0],
         actionId: 'emb-levy',
+        kind: 'reduce_levy' as const,
         identityLabel: '地方施政',
         label: '减免本季赋',
         targetLabel: '河间',
@@ -206,7 +211,33 @@ describe('embodied character action reading flow', () => {
     expect(markup).toContain('减免本季赋');
     expect(markup).toContain('540石州粮');
     expect(markup).toContain('120财力');
-    expect(markup).not.toMatch(/local_governance|open_granary|reduce_levy|Resolver/i);
+    expect(markup).toContain('data-embodied-action-kind="open_granary"');
+    expect(markup).toContain('data-embodied-action-kind="reduce_levy"');
+    expect(markup).not.toMatch(/local_governance|Resolver/i);
+  });
+
+  it('renders court business as a readable identity action with a stable mobile target', () => {
+    const courtAction = {
+      ...embodiment.actions[0],
+      actionId: 'emb-court-alliance',
+      kind: 'form_court_alliance' as const,
+      identityLabel: '朝臣议事',
+      label: '交换朝中支持',
+      targetLabel: '沧台阁 · 顾云岫',
+      intent: '与沧台阁约定在朝廷议程中彼此相助。',
+      cost: '一项最长维持4年的政治承诺',
+    };
+    const markup = renderToStaticMarkup(createElement(PersonAgencySections, {
+      agency: agency('planned'),
+      embodiment: { ...embodiment, actions: [courtAction] },
+      onChooseEmbodiedAction: () => undefined,
+    }));
+
+    expect(markup).toContain('朝臣议事');
+    expect(markup).toContain('交换朝中支持');
+    expect(markup).toContain('沧台阁 · 顾云岫');
+    expect(markup).toContain('data-embodied-action-kind="form_court_alliance"');
+    expect(markup).not.toMatch(/Resolver|\bAI\b/);
   });
 
   it('closes a departed life with concrete experiences and a direct last-page route', () => {

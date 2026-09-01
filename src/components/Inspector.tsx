@@ -831,6 +831,7 @@ export function PersonAgencySections({
                 <li key={action.actionId} data-available={action.available || undefined}>
                   <button
                     type="button"
+                    data-embodied-action-kind={action.kind}
                     disabled={!action.available}
                     onClick={() => onChooseEmbodiedAction?.(action.actionId)}
                   >

@@ -41,6 +41,7 @@ export const PERSONAL_MEMORY_KINDS = [
   'local_relief_enacted',
   'local_levy_reduced',
   'local_measure_setback',
+  'court_alliance_formed',
   'embodied_action_succeeded',
   'embodied_action_setback',
 ] as const;
@@ -399,13 +400,22 @@ function localGovernanceCandidates(
 }
 
 function embodiedActionCandidates(
+  world: WorldState,
   fact: Extract<SimulationFact, { kind: 'embodied_action_resolved' }>,
 ): MemoryCandidate[] {
   // Role-specific actions already produce the authoritative Agency support or
-  // command memory. The observer envelope must not create a second memory for
-  // the same deed.
-  if (fact.payload.domainFactId) return [];
-  const primary = fact.payload.targetKind === 'character'
+  // command memory. Court alliances predate PersonalMemory, so their player
+  // envelope contributes one recollection linked back to the domain Fact.
+  const courtAlliance = fact.payload.action === 'form_court_alliance'
+    && fact.payload.outcome === 'succeeded'
+    && Boolean(fact.payload.domainFactId);
+  if (fact.payload.domainFactId && !courtAlliance) return [];
+  const targetFaction = courtAlliance
+    ? world.factions.find((item) => item.id === fact.payload.targetId)
+    : null;
+  const primary = targetFaction
+    ? subject('character', targetFaction.leaderId, true)
+    : fact.payload.targetKind === 'character'
     ? subject('character', fact.payload.targetId, true)
     : fact.payload.targetKind === 'army'
       ? subject('army', fact.payload.targetId, true)
@@ -413,14 +423,16 @@ function embodiedActionCandidates(
   return [{
     characterId: fact.payload.actorId,
     scope: fact.payload.action === 'strengthen_relationship' ? 'personal' : 'political',
-    kind: fact.payload.outcome === 'succeeded' ? 'embodied_action_succeeded' : 'embodied_action_setback',
+    kind: courtAlliance
+      ? 'court_alliance_formed'
+      : fact.payload.outcome === 'succeeded' ? 'embodied_action_succeeded' : 'embodied_action_setback',
     qualifier: `${fact.payload.action}:${fact.payload.outcome}`,
-    subjects: uniqueSubjects([primary]),
+    subjects: uniqueSubjects([primary, subject('polity', fact.polityIds[0] ?? '')]),
     turn: fact.turn,
-    salience: clamp(34 + fact.importance * 12),
+    salience: courtAlliance ? 70 : clamp(34 + fact.importance * 12),
     valence: fact.payload.outcome === 'succeeded' ? 50 : fact.payload.outcome === 'invalidated' ? -20 : -35,
-    pinnedEligible: false,
-    factId: fact.id,
+    pinnedEligible: courtAlliance,
+    factId: courtAlliance ? fact.payload.domainFactId as string : fact.id,
   }];
 }
 
@@ -502,7 +514,7 @@ function candidatesForFact(world: WorldState, fact: SimulationFact): MemoryCandi
   if (fact.kind === 'agency_support_resolved') return supportCandidates(fact);
   if (fact.kind === 'agency_intent_resolved') return commandResponseCandidates(fact);
   if (fact.kind === 'local_governance_resolved') return localGovernanceCandidates(fact);
-  if (fact.kind === 'embodied_action_resolved') return embodiedActionCandidates(fact);
+  if (fact.kind === 'embodied_action_resolved') return embodiedActionCandidates(world, fact);
   if (fact.kind === 'court_action_resolved') return courtActionCandidates(fact);
   return [];
 }
@@ -666,6 +678,7 @@ function memoryTitle(world: WorldState, memory: PersonalMemoryState): string {
   if (memory.kind === 'local_relief_enacted') return `在${name}开仓赈济`;
   if (memory.kind === 'local_levy_reduced') return `为${name}减免本季赋`;
   if (memory.kind === 'local_measure_setback') return `为${name}所请施政未成`;
+  if (memory.kind === 'court_alliance_formed') return `与${name}约定朝中相助`;
   if (memory.kind === 'embodied_action_succeeded') return `与${name}有关的一件事办成了`;
   if (memory.kind === 'embodied_action_setback') return `与${name}有关的一件事未能如愿`;
   return `${name}落定`;
