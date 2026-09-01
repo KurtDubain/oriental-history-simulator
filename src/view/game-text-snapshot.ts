@@ -43,6 +43,7 @@ import type { SnapshotOptions } from './observer-shell-contract';
 import { projectSituationWorkbench } from './situation-detail';
 import { toSituationSnapshot } from './situation-snapshot';
 import { mapMarkerTarget } from './map-marker-layout';
+import { projectMilitaryAuthority } from './military-authority-reading';
 
 const HISTORY_COLORS: Record<string, string> = {
   世界: '#777267',
@@ -700,15 +701,26 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       })),
       seaZones: world.seaZones.map((zone) => ({ id: zone.id, name: zone.name, center: [zone.x, zone.y], controllerId: zone.controllerId, contested: zone.contested, traffic: zone.traffic })),
       fleets: world.fleets.slice(0, 24).map((fleet) => ({ id: fleet.id, name: fleet.name, polityId: fleet.polityId, seaZoneId: fleet.seaZoneId, portRegionId: fleet.portRegionId, mission: fleet.mission, readiness: fleet.readiness })),
-      armies: world.armies.slice(0, 24).map((army) => ({
-      id: army.id,
-      name: army.name,
-      polityId: army.polityId,
-      regionId: army.regionId,
-      soldiers: army.soldiers,
-      morale: army.morale,
-      supply: army.supply,
-      })),
+      armies: world.armies.slice(0, 24).map((army) => {
+        const authority = projectMilitaryAuthority(world, army);
+        return {
+          id: army.id,
+          name: army.name,
+          polityId: army.polityId,
+          regionId: army.regionId,
+          soldiers: army.soldiers,
+          morale: army.morale,
+          supply: army.supply,
+          lawfulCommander: authority.lawfulCommanderName,
+          actualAllegiance: authority.actualAllegianceName,
+          allegianceBasis: authority.allegianceBasis,
+          commandDiverged: authority.commandDiverged,
+          retinueSoldiers: authority.retinueSoldiers,
+          order: authority.orderLabel,
+          orderIssuer: authority.orderIssuerName,
+          orderTargetRegionId: authority.orderTargetRegionId,
+        };
+      }),
     },
   });
 }

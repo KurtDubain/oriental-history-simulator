@@ -21,6 +21,7 @@ import {
   layoutMapArmyIcons,
   layoutMapRegionNodes,
   worldToScreenPoint as worldToScreen,
+  type MapArmyIconLayout,
   type MapRegionNodeLayout,
 } from './map-scene-geometry';
 import {
@@ -825,6 +826,53 @@ function drawSelectionHalo(context: CanvasRenderingContext2D, radius: number) {
   context.restore();
 }
 
+function drawArmyOrders(
+  context: CanvasRenderingContext2D,
+  layouts: readonly MapArmyIconLayout[],
+  regions: readonly MapRegionView[],
+  transform: MapViewportTransform,
+  overlay: MapOverlay,
+  selectedObject: MapSelectedObject,
+) {
+  const regionById = new Map(regions.map((region) => [region.id, region]));
+  for (const { army, point } of layouts) {
+    const selected = selectedObject?.kind === 'army' && selectedObject.id === army.id;
+    if (army.orderKind === 'hold' || !army.orderTargetRegionId || (overlay !== 'war' && !selected)) continue;
+    const targetRegion = regionById.get(army.orderTargetRegionId);
+    if (!targetRegion) continue;
+    const target = worldToScreen(targetRegion.center, transform);
+    const dx = target.x - point.x;
+    const dy = target.y - point.y;
+    const distance = Math.hypot(dx, dy);
+    if (distance < 18) continue;
+    const normalX = -dy / distance;
+    const normalY = dx / distance;
+    const bend = Math.min(18, distance * 0.12) * (hashString(army.id) % 2 ? 1 : -1);
+    const control = { x: (point.x + target.x) / 2 + normalX * bend, y: (point.y + target.y) / 2 + normalY * bend };
+    const end = { x: target.x - dx / distance * 9, y: target.y - dy / distance * 9 };
+    const angle = Math.atan2(end.y - control.y, end.x - control.x);
+    const color = army.orderKind === 'retreat' ? VERMILION : army.polityColor ?? polityFallback(army.polityId ?? army.id);
+    context.save();
+    context.strokeStyle = color;
+    context.fillStyle = color;
+    context.globalAlpha = army.orderBlocked ? 0.34 : selected ? 0.82 : 0.48;
+    context.lineWidth = selected ? 1.8 : 1.15;
+    context.setLineDash(army.orderBlocked ? [2, 5] : army.orderKind === 'intercept' ? [7, 3] : [5, 4]);
+    context.beginPath();
+    context.moveTo(point.x, point.y);
+    context.quadraticCurveTo(control.x, control.y, end.x, end.y);
+    context.stroke();
+    context.setLineDash([]);
+    context.beginPath();
+    context.moveTo(end.x, end.y);
+    context.lineTo(end.x - Math.cos(angle - 0.55) * 6, end.y - Math.sin(angle - 0.55) * 6);
+    context.lineTo(end.x - Math.cos(angle + 0.55) * 6, end.y - Math.sin(angle + 0.55) * 6);
+    context.closePath();
+    context.fill();
+    context.restore();
+  }
+}
+
 function clusterMountainRegions(regions: readonly MapRegionView[]) {
   const mountainous = regions.filter((region) => isMountainTerrain(region.terrain) && !isIslandTerrain(region.terrain));
   const visited = new Set<string>();
@@ -1331,7 +1379,9 @@ export function drawWorldMap(
   drawPolityLabels(context, regions, transform, overlay, compactMap, scene.level);
   drawMarkers(context, markers.filter(isPoliticalMapMarker), transform, selectedObject);
 
-  layoutMapArmyIcons(armies, regions, transform).forEach(({ army, point, radius }) => {
+  const armyLayouts = layoutMapArmyIcons(armies, regions, transform);
+  drawArmyOrders(context, armyLayouts, regions, transform, overlay, selectedObject);
+  armyLayouts.forEach(({ army, point, radius }) => {
     const { x, y } = point;
     const color = army.polityColor ?? polityFallback(army.polityId ?? army.id);
     const selected = selectedObject?.kind === "army" && selectedObject.id === army.id;
@@ -1355,6 +1405,12 @@ export function drawWorldMap(
         context.shadowBlur = 5;
       }
       context.stroke();
+      if (army.commandDiverged) {
+        context.fillStyle = VERMILION;
+        context.beginPath();
+        context.arc(x + radius * 0.58, y - radius * 0.58, selected ? 2.2 : 1.8, 0, Math.PI * 2);
+        context.fill();
+      }
       context.restore();
       return;
     }
@@ -1368,6 +1424,24 @@ export function drawWorldMap(
     context.strokeStyle = selected ? VERMILION : color;
     context.lineWidth = selected ? 2.6 : 2;
     context.stroke();
+    if (army.commandDiverged) {
+      context.beginPath();
+      context.setLineDash([2, 2]);
+      context.strokeStyle = VERMILION;
+      context.lineWidth = 1;
+      context.arc(x, y, radius - 2.6, 0, Math.PI * 2);
+      context.stroke();
+      context.setLineDash([]);
+    }
+    if ((army.retinueSoldiers ?? 0) > 0) {
+      context.fillStyle = color;
+      context.beginPath();
+      context.moveTo(x + radius - 1, y - radius + 1);
+      context.lineTo(x + radius + 5, y - radius + 3.5);
+      context.lineTo(x + radius - 1, y - radius + 6);
+      context.closePath();
+      context.fill();
+    }
     context.fillStyle = INK;
     context.font = '700 7px Inter, "Noto Sans SC", sans-serif';
     context.textAlign = "center";

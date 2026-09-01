@@ -59,9 +59,9 @@ function moveToQuarter(
 
 describe('POL02 stable faction identity and lifecycle', () => {
   it('settles a faction leader rebellion before the audit quarter closes', () => {
-    const before = advanceWorldBy(createWorld('双图审计-甲', 'private-v03', 1), 75);
-    const beforeFaction = before.factions.find((faction) => faction.name === '齐宗议' && faction.active);
-    if (!beforeFaction) throw new Error('expected 齐宗议 before the failing quarter');
+    const before = advanceWorldBy(createWorld('北辰', 'private-v03', 1), 57);
+    const beforeFaction = before.factions.find((faction) => faction.id === 'fac_0021' && faction.active);
+    if (!beforeFaction) throw new Error('expected the rebel leader faction before the failing quarter');
     const beforeLeader = before.characters.find((character) => character.id === beforeFaction.leaderId);
     if (!beforeLeader) throw new Error(`missing leader ${beforeFaction.leaderId}`);
     const after = advanceWorld(before);
@@ -69,7 +69,7 @@ describe('POL02 stable faction identity and lifecycle', () => {
     const afterLeader = after.characters.find((character) => character.id === beforeFaction.leaderId);
     if (!afterFaction || !afterLeader) throw new Error('expected the prior faction and leader after the rebellion');
 
-    expect(after.turn).toBe(76);
+    expect(after.turn).toBe(58);
     expect(afterLeader.polityId).not.toBe(beforeLeader.polityId);
     expect(afterLeader.factionId).toBeNull();
     expect(afterFaction.active).toBe(true);

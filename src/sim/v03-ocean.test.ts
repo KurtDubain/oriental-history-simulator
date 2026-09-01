@@ -88,6 +88,10 @@ function emitterFor(world: WorldState, context: V03TurnContext): V03Emit {
   };
 }
 
+function rejectUnexpectedLanding(): never {
+  throw new Error('this isolated maritime test must not resolve a landing');
+}
+
 function demobilizeAllFleets(world: WorldState): void {
   for (const fleet of world.fleets) {
     const home = world.regions.find((region) => region.id === fleet.homePortRegionId);
@@ -172,7 +176,7 @@ describe('V0.3a ocean and trade kernel', () => {
     portRegion.food = Math.max(portRegion.food, 10_000);
 
     const context = contextFor(world);
-    processV03Maritime(world, context, emitterFor(world, context));
+    processV03Maritime(world, context, emitterFor(world, context), rejectUnexpectedLanding);
 
     const commissioned = world.fleets.find((fleet) => !fleetIdsBefore.has(fleet.id));
     expect(commissioned?.id).toBe(`fleet_${String(fleetCounterBefore + 1).padStart(4, '0')}`);
@@ -231,7 +235,7 @@ describe('V0.3a ocean and trade kernel', () => {
       negativeFleet.seaZoneId = null;
     }
     const negativeContext = contextFor(withoutProjection);
-    processV03Maritime(withoutProjection, negativeContext, emitterFor(withoutProjection, negativeContext));
+    processV03Maritime(withoutProjection, negativeContext, emitterFor(withoutProjection, negativeContext), rejectUnexpectedLanding);
     expect(negativeContext.maritime.blockadedPortIds).toHaveLength(0);
 
     const withProjection = createWorld('v03-blockade-real');
@@ -255,7 +259,7 @@ describe('V0.3a ocean and trade kernel', () => {
       blockader.targetRegionId = 'r_yamato';
     }
     const positiveContext = contextFor(withProjection);
-    processV03Maritime(withProjection, positiveContext, emitterFor(withProjection, positiveContext));
+    processV03Maritime(withProjection, positiveContext, emitterFor(withProjection, positiveContext), rejectUnexpectedLanding);
     expect(positiveContext.maritime.blockadedPortIds.length).toBeGreaterThan(0);
     expect(withProjection.ports.some((port) => port.blockadePressure >= 55)).toBe(true);
   });

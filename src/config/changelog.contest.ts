@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.21.0',
+    date: '2026-09-01',
+    title: '军令落图，兵权有主',
+    items: [
+      '陆军现在区分名义国属、法定主帅、副将与实际拥戴者，并以附着军团的有界部曲解释个人兵权；战役、记忆、局势与权势账读取同一份权威状态。',
+      '固守、进军、截击、驰援和撤退军令会跨季保存，新令下一季才执行；战争目标、防守、补给与敌军位置确定性地触发改令，接战可反查来源军令。',
+      '战争舆图显示军令箭线，速览与卷宗说明听命对象、发令者和去向；跨海军令要求水师真实返港、占用实际航路运力并服从既定目标。旧 schema 4 存档无虚构史事迁移，长期历史引用保持有界。',
+    ],
+  },
+  {
     version: '1.20.1',
     date: '2026-09-01',
     title: '局势讲事，不讲虚势',

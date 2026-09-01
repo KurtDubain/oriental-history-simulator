@@ -377,6 +377,54 @@ export interface CommitmentState {
   trustStake: number;
 }
 
+export type ArmyOrderKind = 'hold' | 'advance' | 'intercept' | 'reinforce' | 'retreat';
+
+export type ArmyOrderReason =
+  | 'peace_garrison'
+  | 'war_goal'
+  | 'enemy_approach'
+  | 'frontline_support'
+  | 'defend_war_goal'
+  | 'amphibious_landing'
+  | 'low_readiness'
+  | 'target_invalid';
+
+export type MilitaryStateProvenance = 'opening' | 'legacy' | 'system' | 'fact';
+
+export interface ArmyOrderDirective {
+  kind: ArmyOrderKind;
+  warId: string | null;
+  issuerId: string;
+  issuedTurn: number;
+  lastReviewedTurn: number;
+  targetRegionId: string | null;
+  targetArmyId: string | null;
+  status: 'active' | 'blocked';
+  reasonCode: ArmyOrderReason;
+  provenance: MilitaryStateProvenance;
+}
+
+export interface ArmyOrderState extends ArmyOrderDirective {
+  sourceFactId: string | null;
+}
+
+export interface ArmyAllegianceState {
+  characterId: string;
+  strength: number;
+  sinceTurn: number;
+  provenance: MilitaryStateProvenance;
+  sourceFactId: string | null;
+}
+
+/** A named, non-additive slice of the parent army rather than another army. */
+export interface ArmyRetinueState {
+  ownerId: string;
+  soldiers: number;
+  cohesion: number;
+  attachedTurn: number;
+  sourceFactId: string | null;
+}
+
 export interface ArmyState {
   id: string;
   name: string;
@@ -393,6 +441,9 @@ export interface ArmyState {
   food: number;
   lastMovedTurn: number;
   embarkedOperationId: string | null;
+  allegiance: ArmyAllegianceState;
+  retinues: ArmyRetinueState[];
+  order: ArmyOrderState;
 }
 
 export type FleetMission = '护航' | '巡逻' | '封锁' | '袭商' | '运输' | '登陆' | '寻战' | '避战';
@@ -480,7 +531,14 @@ export interface NavalOperationState {
   startedTurn: number;
   progress: number;
   foodLoaded: number;
+  manifest: NavalTransportManifest | null;
   completedTurn: number | null;
+}
+
+export interface NavalTransportManifest {
+  loadedTurn: number;
+  soldiersDeparted: number;
+  transportEdgeIds: string[];
 }
 
 export interface ShipbuildingProjectState {

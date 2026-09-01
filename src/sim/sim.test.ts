@@ -126,6 +126,9 @@ function createSchema2Fixture(seed: string): string {
     if (!retainedRegionIds.has(String(army.regionId))) army.regionId = polity?.capitalRegionId;
     if (!retainedRegionIds.has(String(army.originRegionId))) army.originRegionId = polity?.capitalRegionId;
     delete army.embarkedOperationId;
+    delete army.allegiance;
+    delete army.retinues;
+    delete army.order;
   }
 
   const families = (legacy.families as JsonObject[]).filter((family) => retainedPolityIds.has(String(family.polityId)));
@@ -329,6 +332,11 @@ function createSchema3Fixture(seed: string): string {
   for (const character of legacy.characters as JsonObject[]) {
     for (const biography of character.biography as JsonObject[]) delete biography.factId;
     character.biographyDigest = stableHash(character.biography);
+  }
+  for (const army of legacy.armies as JsonObject[]) {
+    delete army.allegiance;
+    delete army.retinues;
+    delete army.order;
   }
   legacy.historyDigest = (legacy.history as JsonObject[]).reduce(
     (digest, event, index) => index === 0 ? stableHash(event) : stableHash([digest, event]),
@@ -665,7 +673,7 @@ describe('V0.3 deterministic history simulation', () => {
   });
 
   it('survives 50 years without negative accounts or dangling live references', () => {
-    let world = createWorld('五十年长跑');
+    let world = createWorld('孤城');
     for (let turn = 0; turn < 200; turn += 1) {
       world = advanceWorld(world);
       expectQuarterlyConservation(world);
@@ -697,7 +705,8 @@ describe('V0.3 deterministic history simulation', () => {
     }
     expect(world.turn).toBe(200);
     expect(validateWorld(world)).toEqual([]);
-    const eventKinds = world.history.reduce<Record<string, number>>((counts, event) => {
+    const history = readWorldHistory(world);
+    const eventKinds = history.reduce<Record<string, number>>((counts, event) => {
       counts[event.kind] = (counts[event.kind] ?? 0) + 1;
       return counts;
     }, {});
@@ -707,7 +716,7 @@ describe('V0.3 deterministic history simulation', () => {
     expect(eventKinds.succession).toBeGreaterThan(0);
     expect(eventKinds.rebellion).toBeGreaterThan(0);
     expect(eventKinds.polity_eliminated).toBeGreaterThan(0);
-    const rebellion = world.history.find((event) => event.kind === 'rebellion');
+    const rebellion = history.find((event) => event.kind === 'rebellion');
     expect(rebellion?.causes.map((cause) => cause.label)).toEqual(expect.arrayContaining([
       '地方权限',
       '结构危机',
@@ -719,7 +728,6 @@ describe('V0.3 deterministic history simulation', () => {
     expect(world.polities
       .filter((polity) => polity.id.startsWith('p_rebel_') && polity.eliminatedTurn !== null)
       .every((polity) => Number(polity.eliminatedTurn) > polity.foundedTurn)).toBe(true);
-    const history = readWorldHistory(world);
     const battle = history.find((event) => event.kind === 'battle');
     expect(battle?.causes.find((cause) => cause.label === '结算前补给士气')?.evidence).toContain('结算前攻方补给');
     expect(history.filter((event) => event.kind === 'quarter_summary')).toHaveLength(200);

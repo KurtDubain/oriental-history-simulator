@@ -170,7 +170,8 @@ function battleCandidates(fact: Extract<SimulationFact, { kind: 'battle' }>): Me
     const attackingSide = force === fact.payload.attacker;
     const won = attackingSide === fact.payload.attackerWon;
     const lossesRatio = force.losses / Math.max(1, force.soldiersBefore);
-    for (const characterId of [force.commanderId, force.deputyCommanderId].filter((id): id is string => Boolean(id))) {
+    for (const characterId of [...new Set([force.commanderId, force.deputyCommanderId, force.allegianceCharacterId])]
+      .filter((id): id is string => Boolean(id))) {
       candidates.push({
         characterId,
         scope: 'military',
@@ -182,7 +183,7 @@ function battleCandidates(fact: Extract<SimulationFact, { kind: 'battle' }>): Me
           subject('army', force.armyId),
         ]),
         turn: fact.turn,
-        salience: clamp(fact.importance * 15 + lossesRatio * 28 + (force.deputyCommanderId === characterId ? 3 : 7)),
+        salience: clamp(fact.importance * 15 + lossesRatio * 28 + (force.allegianceCharacterId === characterId ? 7 : force.deputyCommanderId === characterId ? 3 : 5)),
         valence: won ? clamp(45 + fact.importance * 7) : -clamp(45 + lossesRatio * 35),
         pinnedEligible: fact.importance >= 5 || lossesRatio >= 0.35,
         factId: fact.id,

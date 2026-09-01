@@ -34,6 +34,7 @@ import type { PersonEmbodimentView } from '../view/embodiment-view';
 import type { CourtProjectionView } from '../view/court-projection';
 import type { CourtFactionTarget, CourtFocusRequest } from '../view/observer-navigation';
 import type { PoliticalFocusLink } from '../view/political-focus';
+import { compact } from '../view/compact-number';
 import { CourtProjection } from './CourtProjection';
 import '../styles/observer-ui.css';
 
@@ -413,10 +414,8 @@ export type InspectorProps =
   | (InspectorSharedProps & { kind: 'person'; data: PersonInspectorData })
   | (InspectorSharedProps & { kind: 'system'; data: SystemInspectorData });
 
-const COMPACT_NUMBER = new Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 });
-
 function display(value: DisplayValue) {
-  return typeof value === 'number' ? COMPACT_NUMBER.format(value) : value;
+  return typeof value === 'number' ? compact.format(value) : value;
 }
 
 function Meter({ label, value }: { label: string; value: number }) {
@@ -1231,8 +1230,10 @@ function mobileQuickLookFor(props: InspectorProps): MobileQuickLookView {
     ownerLabel: '归属',
     owner: props.data.subtitle || '天下运行中的一环',
     current,
-    destination: props.data.kind === 'army' || props.data.kind === 'fleet'
-      ? '兵力、战备、关联地点与沿革'
+    destination: props.data.kind === 'army'
+      ? '兵权、军令、战备与沿革'
+      : props.data.kind === 'fleet'
+        ? '兵力、战备、关联地点与沿革'
       : '当季状态、关联对象与沿革',
   };
 }

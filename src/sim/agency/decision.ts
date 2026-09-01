@@ -29,6 +29,7 @@ import {
   type EmbodiedMilitaryActionCandidate,
 } from './embodied-military';
 import { isEmbodiedCourtAction, projectEmbodiedCourtAction } from './embodied-court';
+import { markLawfulCommandTransfer } from '../military/authority-core';
 import {
   MAX_LOCAL_GOVERNANCE_ACTIONS_PER_TURN,
   compareLocalGovernanceCandidates,
@@ -275,6 +276,7 @@ function hasRecentCommandChange(
   world: WorldState,
   armyId: string,
   actorId: string,
+  currentCommanderId: string,
   turn: number,
 ): boolean {
   const earliestRelevantTurn = turn - Math.max(
@@ -288,7 +290,10 @@ function hasRecentCommandChange(
     if (fact.kind !== 'agency_intent_resolved' || fact.payload.outcome !== 'executed') continue;
     if (fact.payload.targetArmyId === armyId
       && turn - fact.turn < ARMY_COMMAND_CHANGE_COOLDOWN_TURNS) return true;
-    if ((fact.payload.actorId === actorId || fact.payload.previousCommanderId === actorId)
+    if ((fact.payload.actorId === actorId
+      || fact.payload.previousCommanderId === actorId
+      || fact.payload.actorId === currentCommanderId
+      || fact.payload.previousCommanderId === currentCommanderId)
       && turn - fact.turn < COMMAND_CHANGE_PARTICIPANT_COOLDOWN_TURNS) return true;
   }
   return false;
@@ -353,7 +358,7 @@ function preparationSignals(
   const permissionEvidence = permissionReady
     ? '仍在该军团副将任上，且没有兼领其他军政实权'
     : '当前职位、年龄或兼领职权不允许提出独立军令';
-  const cooledDown = !hasRecentCommandChange(world, armyId, character.id, turn);
+  const cooledDown = !hasRecentCommandChange(world, armyId, character.id, commander?.id ?? '', turn);
   const tenureReady = Boolean(deputyOffice && tenure >= MIN_INDEPENDENT_COMMAND_DEPUTY_TENURE_TURNS);
   const commandOpening = tenureReady && cooledDown && (commanderDiscredited || claimAdvantage >= 32);
   const commandOpeningEvidence = !tenureReady
@@ -600,7 +605,7 @@ function reviewDecisionState(world: WorldState, turn: number): CharacterAgencyDe
       const deputyOffice = activeDeputyOffice(world, character.id, army.id);
       if (!deputyOffice
         || turn - deputyOffice.appointedTurn < MIN_INDEPENDENT_COMMAND_DEPUTY_TENURE_TURNS
-        || hasRecentCommandChange(world, army.id, character.id, turn)) return [];
+        || hasRecentCommandChange(world, army.id, character.id, army.commanderId, turn)) return [];
       const previous = previousByCharacter.get(character.id);
       if (previous?.goal.status === 'active' && previous.goal.targetArmyId === army.id) return [];
       if (previous?.goal.targetArmyId === army.id
@@ -1371,6 +1376,9 @@ function resolveIntent(
       decisionThreshold,
     },
   }) as Extract<SimulationFact, { kind: 'agency_intent_resolved' }>;
+  if (outcome === 'executed' && actor && commander && army) {
+    markLawfulCommandTransfer(world, army, commander.id, resolution.id);
+  }
   intent.resolvedFactId = resolution.id;
   const eventKind = outcome === 'executed'
     ? 'deputy_promoted'

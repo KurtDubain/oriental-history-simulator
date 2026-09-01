@@ -338,7 +338,8 @@ function uniqueStable(values: readonly string[], limit = values.length): readonl
 function factMentionsCharacter(fact: SimulationFact, characterId: string): boolean {
   if (fact.kind === 'battle') {
     const forces = [fact.payload.attacker, ...fact.payload.defenders];
-    return forces.some((force) => force.commanderId === characterId || force.deputyCommanderId === characterId);
+    return forces.some((force) => force.commanderId === characterId
+      || force.deputyCommanderId === characterId || force.allegianceCharacterId === characterId);
   }
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
     return fact.payload.holderId === characterId;

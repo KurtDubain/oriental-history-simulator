@@ -13,21 +13,9 @@ import {
   projectCapitalPoliticalPulses,
   projectFactionSpatialPowerRoots,
 } from './political-map-projection';
-
-const compact = new Intl.NumberFormat('zh-CN', {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-});
-
-function polity(world: WorldState, id: string | null | undefined) {
-  if (!id) return undefined;
-  return world.polities.find((candidate) => candidate.id === id);
-}
-
-function region(world: WorldState, id: string | null | undefined) {
-  if (!id) return undefined;
-  return world.regions.find((candidate) => candidate.id === id);
-}
+import { projectMilitaryAuthority } from './military-authority-reading';
+import { compact } from './compact-number';
+import { polity, region } from './dossier-adapter-shared';
 
 function foodSafetyRatio(population: number, food: number) {
   return food / Math.max(1, population);
@@ -86,16 +74,31 @@ export function toMapArmies(world: WorldState): MapArmyView[] {
   const polities = new Map(world.polities.map((item) => [item.id, item]));
   return world.armies
     .filter((army) => army.soldiers > 0)
-    .map((army) => ({
-      id: army.id,
-      name: army.name,
-      regionId: army.regionId,
-      polityId: army.polityId,
-      polityColor: polities.get(army.polityId)?.color,
-      strength: army.soldiers,
-      morale: army.morale,
-      status: army.supply < 45 ? '补给吃紧' : '在营',
-    }));
+    .map((army) => {
+      const reading = projectMilitaryAuthority(world, army);
+      return {
+        id: army.id,
+        name: army.name,
+        regionId: army.regionId,
+        polityId: army.polityId,
+        polityColor: polities.get(army.polityId)?.color,
+        strength: army.soldiers,
+        morale: army.morale,
+        status: army.supply < 45 ? '补给吃紧' : reading.orderLabel,
+        nominalPolityName: reading.nominalPolityName,
+        lawfulCommanderName: reading.lawfulCommanderName,
+        actualAllegianceName: reading.actualAllegianceName,
+        allegianceStrength: reading.allegianceStrength,
+        commandDiverged: reading.commandDiverged,
+        retinueSoldiers: reading.retinueSoldiers,
+        retinueSummary: reading.retinueSummary,
+        orderKind: reading.orderKind,
+        orderLabel: reading.orderLabel,
+        orderTargetRegionId: reading.orderTargetRegionId,
+        orderIssuerName: reading.orderIssuerName,
+        orderBlocked: reading.orderBlocked,
+      };
+    });
 }
 
 export function toMapSeaZones(world: WorldState): MapSeaZoneView[] {

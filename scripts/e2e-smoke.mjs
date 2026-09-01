@@ -30,7 +30,7 @@ const SITUATION_TYPES_BY_LEAD_SLOT = Object.freeze({
 const SITUATION_WATCH_SEED = '春战副将';
 const SITUATION_WATCH_TURN = 4;
 const SITUATION_WATCH_SLOT = 'tension';
-const SITUATION_WATCH_EXPECTED_PAUSE_TURN = 6;
+const SITUATION_WATCH_EXPECTED_PAUSE_TURN = 7;
 const PRIVATE_MAP_CONTENT_VERSION = 'v03-82';
 
 const server = await createServer({
@@ -479,7 +479,7 @@ function assertObserverLeadMilestone(state, expectedSources, label) {
       : [expectedSources[lead.slot]];
     assert.ok(
       expected.includes(lead.source),
-      `${label} ${lead.slot}应按槽位优先使用 Situation，仅在无匹配时回退`,
+      `${label} ${lead.slot}应按槽位优先使用 Situation，仅在无匹配时回退（实际 ${lead.source}，允许 ${expected.join('/')}）`,
     );
   }
   const arbitration = state.observer.leadArbitration;
@@ -613,7 +613,7 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
 
   const turn7 = await advanceTo(page, 7);
   assertObserverLeadMilestone(turn7, {
-    person: 'situation',
+    person: 'fallback',
     polity: 'situation',
     tension: 'situation',
   }, 'T7');
@@ -627,11 +627,11 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   auditSituationProjection(projection, requiredTypes);
   assert.deepEqual((await snapshot(page)).observer.situations, projection, '重复读取必须得到完全相同的局势投影');
   assertObserverLeadMilestone(observed, {
-    person: 'situation',
+    person: 'fallback',
     polity: 'situation',
     tension: 'situation',
   }, 'T8');
-  assert.deepEqual(observerLeadIdentity(observed), turn7Identity, 'T7→T8 应保持新出现的军权题与既有两题');
+  assert.deepEqual(observerLeadIdentity(observed), turn7Identity, 'T7→T8 应保持人物回退题与既有两题');
   assert.ok(observed.observer.focusLeads.every((lead) => (
     lead.trackingTurns >= (lead.slot === 'person' ? 2 : 3)
   )), 'T8 三问应展示各自真实的连续追踪季数');
@@ -823,6 +823,10 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   const turn5 = await waitForSnapshot(page, (current) => current.time.turn === 5 && current.playback.running === true);
   assert.equal(turn5.observer.lastPauseReason, null, '被关注局势尚无新场面的 T5 不得误暂停');
   assert.equal(situationFromSnapshot(turn5, watchedSituationId)?.status, 'open');
+
+  await page.evaluate(() => window.advanceTime(225));
+  const turn6 = await waitForSnapshot(page, (current) => current.time.turn === 6 && current.playback.running === true);
+  assert.equal(turn6.observer.lastPauseReason, null, '被关注局势尚未形成可读转折的 T6 不得误暂停');
 
   await page.evaluate(() => window.advanceTime(225));
   const paused = await waitForSnapshot(page, (current, expected) => (
@@ -1914,13 +1918,13 @@ try {
   collectBrowserErrors(governancePage, governanceErrors);
   await openFreshWorld(governancePage, '州县民生');
   await governancePage.locator('[data-map-primer-skip]').click();
-  await advanceTo(governancePage, 5);
+  await advanceTo(governancePage, 9);
   await governancePage.click('button[data-observer-view="people"]');
   await governancePage.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
-  await governancePage.getByLabel('检索时人群像').fill('卫延昭');
-  await governancePage.locator('.roster-panel button[data-roster-id="c_022"]').click();
+  await governancePage.getByLabel('检索时人群像').fill('林季安');
+  await governancePage.locator('.roster-panel button[data-roster-id="c_076"]').click();
   const governanceSelected = await snapshot(governancePage);
-  assert.equal(governanceSelected.interface.selectedDetail.name, '卫延昭', '地方施政验收种子应稳定定位人物');
+  assert.equal(governanceSelected.interface.selectedDetail.name, '林季安', '地方施政验收种子应稳定定位人物');
   await governancePage.getByRole('button', { name: '以此人入世' }).click();
   const governancePanel = governancePage.locator('[data-testid="embodiment-actions"]');
   await governancePanel.waitFor();
@@ -2042,19 +2046,19 @@ try {
   const mobileTurn6Identity = observerLeadIdentity(mobileTurn6);
   const mobileTurn7 = await advanceTo(mobilePage, 7);
   assertObserverLeadMilestone(mobileTurn7, {
-    person: 'situation',
+    person: 'fallback',
     polity: 'situation',
     tension: 'situation',
   }, '移动端 T7');
   const mobileTurn7Identity = observerLeadIdentity(mobileTurn7);
-  assert.deepEqual(mobileTurn7Identity.slice(1), mobileTurn6Identity.slice(1), '移动端新军权题出现时不应替换既有国势与战争题');
+  assert.deepEqual(mobileTurn7Identity.slice(1), mobileTurn6Identity.slice(1), '移动端人物回退题更新时不应替换既有国势与战争题');
   const mobileSituationState = await advanceTo(mobilePage, 8);
   assertObserverLeadMilestone(mobileSituationState, {
-    person: 'situation',
+    person: 'fallback',
     polity: 'situation',
     tension: 'situation',
   }, '移动端 T8');
-  assert.deepEqual(observerLeadIdentity(mobileSituationState), mobileTurn7Identity, '移动端 T7→T8 应稳定追踪同三条 Situation');
+  assert.deepEqual(observerLeadIdentity(mobileSituationState), mobileTurn7Identity, '移动端 T7→T8 应稳定追踪人物回退题与既有两条局势');
   const mobileTurn8Layout = await mobilePage.evaluate(() => {
     const app = document.querySelector('.observer-app');
     const stage = document.querySelector('.observer-stage')?.getBoundingClientRect();
@@ -2147,8 +2151,11 @@ try {
   await mobileSituationTrigger.waitFor();
   assert.equal(await mobileSituationTrigger.isVisible(), true, '移动端紧凑线索条必须直接提供局势卷宗入口');
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();
-  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 1, '移动端 T8 应可单独展开首条 Situation 题');
-  const mobileLead = mobileSituationState.observer.focusLeads[0];
+  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 1, '移动端 T8 应可单独展开首条观察题');
+  await mobileLeads.locator('.observer-leads__mobile-toggle').click();
+  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 3, '移动端 T8 应可继续展开全部观察题');
+  const mobileLead = mobileSituationState.observer.focusLeads.find((lead) => lead.situationId);
+  assert.ok(mobileLead?.situationId, '移动端 T8 至少应有一条真实局势可供关注');
   const mobileLeadRow = mobileLeads.locator(`[data-testid="observer-lead"][data-situation-id="${mobileLead.situationId}"]`);
   await mobileLeadRow.waitFor();
   await waitForVisualSettled(mobileLeads);

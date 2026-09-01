@@ -10,36 +10,36 @@ import {
 } from '.';
 import type { MapProfile } from './types';
 
-const V1180_BASELINES = {
+const V1210_BASELINES = {
   '架构边界-入世': [
-    ['28a9409c901fb1ad', '2cdf17658cc3a414', 'c1b3eefde96d4684'],
-    ['847fc1e7198a0743', 'e5419911a0ee752e', '26aa4e76684c053d'],
-    ['442ffae15ebca730', '312b069d54287ab7', '7c0897f32e0a78c6'],
-    ['e32a207ee7730d82', '455a11a141000291', '311d545a423719a3'],
-    ['fd98aef164c3af05', '8a8b4d1152fb1782', '246b056ea3920dc3'],
-    ['97a04af627d2943d', '38fc5f8dac77a817', '2903b1c836466871'],
-    ['b58ac25a11b14a8c', 'b7e448acf31fa71b', '4fcb21b1f6b75849'],
-    ['b08d2ce860570023', '32ab66c347e9e79b', 'dffc9a49b1f32f3a'],
-    ['dca7059adbf8cd0d', '9830e70f27a27947', '4dba8d5226d11b83'],
-    ['d765cfaa2d95f1d3', 'cb0a979b42b925f8', '0d532173943ce784'],
-    ['f6cbd446d9d2064d', '359a0f7b1d1df59d', '8659f4b94a1b122f'],
-    ['bfa4707285537b11', 'db3727fc7e2bf095', '1869f8790714b49c'],
-    ['0b73aac9263cf272', '175287c577854ee9', 'a91bc2ef562632fb'],
+    ['b0b0b744104cf3a4', '2cdf17658cc3a414', 'c1b3eefde96d4684'],
+    ['422b04f4c5c78397', 'e5419911a0ee752e', '26aa4e76684c053d'],
+    ['d8eff9be26121085', '312b069d54287ab7', '7c0897f32e0a78c6'],
+    ['0a6cf7eb1fe279c9', '0e74f20b0b5598c4', 'd12c7d3036297d02'],
+    ['01a243252bb74b1a', '6758107147f42318', 'b682cb61a3bdfffb'],
+    ['ebd2d17b08b674f6', '718f7ef9615b3636', '31db4a3d26fc70a9'],
+    ['f8952ee22e4fb268', '3ec7d35916833f0c', '0e26e192435624c7'],
+    ['78a4c7933022de96', 'e415f7bbb3eeadb4', '137f609875798b9e'],
+    ['ec83e1497df72147', '9511c86e6eadc2ad', '85afa743ac40f047'],
+    ['aacffe04a48299f7', '828c2420ec38eab7', '8824c0e57a260a40'],
+    ['0f131b97bf498af0', '9454fa4d9fdf7d96', 'b2d5a93a4297bd0d'],
+    ['f5d328ece18bb5a1', '76db781a59fdaf75', '15ca43f348400785'],
+    ['187d11252d1e1dd4', '4fb0ed6c133f722f', 'ac751a8894ec7e1d'],
   ],
   '州县民生': [
-    ['d20baa490e51204f', '500ad0ab9680ef86', '6905601648536b20'],
-    ['3687d955f279072b', 'c3299f2e30e6c5f6', 'b254d036cd169b61'],
-    ['cc32ac4826b4ac75', 'daacfd3cbdf0a007', '7df06995db6b9ed5'],
-    ['27d40c230527d983', 'c4aebd8ca3bc22f1', '907fb59a4221bb65'],
-    ['e6005fcbbd774275', '41b844091569ee58', 'b9efdf89ea1d557b'],
-    ['d186cb8911baece0', 'db3c9fbc7192beac', 'de7c0daebbbd10a1'],
-    ['705f143a92ed23ec', '46a7dd76fd0a97eb', '1355739e43aaaa97'],
-    ['f4727f5bc3dc954d', '3bbeb51519933665', '40f3a1d54b90ffb3'],
-    ['8b57e9ceda99a941', 'a0290a9f2d60a355', '662e7f5f1fbd7369'],
-    ['6ee8da23a063af18', '3eadf112b15d55ce', '662ca18b17bfd844'],
-    ['46864c6d8729ee0b', '2e418dd64a9d0872', 'bf61f11d19415743'],
-    ['d3928cd12c6469a4', '9386aa37647f967b', '2cd6d55c11e1b833'],
-    ['8e1b27a7d40970ac', '7c4000278ecc26ad', 'b35434f95b8be0ee'],
+    ['4dadc4ac742ea5d0', '500ad0ab9680ef86', '6905601648536b20'],
+    ['edcc44cb2e31fd00', 'c3299f2e30e6c5f6', 'b254d036cd169b61'],
+    ['556772f3474334f0', 'daacfd3cbdf0a007', '7df06995db6b9ed5'],
+    ['769316745067d323', 'f0f0a30da4857549', '517b55f127fa0033'],
+    ['aede90d9b224485d', '4c8f4f1b70acfec2', 'ca2c48ad802907fa'],
+    ['58ac5f6dc0672cbc', '96049a6f871d8d6b', 'f88d1c4754c632f9'],
+    ['c5a36ebffef91d18', 'b827949a282dafcc', 'e36a5f3d9782e069'],
+    ['539408f421354d64', '7d47f3e910ff520a', '0e95b02eefff23d1'],
+    ['9d420677232677be', 'ef91c108e314b4ea', '35b95e53d4e8044e'],
+    ['e341fbecca5ef789', '7f12336dd792c418', '0c521d6e173e5788'],
+    ['7577a89bcb7be10a', 'a11f8b46c071e3df', '623d66098cd5b538'],
+    ['d3cfcf19a03507fa', '2feae9d9036e2c98', '9840169fc6f2b26d'],
+    ['7945684e2067f7f4', '4c63bd8fedab6921', 'a53d44bc8367a1af'],
   ],
 } as const;
 
@@ -97,8 +97,8 @@ describe('MAP01/MAP02 map profile boundary', () => {
     expect(serializeWorld(explicit)).toBe(serializeWorld(implicit));
   });
 
-  it.each(Object.entries(V1180_BASELINES))(
-    'keeps the complete v1.18.0 opening and twelve-quarter digest chain for %s',
+  it.each(Object.entries(V1210_BASELINES))(
+    'keeps the complete v1.21.0 opening and twelve-quarter digest chain for %s',
     (seed, expected) => {
       let world = createWorld(seed);
       const actual: Array<readonly [string, string, string]> = [];

@@ -36,7 +36,7 @@ describe('ObserverLeads', () => {
   });
 
   it('uses Situation identity for watching while fallback leads retain their target identity', () => {
-    let world = createWorld('春战副将');
+    let world = createWorld('兵权入世');
     let projection = deriveObserverLeadProjection(world);
     while (world.turn < 8) {
       const previousHash = world.hash;

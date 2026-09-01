@@ -3,6 +3,8 @@ import type { MapProfile } from '../maps/types';
 import { keyedInt, keyedRandom, stableCompare } from './random';
 import { emitSimulationFact, projectFactLinks, type BattleFact, type SimulationFact } from './facts';
 import { practiceEffect } from './v03-life';
+import { refreshArmyMilitaryAuthority, syncArmyPersonnelLocations } from './military/authority';
+import { armyOrderFactIds, issueAmphibiousArmyOrder } from './military/orders';
 import type { V03Emit, V03TurnContext } from './v03-context';
 import {
   COMMODITIES,
@@ -40,6 +42,11 @@ const BASE_PRICES: CommodityPrices = {
 
 const MAX_SHIPMENTS_PER_TURN = 512;
 const MAX_TRADE_CORRIDORS = 160;
+const MIN_LANDING_FORCE = 1_000;
+const MAX_LANDING_LOAD_AGE = 5;
+const MAX_LANDING_VOYAGE_AGE = 8;
+const MIN_VOYAGE_SEA_SHARE = 25;
+const MIN_LANDING_SEA_SHARE = 35;
 
 export interface CreateV03OceanOptions {
   legacy: boolean;
@@ -633,6 +640,20 @@ function legRecords(path: TransportPath, amount: number, month: 0 | 1 | 2): Ship
   return path.edges.map((edge) => ({ kind: edge.kind, edgeId: edge.id, month, capacityUsed: amount }));
 }
 
+function landingLegRecords(
+  world: WorldState,
+  operation: NavalOperationState,
+  amount: number,
+  month: 0 | 1 | 2,
+): ShipmentLeg[] {
+  return operation.manifest!.transportEdgeIds.map((edgeId) => ({
+    kind: world.portLinks.some((link) => link.id === edgeId) ? 'port-link' : 'sea-lane',
+    edgeId,
+    month,
+    capacityUsed: amount,
+  }));
+}
+
 function createShipmentId(world: WorldState): string {
   world.counters.shipment += 1;
   return `shipment_${String(world.counters.shipment).padStart(7, '0')}`;
@@ -672,6 +693,210 @@ function recordShipment(world: WorldState, context: V03TurnContext, shipment: Sh
       const zone = world.seaZones.find((item) => item.id === zoneId);
       if (zone) zone.traffic += shipment.acceptedAmount;
     }
+  }
+}
+
+function recordLandingTransit(
+  world: WorldState,
+  context: V03TurnContext,
+  operation: NavalOperationState,
+  army: WorldState['armies'][number],
+  destinationRegionId: string,
+): void {
+  const manifest = operation.manifest;
+  if (!manifest) return;
+  const arrived = Math.min(manifest.soldiersDeparted, army.soldiers);
+  const lost = manifest.soldiersDeparted - arrived;
+  const carrier = operation.fleetIds
+    .map((id) => world.fleets.find((fleet) => fleet.id === id))
+    .filter((fleet): fleet is FleetState => Boolean(fleet))
+    .sort((left, right) => right.transports - left.transports || stableCompare(left.id, right.id))[0];
+  const id = createShipmentId(world);
+  recordShipment(world, context, {
+    id,
+    kind: '海军运输',
+    commodity: null,
+    originRegionId: operation.originRegionId,
+    destinationRegionId,
+    acceptedAmount: manifest.soldiersDeparted,
+    deliveredAmount: arrived,
+    lostAmount: lost,
+    raidedAmount: 0,
+    peopleDeparted: manifest.soldiersDeparted,
+    peopleArrived: arrived,
+    peopleLost: lost,
+    contactVolume: arrived,
+    legs: landingLegRecords(world, operation, manifest.soldiersDeparted, (world.counters.shipment % 3) as 0 | 1 | 2),
+    carrierArmyId: army.id,
+    carrierFleetId: carrier?.id ?? null,
+    value: 0,
+    tariff: 0,
+    status: lost > 0 ? '受损' : '交付',
+  });
+}
+
+function orderLandingFleetsHome(world: WorldState, operation: NavalOperationState): void {
+  for (const fleetId of operation.fleetIds) {
+    const fleet = world.fleets.find((candidate) => candidate.id === fleetId);
+    if (!fleet) continue;
+    fleet.mission = '避战';
+    fleet.targetRegionId = operation.originRegionId;
+    fleet.targetSeaZoneId = operation.seaZonePath[0] ?? null;
+  }
+}
+
+function minimumLandingForce(soldiers: number): number {
+  return Math.min(soldiers, Math.max(MIN_LANDING_FORCE, whole(soldiers * 0.35)));
+}
+
+function failLandingLoading(
+  world: WorldState,
+  context: V03TurnContext,
+  emit: V03Emit,
+  operation: NavalOperationState,
+  army: WorldState['armies'][number],
+  reason: string,
+  availableCapacity: number,
+): void {
+  const origin = world.regions.find((region) => region.id === operation.originRegionId);
+  const foodBefore = operation.foodLoaded;
+  if (origin) {
+    origin.food += foodBefore;
+    context.food.transferred += foodBefore;
+  } else {
+    context.food.warDestroyed += foodBefore;
+  }
+  operation.foodLoaded = 0;
+  operation.stage = '失败';
+  operation.completedTurn = context.turn;
+  army.embarkedOperationId = null;
+  emit({
+    category: '海洋',
+    kind: 'amphibious_loading_failed',
+    title: `${origin?.name ?? operation.originRegionId}渡海装载中止`,
+    summary: `${army.name}最低需${minimumLandingForce(army.soldiers)}人，实际可用运力仅${availableCapacity}人；${reason}。行动中止，${foodBefore}军粮${origin ? '退回' : '毁损'}。`,
+    importance: 2,
+    actorIds: [army.commanderId],
+    polityIds: [army.polityId],
+    regionIds: [operation.originRegionId, operation.targetRegionId],
+    causes: [
+      { label: '运力不足', role: '触发', weight: 0.65, evidence: `${availableCapacity}/${minimumLandingForce(army.soldiers)}人；${reason}` },
+      { label: '中止结算', role: '结果', weight: 0.35, evidence: `${foodBefore}军粮${origin ? '退回' : '毁损'}` },
+    ],
+    stateDeltas: [
+      { entityType: 'navalOperation', entityId: operation.id, field: 'stage', before: '装载', after: '失败' },
+      { entityType: 'navalOperation', entityId: operation.id, field: 'foodLoaded', before: foodBefore, after: 0, delta: -foodBefore },
+    ],
+  });
+}
+
+/**
+ * Landing convoys claim their real route capacity before ordinary commerce.
+ * A convoy never receives more capacity than the fleet, ports and sea lanes
+ * actually provide. When only part of a field army fits, the remainder returns
+ * to the origin population instead of vanishing or travelling for free.
+ */
+function loadPreparedLandingOperations(
+  world: WorldState,
+  context: V03TurnContext,
+  emit: V03Emit,
+  portUsage: Map<string, number>,
+): void {
+  const operations = world.navalOperations
+    .filter((operation) => operation.stage === '装载')
+    .sort((left, right) => stableCompare(left.id, right.id));
+  for (const operation of operations) {
+    const army = world.armies.find((candidate) => candidate.id === operation.armyId);
+    const war = world.wars.find((candidate) => candidate.id === operation.warId && candidate.active);
+    if (!army || !war || army.embarkedOperationId !== operation.id) continue;
+    const path = operationTransportPath(world, operation);
+    if (!path) {
+      failLandingLoading(world, context, emit, operation, army, '出发港与目标港之间已无可用航路', 0);
+      continue;
+    }
+    const fleets = operation.fleetIds
+      .map((id) => world.fleets.find((fleet) => fleet.id === id))
+      .filter((fleet): fleet is FleetState => Boolean(fleet));
+    const dockedFleets = fleets.filter((fleet) => (
+      fleet.polityId === army.polityId && fleet.portRegionId === operation.originRegionId
+    ));
+    const transportCapacity = dockedFleets.reduce((sum, fleet) => sum + fleet.transports * 1_000, 0);
+    const requiredMinimum = minimumLandingForce(army.soldiers);
+    if (dockedFleets.length !== operation.fleetIds.length || transportCapacity < requiredMinimum) {
+      if (context.turn - operation.startedTurn >= MAX_LANDING_LOAD_AGE) {
+        failLandingLoading(
+          world,
+          context,
+          emit,
+          operation,
+          army,
+          dockedFleets.length !== operation.fleetIds.length ? '承运水师未齐集装载港' : '船数不足以编成登陆队',
+          transportCapacity,
+        );
+      }
+      continue;
+    }
+
+    const flowId = `navload:${operation.id}:${context.turn}`;
+    const requested = Math.min(army.soldiers, transportCapacity);
+    const accepted = reservePath(world, context, path, requested, flowId, portUsage);
+    if (accepted < requiredMinimum) {
+      releasePath(context, path, accepted, flowId, portUsage);
+      if (context.turn - operation.startedTurn >= MAX_LANDING_LOAD_AGE) {
+        failLandingLoading(world, context, emit, operation, army, '港口与航道持续无足够运力', accepted);
+      }
+      continue;
+    }
+
+    const origin = world.regions.find((region) => region.id === operation.originRegionId);
+    if (!origin) {
+      releasePath(context, path, accepted, flowId, portUsage);
+      failLandingLoading(world, context, emit, operation, army, '出发港已失效', accepted);
+      continue;
+    }
+    const soldiersBefore = army.soldiers;
+    const foodBefore = operation.foodLoaded;
+    const demobilized = soldiersBefore - accepted;
+    const foodRefund = Math.max(0, foodBefore - accepted);
+    if (demobilized > 0) {
+      army.soldiers = accepted;
+      origin.population += demobilized;
+      context.population.demobilized += demobilized;
+      refreshArmyMilitaryAuthority(world, army);
+    }
+    if (foodRefund > 0) {
+      operation.foodLoaded -= foodRefund;
+      origin.food += foodRefund;
+      context.food.transferred += foodRefund;
+    }
+    if (demobilized > 0 || foodRefund > 0) {
+      emit({
+        category: '海洋',
+        kind: 'amphibious_force_reduced',
+        title: `${army.name}缩编渡海`,
+        summary: `${army.name}按运力从${soldiersBefore}人缩至${accepted}人；${demobilized}人留守${origin.name}，${foodRefund}军粮退回。`,
+        importance: 2,
+        actorIds: [army.commanderId, ...dockedFleets.map((fleet) => fleet.commanderId)],
+        polityIds: [army.polityId],
+        regionIds: [origin.id, operation.targetRegionId],
+        causes: [
+          { label: '实际运力', role: '触发', weight: 0.6, evidence: `${soldiersBefore}人中${accepted}人可登船` },
+          { label: '留港结算', role: '结果', weight: 0.4, evidence: `${demobilized}人、${foodRefund}军粮留在${origin.name}` },
+        ],
+        stateDeltas: [
+          { entityType: 'army', entityId: army.id, field: 'soldiers', before: soldiersBefore, after: army.soldiers, delta: -demobilized },
+          { entityType: 'navalOperation', entityId: operation.id, field: 'foodLoaded', before: foodBefore, after: operation.foodLoaded, delta: -foodRefund },
+        ],
+      });
+    }
+
+    operation.manifest = {
+      loadedTurn: context.turn,
+      soldiersDeparted: army.soldiers,
+      transportEdgeIds: path.edges.map((edge) => edge.id),
+    };
+    operation.stage = '航行';
+    operation.progress = 55;
   }
 }
 
@@ -1013,6 +1238,7 @@ export function processV03EconomyAndTrade(world: WorldState, context: V03TurnCon
   updatePrices(world);
   const pathCache = new Map<string, TransportPath | null>();
   const portUsage = new Map<string, number>();
+  loadPreparedLandingOperations(world, context, emit, portUsage);
   processMilitarySupply(world, context, pathCache, portUsage);
   processTrades(world, context, emit, pathCache, portUsage);
   updatePrices(world);
@@ -1049,46 +1275,85 @@ function seaZonePath(world: WorldState, startId: string, goalId: string): string
   return null;
 }
 
+function maritimePathAlongSeaZones(
+  world: WorldState,
+  originLink: PortLinkState,
+  destinationLink: PortLinkState,
+  zones: readonly string[],
+): TransportPath | null {
+  if (zones[0] !== originLink.seaZoneId || zones.at(-1) !== destinationLink.seaZoneId) return null;
+  const allEdges = transportEdges(world);
+  const edges = [allEdges.find((edge) => edge.id === originLink.id)];
+  for (let index = 1; index < zones.length; index += 1) {
+    const left = zones[index - 1];
+    const right = zones[index];
+    const lane = world.seaLanes.find((item) => (
+      (item.fromSeaZoneId === left && item.toSeaZoneId === right)
+      || (item.fromSeaZoneId === right && item.toSeaZoneId === left)
+    ));
+    edges.push(allEdges.find((edge) => edge.id === lane?.id));
+  }
+  edges.push(allEdges.find((edge) => edge.id === destinationLink.id));
+  if (edges.some((edge) => !edge)) return null;
+  const complete = edges as TransportEdge[];
+  return {
+    edges: complete,
+    cost: complete.reduce((sum, edge) => sum + edge.distance + edge.risk * 0.08, 0),
+    risk: complete.reduce((sum, edge) => sum + edge.risk, 0) / Math.max(1, complete.length),
+  };
+}
+
+function operationTransportPath(world: WorldState, operation: NavalOperationState): TransportPath | null {
+  const origin = world.portLinks.find((link) => (
+    link.regionId === operation.originRegionId && link.seaZoneId === operation.seaZonePath[0]
+  ));
+  const destination = world.portLinks.find((link) => (
+    link.regionId === operation.targetRegionId && link.seaZoneId === operation.seaZonePath.at(-1)
+  ));
+  return origin && destination
+    ? maritimePathAlongSeaZones(world, origin, destination, operation.seaZonePath)
+    : null;
+}
+
 function maritimePathBetweenPorts(world: WorldState, originRegionId: string, destinationRegionId: string): TransportPath | null {
   const originLinks = world.portLinks.filter((link) => link.regionId === originRegionId).sort((a, b) => stableCompare(a.id, b.id));
   const destinationLinks = world.portLinks.filter((link) => link.regionId === destinationRegionId).sort((a, b) => stableCompare(a.id, b.id));
   let best: TransportPath | null = null;
-  const edges = transportEdges(world);
   for (const originLink of originLinks) {
     for (const destinationLink of destinationLinks) {
       const zones = seaZonePath(world, originLink.seaZoneId, destinationLink.seaZoneId);
       if (!zones) continue;
-      const selected: TransportEdge[] = [];
-      const first = edges.find((edge) => edge.id === originLink.id);
-      const last = edges.find((edge) => edge.id === destinationLink.id);
-      if (!first || !last) continue;
-      selected.push(first);
-      let complete = true;
-      for (let index = 1; index < zones.length; index += 1) {
-        const left = zones[index - 1] as string;
-        const right = zones[index] as string;
-        const lane = world.seaLanes.find((item) => (
-          (item.fromSeaZoneId === left && item.toSeaZoneId === right)
-          || (item.fromSeaZoneId === right && item.toSeaZoneId === left)
-        ));
-        const edge = lane ? edges.find((item) => item.id === lane.id) : undefined;
-        if (!edge) {
-          complete = false;
-          break;
-        }
-        selected.push(edge);
-      }
-      if (!complete) continue;
-      selected.push(last);
-      const result = {
-        edges: selected,
-        cost: selected.reduce((sum, edge) => sum + edge.distance + edge.risk * 0.08, 0),
-        risk: selected.reduce((sum, edge) => sum + edge.risk, 0) / Math.max(1, selected.length),
-      };
-      if (!best || result.cost < best.cost) best = result;
+      const candidate = maritimePathAlongSeaZones(world, originLink, destinationLink, zones);
+      if (candidate && (!best || candidate.cost < best.cost)) best = candidate;
     }
   }
   return best;
+}
+
+export function migrateNavalOperationManifests(world: WorldState): boolean {
+  let changed = false;
+  for (const operation of world.navalOperations) {
+    if (Object.prototype.hasOwnProperty.call(operation, 'manifest')) continue;
+    const army = world.armies.find((candidate) => candidate.id === operation.armyId);
+    let path = operationTransportPath(world, operation);
+    if (!path) {
+      path = maritimePathBetweenPorts(world, operation.originRegionId, operation.targetRegionId);
+      const first = path?.edges[0];
+      const last = path?.edges.at(-1);
+      const repaired = first && last ? seaZonePath(world, first.to, last.to) : null;
+      if (repaired) operation.seaZonePath = repaired;
+    }
+    const wasLoaded = operation.stage === '航行' || operation.stage === '登陆' || operation.stage === '滩头';
+    operation.manifest = wasLoaded && army && path
+      ? {
+          loadedTurn: Math.max(operation.startedTurn, world.turn - 1),
+          soldiersDeparted: army.soldiers,
+          transportEdgeIds: path.edges.map((edge) => edge.id),
+        }
+      : null;
+    changed = true;
+  }
+  return changed;
 }
 
 function atWar(world: WorldState, leftId: string, rightId: string): boolean {
@@ -1262,8 +1527,71 @@ function repairFleets(world: WorldState, context: V03TurnContext, emit: V03Emit)
   }
 }
 
+function landingPreparationAssignments(world: WorldState): Map<string, string> {
+  const assignments = new Map<string, string>();
+  if (world.navalOperations.some((operation) => operation.stage !== '完成' && operation.stage !== '失败')) {
+    return assignments;
+  }
+  const usedFleetIds = new Set<string>();
+  const armies = world.armies
+    .filter((army) => (
+      !army.embarkedOperationId
+      && army.order.kind === 'advance'
+      && army.order.status === 'blocked'
+      && Boolean(army.order.warId && army.order.targetRegionId)
+    ))
+    .sort((left, right) => right.soldiers - left.soldiers || stableCompare(left.id, right.id));
+  for (const army of armies) {
+    const war = world.wars.find((candidate) => candidate.id === army.order.warId && candidate.active);
+    const target = world.regions.find((region) => region.id === army.order.targetRegionId);
+    const enemyId = war?.attackerId === army.polityId ? war.defenderId : war?.attackerId;
+    if (!war || !target?.port || target.controllerId !== enemyId
+      || !maritimePathBetweenPorts(world, army.regionId, target.id)) continue;
+    const fleet = world.fleets
+      .filter((candidate) => (
+        !usedFleetIds.has(candidate.id)
+        && candidate.polityId === army.polityId
+        && candidate.homePortRegionId === army.regionId
+        && candidate.transports * 1_000 >= army.soldiers
+      ))
+      .sort((left, right) => right.transports - left.transports || stableCompare(left.id, right.id))[0];
+    if (!fleet) continue;
+    assignments.set(fleet.id, army.id);
+    usedFleetIds.add(fleet.id);
+  }
+  return assignments;
+}
+
 function chooseFleetMissions(world: WorldState): void {
+  const landingPreparations = landingPreparationAssignments(world);
   for (const fleet of [...world.fleets].sort((a, b) => stableCompare(a.id, b.id))) {
+    const activeOperation = world.navalOperations.find((operation) => (
+      operation.fleetIds.includes(fleet.id)
+      && operation.stage !== '完成'
+      && operation.stage !== '失败'
+    ));
+    if (activeOperation) {
+      const waitingInPort = activeOperation.stage === '集结' || activeOperation.stage === '装载';
+      const targetRegionId = waitingInPort ? activeOperation.originRegionId : activeOperation.targetRegionId;
+      fleet.mission = '登陆';
+      fleet.targetRegionId = targetRegionId;
+      fleet.targetSeaZoneId = waitingInPort
+        ? null
+        : activeOperation.seaZonePath.at(-1) ?? null;
+      continue;
+    }
+    const retreatPort = fleet.targetRegionId
+      ? world.regions.find((region) => region.id === fleet.targetRegionId && region.controllerId === fleet.polityId)
+      : null;
+    if (fleet.mission === '避战' && retreatPort && fleet.portRegionId !== retreatPort.id) continue;
+    const landingArmyId = landingPreparations.get(fleet.id);
+    if (landingArmyId) {
+      const army = world.armies.find((candidate) => candidate.id === landingArmyId);
+      fleet.mission = '运输';
+      fleet.targetRegionId = army?.regionId ?? fleet.homePortRegionId;
+      fleet.targetSeaZoneId = world.portLinks.find((link) => link.regionId === fleet.targetRegionId)?.seaZoneId ?? null;
+      continue;
+    }
     const enemyIds = world.wars
       .filter((war) => war.active && (war.attackerId === fleet.polityId || war.defenderId === fleet.polityId))
       .map((war) => war.attackerId === fleet.polityId ? war.defenderId : war.attackerId);
@@ -1301,12 +1629,17 @@ function chooseFleetMissions(world: WorldState): void {
 
 function moveFleets(world: WorldState): void {
   for (const fleet of [...world.fleets].sort((a, b) => stableCompare(a.id, b.id))) {
+    if (fleet.mission === '运输' && fleet.targetRegionId && fleet.portRegionId === fleet.targetRegionId) continue;
     if (!fleet.targetSeaZoneId || fleet.lastMovedTurn === world.turn) continue;
+    const voyage = world.navalOperations.find((operation) => (
+      operation.stage === '航行' && operation.fleetIds.includes(fleet.id)
+    ));
     if (fleet.portRegionId) {
       const links = world.portLinks.filter((link) => link.regionId === fleet.portRegionId);
-      const direct = links.find((link) => link.seaZoneId === fleet.targetSeaZoneId);
+      const launchTarget = voyage?.seaZonePath[0] ?? fleet.targetSeaZoneId;
+      const direct = links.find((link) => link.seaZoneId === launchTarget);
       const launch = direct ?? links
-        .map((link) => ({ link, path: seaZonePath(world, link.seaZoneId, fleet.targetSeaZoneId as string) }))
+        .map((link) => ({ link, path: seaZonePath(world, link.seaZoneId, launchTarget) }))
         .filter((item): item is { link: PortLinkState; path: string[] } => Boolean(item.path))
         .sort((left, right) => left.path.length - right.path.length || stableCompare(left.link.id, right.link.id))[0]?.link;
       if (!launch) continue;
@@ -1315,7 +1648,33 @@ function moveFleets(world: WorldState): void {
       fleet.lastMovedTurn = world.turn;
       continue;
     }
-    if (!fleet.seaZoneId || fleet.seaZoneId === fleet.targetSeaZoneId) continue;
+    if (!fleet.seaZoneId) continue;
+    if (fleet.seaZoneId === fleet.targetSeaZoneId) {
+      const targetPort = (fleet.mission === '运输' || fleet.mission === '避战') && fleet.targetRegionId
+        ? world.regions.find((region) => (
+          region.id === fleet.targetRegionId
+          && region.port
+          && region.controllerId === fleet.polityId
+          && world.portLinks.some((link) => link.regionId === region.id && link.seaZoneId === fleet.seaZoneId)
+        ))
+        : null;
+      if (targetPort) {
+        fleet.portRegionId = targetPort.id;
+        fleet.seaZoneId = null;
+        fleet.lastMovedTurn = world.turn;
+      }
+      continue;
+    }
+    if (voyage) {
+      const routeIndex = voyage.seaZonePath.indexOf(fleet.seaZoneId);
+      const nextZoneId = voyage.seaZonePath[routeIndex + 1];
+      if (routeIndex >= 0 && nextZoneId) {
+        fleet.seaZoneId = nextZoneId;
+        fleet.lastMovedTurn = world.turn;
+        fleet.readiness = Math.round(clamp(fleet.readiness - 2));
+      }
+      continue;
+    }
     const path = seaZonePath(world, fleet.seaZoneId, fleet.targetSeaZoneId);
     if (path && path.length >= 2) {
       fleet.seaZoneId = path[1] as string;
@@ -1399,16 +1758,8 @@ function maintainFleets(world: WorldState, context: V03TurnContext, emit: V03Emi
   }
 }
 
-function updateSeaPower(world: WorldState, context: V03TurnContext): void {
-  const profile = getMapProfileForContentVersion(world.mapContentVersion);
+function refreshSeaPower(world: WorldState): void {
   for (const zone of world.seaZones) {
-    const definition = profile.simulation.seaZones.find((item) => item.id === zone.id);
-    const seasonal = context.season === '夏' && zone.climate === '季风海' ? 10
-      : context.season === '冬' && zone.climate === '北方海' ? 7
-        : context.season === '秋' && zone.climate === '外洋' ? 8 : 0;
-    const noise = (keyedRandom(world.seed, context.turn, 'sea-weather', zone.id) - 0.5) * 14;
-    zone.stormRisk = Math.round(clamp((definition?.stormRisk ?? zone.stormRisk) + seasonal + noise));
-    zone.piracy = Math.round(clamp(zone.piracy * 0.94 + Math.min(10, zone.traffic / 8_000) - (zone.controllerId ? 1.5 : 0)));
     const power: Record<string, number> = {};
     for (const fleet of world.fleets.filter((item) => item.seaZoneId === zone.id)) {
       const raw = (fleet.warships * 90 + fleet.patrolShips * 48 + fleet.transports * 18)
@@ -1423,6 +1774,20 @@ function updateSeaPower(world: WorldState, context: V03TurnContext): void {
     zone.controllerId = topShare >= 55 ? ranked[0]?.[0] ?? null : null;
     zone.contested = ranked.length > 1 && (topShare < 55 || topShare - secondShare < 20);
   }
+}
+
+function updateSeaPower(world: WorldState, context: V03TurnContext): void {
+  const profile = getMapProfileForContentVersion(world.mapContentVersion);
+  for (const zone of world.seaZones) {
+    const definition = profile.simulation.seaZones.find((item) => item.id === zone.id);
+    const seasonal = context.season === '夏' && zone.climate === '季风海' ? 10
+      : context.season === '冬' && zone.climate === '北方海' ? 7
+        : context.season === '秋' && zone.climate === '外洋' ? 8 : 0;
+    const noise = (keyedRandom(world.seed, context.turn, 'sea-weather', zone.id) - 0.5) * 14;
+    zone.stormRisk = Math.round(clamp((definition?.stormRisk ?? zone.stormRisk) + seasonal + noise));
+    zone.piracy = Math.round(clamp(zone.piracy * 0.94 + Math.min(10, zone.traffic / 8_000) - (zone.controllerId ? 1.5 : 0)));
+  }
+  refreshSeaPower(world);
 }
 
 function updateBlockades(world: WorldState, context: V03TurnContext, emit: V03Emit): void {
@@ -1580,7 +1945,103 @@ function processShipbuilding(world: WorldState, context: V03TurnContext, emit: V
   }
 }
 
-function resolveLanding(world: WorldState, operation: NavalOperationState, context: V03TurnContext, emit: V03Emit): void {
+function seaPowerShare(world: WorldState, seaZoneId: string, polityId: string): number {
+  const zone = world.seaZones.find((candidate) => candidate.id === seaZoneId);
+  const total = Object.values(zone?.powerByPolity ?? {}).reduce((sum, value) => sum + value, 0);
+  return (zone?.powerByPolity[polityId] ?? 0) / Math.max(1, total) * 100;
+}
+
+type LandingCaptureResolver = (
+  war: WorldState['wars'][number],
+  army: WorldState['armies'][number],
+  target: RegionState,
+  previousControllerId: string,
+  battleFact: BattleFact,
+  defenders: WorldState['armies'],
+) => SimulationFact;
+
+/** Embarked troops live only from the manifest closed at loading time. */
+export function consumeEmbarkedArmyRations(
+  world: WorldState,
+  army: WorldState['armies'][number],
+  context: V03TurnContext,
+): boolean {
+  const operation = army.embarkedOperationId
+    ? world.navalOperations.find((item) => item.id === army.embarkedOperationId)
+    : null;
+  if (!operation || (operation.stage !== '航行' && operation.stage !== '登陆')) return false;
+  const needed = Math.max(1, whole(army.soldiers * 0.2));
+  const manifestConsumed = Math.min(operation.foodLoaded, needed);
+  const carriedConsumed = Math.min(army.food, needed - manifestConsumed);
+  const consumed = manifestConsumed + carriedConsumed;
+  operation.foodLoaded -= manifestConsumed;
+  army.food -= carriedConsumed;
+  context.food.armyConsumed += consumed;
+  army.supply = Math.round(clamp(consumed / needed * 100));
+  if (consumed < needed) {
+    army.morale = Math.round(clamp(army.morale - 5 - (needed - consumed) / needed * 12));
+  }
+  return true;
+}
+
+function failLandingVoyage(
+  world: WorldState,
+  context: V03TurnContext,
+  emit: V03Emit,
+  operation: NavalOperationState,
+  army: WorldState['armies'][number],
+  reason: string,
+  seaZoneId: string | null,
+  friendlyShare: number,
+): void {
+  const origin = world.regions.find((region) => region.id === operation.originRegionId);
+  const soldiersBefore = army.soldiers;
+  const losses = Math.min(Math.max(0, soldiersBefore - 1), whole(soldiersBefore * 0.04));
+  const foodBefore = operation.foodLoaded;
+  const returnedFood = origin ? whole(foodBefore * 0.7) : 0;
+  const destroyedFood = foodBefore - returnedFood;
+  army.soldiers -= losses;
+  context.population.militaryDeaths += losses;
+  if (origin) {
+    army.regionId = origin.id;
+    origin.food += returnedFood;
+    context.food.transferred += returnedFood;
+  }
+  context.food.warDestroyed += destroyedFood;
+  operation.foodLoaded = 0;
+  operation.stage = '失败';
+  operation.completedTurn = context.turn;
+  army.embarkedOperationId = null;
+  recordLandingTransit(world, context, operation, army, operation.originRegionId);
+  orderLandingFleetsHome(world, operation);
+  refreshArmyMilitaryAuthority(world, army);
+  emit({
+    category: '海洋',
+    kind: 'amphibious_voyage_failed',
+    title: `${army.name}渡海受阻`,
+    summary: `${army.name}在${world.seaZones.find((zone) => zone.id === seaZoneId)?.name ?? '航路中途'}因${reason}返航；海权${Math.round(friendlyShare)}%，损兵${losses}、损粮${destroyedFood}。`,
+    importance: 3,
+    actorIds: [army.commanderId],
+    polityIds: [army.polityId],
+    regionIds: [operation.originRegionId, operation.targetRegionId],
+    causes: [
+      { label: '海路受阻', role: '触发', weight: 0.65, evidence: `${seaZoneId ?? '未离港'}海权${Math.round(friendlyShare)}%；${reason}` },
+      { label: '返航结算', role: '结果', weight: 0.35, evidence: `兵员${losses}、军粮${destroyedFood}` },
+    ],
+    stateDeltas: [
+      { entityType: 'army', entityId: army.id, field: 'soldiers', before: soldiersBefore, after: army.soldiers, delta: -losses },
+      { entityType: 'navalOperation', entityId: operation.id, field: 'stage', before: '航行', after: '失败' },
+    ],
+  });
+}
+
+function resolveLanding(
+  world: WorldState,
+  operation: NavalOperationState,
+  context: V03TurnContext,
+  emit: V03Emit,
+  capture: LandingCaptureResolver,
+): void {
   const army = world.armies.find((item) => item.id === operation.armyId);
   const target = world.regions.find((item) => item.id === operation.targetRegionId);
   const war = world.wars.find((item) => item.id === operation.warId && item.active);
@@ -1602,11 +2063,14 @@ function resolveLanding(world: WorldState, operation: NavalOperationState, conte
   const won = attackPower * variance > defensePower;
   const soldiersBefore = army.soldiers;
   const moraleBefore = army.morale;
+  recordLandingTransit(world, context, operation, army, operation.targetRegionId);
   const defenderSnapshots = defenders.map((defender) => ({
     armyId: defender.id,
     polityId: defender.polityId,
     commanderId: defender.commanderId,
     deputyCommanderId: defender.deputyCommanderId,
+    allegianceCharacterId: defender.allegiance.characterId,
+    allegianceStrength: defender.allegiance.strength,
     soldiersBefore: defender.soldiers,
     soldiersAfter: defender.soldiers,
     moraleBefore: defender.morale,
@@ -1628,8 +2092,9 @@ function resolveLanding(world: WorldState, operation: NavalOperationState, conte
     importance: 4,
     actorIds: [
       army.commanderId,
+      army.allegiance.characterId,
       ...(army.deputyCommanderId ? [army.deputyCommanderId] : []),
-      ...defenders.flatMap((defender) => [defender.commanderId, ...(defender.deputyCommanderId ? [defender.deputyCommanderId] : [])]),
+      ...defenders.flatMap((defender) => [defender.commanderId, defender.allegiance.characterId, ...(defender.deputyCommanderId ? [defender.deputyCommanderId] : [])]),
     ],
     polityIds: [army.polityId, previousController],
     regionIds: [operation.originRegionId, target.id],
@@ -1640,7 +2105,7 @@ function resolveLanding(world: WorldState, operation: NavalOperationState, conte
       { label: '登陆结算', role: '结果', weight: 0.25, evidence: `攻方损失${losses}，民兵损失${militiaLoss}` },
     ],
     stateDeltas: [{ entityType: 'army', entityId: army.id, field: 'soldiers', before: soldiersBefore, after: army.soldiers, delta: -losses }],
-    sourceFactIds: [],
+    sourceFactIds: armyOrderFactIds([army]),
     payload: {
       warId: war.id,
       targetRegionId: target.id,
@@ -1654,6 +2119,8 @@ function resolveLanding(world: WorldState, operation: NavalOperationState, conte
         polityId: army.polityId,
         commanderId: army.commanderId,
         deputyCommanderId: army.deputyCommanderId,
+        allegianceCharacterId: army.allegiance.characterId,
+        allegianceStrength: army.allegiance.strength,
         soldiersBefore,
         soldiersAfter: army.soldiers,
         moraleBefore,
@@ -1667,36 +2134,23 @@ function resolveLanding(world: WorldState, operation: NavalOperationState, conte
   }) as BattleFact;
   let territoryFact: SimulationFact | null = null;
   if (won) {
-    target.controllerId = army.polityId;
-    territoryFact = emitSimulationFact(world, context, {
-      kind: 'territory_control_changed',
-      category: '海洋',
-      importance: 4,
-      actorIds: [army.commanderId],
-      polityIds: [army.polityId, previousController],
-      regionIds: [target.id],
-      causes: [
-        { label: '登陆胜利', role: '触发', weight: 0.68, evidence: `${battleFact.id}确认登陆军建立滩头` },
-        { label: '港岸接管', role: '结果', weight: 0.32, evidence: `${target.name}控制权转入${army.polityId}` },
-      ],
-      stateDeltas: [{ entityType: 'region', entityId: target.id, field: 'controllerId', before: previousController, after: army.polityId }],
-      sourceFactIds: [battleFact.id],
-      payload: {
-        regionId: target.id,
-        previousControllerId: previousController,
-        nextControllerId: army.polityId,
-        reason: 'amphibious_landing',
-        warId: war.id,
-      },
-    });
     army.regionId = target.id;
+    syncArmyPersonnelLocations(world, army);
+    territoryFact = capture(war, army, target, previousController, battleFact, defenders);
     army.food += operation.foodLoaded;
     operation.foodLoaded = 0;
-    operation.stage = '滩头';
-    const attacker = world.polities.find((polity) => polity.id === army.polityId);
     const defender = world.polities.find((polity) => polity.id === previousController);
-    if (attacker && !attacker.controlledRegionIds.includes(target.id)) attacker.controlledRegionIds.push(target.id);
-    if (defender) defender.controlledRegionIds = defender.controlledRegionIds.filter((id) => id !== target.id);
+    operation.stage = war.active ? '滩头' : '完成';
+    if (!war.active) {
+      operation.progress = 100;
+      operation.completedTurn = world.turn;
+      army.embarkedOperationId = null;
+    }
+    if (defender && !defender.alive) {
+      repairFleets(world, context, emit);
+      refreshSeaPower(world);
+      context.maritime.fleetIds = world.fleets.map((fleet) => fleet.id).sort(stableCompare);
+    }
   } else {
     army.regionId = operation.originRegionId;
     const returnedFood = whole(operation.foodLoaded * 0.55);
@@ -1706,7 +2160,9 @@ function resolveLanding(world: WorldState, operation: NavalOperationState, conte
     operation.stage = '失败';
     operation.completedTurn = world.turn;
     army.embarkedOperationId = null;
+    orderLandingFleetsHome(world, operation);
   }
+  syncArmyPersonnelLocations(world, army);
   emit({
     category: '海洋',
     kind: won ? 'amphibious_landing_succeeded' : 'amphibious_landing_failed',
@@ -1731,7 +2187,12 @@ function resolveLanding(world: WorldState, operation: NavalOperationState, conte
   });
 }
 
-function advanceNavalOperations(world: WorldState, context: V03TurnContext, emit: V03Emit): void {
+function advanceNavalOperations(
+  world: WorldState,
+  context: V03TurnContext,
+  emit: V03Emit,
+  capture: LandingCaptureResolver,
+): void {
   for (const operation of world.navalOperations.filter((item) => item.stage !== '完成' && item.stage !== '失败')) {
     const army = world.armies.find((item) => item.id === operation.armyId);
     const war = world.wars.find((item) => item.id === operation.warId);
@@ -1758,6 +2219,8 @@ function advanceNavalOperations(world: WorldState, context: V03TurnContext, emit
       operation.stage = '失败';
       operation.completedTurn = world.turn;
       if (army) army.embarkedOperationId = null;
+      if (army && operation.manifest) recordLandingTransit(world, context, operation, army, operation.originRegionId);
+      orderLandingFleetsHome(world, operation);
       emit({
         category: '海洋',
         kind: 'naval_operation_aborted',
@@ -1780,78 +2243,52 @@ function advanceNavalOperations(world: WorldState, context: V03TurnContext, emit
       operation.progress = Math.min(100, operation.progress + 45);
       if (operation.progress >= 40) operation.stage = '装载';
     } else if (operation.stage === '装载') {
-      const path = maritimePathBetweenPorts(world, operation.originRegionId, operation.targetRegionId);
-      const fleet = operation.fleetIds.map((id) => world.fleets.find((item) => item.id === id)).find((item): item is FleetState => Boolean(item));
-      if (!path || !fleet) {
-        const origin = world.regions.find((item) => item.id === operation.originRegionId);
-        if (origin) {
-          origin.food += operation.foodLoaded;
-          context.food.transferred += operation.foodLoaded;
-        } else {
-          context.food.warDestroyed += operation.foodLoaded;
-        }
-        operation.foodLoaded = 0;
-        operation.stage = '失败';
-        operation.completedTurn = world.turn;
-        army.embarkedOperationId = null;
-        continue;
-      }
-      const portUsage = new Map<string, number>();
-      for (const usage of context.logistics.seaUsage) {
-        const link = world.portLinks.find((item) => item.id === usage.edgeId);
-        if (link) portUsage.set(link.regionId, (portUsage.get(link.regionId) ?? 0) + usage.reserved);
-      }
-      const flowId = createShipmentId(world);
-      const capacityNeed = whole(army.soldiers);
-      const accepted = reservePath(world, context, path, capacityNeed, flowId, portUsage);
-      if (accepted < capacityNeed) {
-        releasePath(context, path, accepted, flowId, portUsage);
-        continue;
-      }
-      const month = (world.counters.shipment % 3) as 0 | 1 | 2;
-      recordShipment(world, context, {
-        id: flowId,
-        kind: '海军运输',
-        commodity: null,
-        originRegionId: operation.originRegionId,
-        destinationRegionId: operation.targetRegionId,
-        acceptedAmount: accepted,
-        deliveredAmount: accepted,
-        lostAmount: 0,
-        raidedAmount: 0,
-        peopleDeparted: army.soldiers,
-        peopleArrived: army.soldiers,
-        peopleLost: 0,
-        contactVolume: army.soldiers,
-        legs: legRecords(path, accepted, month),
-        carrierArmyId: army.id,
-        carrierFleetId: fleet.id,
-        value: 0,
-        tariff: 0,
-        status: '交付',
-      });
-      operation.stage = '航行';
-      operation.progress = 55;
+      // Loading is settled before ordinary trade in processV03EconomyAndTrade,
+      // so a prepared convoy claims only real capacity and cannot starve behind
+      // commerce forever. Remaining in this stage means it is still waiting for
+      // its bounded loading window or will be failed there with an explanation.
     } else if (operation.stage === '航行') {
-      const shares = operation.seaZonePath.map((zoneId) => {
-        const zone = world.seaZones.find((item) => item.id === zoneId);
-        const total = Object.values(zone?.powerByPolity ?? {}).reduce((sum, value) => sum + value, 0);
-        return (zone?.powerByPolity[army.polityId] ?? 0) / Math.max(1, total) * 100;
-      });
-      if (shares.every((share) => share >= 45)) {
+      const fleetZoneIds = assignedFleets
+        .map((fleet) => fleet.seaZoneId)
+        .filter((id): id is string => Boolean(id));
+      const targetSeaZoneId = operation.seaZonePath.at(-1) ?? null;
+      const routeIndexes = fleetZoneIds.map((zoneId) => operation.seaZonePath.indexOf(zoneId));
+      const currentSeaZoneId = fleetZoneIds[0] ?? null;
+      const shares = fleetZoneIds.map((zoneId) => seaPowerShare(world, zoneId, army.polityId));
+      const weakestShare = shares.length > 0 ? Math.min(...shares) : 0;
+      const leftRoute = routeIndexes.some((index) => index < 0);
+      if (leftRoute) {
+        failLandingVoyage(world, context, emit, operation, army, '舰队偏离航路，远征军无法前送', currentSeaZoneId, weakestShare);
+        continue;
+      }
+      const transportCapacity = assignedFleets.reduce((sum, fleet) => sum + fleet.transports * 1_000, 0);
+      if (transportCapacity < army.soldiers) {
+        failLandingVoyage(world, context, emit, operation, army, `承运船损失后仅余${transportCapacity}人运力`, currentSeaZoneId, weakestShare);
+        continue;
+      }
+      if (fleetZoneIds.length === assignedFleets.length && weakestShare < MIN_VOYAGE_SEA_SHARE) {
+        failLandingVoyage(world, context, emit, operation, army, '沿途海权不足，舰队遇阻', currentSeaZoneId, weakestShare);
+        continue;
+      }
+      const routeIndex = routeIndexes.length > 0 ? Math.min(...routeIndexes) : -1;
+      if (routeIndex >= 0) {
+        operation.progress = Math.min(82, 55 + whole((routeIndex + 1) / Math.max(1, operation.seaZonePath.length) * 27));
+      }
+      const reachedTarget = Boolean(
+        targetSeaZoneId
+        && fleetZoneIds.length === assignedFleets.length
+        && fleetZoneIds.every((zoneId) => zoneId === targetSeaZoneId),
+      );
+      if (reachedTarget && weakestShare >= MIN_LANDING_SEA_SHARE) {
         operation.stage = '登陆';
         operation.progress = 85;
-      } else if (world.turn - operation.startedTurn >= 8) {
-        operation.stage = '失败';
-        operation.completedTurn = world.turn;
-        army.embarkedOperationId = null;
-        const origin = world.regions.find((item) => item.id === operation.originRegionId);
-        if (origin) origin.food += operation.foodLoaded;
-        context.food.transferred += operation.foodLoaded;
-        operation.foodLoaded = 0;
+      } else if (reachedTarget) {
+        failLandingVoyage(world, context, emit, operation, army, '敌军控制港外海，舰队无法掩护登陆', currentSeaZoneId, weakestShare);
+      } else if (world.turn - operation.startedTurn >= MAX_LANDING_VOYAGE_AGE) {
+        failLandingVoyage(world, context, emit, operation, army, '航程拖延超过远征期限', currentSeaZoneId, weakestShare);
       }
     } else if (operation.stage === '登陆') {
-      resolveLanding(world, operation, context, emit);
+      resolveLanding(world, operation, context, emit, capture);
     } else if (operation.stage === '滩头') {
       operation.stage = '完成';
       operation.progress = 100;
@@ -1867,25 +2304,39 @@ function maybeCreateLandingOperation(world: WorldState, context: V03TurnContext,
     for (const attackerId of [war.attackerId, war.defenderId]) {
       const defenderId = attackerId === war.attackerId ? war.defenderId : war.attackerId;
       const originArmies = world.armies
-        .filter((army) => army.polityId === attackerId && !army.embarkedOperationId && world.regions.some((region) => region.id === army.regionId && region.port && region.controllerId === attackerId))
+        .filter((army) => army.polityId === attackerId
+          && !army.embarkedOperationId
+          && army.lastMovedTurn !== context.turn
+          && army.order.warId === war.id
+          && army.order.kind === 'advance'
+          && army.order.status === 'blocked'
+          && army.order.issuedTurn < context.turn
+          && world.regions.some((region) => region.id === army.regionId && region.port && region.controllerId === attackerId))
         .sort((left, right) => right.soldiers - left.soldiers || stableCompare(left.id, right.id));
       for (const army of originArmies) {
         const fleet = world.fleets
-          .filter((item) => item.polityId === attackerId && item.homePortRegionId === army.regionId && item.transports * 1_000 >= army.soldiers)
+          .filter((item) => (
+            item.polityId === attackerId
+            && item.homePortRegionId === army.regionId
+            && item.portRegionId === army.regionId
+            && item.lastMovedTurn !== context.turn
+            && item.transports * 1_000 >= army.soldiers
+          ))
           .sort((left, right) => right.transports - left.transports || stableCompare(left.id, right.id))[0];
         if (!fleet) continue;
-        const targets = world.regions
-          .filter((region) => region.controllerId === defenderId && region.port)
-          .map((region) => ({ region, path: maritimePathBetweenPorts(world, army.regionId, region.id) }))
-          .filter((item): item is { region: RegionState; path: TransportPath } => Boolean(item.path && item.path.edges.some((edge) => edge.kind === 'sea-lane')))
-          .sort((left, right) => right.region.strategicValue - left.region.strategicValue || stableCompare(left.region.id, right.region.id));
-        const target = targets[0];
-        if (!target) continue;
-        const seaIds: string[] = [];
-        for (const edge of target.path.edges.filter((item) => item.kind === 'sea-lane')) {
-          if (!seaIds.includes(edge.from)) seaIds.push(edge.from);
-          if (!seaIds.includes(edge.to)) seaIds.push(edge.to);
-        }
+        const targetRegion = world.regions.find((region) => (
+          region.id === army.order.targetRegionId && region.controllerId === defenderId && region.port
+        ));
+        const targetPath = targetRegion
+          ? maritimePathBetweenPorts(world, army.regionId, targetRegion.id)
+          : null;
+        if (!targetRegion || !targetPath || !targetPath.edges.some((edge) => edge.kind === 'sea-lane')) continue;
+        const seaIds = seaZonePath(
+          world,
+          targetPath.edges[0]?.to ?? '',
+          targetPath.edges.at(-1)?.to ?? '',
+        );
+        if (!seaIds || seaIds.length < 2) continue;
         const origin = world.regions.find((region) => region.id === army.regionId) as RegionState;
         const foodLoaded = Math.min(origin.food, army.soldiers);
         if (foodLoaded < army.soldiers * 0.65) continue;
@@ -1898,17 +2349,19 @@ function maybeCreateLandingOperation(world: WorldState, context: V03TurnContext,
           armyId: army.id,
           fleetIds: [fleet.id],
           originRegionId: origin.id,
-          targetRegionId: target.region.id,
+          targetRegionId: targetRegion.id,
           seaZonePath: seaIds,
           stage: '集结',
           startedTurn: world.turn,
           progress: 0,
           foodLoaded,
+          manifest: null,
           completedTurn: null,
         };
+        issueAmphibiousArmyOrder(world, context, army, war.id, targetRegion.id);
         army.embarkedOperationId = operation.id;
         fleet.mission = '登陆';
-        fleet.targetRegionId = target.region.id;
+        fleet.targetRegionId = targetRegion.id;
         fleet.targetSeaZoneId = seaIds.at(-1) ?? null;
         world.navalOperations.push(operation);
         context.maritime.landingOperationIds.push(operation.id);
@@ -1916,13 +2369,13 @@ function maybeCreateLandingOperation(world: WorldState, context: V03TurnContext,
           category: '海洋',
           kind: 'amphibious_operation_prepared',
           title: `${army.name}筹备渡海`,
-          summary: `${army.name}在${origin.name}集结，${fleet.name}提供运输吨位，并预装${foodLoaded}军粮准备进攻${target.region.name}。`,
+          summary: `${army.name}在${origin.name}集结，${fleet.name}提供运输吨位，并预装${foodLoaded}军粮准备进攻${targetRegion.name}。`,
           importance: 3,
           actorIds: [army.commanderId, fleet.commanderId],
           polityIds: [attackerId, defenderId],
-          regionIds: [origin.id, target.region.id],
+          regionIds: [origin.id, targetRegion.id],
           causes: [
-            { label: '战争目标', role: '结构', weight: 0.2, evidence: `${war.reason}使${target.region.name}成为跨海目标`, refs: [{ kind: 'entity', entityType: 'war', entityId: war.id, label: '活动战争' }] },
+            { label: '战争目标', role: '结构', weight: 0.2, evidence: `${war.reason}使${targetRegion.name}成为跨海目标`, refs: [{ kind: 'entity', entityType: 'war', entityId: war.id, label: '活动战争' }] },
             { label: '运输吨位', role: '条件', weight: 0.3, evidence: `${fleet.transports}艘运输船可承载${fleet.transports * 1_000}人`, refs: [{ kind: 'entity', entityType: 'fleet', entityId: fleet.id, field: 'transports', label: '运输船' }] },
             { label: '军粮预装', role: '条件', weight: 0.25, evidence: `${foodLoaded}军粮已从${origin.name}转入行动账户` },
             { label: '行动建立', role: '结果', weight: 0.25, evidence: `${operation.id}进入集结阶段` },
@@ -1936,7 +2389,12 @@ function maybeCreateLandingOperation(world: WorldState, context: V03TurnContext,
 }
 
 /** Fleet upkeep, sea power, blockade, shipbuilding and bounded landings. */
-export function processV03Maritime(world: WorldState, context: V03TurnContext, emit: V03Emit): void {
+export function processV03Maritime(
+  world: WorldState,
+  context: V03TurnContext,
+  emit: V03Emit,
+  capture: LandingCaptureResolver,
+): void {
   repairFleets(world, context, emit);
   context.maritime.fleetIds = world.fleets.map((fleet) => fleet.id).sort(stableCompare);
   chooseFleetMissions(world);
@@ -1945,6 +2403,6 @@ export function processV03Maritime(world: WorldState, context: V03TurnContext, e
   updateSeaPower(world, context);
   updateBlockades(world, context, emit);
   processShipbuilding(world, context, emit);
-  advanceNavalOperations(world, context, emit);
+  advanceNavalOperations(world, context, emit, capture);
   maybeCreateLandingOperation(world, context, emit);
 }

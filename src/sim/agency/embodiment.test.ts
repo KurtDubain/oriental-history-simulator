@@ -177,7 +177,7 @@ describe('EMB05-06 deputy identity action', () => {
 
   it('lets a player-held deputy carry support into a next-quarter request using the same intent resolver', () => {
     let world = createWorld('军权春秋');
-    while (world.turn < 8) world = advanceWorld(world);
+    while (world.turn < 10) world = advanceWorld(world);
     const autonomous = advanceWorld(world);
     const naturallyRequesting = autonomous.facts
       .flatMap((fact) => (

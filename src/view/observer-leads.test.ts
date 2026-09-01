@@ -30,9 +30,9 @@ function leadAt(projection: ObserverLeadProjection, slot: ObserverLeadSlot) {
   return lead;
 }
 
-function fixedWorldsThrough(turn: number): Map<number, WorldState> {
+function fixedWorldsThrough(turn: number, seed = '春战副将'): Map<number, WorldState> {
   const worlds = new Map<number, WorldState>();
-  let world = createWorld('春战副将');
+  let world = createWorld(seed);
   worlds.set(0, world);
   while (world.turn < turn) {
     world = advanceWorld(world);
@@ -273,7 +273,7 @@ describe('observer story leads', () => {
   });
 
   it('does not silently replace earlier slots when a later diversity-conflicting slot is retained', () => {
-    const base = fixedWorldsThrough(8).get(8) as WorldState;
+    const base = fixedWorldsThrough(8, '兵权入世').get(8) as WorldState;
     const military = base.situationSystem.situations.filter((item) => item.type === 'military_power_crisis');
     const inheritance = base.situationSystem.situations.find((item) => item.type === 'inheritance_crisis');
     const wars = base.situationSystem.situations.filter((item) => item.type === 'war_progress');

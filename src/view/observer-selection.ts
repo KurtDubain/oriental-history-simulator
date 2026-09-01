@@ -1,5 +1,5 @@
 import type { WorldState } from '../sim/types';
-import { compact } from './dossier-adapter-shared';
+import { compact } from './compact-number';
 import { toSystemInspector } from './map-dossier-adapter';
 import { projectSituationHistoricalScenes } from './historical-scenes';
 import { projectSituationSnapshotItem } from './situation-snapshot';

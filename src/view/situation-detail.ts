@@ -208,6 +208,7 @@ const FACT_KIND_LABELS: Record<SimulationFact['kind'], string> = {
   war_started: '宣战事实',
   war_ended: '停战事实',
   battle: '战役事实',
+  army_order_changed: '军令变更',
   territory_control_changed: '领土事实',
   appointment_started: '任命事实',
   appointment_ended: '去职事实',
@@ -255,6 +256,31 @@ const FIELD_LABELS: Readonly<Record<string, string>> = {
   dynastyName: '王朝名号',
   rulingFamilyPower: '王室根基',
   dynastyStability: '王朝稳定',
+  'order.kind': '军令',
+  'order.warId': '所属战事',
+  'order.issuerId': '下令者',
+  'order.targetRegionId': '军令去向',
+  'order.targetArmyId': '追踪军团',
+  'order.status': '执行状态',
+  'order.reasonCode': '改令缘由',
+};
+
+const ORDER_VALUE_LABELS: Readonly<Record<string, string>> = {
+  hold: '固守',
+  advance: '进军',
+  intercept: '截击',
+  reinforce: '驰援',
+  retreat: '撤退',
+  active: '可以执行',
+  blocked: '道路受阻',
+  peace_garrison: '战事已息，留营守备',
+  war_goal: '夺取战争目标',
+  enemy_approach: '敌军逼近',
+  frontline_support: '接应友军',
+  defend_war_goal: '守卫战守要地',
+  amphibious_landing: '改由水师送登陆岸',
+  low_readiness: '军粮或军心不足',
+  target_invalid: '原定目标失效',
 };
 
 const TEMPLATE_BY_TYPE: Readonly<Record<string, SituationTemplate>> = {
@@ -301,12 +327,15 @@ function valueLabel(world: WorldState, value: DeltaValue, field: string): string
   if (typeof value === 'number') return compactNumber(value);
   if (typeof value === 'boolean') return value ? '是' : '否';
   if (value === null) return '无';
+  if (field.startsWith('order.') && ORDER_VALUE_LABELS[value]) return ORDER_VALUE_LABELS[value];
   const named = world.characters.find((item) => item.id === value)?.name
     ?? world.polities.find((item) => item.id === value)?.shortName
     ?? world.polities.find((item) => item.id === value)?.name
     ?? world.regions.find((item) => item.id === value)?.name
     ?? world.families.find((item) => item.id === value)?.name
-    ?? world.factions.find((item) => item.id === value)?.name;
+    ?? world.factions.find((item) => item.id === value)?.name
+    ?? world.armies.find((item) => item.id === value)?.name
+    ?? world.wars.find((item) => item.id === value)?.reason;
   if (named) return named;
   return field === 'outcomeKey' ? situationOutcomeLabel(value) : value;
 }

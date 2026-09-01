@@ -42,6 +42,7 @@ import {
   type MapPointerContact,
 } from "../view/map-gestures";
 import { buildMapPresentation } from "../view/map-presentation";
+import { mapArmyHoverReading } from "../view/map-army-reading";
 import { buildMapLodScene, resolveMapLodLevel } from "../view/map-lod";
 import { resolveMapFocusOffset, type MapFocusOcclusion } from "../view/map-focus-offset";
 import { layoutMapMarkers, mapMarkerMatchesSelection, mapMarkerTarget } from "../view/map-marker-layout";
@@ -912,11 +913,7 @@ export function WorldMap({
         ["人口", formatPopulation(hover.region.population)],
       ],
     };
-    if (hover.kind === "army") return {
-      name: hover.army.name,
-      type: "军团 · 可点击",
-      rows: [["兵力", formatPopulation(hover.army.strength)], ["士气", `${Math.round(hover.army.morale ?? 0)}`], ["状态", hover.army.status ?? "驻军"]],
-    };
+    if (hover.kind === "army") return mapArmyHoverReading(hover.army);
     if (hover.kind === "fleet") return {
       name: hover.fleet.name,
       type: "水师 · 可点击",

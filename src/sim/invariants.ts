@@ -17,6 +17,10 @@ import { validateRuntimeEmbodiedActions } from './validation/embodiment';
 import { validateCourtActionFacts } from './validation/court-actions';
 import { validateFactionState } from './validation/factions';
 import { validateCommitmentState } from './validation/commitments';
+import {
+  collectMilitarySourceFactIds,
+  validateMilitaryAuthority,
+} from './validation/military-authority';
 import { findMapProfileForContentVersion } from '../maps';
 import { findActiveWorldFact, readWorldFacts, readWorldHistory, validateWorldArchiveIntegrity } from './archive';
 
@@ -1243,6 +1247,8 @@ export function validateTurnRuntime(
         push(violations, 'runtime.shipment-balance', `${shipment.id}货量或人数不守恒`, shipment.id);
       }
     }
+    const validSeaFlowId = (id: string): boolean => shipmentIds.has(id) || next.navalOperations.some((operation) => (
+      operation.manifest?.loadedTurn === report.turn && id === `navload:${operation.id}:${report.turn}`));
     const migrationShipments = report.trade.shipments.filter((shipment) => shipment.kind === '迁徙');
     if (
       report.migration.departed !== report.migration.arrived + report.migration.travelDeaths
@@ -1281,7 +1287,8 @@ export function validateTurnRuntime(
         || !isWholeNonNegative(usage.reserved)
         || !isWholeNonNegative(usage.capacity)
         || usage.reserved > maximumEffectiveCapacity
-        || usage.capacity > maximumEffectiveCapacity) {
+        || usage.capacity > maximumEffectiveCapacity
+        || usage.flowIds.some((id) => !validSeaFlowId(id))) {
         push(violations, 'runtime.sea-capacity', `${usage.edgeId}本季海运运力无效`, usage.edgeId);
       }
     }
@@ -1325,6 +1332,10 @@ export function validateTurnRuntime(
     }
   }
 
+  violations.push(...validateMilitaryAuthority(next, {
+    facts: artifacts.factChain?.appendedItems as readonly SimulationFact[] | undefined,
+    trustedSourceFactIds: collectMilitarySourceFactIds(previous),
+  }));
   if (next.hash !== computeWorldHash(next)) push(violations, 'runtime.hash', '推进后世界哈希与当前权威状态不一致');
   return violations;
 }
@@ -1370,6 +1381,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     return violations;
   }
   const fullWorld = world.facts === facts && world.history === history ? world : { ...world, facts, history };
+  violations.push(...validateMilitaryAuthority(fullWorld));
   if (world.schemaVersion !== 4) push(violations, 'schema.version', `不支持的存档版本 ${String(world.schemaVersion)}`);
   if (!world.seed) push(violations, 'seed.empty', '世界种子不能为空');
   if (!isWholeNonNegative(world.turn)) push(violations, 'clock.turn', '世界回合必须为非负安全整数');
@@ -2132,6 +2144,14 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       || !regionById.has(operation.originRegionId) || !regionById.has(operation.targetRegionId)
       || operation.seaZonePath.some((id) => !seaZoneById.has(id))
       || !isWholeNonNegative(operation.foodLoaded) || (!activeOperation && operation.foodLoaded !== 0)
+      || ((operation.stage === '航行' || operation.stage === '登陆' || operation.stage === '滩头') && !operation.manifest)
+      || (operation.manifest && (
+        !isWholeNonNegative(operation.manifest.loadedTurn) || operation.manifest.loadedTurn > world.turn
+        || !isWholeNonNegative(operation.manifest.soldiersDeparted) || operation.manifest.soldiersDeparted === 0
+        || operation.manifest.transportEdgeIds.length < 3
+        || operation.manifest.transportEdgeIds.some((id) => !world.portLinks.some((link) => link.id === id)
+          && !world.seaLanes.some((lane) => lane.id === id))
+      ))
       || !isFiniteRange(operation.progress, 0, 100)) {
       push(violations, 'naval-operation.references', `${operation.id}登陆行动引用或账目无效`, operation.id);
     }
@@ -2536,6 +2556,8 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
         || (leg.kind === 'port-link' && !world.portLinks.some((link) => link.id === leg.edgeId))
       ))) push(violations, 'shipment.path', `${shipment.id}含无效运输边`, shipment.id);
     }
+    const validSeaFlowId = (id: string): boolean => shipmentIds.has(id) || world.navalOperations.some((operation) => (
+      operation.manifest?.loadedTurn === world.lastTurn?.turn && id === `navload:${operation.id}:${world.lastTurn?.turn}`));
     const migrationShipments = shipments.filter((shipment) => shipment.kind === '迁徙');
     const migration = world.lastTurn.migration;
     if (migration.departed !== migration.arrived + migration.travelDeaths
@@ -2607,7 +2629,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
         // quarter. Blockade/damage can change between those reservations, so
         // `capacity` is one snapshot rather than a cap for their aggregate.
         || !isWholeNonNegative(usage.reserved) || usage.reserved > maximumEffectiveCapacity
-        || usage.flowIds.some((id) => !shipmentIds.has(id))) {
+        || usage.flowIds.some((id) => !validSeaFlowId(id))) {
         push(violations, 'logistics.sea-capacity', `${usage.edgeId}海运运力或流量引用无效`, usage.edgeId);
       }
     }

@@ -252,11 +252,12 @@ function relevantMilitaryOrders(
 function battleParticipation(fact: SimulationFact, actorId: string): { role: CommandRole; won: boolean } | null {
   if (fact.kind !== 'battle') return null;
   const forces = [fact.payload.attacker, ...fact.payload.defenders];
-  const force = forces.find((item) => item.commanderId === actorId || item.deputyCommanderId === actorId);
+  const force = forces.find((item) => item.commanderId === actorId
+    || item.deputyCommanderId === actorId || item.allegianceCharacterId === actorId);
   if (!force) return null;
   const attackerSide = force.armyId === fact.payload.attacker.armyId;
   return {
-    role: force.commanderId === actorId ? 'commander' : 'deputy',
+    role: force.allegianceCharacterId === actorId || force.commanderId === actorId ? 'commander' : 'deputy',
     won: attackerSide ? fact.payload.attackerWon : !fact.payload.attackerWon,
   };
 }
@@ -465,12 +466,12 @@ function buildCandidate(
     commandContribution,
     primary.role === 'commander' ? '实际主帅军令' : '副将军中位置',
     primary.role === 'commander'
-      ? `${actor.name}当前实际统率${mainPositions.length}支军团，直接掌握${soldiersInReach}兵，占本国陆军${Math.round(armyShare * 100)}%`
+      ? `${actor.name}当前获${mainPositions.length}支军团实际拥戴，可影响${soldiersInReach}兵，占本国陆军${Math.round(armyShare * 100)}%`
       : `${actor.name}是${primary.army.name}登记副将；副将经验${actor.deputyExperience}、战功${actor.merit}、声望${actor.renown}`,
     primary.role === 'commander'
       ? [
-        indexRef('army', primary.army.id, 'commanderId', actor.id),
-        indexRef('character', actor.id, 'commandingArmyId', actor.commandingArmyId),
+        indexRef('army', primary.army.id, 'allegiance.characterId', actor.id),
+        indexRef('army', primary.army.id, 'allegiance.strength', primary.army.allegiance.strength),
         indexRef('character', actor.id, 'directSoldiers', soldiersInReach),
         indexRef('polity', polity.id, 'totalArmySoldiers', politySoldiers),
       ]
@@ -857,10 +858,11 @@ function detectMilitaryPowerCrisis(
       if (!character?.alive || character.polityId !== polity.id || character.id === polity.rulerId) return;
       const key = `${polity.id}:${character.id}`;
       const positions = positionsByActor.get(key) ?? [];
+      if (positions.some((position) => position.army.id === army.id)) return;
       positions.push({ army, role });
       positionsByActor.set(key, positions);
     };
-    addPosition(army.commanderId, 'commander');
+    addPosition(army.allegiance.characterId, 'commander');
     addPosition(army.deputyCommanderId, 'deputy');
   }
 

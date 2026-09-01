@@ -227,6 +227,7 @@ import {
   restoreWorldSession,
   type OpenWorldSource,
 } from './view/world-session-restore';
+import { compact } from './view/compact-number';
 import './styles/app.css';
 
 const DEFAULT_SEED = '沧衡-甲子';
@@ -245,11 +246,6 @@ function quarterHistoryCue(events: ReadonlyArray<WorldState['history'][number]>)
   if (events.some((event) => event.importance >= 5)) return 'turning_point';
   return null;
 }
-const compact = new Intl.NumberFormat('zh-CN', {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-});
-
 function assertValidWorld(candidate: WorldState): WorldState {
   const violations = measureRuntimePhase(
     'validation.full',

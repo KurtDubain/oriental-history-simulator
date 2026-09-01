@@ -120,12 +120,33 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact): F
     };
   }
   if (fact.kind === 'battle') {
-    const attacker = characterName(world, fact.payload.attacker.commanderId);
-    const defenders = fact.payload.defenders.map((item) => characterName(world, item.commanderId)).join('、') || '守军';
+    const attacker = characterName(world, fact.payload.attacker.allegianceCharacterId ?? fact.payload.attacker.commanderId);
+    const defenders = fact.payload.defenders.map((item) => characterName(world, item.allegianceCharacterId ?? item.commanderId)).join('、') || '守军';
     const losses = fact.payload.attacker.losses + fact.payload.defenders.reduce((sum, item) => sum + item.losses, 0);
     return {
       title: `${regionName(world, fact.payload.targetRegionId)}之战`,
-      summary: `${attacker}所部与${defenders}交战，${fact.payload.attackerWon ? '攻方取胜' : '守方守住战线'}；双方共损失${compactNumber(losses)}人。`,
+      summary: `${attacker}承行军令，与${defenders}所部交战，${fact.payload.attackerWon ? '攻方取胜' : '守方守住战线'}；双方共损失${compactNumber(losses)}人。`,
+    };
+  }
+  if (fact.kind === 'army_order_changed') {
+    const labels = { hold: '固守', advance: '进军', intercept: '截击', reinforce: '驰援', retreat: '撤退' } as const;
+    const target = fact.payload.next.targetArmyId
+      ? armyName(world, fact.payload.next.targetArmyId)
+      : fact.payload.next.targetRegionId
+        ? regionName(world, fact.payload.next.targetRegionId)
+        : '本营';
+    const issuer = characterName(world, fact.payload.next.issuerId);
+    const actualId = fact.actorIds.find((id) => id !== fact.payload.next.issuerId);
+    const actual = actualId ? characterName(world, actualId) : issuer;
+    return {
+      title: `${issuer}命${armyName(world, fact.payload.armyId)}${labels[fact.payload.next.kind]}${target}`,
+      summary: fact.payload.next.status === 'blocked'
+        ? `${issuer}改令${labels[fact.payload.next.kind]}${target}，但道路未通，${armyName(world, fact.payload.armyId)}仍在营中待命。`
+        : fact.payload.next.kind === 'hold'
+          ? `${issuer}命${armyName(world, fact.payload.armyId)}留守${target}，本季不再移营。`
+          : issuer === actual
+        ? `${issuer}亲自统带${armyName(world, fact.payload.armyId)}，将于下季开始${labels[fact.payload.next.kind]}${target}。`
+        : `${issuer}依法下令，军中实际听命于${actual}；${armyName(world, fact.payload.armyId)}将于下季开始${labels[fact.payload.next.kind]}${target}。`,
     };
   }
   if (fact.kind === 'territory_control_changed') {

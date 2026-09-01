@@ -59,7 +59,7 @@ describe('schema 4 authoritative fact layer', () => {
   }, 15_000);
 
   it('credits deputies from unpublished battles and retains pre-disband participant snapshots', () => {
-    const world = advanceWorldBy(createWorld('春战副将'), 8);
+    const world = advanceWorldBy(createWorld('春战副将'), 32);
     const battles = world.facts.filter((fact): fact is Extract<SimulationFact, { kind: 'battle' }> => fact.kind === 'battle');
     const projectedFactIds = new Set(world.history.flatMap((event) => event.sourceFactIds));
     const unpublished = battles.filter((fact) => !projectedFactIds.has(fact.id));
@@ -76,6 +76,11 @@ describe('schema 4 authoritative fact layer', () => {
       fact.payload.attacker.soldiersBefore - fact.payload.attacker.soldiersAfter === fact.payload.attacker.losses
       && fact.payload.defenders.every((force) => force.soldiersBefore - force.soldiersAfter === force.losses)
     ))).toBe(true);
+    // Participant snapshots must remain self-contained even after the live
+    // army record is retired. Do not depend on one balance seed happening to
+    // annihilate a force within a fixed number of quarters.
+    const retiredArmyId = battles[0]?.payload.attacker.armyId;
+    world.armies = world.armies.filter((army) => army.id !== retiredArmyId);
     const survivingArmyIds = new Set(world.armies.map((army) => army.id));
     const disbandedParticipant = battles
       .flatMap((fact) => [fact.payload.attacker, ...fact.payload.defenders])
@@ -111,7 +116,7 @@ describe('schema 4 authoritative fact layer', () => {
       'appointment_ended',
       'character_death',
       'marriage',
-    ] as const) expect(factKinds.has(requiredKind)).toBe(true);
+    ] as const) expect(factKinds.has(requiredKind), requiredKind).toBe(true);
     const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
     expect(world.history.filter((event) => event.kind === 'battle').every((event) => (
       event.sourceFactIds.length === 1 && factById.get(event.sourceFactIds[0])?.kind === 'battle'

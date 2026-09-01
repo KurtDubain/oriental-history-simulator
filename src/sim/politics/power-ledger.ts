@@ -137,13 +137,17 @@ function activeOfficeResources(
     }
     if (office.kind === '军团主帅' || office.kind === '军团副将') {
       const army = world.armies.find((item) => item.id === office.armyId);
+      const aligned = !army || army.allegiance.characterId === office.holderId;
+      const actual = army ? world.characters.find((item) => item.id === army.allegiance.characterId)?.name : null;
       result.push({
         id: `office:${office.id}`,
         category: 'military_command',
         label: `${army?.name ?? '军团'}${office.kind === '军团主帅' ? '军令' : '副将席位'}`,
-        detail: `${holderName(office)}${office.kind === '军团主帅' ? `统率${Math.round(army?.soldiers ?? 0)}兵` : '身处军令递补序列'}`,
+        detail: `${holderName(office)}${office.kind === '军团主帅'
+          ? aligned ? `依法掌令，军中同听其号令` : `依法掌令，但士卒更拥戴${actual ?? '军中旧主'}`
+          : '身处军令递补序列'}`,
         value: office.kind === '军团主帅'
-          ? 9 + Math.min(5, (army?.soldiers ?? 0) / 3_500)
+          ? (aligned ? 9 : 5) + Math.min(aligned ? 5 : 3, (army?.soldiers ?? 0) / 3_500)
           : 4 + Math.min(2, office.rank * 0.25),
         characterIds: [office.holderId],
         regionIds: army ? [army.regionId] : [],
@@ -185,6 +189,27 @@ function activeOfficeResources(
       characterIds: [office.holderId],
       regionIds: [],
       evidence: [{ entityType: 'office', entityId: office.id, field: 'active' }],
+    });
+  }
+  for (const army of world.armies.filter((item) => (
+    item.polityId === faction.polityId
+    && item.allegiance.characterId !== item.commanderId
+    && memberIds.has(item.allegiance.characterId)
+  ))) {
+    const actual = world.characters.find((item) => item.id === army.allegiance.characterId);
+    const retinue = army.retinues.find((item) => item.ownerId === actual?.id);
+    result.push({
+      id: `allegiance:${army.id}`,
+      category: 'military_command',
+      label: `${army.name}军中拥戴`,
+      detail: `${actual?.name ?? '军中旧主'}虽非主帅，仍获拥戴${army.allegiance.strength}${retinue ? `并有${retinue.soldiers}名直属部曲` : ''}`,
+      value: 4 + army.allegiance.strength * 0.05 + Math.min(4, (retinue?.soldiers ?? 0) / 180),
+      characterIds: actual ? [actual.id] : [],
+      regionIds: [army.regionId],
+      evidence: [
+        { entityType: 'army', entityId: army.id, field: 'allegiance.characterId' },
+        { entityType: 'army', entityId: army.id, field: 'allegiance.strength' },
+      ],
     });
   }
   return result;

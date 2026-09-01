@@ -12,7 +12,7 @@ import {
 } from './situation-detail';
 
 function establishedWorld(): WorldState {
-  return advanceWorldBy(createWorld('春战副将'), 8);
+  return advanceWorldBy(createWorld('兵权入世'), 8);
 }
 
 function withoutOptionalHistoryLinks<T extends {

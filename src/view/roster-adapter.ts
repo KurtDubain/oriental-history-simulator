@@ -26,6 +26,7 @@ import {
   type RosterScope,
 } from './roster-discovery';
 import { situationTypeLabel } from './situation-snapshot';
+import { projectMilitaryAuthority } from './military-authority-reading';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import type { ObserverWatchItem } from './v1-observer';
 import {
@@ -292,6 +293,8 @@ function factReferencesMilitary(fact: SimulationFact, kind: 'army' | 'fleet', id
     case 'battle':
       return fact.payload.attacker.armyId === id
         || fact.payload.defenders.some((force) => force.armyId === id);
+    case 'army_order_changed':
+      return fact.payload.armyId === id;
     case 'appointment_started':
     case 'appointment_ended':
       return fact.payload.armyId === id;
@@ -589,6 +592,7 @@ function militaryItem(
   const strained = coverage < 0.75;
   const army = isArmy ? item as WorldState['armies'][number] : null;
   const fleet = isArmy ? null : item as WorldState['fleets'][number];
+  const authority = army ? projectMilitaryAuthority(context.world, army) : null;
   const recent = militaryEvent(context, kind, item.id);
   const watchAlert = watchCandidate(context, kind, item.id);
   const situation = situationCandidate(context, 'military', item.id);
@@ -609,8 +613,12 @@ function militaryItem(
   return {
     id: item.id,
     title: item.name,
-    subtitle: `${livingCharacter(context.world, item.commanderId)?.name ?? '无帅'} · ${location}${fleet ? ` · ${fleet.mission}` : ''}`,
-    meta: `${compact.format(strength)} 人 · 余粮 ${coverage.toFixed(1)} 季`,
+    subtitle: authority
+      ? `${authority.authoritySummary} · ${location}`
+      : `${livingCharacter(context.world, item.commanderId)?.name ?? '无帅'} · ${location}${fleet ? ` · ${fleet.mission}` : ''}`,
+    meta: authority
+      ? `${authority.orderLabel} · ${compact.format(strength)} 人 · 余粮 ${coverage.toFixed(1)} 季`
+      : `${compact.format(strength)} 人 · 余粮 ${coverage.toFixed(1)} 季`,
     accent: polity(context.world, item.polityId)?.color,
     alert: Boolean(watched?.reason.kind === 'watched-alert') || strained || item.morale < 40,
     reason: attention.reason,

@@ -64,6 +64,7 @@ function factNamesCharacter(fact: SimulationFact, characterId: string): boolean 
     case 'battle':
       return [fact.payload.attacker, ...fact.payload.defenders].some((force) => (
         force.commanderId === characterId || force.deputyCommanderId === characterId
+        || force.allegianceCharacterId === characterId
       ));
     case 'appointment_started':
     case 'appointment_ended':

@@ -4,7 +4,7 @@ import type { WorldState } from './types';
 import { validateWorld } from './invariants';
 import { migrateV01SocialState } from './v02';
 import { createV03LifeSystems } from './v03-life';
-import { createV03OceanSystems } from './v03-ocean';
+import { createV03OceanSystems, migrateNavalOperationManifests } from './v03-ocean';
 import type { LegacyArchiveBoundary, SimulationFact } from './facts';
 import { createSituationSystemState } from './situations';
 import { createAgencySystemState } from './agency/memory';
@@ -12,6 +12,7 @@ import { createAgencyDecisionSystemState } from './agency/decision';
 import { findMapProfileForContentVersion } from '../maps';
 import { migrateFactionIdentityModel } from './politics/faction-lifecycle';
 import { refreshFactionPowerLedgers } from './politics/power-ledger';
+import { migrateArmyMilitaryState } from './military/authority';
 import {
   compactWorldArchive,
   createWorldArchiveState,
@@ -250,6 +251,8 @@ export function deserializeWorld(serialized: string): WorldState {
     world.archiveSystem = createWorldArchiveState(legacyBoundary);
     migrated = true;
   }
+  if (migrateArmyMilitaryState(world)) migrated = true;
+  if (migrateNavalOperationManifests(world)) migrated = true;
   if (!world.situationSystem || typeof world.situationSystem !== 'object') {
     // Phase-A schema-4 saves predate authoritative Situations. Authenticate the
     // original hash first, then start observation at the next live quarter; do

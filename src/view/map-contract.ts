@@ -55,6 +55,18 @@ export interface MapArmyView {
   strength: number;
   morale?: number;
   status?: string;
+  nominalPolityName?: string;
+  lawfulCommanderName?: string;
+  actualAllegianceName?: string;
+  allegianceStrength?: number;
+  commandDiverged?: boolean;
+  retinueSoldiers?: number;
+  retinueSummary?: string;
+  orderKind?: 'hold' | 'advance' | 'intercept' | 'reinforce' | 'retreat';
+  orderLabel?: string;
+  orderTargetRegionId?: string | null;
+  orderIssuerName?: string;
+  orderBlocked?: boolean;
 }
 
 export interface MapSeaZoneView {

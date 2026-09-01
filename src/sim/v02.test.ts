@@ -11,7 +11,10 @@ import {
   type CharacterState,
   type WorldState,
 } from './index';
-import { politicalAllianceFormationFact } from './politics/faction-commitments';
+import {
+  firstPoliticalAllianceEndFact,
+  politicalAllianceFormationFact,
+} from './politics/faction-commitments';
 
 function relationTrust(world: WorldState, sourceId: string, targetId: string): number {
   return world.relationships.find((relation) => (
@@ -188,26 +191,80 @@ describe('V0.2 coupled social simulation', () => {
       resolutionEventId: null,
     });
 
+    const formationFact = commitmentBefore
+      ? politicalAllianceFormationFact(beforeDestruction, commitmentBefore)
+      : null;
+    if (!formationFact) throw new Error('expected the exact alliance formation Fact');
+    const endingFaction = beforeDestruction.factions.find((faction) => (
+      faction.id === formationFact.payload.rightFactionId
+    ));
+    if (!endingFaction) throw new Error('expected the alliance carrier faction');
+    const endingMemberIds = [...endingFaction.memberIds];
+    expect(endingMemberIds.length).toBeGreaterThan(0);
+
+    // T23 is winter. Make every member old enough for the ordinary lifecycle
+    // system's certain-death branch, then let the real quarterly pipeline emit
+    // deaths, dissolve the empty faction, end its alliance and settle the
+    // attached promise in causal order.
+    for (const memberId of endingMemberIds) {
+      const member = beforeDestruction.characters.find((character) => character.id === memberId);
+      if (!member) throw new Error(`expected faction member ${memberId}`);
+      member.age = 94;
+      member.birthTurn = beforeDestruction.turn + 1 - 95 * 4;
+      member.adultTurn = member.birthTurn + 16 * 4;
+      member.lifeStage = '衰老';
+      member.protectedUntilTurn = null;
+    }
+    beforeDestruction.hash = computeWorldHash(beforeDestruction);
+
     let world = advanceWorld(beforeDestruction);
+    expect(world.lastTurn).toMatchObject({
+      turn: 23,
+      season: '冬',
+    });
+    const endingFact = firstPoliticalAllianceEndFact(world, formationFact);
+    if (!endingFact) throw new Error('expected the quarterly pipeline to end the exact alliance');
+    const carrierDeathFacts = world.facts.filter((fact) => (
+      fact.turn === 23
+      && fact.kind === 'character_death'
+      && endingMemberIds.includes(fact.payload.characterId)
+    ));
+    expect(carrierDeathFacts).toHaveLength(endingMemberIds.length);
+    expect(world.lastTurn?.factIds).toEqual(expect.arrayContaining([
+      ...carrierDeathFacts.map((fact) => fact.id),
+      endingFact.id,
+    ]));
+    const endingFactIndex = world.lastTurn?.factIds.indexOf(endingFact.id) ?? -1;
+    expect(endingFactIndex).toBeGreaterThanOrEqual(0);
+    expect(carrierDeathFacts.every((fact) => (
+      (world.lastTurn?.factIds.indexOf(fact.id) ?? Number.POSITIVE_INFINITY) < endingFactIndex
+    ))).toBe(true);
+
     const commitmentAfter = world.commitments.find((commitment) => commitment.id === commitmentBefore?.id);
     expect(commitmentAfter).toMatchObject({
       status: '失效',
       resolvedTurn: 23,
     });
 
-    const endingFact = world.facts.find((fact) => (
-      fact.kind === 'faction_relation_changed'
-      && fact.turn === 23
-      && fact.payload.relation === 'alliance'
-      && fact.payload.action === 'ended'
-      && [fact.payload.leftFactionId, fact.payload.rightFactionId].includes('fac_0010')
-      && [fact.payload.leftFactionId, fact.payload.rightFactionId].includes('fac_0008')
-    ));
     if (!endingFact || endingFact.kind !== 'faction_relation_changed') {
-      throw new Error('expected the destroyed polity to emit the alliance-ending Fact');
+      throw new Error('expected the exact alliance-ending Fact');
     }
-    expect(endingFact.payload.reasonCode).toBe('faction_polity_destroyed');
-    expect(endingFact.sourceFactIds).toHaveLength(1);
+    expect(endingFact).toMatchObject({
+      turn: 23,
+      payload: {
+        relation: 'alliance',
+        action: 'ended',
+        reasonCode: 'faction_core_exhausted',
+      },
+    });
+    expect([
+      endingFact.payload.leftFactionId,
+      endingFact.payload.rightFactionId,
+    ].sort()).toEqual([
+      formationFact.payload.leftFactionId,
+      formationFact.payload.rightFactionId,
+    ].sort());
+    expect(endingFact.sourceFactIds).toEqual(carrierDeathFacts.map((fact) => fact.id).sort());
 
     const resolutionEvent = world.history.find((event) => event.id === commitmentAfter?.resolutionEventId);
     expect(resolutionEvent).toMatchObject({
@@ -226,6 +283,13 @@ describe('V0.2 coupled social simulation', () => {
     expect(resolutionEvent?.title).toContain('海清议');
     expect(resolutionEvent?.summary).not.toContain(commitmentAfter?.promisorId);
     expect(resolutionEvent?.summary).not.toContain(commitmentAfter?.promiseeId);
+    const allianceEndEvent = world.history.find((event) => (
+      event.kind === 'faction_alliance_ended' && event.sourceFactIds.includes(endingFact.id)
+    ));
+    expect(allianceEndEvent).toBeDefined();
+    expect(world.lastTurn?.eventIds.indexOf(allianceEndEvent?.id ?? '')).toBeLessThan(
+      world.lastTurn?.eventIds.indexOf(resolutionEvent?.id ?? '') ?? -1,
+    );
     expect(world.relationships.some((relationship) => relationship.memories.some((memory) => (
       memory.eventId === resolutionEvent?.id
     )))).toBe(false);

@@ -90,7 +90,10 @@ try {
           const box = element.getBoundingClientRect();
           return { width: box.width, height: box.height };
         });
-        assert.ok(rect.width >= 44 && rect.height >= 44, `${scenario.slug} ${selector} 至少 44px`);
+        assert.ok(
+          rect.width >= 44 && rect.height >= 44,
+          `${scenario.slug} ${selector} 至少 44px，实际 ${JSON.stringify(rect)}`,
+        );
       }
     }
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}.png` });

@@ -46,6 +46,7 @@ function collectLegacyReferencedFactIds(world: ArchiveWorldState): Set<string> {
   const seen = new Set<object>();
   collectFactIdStrings(world.situationSystem, result, seen);
   collectFactIdStrings(world.agencyDecisionSystem, result, seen);
+  collectFactIdStrings(world.armies.map((army) => ({ allegiance: army.allegiance, retinues: army.retinues, order: army.order })), result, seen);
   collectFactIdStrings(world.lastTurn?.factIds ?? [], result, seen);
   return result;
 }
@@ -106,6 +107,7 @@ export function collectReferencedFactIds(world: ArchiveWorldState): Set<string> 
     seen,
   );
   collectFactIdStrings(world.agencyDecisionSystem, result, seen);
+  collectFactIdStrings(world.armies.map((army) => ({ allegiance: army.allegiance, retinues: army.retinues, order: army.order })), result, seen);
   collectFactIdStrings(world.lastTurn?.factIds ?? [], result, seen);
   for (const factId of activePowerBrokerFormationFactIds(world)) result.add(factId);
   return result;

@@ -20,7 +20,7 @@ describe('world integrity module boundaries', () => {
   it('keeps the fixed-seed schema-4 hash and the engine compatibility export', () => {
     expect(computeWorldHashFromEngine).toBe(computeWorldHash);
     const world = createWorld('架构边界-入世');
-    expect(world.hash).toBe('28a9409c901fb1ad');
+    expect(world.hash).toBe('b0b0b744104cf3a4');
     expect(computeWorldHash(world)).toBe(world.hash);
   });
 });

@@ -7,6 +7,7 @@ import {
   Landmark,
   MapPin,
   Route,
+  Shield,
   Sparkles,
   ScrollText,
   UserRound,
@@ -22,6 +23,7 @@ export type ArchiveEntityKind =
   | 'family'
   | 'person'
   | 'region'
+  | 'army'
   | 'seaZone'
   | 'fleet'
   | 'tradeCorridor'
@@ -84,6 +86,7 @@ const KIND_ICON = {
   family: UsersRound,
   person: UserRound,
   region: MapPin,
+  army: Shield,
   seaZone: Anchor,
   fleet: Anchor,
   tradeCorridor: Route,

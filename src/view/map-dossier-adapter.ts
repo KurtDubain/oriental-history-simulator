@@ -4,61 +4,18 @@ import type {
   SystemInspectorData,
 } from '../components/Inspector';
 import type {
-  HistoryEvent,
   RegionState,
   WorldState,
 } from '../sim/types';
-import { isDefaultVisibleHistoryEvent } from './history-visibility';
-
-const compact = new Intl.NumberFormat('zh-CN', {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-});
-
-const SEASON_NAMES = ['春', '夏', '秋', '冬'] as const;
-
-function turnLabel(turn: number) {
-  const safeTurn = Math.max(0, Number.isFinite(turn) ? Math.floor(turn) : 0);
-  return `第 ${Math.floor(safeTurn / 4) + 1} 年 · ${SEASON_NAMES[safeTurn % 4]}`;
-}
-
-function polity(world: WorldState, id: string | null | undefined) {
-  if (!id) return undefined;
-  return world.polities.find((candidate) => candidate.id === id);
-}
-
-function character(world: WorldState, id: string | null | undefined) {
-  if (!id) return undefined;
-  return world.characters.find((candidate) => candidate.id === id);
-}
-
-function region(world: WorldState, id: string | null | undefined) {
-  if (!id) return undefined;
-  return world.regions.find((candidate) => candidate.id === id);
-}
-
-function historyRecord(item: HistoryEvent): InspectorRecord {
-  return {
-    id: item.id,
-    date: `第 ${item.year} 年 · ${item.season}`,
-    title: item.title,
-    summary: item.summary,
-    eventId: item.id,
-    importance: item.importance,
-  };
-}
-
-function scopedHistory(
-  world: WorldState,
-  predicate: (event: HistoryEvent) => boolean,
-  limit = 8,
-) {
-  return world.history
-    .filter((event) => isDefaultVisibleHistoryEvent(event) && predicate(event))
-    .slice(-limit)
-    .reverse()
-    .map(historyRecord);
-}
+import { projectMilitaryAuthority } from './military-authority-reading';
+import {
+  character,
+  polity,
+  region,
+  scopedHistory,
+  turnLabel,
+} from './dossier-adapter-shared';
+import { compact } from './compact-number';
 
 function foodSafetyRatio(item: RegionState) {
   return item.food / Math.max(1, item.population);
@@ -83,13 +40,29 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
     const commander = character(world, item.commanderId);
     const deputy = character(world, item.deputyCommanderId);
     const stationed = region(world, item.regionId);
-    const summary = item.supply < 35
+    const authority = projectMilitaryAuthority(world, item);
+    const readiness = item.supply < 35
       ? '粮道已很吃紧；继续行军或交战，减员会先于正面溃败到来。'
       : item.morale < 40
         ? '军心不稳；主帅威望、近期胜负和补给将决定这支军团能否维持建制。'
         : item.training >= 70 && item.experience >= 60
           ? '这是一支训练与战阵经验俱佳的常备军，真正的限制来自粮道、主帅和战场位置。'
           : '军团的战力由兵力、训练、军心与补给共同决定，人数并不等同于胜算。';
+    const summary = `${authority.authoritySummary}；${authority.retinueSummary}。当前军令：${authority.orderLabel}。${readiness}`;
+    const actual = character(world, authority.actualAllegianceId);
+    const orderTarget = authority.orderTargetKind === 'army'
+      ? { id: authority.orderTargetId as string, kind: 'army' as const, label: authority.orderTargetName, detail: '军令目标' }
+      : authority.orderTargetKind === 'region'
+        ? { id: authority.orderTargetId as string, kind: 'region' as const, label: authority.orderTargetName, detail: '军令目的地' }
+        : null;
+    const links = [
+      commander ? { id: commander.id, kind: 'person' as const, label: commander.name, detail: '法定主帅' } : null,
+      deputy ? { id: deputy.id, kind: 'person' as const, label: deputy.name, detail: '军团副将' } : null,
+      actual && actual.id !== commander?.id ? { id: actual.id, kind: 'person' as const, label: actual.name, detail: '军中实际拥戴' } : null,
+      stationed ? { id: stationed.id, kind: 'region' as const, label: stationed.name, detail: '当前驻地' } : null,
+      orderTarget,
+      owner ? { id: owner.id, kind: 'country' as const, label: owner.name, detail: '名义所属' } : null,
+    ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
     return {
       id,
       kind,
@@ -97,8 +70,14 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
       subtitle: `${owner?.name ?? '无属'} · ${stationed?.name ?? '驻地不详'}`,
       summary,
       facts: [
-        { label: '主帅', value: commander?.name ?? '无帅' },
-        { label: '副将', value: deputy?.name ?? '暂缺' },
+        { label: '名义所属', value: authority.nominalPolityName },
+        { label: '主帅', value: authority.lawfulCommanderName },
+        { label: '军中拥戴', value: `${authority.actualAllegianceName} · ${authority.allegianceStrength}` },
+        { label: '拥戴凭据', value: authority.allegianceBasis },
+        { label: '副署', value: authority.deputyCommanderName ?? '暂缺' },
+        { label: '直属部曲', value: authority.retinueSummary },
+        { label: '当前军令', value: authority.orderLabel },
+        { label: '下令者', value: authority.orderIssuerName },
         { label: '兵力', value: compact.format(item.soldiers) },
         { label: '军粮', value: compact.format(item.food) },
         { label: '本营', value: region(world, item.originRegionId)?.name ?? '不详' },
@@ -110,12 +89,7 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
         { label: '战阵经验', value: item.experience },
         { label: '补给', value: item.supply },
       ],
-      links: [
-        commander ? { id: commander.id, kind: 'person' as const, label: commander.name, detail: '军团主帅' } : null,
-        deputy ? { id: deputy.id, kind: 'person' as const, label: deputy.name, detail: '军团副将' } : null,
-        stationed ? { id: stationed.id, kind: 'region' as const, label: stationed.name, detail: '当前驻地' } : null,
-        owner ? { id: owner.id, kind: 'country' as const, label: owner.name, detail: '所属政权' } : null,
-      ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry)),
+      links: [...new Map(links.map((entry) => [`${entry.kind}:${entry.id}`, entry])).values()],
       history: systemHistory(world, 'army', id),
     };
   }

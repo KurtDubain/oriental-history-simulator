@@ -49,8 +49,8 @@ export const MAP_PRIMER_STEPS: readonly PrimerStepDefinition[] = [
     id: 'situation',
     eyebrow: '第二眼 · 人势',
     title: '再认谁控制这里',
-    description: '淡色疆域属于不同政权；方印是城邑，双框是都城，锚是港口，带兵数的圆章是军团。',
-    reading: '颜色只表示控制，不代表强弱。城邑、港口与军团的位置才说明当季局势。',
+    description: '淡色疆域属于不同政权；方印是城邑，双框是都城，锚是港口，带兵数的圆章是军团。兵势层的箭线是已经下达的军令。',
+    reading: '点军团可看主帅、实际听命与去向；圆章红点表示法定主帅与军中拥戴并非一人。',
     action: '带我看疆界',
   },
   {

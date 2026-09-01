@@ -14,8 +14,8 @@ import {
 
 describe('authoritative Situation engine integration', () => {
   it('forms all four deterministic Situation stories from real Facts and preserves identity across saves', () => {
-    const first = advanceWorldBy(createWorld('春战副将'), 12);
-    const replay = advanceWorldBy(createWorld('春战副将'), 12);
+    const first = advanceWorldBy(createWorld('兵权入世'), 12);
+    const replay = advanceWorldBy(createWorld('兵权入世'), 12);
 
     expect(first.hash).toBe(replay.hash);
     expect(first.situationSystem).toEqual(replay.situationSystem);

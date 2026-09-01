@@ -19,6 +19,8 @@ export type {
   AppointmentEndedFact,
   AppointmentFactPayload,
   AppointmentStartedFact,
+  ArmyOrderChangedFact,
+  ArmyOrderChangedFactPayload,
   BattleFact,
   BattleFactPayload,
   BattleForceFact,

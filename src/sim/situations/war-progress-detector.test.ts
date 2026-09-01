@@ -395,6 +395,7 @@ describe('war progress detector', () => {
         startedTurn: 5,
         progress: 10,
         foodLoaded: 0,
+        manifest: null,
         completedTurn: null,
       }, {
         id: 'test-operation-second-war',
@@ -408,6 +409,7 @@ describe('war progress detector', () => {
         startedTurn: 5,
         progress: 10,
         foodLoaded: 0,
+        manifest: null,
         completedTurn: null,
       });
     }

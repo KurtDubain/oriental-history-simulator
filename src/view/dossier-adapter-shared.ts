@@ -8,10 +8,7 @@ import type {
 import type { HistoricalScene } from './historical-scenes';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 
-export const compact = new Intl.NumberFormat('zh-CN', {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-});
+export { compact } from './compact-number';
 
 const SEASON_NAMES = ['春', '夏', '秋', '冬'] as const;
 

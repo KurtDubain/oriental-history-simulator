@@ -1,4 +1,5 @@
 import type {
+  ArmyOrderDirective,
   EventCategory,
   EventCause,
   OfficeKind,
@@ -24,6 +25,7 @@ export type SimulationFactKind =
   | 'faction_lifecycle'
   | 'faction_relation_changed'
   | 'court_action_resolved'
+  | 'army_order_changed'
   | 'situation_milestone';
 
 export interface BattleForceFact {
@@ -31,6 +33,9 @@ export interface BattleForceFact {
   polityId: string;
   commanderId: string;
   deputyCommanderId: string | null;
+  /** Snapshot of who the soldiers actually obeyed; absent only in legacy Facts. */
+  allegianceCharacterId?: string;
+  allegianceStrength?: number;
   soldiersBefore: number;
   soldiersAfter: number;
   moraleBefore: number;
@@ -83,6 +88,13 @@ export interface BattleFactPayload {
   militiaLosses: number;
   attacker: BattleForceFact;
   defenders: BattleForceFact[];
+}
+
+export interface ArmyOrderChangedFactPayload {
+  armyId: string;
+  polityId: string;
+  previous: ArmyOrderDirective;
+  next: ArmyOrderDirective;
 }
 
 export interface TerritoryControlFactPayload {
@@ -375,6 +387,7 @@ export type EmbodiedActionResolvedFact = SimulationFactBase<'embodied_action_res
 export type FactionLifecycleFact = SimulationFactBase<'faction_lifecycle', FactionLifecycleFactPayload>;
 export type FactionRelationChangedFact = SimulationFactBase<'faction_relation_changed', FactionRelationChangedFactPayload>;
 export type CourtActionResolvedFact = SimulationFactBase<'court_action_resolved', CourtActionResolvedFactPayload>;
+export type ArmyOrderChangedFact = SimulationFactBase<'army_order_changed', ArmyOrderChangedFactPayload>;
 
 export type SimulationFact =
   | WarStartedFact
@@ -394,6 +407,7 @@ export type SimulationFact =
   | FactionLifecycleFact
   | FactionRelationChangedFact
   | CourtActionResolvedFact
+  | ArmyOrderChangedFact
   | SituationMilestoneFact;
 
 export type SimulationFactInput = SimulationFact extends infer Fact
