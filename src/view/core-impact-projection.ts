@@ -5,14 +5,13 @@ import type {
   WorldState,
 } from '../sim/types';
 
-export type CoreImpactSource = '粮食' | '贸易' | '疾病' | '地方压力';
+export type CoreImpactSource = '粮食' | '疾病' | '地方压力';
 export type CoreImpactTargetKind = 'army' | 'polity' | 'person' | 'war';
-export type CoreImpactKind = '补给' | '兵力' | '士气' | '军令' | '国库' | '合法性' | '中央权威' | '官职' | '兵权' | '人物行动';
+export type CoreImpactKind = '兵力' | '军令' | '合法性' | '官职' | '兵权' | '人物行动';
 
 export interface CoreImpactTarget {
   kind: CoreImpactTargetKind;
   id: string;
-  label: string;
 }
 
 export interface CoreImpactBeforeAfter {
@@ -31,7 +30,6 @@ export interface CoreImpactProjection {
   beforeAfter?: CoreImpactBeforeAfter;
   sourceFactIds: readonly string[];
   sourceEventIds: readonly string[];
-  sourceShipmentIds: readonly string[];
   relatedTargets: readonly CoreImpactTarget[];
   relatedWarId: string | null;
 }
@@ -40,6 +38,7 @@ export interface CoreImpactScope {
   target?: Pick<CoreImpactTarget, 'kind' | 'id'>;
   warId?: string;
   sourceFactIds?: readonly string[];
+  sources?: readonly CoreImpactSource[];
   limit?: number;
 }
 
@@ -81,16 +80,8 @@ function currentEvents(world: WorldState): HistoryEvent[] {
     .sort((left, right) => stableCompare(left.id, right.id));
 }
 
-function target(kind: CoreImpactTargetKind, id: string, label: string): CoreImpactTarget {
-  return { kind, id, label };
-}
-
-function warLabel(world: WorldState, warId: string): string {
-  const war = world.wars.find((item) => item.id === warId);
-  if (!war) return warId;
-  const attacker = world.polities.find((item) => item.id === war.attackerId)?.shortName ?? war.attackerId;
-  const defender = world.polities.find((item) => item.id === war.defenderId)?.shortName ?? war.defenderId;
-  return `${attacker}—${defender}之战`;
+function target(kind: CoreImpactTargetKind, id: string): CoreImpactTarget {
+  return { kind, id };
 }
 
 function deltaFor(
@@ -120,16 +111,15 @@ function lowReadinessImpacts(world: WorldState, facts: readonly SimulationFact[]
       id: `core-impact:order:${fact.id}`,
       turn: fact.turn,
       source: '粮食' as const,
-      target: target('army', army.id, army.name),
+      target: target('army', army.id),
       impact: '军令' as const,
       summary: `${army.name}补给仅${Math.round(army.supply)}；${commander?.name ?? '主帅'}已将军令由${previous}改为${next}，军令事实明记缘由为军粮或军心不足。`,
       beforeAfter: { label: '军令', before: previous, after: next },
       sourceFactIds: unique([fact.id, ...fact.sourceFactIds]),
       sourceEventIds: eventIdsForFact(events, fact.id),
-      sourceShipmentIds: [],
       relatedTargets: [
-        target('polity', army.polityId, world.polities.find((item) => item.id === army.polityId)?.name ?? army.polityId),
-        ...(commander ? [target('person', commander.id, commander.name)] : []),
+        target('polity', army.polityId),
+        ...(commander ? [target('person', commander.id)] : []),
       ],
       relatedWarId: fact.payload.next.warId,
       priority: 92,
@@ -153,46 +143,19 @@ function battleSupplyImpacts(world: WorldState, facts: readonly SimulationFact[]
       id: `core-impact:battle:${fact.id}`,
       turn: fact.turn,
       source: '粮食' as const,
-      target: target('army', force.armyId, armyLabel),
+      target: target('army', force.armyId),
       impact: '兵力' as const,
       summary: `${armyLabel}以补给${Math.round(force.supplyBefore)}投入${battlefield}之战；该补给与士气已进入实际战力结算，兵力由${Math.round(force.soldiersBefore)}变为${Math.round(force.soldiersAfter)}。`,
       beforeAfter: { label: '兵力', before: force.soldiersBefore, after: force.soldiersAfter },
       sourceFactIds: unique([fact.id, ...fact.sourceFactIds]),
       sourceEventIds: eventIdsForFact(events, fact.id),
-      sourceShipmentIds: [],
       relatedTargets: [
-        target('war', fact.payload.warId, warLabel(world, fact.payload.warId)),
-        target('polity', force.polityId, world.polities.find((item) => item.id === force.polityId)?.name ?? force.polityId),
-        ...(commander ? [target('person', commander.id, commander.name)] : []),
+        target('war', fact.payload.warId),
+        target('polity', force.polityId),
+        ...(commander ? [target('person', commander.id)] : []),
       ],
       relatedWarId: fact.payload.warId,
       priority: 100,
-    }];
-  });
-}
-
-function deliveredArmyFoodImpacts(world: WorldState): RankedImpact[] {
-  const report = world.lastTurn;
-  if (!report) return [];
-  return report.trade.shipments.flatMap((shipment) => {
-    if (shipment.kind !== '军粮' || !shipment.carrierArmyId || shipment.deliveredAmount <= 0) return [];
-    const army = world.armies.find((item) => item.id === shipment.carrierArmyId);
-    if (!army) return [];
-    const origin = world.regions.find((region) => region.id === shipment.originRegionId)?.name ?? '起运地';
-    const destination = world.regions.find((region) => region.id === shipment.destinationRegionId)?.name ?? '营地';
-    return [{
-      id: `core-impact:shipment:${shipment.id}`,
-      turn: report.turn,
-      source: '粮食' as const,
-      target: target('army', army.id, army.name),
-      impact: '补给' as const,
-      summary: `${Math.round(shipment.deliveredAmount)}石军粮已由${origin}实际运抵${destination}，承运的${army.name}当前补给为${Math.round(army.supply)}。`,
-      sourceFactIds: [],
-      sourceEventIds: [],
-      sourceShipmentIds: [shipment.id],
-      relatedTargets: [target('polity', army.polityId, world.polities.find((item) => item.id === army.polityId)?.name ?? army.polityId)],
-      relatedWarId: army.order.warId,
-      priority: 55,
     }];
   });
 }
@@ -202,7 +165,6 @@ function localGovernanceImpacts(world: WorldState, facts: readonly SimulationFac
     if (fact.kind !== 'local_governance_resolved' || fact.payload.outcome !== 'enacted') return [];
     const legitimacy = deltaFor(fact.stateDeltas, 'polity', fact.payload.polityId, 'legitimacy');
     if (!legitimacy && fact.payload.pressure < 60) return [];
-    const polity = world.polities.find((item) => item.id === fact.payload.polityId);
     const region = world.regions.find((item) => item.id === fact.payload.regionId);
     const actor = world.characters.find((person) => person.id === fact.payload.actorId);
     const action = fact.payload.action === 'open_granary' ? '开仓赈济' : '减免当季赋';
@@ -211,7 +173,7 @@ function localGovernanceImpacts(world: WorldState, facts: readonly SimulationFac
       id: `core-impact:governance:${fact.id}`,
       turn: fact.turn,
       source: '地方压力' as const,
-      target: target('polity', fact.payload.polityId, polity?.name ?? fact.payload.polityId),
+      target: target('polity', fact.payload.polityId),
       impact: legitimacy ? '合法性' as const : '人物行动' as const,
       summary: `${region?.name ?? '当地'}在粮可支${fact.payload.foodSeasonsBefore.toFixed(1)}季、动荡${Math.round(fact.payload.unrestBefore)}的压力下，${actor?.name ?? '地方长官'}实行${action}；动荡${Math.round(fact.payload.unrestBefore)}→${Math.round(fact.payload.unrestAfter)}${legitimacyText}。`,
       beforeAfter: legitimacy
@@ -219,9 +181,8 @@ function localGovernanceImpacts(world: WorldState, facts: readonly SimulationFac
         : { label: '地方动荡', before: fact.payload.unrestBefore, after: fact.payload.unrestAfter },
       sourceFactIds: unique([fact.id, ...fact.sourceFactIds]),
       sourceEventIds: eventIdsForFact(events, fact.id),
-      sourceShipmentIds: [],
       relatedTargets: [
-        ...(actor ? [target('person', actor.id, actor.name)] : []),
+        ...(actor ? [target('person', actor.id)] : []),
       ],
       relatedWarId: null,
       priority: legitimacy ? 84 : 70,
@@ -243,13 +204,12 @@ function legitimacyCrisisImpacts(world: WorldState, events: readonly HistoryEven
       id: `core-impact:legitimacy:${event.id}`,
       turn: event.turn,
       source: '地方压力' as const,
-      target: target('polity', polityId, polity?.name ?? polityId),
+      target: target('polity', polityId),
       impact: '合法性' as const,
       summary: `${[food, unrest].filter(Boolean).join('、')}等压力已进入朝局结算；${polity?.name ?? '该政权'}合法性${String(legitimacy.before)}→${String(legitimacy.after)}${authority ? `，中央权威${String(authority.before)}→${String(authority.after)}` : ''}。`,
       beforeAfter: { label: '合法性', before: legitimacy.before, after: legitimacy.after },
       sourceFactIds: unique(event.sourceFactIds),
       sourceEventIds: [event.id],
-      sourceShipmentIds: [],
       relatedTargets: [],
       relatedWarId: null,
       priority: 88,
@@ -257,7 +217,7 @@ function legitimacyCrisisImpacts(world: WorldState, events: readonly HistoryEven
   });
 }
 
-function rebellionImpacts(world: WorldState, facts: readonly SimulationFact[], events: readonly HistoryEvent[]): RankedImpact[] {
+function rebellionImpacts(facts: readonly SimulationFact[], events: readonly HistoryEvent[]): RankedImpact[] {
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
   return events.flatMap((event) => {
     if (event.kind !== 'rebellion') return [];
@@ -271,13 +231,12 @@ function rebellionImpacts(world: WorldState, facts: readonly SimulationFact[], e
       id: `core-impact:rebellion:${event.id}`,
       turn: event.turn,
       source: '地方压力' as const,
-      target: target('war', warFact.payload.warId, warLabel(world, warFact.payload.warId)),
+      target: target('war', warFact.payload.warId),
       impact: '兵权' as const,
       summary: `${crisis ? `地方结构危机为“${crisis}”` : '地方结构危机已成形'}；${military ?? '起事者已完成军资准备'}，并实际触发${warFact.payload.reason}。`,
       sourceFactIds: unique([warFact.id, ...event.sourceFactIds]),
       sourceEventIds: [event.id],
-      sourceShipmentIds: [],
-      relatedTargets: warFact.polityIds.map((id) => target('polity', id, world.polities.find((item) => item.id === id)?.name ?? id)),
+      relatedTargets: warFact.polityIds.map((id) => target('polity', id)),
       relatedWarId: warFact.payload.warId,
       priority: 98,
     }];
@@ -300,39 +259,39 @@ function diseaseOfficeImpacts(world: WorldState, facts: readonly SimulationFact[
   const startedFacts = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_started' }> => fact.kind === 'appointment_started');
   return facts.flatMap((fact) => {
     if (fact.kind !== 'character_death' || !fact.payload.diseaseId) return [];
-    const person = world.characters.find((item) => item.id === fact.payload.characterId);
-    const pathogen = world.pathogens.find((item) => item.id === fact.payload.diseaseId);
     const ended = endedFacts
       .filter((item) => item.payload.holderId === fact.payload.characterId)
       .sort((left, right) => right.payload.rank - left.payload.rank || stableCompare(left.id, right.id))[0];
-    const successor = ended
-      ? startedFacts.find((item) => item.payload.holderId !== fact.payload.characterId && sameOfficeSeat(ended.payload, item.payload))
-      : undefined;
+    if (!ended) return [];
+    const person = world.characters.find((item) => item.id === fact.payload.characterId);
+    const pathogen = world.pathogens.find((item) => item.id === fact.payload.diseaseId);
+    const successor = startedFacts.find((item) => (
+      item.payload.holderId !== fact.payload.characterId && sameOfficeSeat(ended.payload, item.payload)
+    ));
     const successorName = successor
       ? world.characters.find((item) => item.id === successor.payload.holderId)?.name ?? successor.payload.holderId
       : null;
-    const seatLabel = ended?.payload.armyId
+    const seatLabel = ended.payload.armyId
       ? `${world.armies.find((army) => army.id === ended.payload.armyId)?.name ?? ended.payload.armyId}主帅`
-      : ended?.payload.fleetId
+      : ended.payload.fleetId
         ? `${world.fleets.find((fleet) => fleet.id === ended.payload.fleetId)?.name ?? ended.payload.fleetId}提督`
-        : ended?.payload.officeKind ?? fact.payload.role;
+        : ended.payload.officeKind;
     const polityId = fact.polityIds[0] ?? person?.polityId ?? '';
     const relatedTargets: CoreImpactTarget[] = [];
-    if (polityId) relatedTargets.push(target('polity', polityId, world.polities.find((item) => item.id === polityId)?.name ?? polityId));
-    if (ended?.payload.armyId) relatedTargets.push(target('army', ended.payload.armyId, world.armies.find((army) => army.id === ended.payload.armyId)?.name ?? ended.payload.armyId));
-    if (successorName && successor) relatedTargets.push(target('person', successor.payload.holderId, successorName));
-    const linkedFactIds = [fact.id, ...fact.sourceFactIds, ended?.id ?? '', successor?.id ?? ''];
+    if (polityId) relatedTargets.push(target('polity', polityId));
+    if (ended.payload.armyId) relatedTargets.push(target('army', ended.payload.armyId));
+    if (successorName && successor) relatedTargets.push(target('person', successor.payload.holderId));
+    const linkedFactIds = [fact.id, ...fact.sourceFactIds, ended.id, successor?.id ?? ''];
     return [{
       id: `core-impact:disease:${fact.id}`,
       turn: fact.turn,
       source: '疾病' as const,
-      target: target('person', fact.payload.characterId, person?.name ?? fact.payload.characterId),
-      impact: ended?.payload.armyId || fact.payload.role === '将领' ? '兵权' as const : '官职' as const,
+      target: target('person', fact.payload.characterId),
+      impact: ended.payload.armyId || ended.payload.fleetId ? '兵权' as const : '官职' as const,
       summary: `${person?.name ?? '该人'}在染患${pathogen?.name ?? fact.payload.diseaseId}期间病故（健康${Math.round(fact.payload.health)}），其${seatLabel}职权随生命状态一并结算${successorName ? `；同季由${successorName}接掌` : ''}。`,
       beforeAfter: { label: '生命状态', before: true, after: false },
       sourceFactIds: unique(linkedFactIds),
       sourceEventIds: eventIdsForFact(events, fact.id),
-      sourceShipmentIds: [],
       relatedTargets,
       relatedWarId: null,
       priority: successor ? 94 : 82,
@@ -350,6 +309,7 @@ function matchesScope(impact: CoreImpactProjection, scope: CoreImpactScope): boo
     const wanted = new Set(scope.sourceFactIds);
     if (!impact.sourceFactIds.some((id) => wanted.has(id))) return false;
   }
+  if (scope.sources?.length && !scope.sources.includes(impact.source)) return false;
   return true;
 }
 
@@ -381,12 +341,11 @@ export function projectCoreImpacts(world: WorldState, scope: CoreImpactScope = {
   const events = currentEvents(world);
   const candidates = [
     ...battleSupplyImpacts(world, facts, events),
-    ...rebellionImpacts(world, facts, events),
+    ...rebellionImpacts(facts, events),
     ...diseaseOfficeImpacts(world, facts, events),
     ...lowReadinessImpacts(world, facts, events),
     ...legitimacyCrisisImpacts(world, events),
     ...localGovernanceImpacts(world, facts, events),
-    ...deliveredArmyFoodImpacts(world),
   ].filter((impact) => matchesScope(impact, scope));
   const requestedLimit = scope.limit ?? 3;
   const limit = Number.isFinite(requestedLimit) ? Math.max(0, Math.min(3, Math.floor(requestedLimit))) : 0;

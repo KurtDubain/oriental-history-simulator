@@ -1,10 +1,18 @@
-import type { HistoryEvent, WorldState } from '../sim/types';
+import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
 import { projectCoreImpacts, type CoreImpactProjection } from './core-impact-projection';
 import { toChronicleEvent } from './history-causal-adapter';
 import { projectHistoricalScenes } from './historical-scenes';
 import type { QuarterPulseSituationChange } from './quarter-pulse-situations';
 
 export const MAX_QUARTER_PULSE_STORIES = 3;
+
+const MAIN_APPOINTMENT_KINDS = new Set(['君主', '宰辅', '枢密使', '军团主帅', '水师提督']);
+const MAIN_FACT_KINDS = new Set<SimulationFact['kind']>(['war_started', 'war_ended', 'battle', 'territory_control_changed',
+  'army_order_changed', 'faction_lifecycle', 'faction_relation_changed', 'court_action_resolved']);
+const MAIN_CHRONICLE_KINDS = new Set([
+  'capital_fall', 'rebellion', 'army_raised', 'succession', 'polity_eliminated', 'polity_dissolved',
+  'power_broker', 'power_broker_fell', 'purge',
+]);
 
 interface QuarterPulseStoryBase {
   id: string;
@@ -126,7 +134,23 @@ function evidenceClusters(stories: readonly QuarterPulseStory[]): QuarterPulseSt
   return [...clusters.values()];
 }
 
-function currentFactStories(world: WorldState): QuarterPulseEventStory[] {
+function isMainFactEligible(fact: SimulationFact, coreImpactFactIds: ReadonlySet<string>): boolean {
+  if (coreImpactFactIds.has(fact.id)) return true;
+  if (MAIN_FACT_KINDS.has(fact.kind)) return true;
+  if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
+    return MAIN_APPOINTMENT_KINDS.has(fact.payload.officeKind);
+  }
+  return fact.kind === 'local_governance_resolved'
+    && fact.payload.outcome === 'enacted'
+    && (fact.payload.unrestBefore !== fact.payload.unrestAfter || changesPolityStanding(fact.stateDeltas));
+}
+
+function changesPolityStanding(deltas: readonly HistoryEvent['stateDeltas'][number][]): boolean {
+  return deltas.some((delta) => delta.entityType === 'polity' && (delta.field === 'legitimacy' || delta.field === 'authority')
+    && delta.before !== delta.after);
+}
+
+function currentFactStories(world: WorldState, coreImpactFactIds: ReadonlySet<string>): QuarterPulseEventStory[] {
   const report = world.lastTurn;
   if (!report) return [];
   const reportFactIds = new Set(report.factIds);
@@ -135,7 +159,7 @@ function currentFactStories(world: WorldState): QuarterPulseEventStory[] {
   const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
   const historyById = new Map(world.history.map((event) => [event.id, event]));
   return projectHistoricalScenes(world, facts, facts.length, 'active')
-    .map((scene) => {
+    .map<QuarterPulseEventStory | null>((scene) => {
       const sourceFactIds = uniqueSorted(scene.sourceFactIds.filter((id) => {
         const fact = factById.get(id);
         return reportFactIds.has(id) && fact?.turn === report.turn;
@@ -145,9 +169,8 @@ function currentFactStories(world: WorldState): QuarterPulseEventStory[] {
         return reportEventIds.has(id) && event?.turn === report.turn;
       }));
       const eventId = historyEventIds[0] ?? null;
-      const currentFacts = sourceFactIds
-        .map((id) => factById.get(id))
-        .flatMap((fact) => fact ? [fact] : []);
+      const currentFacts = sourceFactIds.flatMap((id) => factById.get(id) ?? []);
+      if (!currentFacts.some((fact) => isMainFactEligible(fact, coreImpactFactIds))) return null;
       const strongestFact = [...currentFacts]
         .sort((left, right) => right.importance - left.importance || stableCompare(left.id, right.id))[0];
       const regionIds = uniqueInOrder(currentFacts.flatMap((fact) => fact.regionIds));
@@ -169,7 +192,7 @@ function currentFactStories(world: WorldState): QuarterPulseEventStory[] {
         historyEventIds,
         regionIds,
       };
-    });
+    }).filter((story): story is QuarterPulseEventStory => story !== null);
 }
 
 function chronicleFallbackStories(
@@ -183,24 +206,16 @@ function chronicleFallbackStories(
   const eventIds = new Set(report.eventIds);
   const reportFactIds = new Set(report.factIds);
   const factById = new Map(world.facts.map((fact) => [fact.id, fact]));
-  const characterIds = new Set(world.characters.map((character) => character.id));
-  const polityIds = new Set(world.polities.map((polity) => polity.id));
-  const regionIds = new Set(world.regions.map((region) => region.id));
-  const hasConcreteAnchor = (event: HistoryEvent): boolean => (
-    event.sourceFactIds.length > 0
-    || event.stateDeltas.length > 0
-    || event.actorIds.some((id) => characterIds.has(id))
-    || event.polityIds.some((id) => polityIds.has(id))
-    || event.regionIds.some((id) => regionIds.has(id))
-  );
   return world.history
     .filter((event) => (
       eventIds.has(event.id)
       && event.turn === report.turn
       && event.kind !== 'quarter_summary'
       && !event.kind.startsWith('situation_')
-      && (!['人口', '经济', '疾病', '知识', '迁徙'].includes(event.category) || coreImpactEventIds.has(event.id))
-      && hasConcreteAnchor(event)
+      && (coreImpactEventIds.has(event.id) || event.category === '海洋' || MAIN_CHRONICLE_KINDS.has(event.kind)
+        || (event.kind === 'legitimacy_crisis' && changesPolityStanding(event.stateDeltas)))
+      && event.sourceFactIds.length + event.stateDeltas.length + event.actorIds.length
+        + event.polityIds.length + event.regionIds.length > 0
       && !coveredEvents.has(event.id)
       && !event.sourceFactIds.some((id) => coveredFacts.has(id))
     ))
@@ -255,8 +270,9 @@ export function selectQuarterPulseStories(
 export function projectQuarterPulse(world: WorldState): QuarterPulseProjection {
   if (!world.lastTurn) return { stories: [], highlightedRegionIds: [] };
   const coreImpacts = projectCoreImpacts(world);
+  const coreImpactFactIds = new Set(coreImpacts.flatMap((impact) => impact.sourceFactIds));
   const coreImpactEventIds = new Set(coreImpacts.flatMap((impact) => impact.sourceEventIds));
-  const facts = currentFactStories(world);
+  const facts = currentFactStories(world, coreImpactFactIds);
   const coveredFacts = new Set(facts.flatMap((story) => story.sourceFactIds));
   const coveredEvents = new Set(facts.flatMap((story) => story.historyEventIds));
   const candidates: QuarterPulseStory[] = [

@@ -175,19 +175,43 @@ describe('observer story leads', () => {
     expect(deriveObserverLeads(world)).toHaveLength(3);
   });
 
-  it('never repeats one principal historical scene or Fact across three different Situations', () => {
-    const world = contestWorldAt(12);
-    const leads = deriveObserverLeads(world);
-
-    expect(leads.length).toBeGreaterThan(1);
-    expect(new Set(leads.map((lead) => lead.primarySceneId)).size).toBe(leads.length);
-    for (let index = 0; index < leads.length; index += 1) {
-      for (let other = index + 1; other < leads.length; other += 1) {
-        const otherFacts = new Set(leads[other].primarySourceFactIds);
-        expect(leads[index].primarySourceFactIds.some((id) => otherFacts.has(id))).toBe(false);
+  it('never repeats one principal historical scene or Fact across Situations and appointment fallbacks', () => {
+    let world = createWorld('沧衡-甲子', 'contest-v01');
+    for (let turn = 1; turn <= 12; turn += 1) {
+      world = advanceWorld(world);
+      const leads = deriveObserverLeads(world);
+      expect(new Set(leads.map((lead) => lead.primarySceneId)).size).toBe(leads.length);
+      for (let index = 0; index < leads.length; index += 1) {
+        for (let other = index + 1; other < leads.length; other += 1) {
+          const otherFacts = new Set(leads[other].primarySourceFactIds);
+          expect(leads[index].primarySourceFactIds.some((id) => otherFacts.has(id))).toBe(false);
+        }
       }
     }
+    const leads = deriveObserverLeads(world);
+    expect(leads.length).toBeGreaterThan(1);
     expect(leads.filter((lead) => lead.recentChange?.includes('雪塞之战'))).toHaveLength(1);
+  });
+
+  it('answers a war-progress question with the latest war scene instead of a dependent Agency scene', () => {
+    const base = contestWorldAt(12);
+    const situation = base.situationSystem.situations.find((item) => {
+      if (item.status !== 'open' || item.type !== 'war_progress') return false;
+      const scenes = projectSituationHistoricalScenes(base, item, 24, null, 'active');
+      return scenes.some((scene) => scene.id.startsWith('scene:war:'))
+        && scenes.some((scene) => scene.id.startsWith('scene:agency:'));
+    });
+    expect(situation).toBeDefined();
+    const world = withSituations(base, [situation as SituationState]);
+    const lead = deriveObserverLeads(world)[0];
+    const sourceKinds = new Set(base.facts
+      .filter((fact) => lead.primarySourceFactIds.includes(fact.id))
+      .map((fact) => fact.kind));
+
+    expect(lead.question).toContain('目前打到哪里');
+    expect(lead.primarySceneId).toMatch(/^scene:war:/u);
+    expect([...sourceKinds].every((kind) => ['battle', 'territory_control_changed', 'war_started', 'war_ended'].includes(kind))).toBe(true);
+    expect(lead.evidence.join('')).not.toMatch(/请令|未准|未应允/u);
   });
 
   it('uses a one-quarter resolved echo only to fill an open-story vacancy', () => {
@@ -235,7 +259,7 @@ describe('observer story leads', () => {
     expect(enriched.evidence[1]).toContain('补给22');
   });
 
-  it('asks what changed after appointments, caps them at one, and omits an isolated ordinary departure', () => {
+  it('merges a same-seat appointment transfer, names both holders and stays deterministic', () => {
     const base = worldAt(3, '当世三问-任免补位');
     const armies = base.armies.slice(0, 3);
     const holders = base.characters.slice(0, 3);
@@ -258,9 +282,14 @@ describe('observer story leads', () => {
     expect(isolated).toEqual([]);
     const successor = appointmentFact(base, 'fact-test-b-started', 'appointment_started', '军团副将', holders[1].id, armies[0].id);
     const successionLeads = deriveObserverLeads(withCurrentFacts(base, [ended, successor]));
+    const reversed = deriveObserverLeads(withCurrentFacts(base, [successor, ended]));
     expect(successionLeads).toHaveLength(1);
-    expect(successionLeads[0].question).toContain('谁接掌其权');
-    expect(successionLeads[0].question).not.toContain('结果如何');
+    expect(reversed).toEqual(successionLeads);
+    expect(successionLeads[0].question).toContain('军团副将');
+    expect(successionLeads[0].evidence[0]).toContain(holders[0].name);
+    expect(successionLeads[0].evidence[0]).toContain(holders[1].name);
+    expect(successionLeads[0].evidence[0]).toContain('兵权已完成交接');
+    expect(successionLeads[0].primarySourceFactIds).toEqual([ended.id, successor.id]);
   });
 
   it('is deterministic, fact-backed and read-only for the same authoritative world', () => {

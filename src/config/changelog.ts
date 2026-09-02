@@ -5,7 +5,14 @@ export interface AppReleaseNote {
   items: readonly string[];
 }
 
+export const LATEST_APP_RELEASE: AppReleaseNote = { version: '1.22.2', date: '2026-09-02', title: '军粮退幕，问答归真', items: [
+  '例行军粮不再算军政后果；只展示真实改令或参战减员。',
+  '战争问卡先答战况；任免写清谁下、谁上和兵权。',
+  '贸易、运输、迁徙和疫情不补位。',
+] };
+
 export const APP_RELEASES: readonly AppReleaseNote[] = [
+  LATEST_APP_RELEASE,
   {
     version: '1.22.1',
     date: '2026-09-02',
@@ -386,5 +393,3 @@ export const APP_RELEASES: readonly AppReleaseNote[] = [
     ],
   },
 ] as const;
-
-export const LATEST_APP_RELEASE = APP_RELEASES[0];

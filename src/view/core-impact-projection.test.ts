@@ -9,10 +9,12 @@ import {
   serializeWorld,
   type ArmyState,
   type FactTurnBuffer,
+  type HistoryEvent,
   type SimulationFact,
   type WarState,
   type WorldState,
 } from '../sim';
+import { toCountryInspector } from './country-dossier-adapter';
 import { projectCoreImpacts } from './core-impact-projection';
 
 interface BorderWarFixture {
@@ -163,6 +165,57 @@ function factBufferForLastTurn(world: WorldState): FactTurnBuffer {
     year: world.lastTurn.year,
     season: world.lastTurn.season,
     facts: [],
+  };
+}
+
+function scopedBattleFact(
+  world: WorldState,
+  polityId: string,
+  ordinal: number,
+): Extract<SimulationFact, { kind: 'battle' }> {
+  if (!world.lastTurn) throw new Error('expected a finalized quarter');
+  const commander = world.characters.find((person) => person.polityId === polityId) ?? world.characters[0];
+  const opponent = world.polities.find((polity) => polity.id !== polityId) ?? world.polities[0];
+  const defender = world.characters.find((person) => person.polityId === opponent.id) ?? world.characters[1];
+  const battlefield = world.regions.find((region) => region.controllerId === opponent.id) ?? world.regions[0];
+  const force = (armyId: string, forcePolityId: string, commanderId: string, supplyBefore: number) => ({
+    armyId,
+    polityId: forcePolityId,
+    commanderId,
+    deputyCommanderId: null,
+    soldiersBefore: 10_000,
+    soldiersAfter: 9_000,
+    moraleBefore: 70,
+    moraleAfter: 62,
+    trainingBefore: 60,
+    supplyBefore,
+    losses: 1_000,
+  });
+  return {
+    id: `fact_scope_battle_${ordinal}`,
+    turn: world.lastTurn.turn,
+    year: world.lastTurn.year,
+    season: world.lastTurn.season,
+    kind: 'battle',
+    category: '军事',
+    importance: 3,
+    actorIds: [commander.id, defender.id],
+    polityIds: [polityId, opponent.id],
+    regionIds: [battlefield.id],
+    causes: [{ label: '结算前补给士气', weight: 1, evidence: '攻方补给已进入战力结算' }],
+    stateDeltas: [],
+    sourceFactIds: [],
+    payload: {
+      warId: `war_scope_${ordinal}`,
+      targetRegionId: battlefield.id,
+      routeId: world.routes[0].id,
+      attackerWon: false,
+      attackerPower: 800,
+      defenderPower: 1_200,
+      militiaLosses: 0,
+      attacker: force(`army_scope_${ordinal}`, polityId, commander.id, 25),
+      defenders: [force(`army_scope_defender_${ordinal}`, opponent.id, defender.id, 90)],
+    },
   };
 }
 
@@ -486,6 +539,104 @@ describe('core military-political impact projection', () => {
     };
 
     expect(projectCoreImpacts(world)).toEqual([]);
+  });
+
+  it('does not treat routine army food delivery to a fully supplied formation as a military-political result', () => {
+    const world = openingWorld('军政影响-例行军粮保持后台');
+    if (!world.lastTurn) throw new Error('expected a finalized quarter');
+    const army = world.armies[0];
+    const [origin, destination] = world.regions;
+    if (!army || !origin || !destination) throw new Error('expected an army and two regions');
+    army.supply = 100;
+    world.lastTurn.factIds = [];
+    world.lastTurn.eventIds = [];
+    world.lastTurn.trade.shipments = [{
+      id: 'shipment_routine_army_food',
+      kind: '军粮',
+      commodity: '粮食',
+      originRegionId: origin.id,
+      destinationRegionId: destination.id,
+      acceptedAmount: 8_000,
+      deliveredAmount: 8_000,
+      lostAmount: 0,
+      raidedAmount: 0,
+      peopleDeparted: 0,
+      peopleArrived: 0,
+      peopleLost: 0,
+      contactVolume: 0,
+      legs: [],
+      carrierArmyId: army.id,
+      carrierFleetId: null,
+      value: 0,
+      tariff: 0,
+      status: '交付',
+    }];
+
+    expect(projectCoreImpacts(world, { target: { kind: 'army', id: army.id } })).toEqual([]);
+    expect(projectCoreImpacts(world).some((impact) => impact.summary.includes('补给为100'))).toBe(false);
+  });
+
+  it('filters court sources before the global result limit hides a real local legitimacy impact', () => {
+    const world = openingWorld('军政影响-朝堂来源先筛选');
+    if (!world.lastTurn) throw new Error('expected a finalized quarter');
+    const polity = world.polities[0];
+    world.lastTurn.factIds = [];
+    world.lastTurn.eventIds = [];
+    const battles = [1, 2, 3].map((ordinal) => scopedBattleFact(world, polity.id, ordinal));
+    world.facts.push(...battles);
+    world.lastTurn.factIds.push(...battles.map((fact) => fact.id));
+    const crisis: HistoryEvent = {
+      id: 'event_scope_legitimacy',
+      turn: world.lastTurn.turn,
+      year: world.lastTurn.year,
+      season: world.lastTurn.season,
+      category: '政治',
+      kind: 'legitimacy_crisis',
+      title: `${polity.name}粮荒入朝`,
+      summary: `${polity.name}的地方压力已伤及合法性。`,
+      importance: 4,
+      actorIds: [],
+      polityIds: [polity.id],
+      regionIds: [],
+      causes: [
+        { label: '粮食安全', weight: 1, evidence: '属地粮仓见底' },
+        { label: '民间不安', weight: 1, evidence: '流民与民怨累积' },
+      ],
+      evidence: [],
+      stateDeltas: [{
+        entityType: 'polity',
+        entityId: polity.id,
+        field: 'legitimacy',
+        before: 70,
+        after: 68,
+        delta: -2,
+      }],
+      sourceFactIds: [],
+      situationIds: [],
+    };
+    world.history.push(crisis);
+    world.lastTurn.eventIds.push(crisis.id);
+
+    expect(projectCoreImpacts(world, {
+      target: { kind: 'polity', id: polity.id },
+      limit: 3,
+    }).map((impact) => impact.source)).toEqual(['粮食', '粮食', '粮食']);
+
+    const courtImpact = projectCoreImpacts(world, {
+      target: { kind: 'polity', id: polity.id },
+      sources: ['地方压力', '疾病'],
+      limit: 1,
+    });
+    expect(courtImpact).toHaveLength(1);
+    expect(courtImpact[0]).toMatchObject({
+      source: '地方压力',
+      sourceEventIds: [crisis.id],
+      beforeAfter: { label: '合法性', before: 70, after: 68 },
+    });
+    expect(toCountryInspector(world, polity).coreImpact).toEqual({
+      summary: courtImpact[0].summary,
+      sourceEventId: crisis.id,
+    });
   });
 
   it('is deterministic and read-only, including the authenticated save and the next seeded quarter', () => {

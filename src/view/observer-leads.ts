@@ -40,10 +40,7 @@ export interface ObserverLead {
   primarySourceFactIds: readonly string[];
 }
 
-/** A stateless wrapper retained for the app/text-snapshot integration boundary. */
-export interface ObserverLeadProjection {
-  leads: ObserverLead[];
-}
+export interface ObserverLeadProjection { leads: ObserverLead[] }
 
 export const OBSERVER_LEAD_VISIBILITY_THRESHOLD = 40;
 export const OBSERVER_LEAD_RESOLUTION_ECHO_TURNS = 1;
@@ -55,38 +52,15 @@ const PHASE_ORDER: Readonly<Record<SituationPhase, number>> = {
 };
 const WAR_SITUATION_TYPES = new Set(['war_progress', 'military_power_crisis']);
 const STORY_FACT_KINDS = new Set<SimulationFact['kind']>([
-  'war_started',
-  'war_ended',
-  'battle',
-  'territory_control_changed',
-  'army_order_changed',
-  'appointment_started',
-  'appointment_ended',
-  'agency_support_resolved',
-  'agency_intent_resolved',
-  'faction_lifecycle',
-  'faction_relation_changed',
-  'court_action_resolved',
-  'embodied_action_resolved',
+  'war_started', 'war_ended', 'battle', 'territory_control_changed', 'army_order_changed',
+  'appointment_started', 'appointment_ended', 'agency_support_resolved', 'agency_intent_resolved',
+  'faction_lifecycle', 'faction_relation_changed', 'court_action_resolved', 'embodied_action_resolved',
 ]);
 const WAR_FACT_KINDS = new Set<SimulationFact['kind']>([
-  'war_started',
-  'war_ended',
-  'battle',
-  'territory_control_changed',
-  'army_order_changed',
-  'agency_support_resolved',
-  'agency_intent_resolved',
+  'war_started', 'war_ended', 'battle', 'territory_control_changed', 'army_order_changed',
+  'agency_support_resolved', 'agency_intent_resolved',
 ]);
-const HIGH_OFFICES = new Set([
-  '君主',
-  '宰辅',
-  '枢密使',
-  '军团主帅',
-  '军团副将',
-  '水师提督',
-  '水师副将',
-]);
+const HIGH_OFFICES = new Set(['君主', '宰辅', '枢密使', '军团主帅', '军团副将', '水师提督', '水师副将']);
 const MAJOR_APPOINTMENT_OFFICES = new Set(['君主', '宰辅', '枢密使', '军团主帅', '水师提督']);
 const FACT_QUESTION_SUFFIX: Partial<Record<SimulationFact['kind'], string>> = {
   war_started: '，战端从何而起？',
@@ -150,7 +124,7 @@ function questionForSituation(item: SituationSnapshotItem, situation: SituationS
   }
   const core = participant(item, 'coreCharacterIds')?.label ?? '这名将领';
   const polity = participant(item, 'polityIds')?.label ?? '该政权';
-  if (item.type === 'military_power_crisis') return `${core}现在掌着什么兵权？`;
+  if (item.type === 'military_power_crisis') return `${core}为何成为军权焦点？`;
   if (item.type === 'inheritance_crisis') return `${polity}的继承问题现在卡在哪里？`;
   if (item.type === 'court_power_struggle') return `${polity}眼下由谁左右朝局？`;
   return `${item.title.replace(/的战争进程$/u, '')}，目前打到哪里？`;
@@ -174,7 +148,7 @@ function primaryFactId(world: WorldState, scene: HistoricalScene): string | null
       ? { agency_intent_resolved: 0, agency_intent_submitted: 1, agency_support_resolved: 2 }
       : {};
   return world.facts
-    .filter((fact) => scene.sourceFactIds.includes(fact.id))
+    .filter((fact) => scene.sourceFactIds.includes(fact.id) && (!scene.id.startsWith('scene:war:') || priorities[fact.kind] !== undefined))
     .sort((left, right) => (priorities[left.kind] ?? 10) - (priorities[right.kind] ?? 10)
       || right.turn - left.turn || right.importance - left.importance || stableCompare(left.id, right.id))[0]?.id ?? null;
 }
@@ -194,7 +168,7 @@ function structuralChoice(item: SituationSnapshotItem, evidence: SituationSnapsh
 }
 
 function situationChoices(world: WorldState, situation: SituationState, item: SituationSnapshotItem): SituationLeadChoice[] {
-  const scenes = projectSituationHistoricalScenes(world, situation, 8, null, 'active').map((scene) => {
+  const scenes = projectSituationHistoricalScenes(world, situation, 24, null, 'active').map((scene) => {
     const factId = primaryFactId(world, scene);
     return {
       primarySceneId: scene.id,
@@ -204,6 +178,10 @@ function situationChoices(world: WorldState, situation: SituationState, item: Si
     };
   });
   const structural = item.evidence.filter((entry) => entry.role === 'structural').map((entry) => structuralChoice(item, entry));
+  if (situation.type === 'war_progress') {
+    const warScenes = scenes.filter((scene) => scene.primarySceneId.startsWith('scene:war:') && scene.primarySourceFactIds.length > 0);
+    return warScenes.length ? [warScenes[0], ...structural, ...warScenes.slice(1)] : structural;
+  }
   return scenes.length ? [scenes[0], ...structural, ...scenes.slice(1)] : structural;
 }
 
@@ -232,8 +210,7 @@ function projectSituationLead(world: WorldState, situation: SituationState, reso
 }
 
 function sameAppointmentSeat(left: SimulationFact, right: SimulationFact): boolean {
-  if ((left.kind !== 'appointment_started' && left.kind !== 'appointment_ended')
-    || (right.kind !== 'appointment_started' && right.kind !== 'appointment_ended')) return false;
+  if ((left.kind !== 'appointment_started' && left.kind !== 'appointment_ended') || (right.kind !== 'appointment_started' && right.kind !== 'appointment_ended')) return false;
   return left.payload.polityId === right.payload.polityId
     && left.payload.officeKind === right.payload.officeKind
     && left.payload.regionId === right.payload.regionId
@@ -273,10 +250,8 @@ function projectFactLead(world: WorldState, fact: SimulationFact): ObserverLead 
     ...fact.regionIds.map((id) => world.regions.find((item) => item.id === id)?.name),
   ].filter((label, index, all): label is string => Boolean(label) && all.indexOf(label) === index).slice(0, 3);
   const war = WAR_FACT_KINDS.has(fact.kind);
-  const question = fact.kind === 'appointment_started'
-    ? `${narrative.title}后，兵权或朝局怎样变化？`
-    : fact.kind === 'appointment_ended'
-      ? `${narrative.title}后，谁接掌其权？`
+  const question = fact.kind === 'appointment_started' ? `${narrative.title}后，兵权或朝局怎样变化？`
+    : fact.kind === 'appointment_ended' ? `${narrative.title}后，哪项官职或兵权暂时空缺？`
       : `${narrative.title}${FACT_QUESTION_SUFFIX[fact.kind] ?? '带来了什么变化？'}`;
   return {
     id: `lead-fact:${fact.id}`,
@@ -298,6 +273,27 @@ function projectFactLead(world: WorldState, fact: SimulationFact): ObserverLead 
   };
 }
 
+type AppointmentFact = Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }>;
+
+function projectAppointmentTransferLead(world: WorldState, left: AppointmentFact, right: AppointmentFact): ObserverLead | null {
+  const ended = left.kind === 'appointment_ended' ? left : right;
+  const started = left.kind === 'appointment_started' ? left : right;
+  if (ended.kind !== 'appointment_ended' || started.kind !== 'appointment_started') return null;
+  const lead = projectFactLead(world, started);
+  if (!lead) return null;
+  const former = world.characters.find((item) => item.id === ended.payload.holderId)?.name ?? '前任';
+  const successor = world.characters.find((item) => item.id === started.payload.holderId)?.name ?? '新任';
+  const seat = started.payload.officeKind;
+  const authority = started.payload.armyId || started.payload.fleetId ? '兵权' : '官权';
+  const sourceFactIds = [ended.id, started.id].sort(stableCompare);
+  return {
+    ...lead,
+    question: `${former}卸任${seat}、${successor}接任后，${authority}怎样变化？`,
+    evidence: [`${former}下、${successor}上；${seat}的${authority}已完成交接。`, lead.evidence[1]],
+    primarySceneId: `scene:fact:${sourceFactIds.join(':')}`, primarySourceFactIds: sourceFactIds,
+  };
+}
+
 function coveredFactIds(situations: readonly SituationState[]): Set<string> {
   return new Set(situations.flatMap((situation) => [
     ...situation.causalFactIds,
@@ -307,11 +303,6 @@ function coveredFactIds(situations: readonly SituationState[]): Set<string> {
   ]));
 }
 
-/**
- * Selects at most three current stories without retaining observer-owned state.
- * Open Situations lead, a one-quarter resolution echo may fill vacancies, and
- * current-quarter war/court Facts provide the final sparse fallback.
- */
 export function deriveObserverLeads(world: WorldState): ObserverLead[] {
   const open = world.situationSystem.situations
     .filter((item) => item.status === 'open' && item.visibility >= OBSERVER_LEAD_VISIBILITY_THRESHOLD)
@@ -364,11 +355,15 @@ export function deriveObserverLeads(world: WorldState): ObserverLead[] {
     for (const fact of facts) {
       const appointment = fact.kind === 'appointment_started' || fact.kind === 'appointment_ended';
       if ((appointment && appointmentSelected) || usedPrimaryFacts.has(fact.id)) continue;
-      const lead = projectFactLead(world, fact);
-      if (lead) {
+      const counterpart = appointment ? currentFacts.find((other): other is AppointmentFact => (
+        other.id !== fact.id && other.kind !== fact.kind && sameAppointmentSeat(fact, other)
+      )) : undefined;
+      const lead = counterpart ? projectAppointmentTransferLead(world, fact as AppointmentFact, counterpart) : projectFactLead(world, fact);
+      if (lead && !usedSceneIds.has(lead.primarySceneId)
+        && lead.primarySourceFactIds.every((id) => !usedPrimaryFacts.has(id))) {
         leads.push(lead);
         usedSceneIds.add(lead.primarySceneId);
-        usedPrimaryFacts.add(fact.id);
+        lead.primarySourceFactIds.forEach((id) => usedPrimaryFacts.add(id));
         if (appointment) appointmentSelected = true;
       }
       if (leads.length >= 3) break;

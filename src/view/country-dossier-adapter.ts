@@ -42,8 +42,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     .map((faction) => ({ faction, ledger: calculateFactionPowerLedger(world, faction) }))
     .sort((a, b) => b.ledger.total - a.ledger.total || a.faction.id.localeCompare(b.faction.id));
   const activeCourt = projectCourt(world, item.id, 'active');
-  const coreImpact = projectCoreImpacts(world, { target: { kind: 'polity', id: item.id }, limit: 3 })
-    .find((impact) => impact.source === '地方压力' || impact.source === '疾病');
+  const coreImpact = projectCoreImpacts(world, { target: { kind: 'polity', id: item.id }, sources: ['地方压力', '疾病'], limit: 1 })[0];
   const courtPositionByFactionId = new Map(activeCourt.factionPositions.map((position) => [position.factionId, position]));
   const powerholders = activeCourt.seats.map((seat) => ({
     id: seat.holderId,

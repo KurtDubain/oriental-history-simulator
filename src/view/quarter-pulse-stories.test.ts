@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { advanceWorld, createWorld } from '../sim';
-import type { HistoryEvent, WorldState } from '../sim/types';
+import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
 import {
   MAX_QUARTER_PULSE_STORIES,
   projectQuarterPulse,
@@ -175,7 +175,7 @@ describe('TRIM01 QuarterPulse story projection', () => {
     ]);
   });
 
-  it('rejects unanchored maintenance chronicles while retaining Fact-, delta-, and named-action records', () => {
+  it('requires a concrete military or court result instead of treating any anchored chronicle as main news', () => {
     const base = advanceWorld(createWorld('TRIM02季度维护记录契约'));
     const actor = base.characters[0];
     const polity = base.polities.find((item) => item.id === actor.polityId) ?? base.polities[0];
@@ -185,17 +185,25 @@ describe('TRIM01 QuarterPulse story projection', () => {
       title: '观察索引例行维护',
       importance: 5,
     });
-    const factBacked = chronicleEvent(base, 'chronicle-fact-backed', {
-      sourceFactIds: ['fact-recorded-elsewhere'],
+    const armyRaised = chronicleEvent(base, 'chronicle-army-raised', {
+      category: '军事',
+      kind: 'army_raised',
+      title: `${polity.name}编成新军`,
+      polityIds: [polity.id],
+      regionIds: [region.id],
+      stateDeltas: [{ entityType: 'army', entityId: 'army-new', field: 'soldiers', before: 0, after: 2_000 }],
       importance: 4,
     });
-    const deltaBacked = chronicleEvent(base, 'chronicle-delta-backed', {
+    const legitimacyCrisis = chronicleEvent(base, 'chronicle-legitimacy-crisis', {
+      kind: 'legitimacy_crisis',
+      title: `${polity.name}国统动摇`,
+      polityIds: [polity.id],
       stateDeltas: [{
-        entityType: 'world',
-        entityId: 'world',
-        field: 'seasonalMarker',
-        before: false,
-        after: true,
+        entityType: 'polity',
+        entityId: polity.id,
+        field: 'legitimacy',
+        before: 31,
+        after: 29,
       }],
       importance: 3,
     });
@@ -206,7 +214,7 @@ describe('TRIM01 QuarterPulse story projection', () => {
       regionIds: [region.id],
       importance: 2,
     });
-    const events = [maintenance, factBacked, deltaBacked, namedAction];
+    const events = [maintenance, armyRaised, legitimacyCrisis, namedAction];
     const world: WorldState = {
       ...base,
       facts: [],
@@ -221,16 +229,11 @@ describe('TRIM01 QuarterPulse story projection', () => {
     const projection = projectQuarterPulse(world);
 
     expect(projection.stories.map((story) => story.id)).toEqual([
-      factBacked.id,
-      deltaBacked.id,
-      namedAction.id,
+      armyRaised.id,
+      legitimacyCrisis.id,
     ]);
     expect(projection.stories).not.toContainEqual(expect.objectContaining({ id: maintenance.id }));
-    expect(projection.stories.find((story) => story.id === namedAction.id)).toMatchObject({
-      source: 'chronicle',
-      eventId: namedAction.id,
-      regionIds: [region.id],
-    });
+    expect(projection.stories).not.toContainEqual(expect.objectContaining({ id: namedAction.id }));
   });
 
   it('keeps ordinary trade, migration and disease out of the default three stories without a proven military or court consequence', () => {
@@ -258,6 +261,60 @@ describe('TRIM01 QuarterPulse story projection', () => {
     };
 
     expect(projectQuarterPulse(world).stories).toEqual([]);
+  });
+
+  it('does not promote a high-importance ordinary Fact scene without a military or court result', () => {
+    const base = advanceWorld(createWorld('普通事实不入主季报'));
+    const report = base.lastTurn!;
+    const left = base.characters[0];
+    const right = base.characters.find((character) => character.id !== left.id) ?? base.characters[1];
+    const fact: Extract<SimulationFact, { kind: 'marriage' }> = {
+      id: 'fact-ordinary-marriage',
+      turn: report.turn,
+      year: report.year,
+      season: report.season,
+      kind: 'marriage',
+      category: '政治',
+      importance: 5,
+      actorIds: [left.id, right.id],
+      polityIds: [left.polityId, right.polityId],
+      regionIds: [left.locationRegionId],
+      causes: [],
+      stateDeltas: [],
+      sourceFactIds: [],
+      payload: {
+        leftCharacterId: left.id,
+        rightCharacterId: right.id,
+        leftFamilyId: left.familyId ?? 'family-left',
+        rightFamilyId: right.familyId ?? 'family-right',
+        diplomatic: false,
+      },
+    };
+    const world: WorldState = {
+      ...base,
+      facts: [fact],
+      history: [],
+      lastTurn: { ...report, factIds: [fact.id], eventIds: [] },
+    };
+
+    expect(projectQuarterPulse(world).stories).toEqual([]);
+  });
+
+  it('沧衡-甲子首季不再让两条普通通商约占据主季报', () => {
+    const world = advanceWorld(createWorld('沧衡-甲子'));
+    const projection = projectQuarterPulse(world);
+    const ordinaryTradeTreaties = projection.stories.filter((story) => (
+      story.kind === 'event'
+      && story.source === 'chronicle'
+      && (story.title.includes('通商约') || story.title.includes('商约'))
+    ));
+
+    expect(projection.stories.length).toBeLessThanOrEqual(MAX_QUARTER_PULSE_STORIES);
+    expect(ordinaryTradeTreaties).toEqual([]);
+    expect(projection.stories.map((story) => story.title)).not.toEqual([
+      '沧海盟与燕国缔结通商约',
+      '齐国与和国缔结通商约',
+    ]);
   });
 
   it('uses stable story identity as the final tie-break regardless of candidate order', () => {
