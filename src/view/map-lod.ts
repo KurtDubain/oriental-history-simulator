@@ -3,12 +3,10 @@ import type {
   MapFleetView,
   MapLodLevel,
   MapLodScene,
-  MapMarkerView,
   MapPresentationView,
   MapRegionView,
   MapSelectedObject,
 } from './map-contract';
-import { isPoliticalMapMarker, mapMarkerMatchesSelection } from './map-marker-layout';
 
 export const MAP_LOD_THRESHOLDS = Object.freeze({
   overviewToRegional: 1.3,
@@ -133,17 +131,6 @@ function selectedFleetId(selectedObject: MapSelectedObject) {
   return selectedObject?.kind === 'fleet' ? selectedObject.id : undefined;
 }
 
-function markerIsSelected(marker: MapMarkerView, selectedObject: MapSelectedObject) {
-  return mapMarkerMatchesSelection(marker, selectedObject);
-}
-
-function flowIsSelected(
-  flow: MapPresentationView['flows'][number],
-  selectedObject: MapSelectedObject,
-) {
-  return flow.selectedKind === selectedObject?.kind && flow.selectedId === selectedObject.id;
-}
-
 function visibleArmies(
   armies: readonly MapArmyView[],
   level: MapLodLevel,
@@ -199,13 +186,7 @@ export function buildMapLodScene(
     : new Set(
       presentation.regions.filter((region) => region.port).map((region) => region.id),
     );
-  const interactiveSeaZoneIds = level === 'overview'
-    ? new Set(
-      presentation.seaZones
-        .filter((zone) => selectedObject?.kind === 'seaZone' && zone.id === selectedObject.id)
-        .map((zone) => zone.id),
-    )
-    : new Set(presentation.seaZones.map((zone) => zone.id));
+  const interactiveSeaZoneIds = new Set(presentation.seaZones.map((zone) => zone.id));
 
   return {
     ...presentation,
@@ -216,13 +197,6 @@ export function buildMapLodScene(
     interactiveSeaZoneIds,
     armies: visibleArmies(presentation.armies, level, selectedObject),
     fleets: visibleFleets(presentation.fleets, level, selectedObject),
-    flows: level === 'local'
-      ? [...presentation.flows]
-      : presentation.flows.filter((flow) => flowIsSelected(flow, selectedObject)),
-    markers: level === 'local'
-      ? [...presentation.markers]
-      : presentation.markers.filter((marker) => (
-        isPoliticalMapMarker(marker) || marker.alert || markerIsSelected(marker, selectedObject)
-      )),
+    markers: [...presentation.markers],
   };
 }

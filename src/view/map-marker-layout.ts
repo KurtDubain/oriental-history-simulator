@@ -21,14 +21,10 @@ const ROOT_OFFSETS: readonly MapPoint[] = [
   { x: 4, y: -23 },
 ];
 
-export function isPoliticalMapMarker(marker: MapMarkerView): boolean {
-  return marker.kind === 'capitalPulse' || marker.kind === 'powerRoot';
-}
-
 export function mapMarkerTarget(marker: MapMarkerView): { kind: MapMarkerTargetKind; id: string } {
   return {
     kind: marker.targetKind
-      ?? (marker.kind === 'capitalPulse' ? 'country' : marker.kind === 'powerRoot' ? 'region' : marker.kind),
+      ?? (marker.kind === 'capitalPulse' ? 'country' : 'region'),
     id: marker.targetId ?? marker.id,
   };
 }
@@ -73,7 +69,6 @@ export function layoutMapMarkers(
         radius: compact ? 4.8 : 6,
       };
     }
-    const radius = 5 + Math.min(1, Math.max(0, marker.magnitude / 100)) * 3;
-    return { marker, point: base, radius };
+    return { marker, point: base, radius: compact ? 4.8 : 6 };
   });
 }

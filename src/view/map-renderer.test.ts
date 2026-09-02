@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import type { MapPresentationDefinition } from '../maps/types';
 import type {
+  MapArmyView,
   MapLodScene,
   MapMarkerView,
   MapRegionView,
@@ -111,6 +112,7 @@ function region(
     terrain: '平原',
     population: 100,
     foodRatio: 1,
+    supplyNote: '供养尚稳',
     ...options,
   };
 }
@@ -119,6 +121,7 @@ function scene(options: {
   regions?: MapRegionView[];
   seaZones?: MapSeaZoneView[];
   markers?: MapMarkerView[];
+  armies?: MapArmyView[];
   interactiveSeaZoneIds?: ReadonlySet<string>;
 } = {}): MapLodScene {
   const regions = options.regions ?? [];
@@ -128,10 +131,9 @@ function scene(options: {
     level: 'overview',
     regions,
     routes: [],
-    armies: [],
+    armies: options.armies ?? [],
     seaZones,
     fleets: [],
-    flows: [],
     markers: options.markers ?? [],
     regionLabelIds: new Set(regions.filter((item) => item.capital).map((item) => item.id)),
     cityRegionIds: new Set(regions.filter((item) => item.capital).map((item) => item.id)),
@@ -149,7 +151,7 @@ afterAll(() => {
 });
 
 describe('map renderer LOD contract', () => {
-  it('draws only interactive sea zones and therefore preserves the selected overview exception', () => {
+  it('draws the full sea theatre inside the unified military overlay', () => {
     const seaZones: MapSeaZoneView[] = [
       {
         id: 'sea_selected',
@@ -157,9 +159,6 @@ describe('map renderer LOD contract', () => {
         center: { x: 430, y: 210 },
         climate: '季风海',
         contested: false,
-        traffic: 20,
-        stormRisk: 10,
-        piracy: 5,
         powerShare: 0.5,
       },
       {
@@ -168,9 +167,6 @@ describe('map renderer LOD contract', () => {
         center: { x: 610, y: 210 },
         climate: '季风海',
         contested: false,
-        traffic: 15,
-        stormRisk: 10,
-        piracy: 5,
         powerShare: 0.4,
       },
     ];
@@ -180,7 +176,7 @@ describe('map renderer LOD contract', () => {
       context,
       { width: 390, height: 644, dpr: 1 },
       scene({ seaZones, interactiveSeaZoneIds: new Set(['sea_selected']) }),
-      'naval',
+      'war',
       [],
       null,
       { kind: 'seaZone', id: 'sea_selected' },
@@ -188,9 +184,45 @@ describe('map renderer LOD contract', () => {
       { zoom: 1, panX: 0, panY: 0 },
     );
 
-    expect(context.ellipses).toHaveLength(1);
+    expect(context.ellipses).toHaveLength(2);
     expect(context.fillTexts.map((call) => call.text)).toContain('所选近海');
-    expect(context.fillTexts.map((call) => call.text)).not.toContain('隐藏近海');
+    expect(context.fillTexts.map((call) => call.text)).toContain('隐藏近海');
+  });
+
+  it('labels only a verifiable expected contact in the military overlay', () => {
+    const origin = region('origin', '西营', { x: 360, y: 260 }, { polityId: 'polity-west' });
+    const destination = region('destination', '东丘', { x: 560, y: 260 }, { polityId: 'polity-east' });
+    const attacker: MapArmyView = {
+      id: 'army-west',
+      name: '西营军',
+      polityId: 'polity-west',
+      regionId: origin.id,
+      strength: 1_200,
+      orderKind: 'advance',
+      orderTargetRegionId: destination.id,
+      expectedContact: {
+        armyId: 'army-east',
+        armyName: '东丘军',
+        regionId: destination.id,
+        regionName: destination.name,
+      },
+    };
+    const context = recordingContext();
+
+    drawWorldMap(
+      context,
+      { width: 390, height: 644, dpr: 1 },
+      scene({ regions: [origin, destination], armies: [attacker] }),
+      'war',
+      [],
+      null,
+      null,
+      undefined,
+      { zoom: 1, panX: 0, panY: 0 },
+    );
+
+    expect(context.fillTexts.map((call) => call.text))
+      .toContain('预计接敌 · 东丘军（东丘）');
   });
 
   it('keeps compact overview polity and capital hierarchy without restoring ordinary region names', () => {

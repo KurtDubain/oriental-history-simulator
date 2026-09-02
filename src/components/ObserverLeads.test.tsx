@@ -2,94 +2,78 @@ import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { describe, expect, it, vi } from 'vitest';
 import { advanceWorld, createWorld } from '../sim';
-import { deriveObserverLeadProjection, deriveObserverLeads } from '../view/observer-leads';
+import { deriveObserverLeads } from '../view/observer-leads';
 import { ObserverLeads, observerLeadTargetKey, observerLeadWatchKey } from './ObserverLeads';
 
-describe('ObserverLeads', () => {
-  it('renders three present-tense, evidence-backed questions without detector stages', () => {
-    const leads = deriveObserverLeads(createWorld('当世三问-组件测试'));
-    const markup = renderToStaticMarkup(createElement(ObserverLeads, {
-      leads,
-      watchedKeys: new Set([`${leads[0].target.kind}:${leads[0].target.id}`]),
-      situationCount: 7,
-      onInspect: vi.fn(),
-      onToggleWatch: vi.fn(),
-      onOpenSituations: vi.fn(),
-    }));
+function leadsAt(turn: number, seed: string) {
+  let world = createWorld(seed);
+  while (world.turn < turn) world = advanceWorld(world);
+  return { world, leads: deriveObserverLeads(world) };
+}
 
-    expect(markup).toContain('观察线索 · 现在看什么');
-    expect(markup).not.toContain('持续局势 · 现在看什么');
-    expect(markup).toContain('持续局势');
-    expect(markup).toContain('data-history-destination="situation"');
-    expect(markup).not.toContain('data-history-layer="situation"');
+function render(leads: ReturnType<typeof deriveObserverLeads>, situationCount = 0) {
+  return renderToStaticMarkup(createElement(ObserverLeads, {
+    leads,
+    watchedKeys: new Set(leads[0] ? [observerLeadWatchKey(leads[0])] : []),
+    situationCount,
+    onInspect: vi.fn(),
+    onToggleWatch: vi.fn(),
+    onOpenSituations: vi.fn(),
+  }));
+}
+
+describe('ObserverLeads', () => {
+  it('keeps the story entrance visible without manufacturing empty questions', () => {
+    const markup = render(deriveObserverLeads(createWorld('当世三问-空白开局')));
+
     expect(markup).toContain('当世三问');
-    expect(markup.match(/data-testid="observer-lead"/g)).toHaveLength(3);
-    expect(markup).not.toContain('接着看');
-    expect(markup).not.toContain('data-testid="observer-lead-next"');
+    expect(markup).toContain('战争 · 人物 · 朝局');
+    expect(markup).toContain('眼下暂无值得单列的战事或朝局');
+    expect(markup).toContain('不会用空泛题目凑满三条');
+    expect(markup).not.toContain('data-testid="observer-lead"');
+  });
+
+  it('renders at most three concrete story questions without fixed slots or detector values', () => {
+    const { world, leads } = leadsAt(8, '当世三问-组件测试');
+    const markup = render(leads, world.situationSystem.situations.length);
+
+    expect(leads.length).toBeGreaterThan(0);
+    expect(leads.length).toBeLessThanOrEqual(3);
+    expect(markup.match(/data-testid="observer-lead"/g)).toHaveLength(leads.length);
+    expect(markup).not.toContain('data-slot=');
     expect(markup).not.toContain('data-stage=');
+    expect(markup).not.toContain('接着看');
     expect(markup).not.toMatch(/会不会|能否|还是/);
-    expect(markup.match(/data-testid="observer-lead-fact"/g)).toHaveLength(3);
+    expect(markup.match(/data-testid="observer-lead-fact"/g)).toHaveLength(leads.length);
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('查看持续局势');
-    expect(markup).toContain('7 条局势');
     expect(markup.match(/data-situation-workbench-trigger/g)).toHaveLength(1);
   });
 
-  it('uses Situation identity for watching while fallback leads retain their target identity', () => {
-    let world = createWorld('兵权入世');
-    let projection = deriveObserverLeadProjection(world);
-    while (world.turn < 8) {
-      const previousHash = world.hash;
-      world = advanceWorld(world);
-      projection = deriveObserverLeadProjection(world, projection.continuity, previousHash);
-    }
-    const watchedLead = projection.leads[0];
-    const markup = renderToStaticMarkup(createElement(ObserverLeads, {
-      leads: projection.leads,
-      watchedKeys: new Set([`situation:${watchedLead.situationId}`]),
-      situationCount: world.situationSystem.situations.length,
-      onInspect: vi.fn(),
-      onToggleWatch: vi.fn(),
-      onOpenSituations: vi.fn(),
-    }));
+  it('watches a Situation by its identity and a Fact fallback by its target identity', () => {
+    const situationLead = leadsAt(8, '兵权入世').leads.find((item) => item.situationId);
+    if (!situationLead?.situationId) throw new Error('expected a Situation lead');
+    const situationMarkup = render([situationLead], 1);
 
-    expect(markup.match(/data-source="situation"/g)?.length).toBeGreaterThanOrEqual(3);
-    expect(markup.match(/data-situation-id="situation_/g)).toHaveLength(3);
-    expect(markup.match(/data-display-mode="tracking"/g)).toHaveLength(2);
-    expect(markup.match(/data-display-mode="resolution_echo"/g)).toHaveLength(1);
-    expect(markup.match(/data-testid="observer-lead-change"/g)).toHaveLength(3);
-    expect(markup).toContain('延续');
-    expect(observerLeadWatchKey(watchedLead)).toBe(`situation:${watchedLead.situationId}`);
-    expect(observerLeadTargetKey(watchedLead)).toBe(
-      `${watchedLead.target.kind}:${watchedLead.target.id}`,
-    );
-    expect(markup).toContain('局势已关注');
-    expect(markup).toContain('取消关注局势');
-    expect(markup).toContain('data-watch-kind="situation"');
-    expect(markup).not.toContain('局势级关注将在下一阶段开放');
+    expect(observerLeadWatchKey(situationLead)).toBe(`situation:${situationLead.situationId}`);
+    expect(observerLeadTargetKey(situationLead)).toBe(`${situationLead.target.kind}:${situationLead.target.id}`);
+    expect(situationMarkup).toContain('局势已关注');
+    expect(situationMarkup).toContain('data-watch-kind="situation"');
+    expect(situationMarkup).toContain('observer-leads__situation-age');
 
-    const fallback = deriveObserverLeads(createWorld('当世三问-fallback'))[0];
-    expect(observerLeadWatchKey({ ...fallback, situationId: null })).toBe(
-      `${fallback.target.kind}:${fallback.target.id}`,
-    );
+    const factWorld = leadsAt(3, '当世三问-fact').world;
+    const factLead = deriveObserverLeads({
+      ...factWorld,
+      situationSystem: { ...factWorld.situationSystem, situations: [] },
+    }).find((item) => item.source === 'fact');
+    if (!factLead) throw new Error('expected a Fact fallback lead');
+    expect(observerLeadWatchKey(factLead)).toBe(`${factLead.target.kind}:${factLead.target.id}`);
   });
 
-  it('renders a tracked Situation headline once while retaining its evidence copy', () => {
-    let world = createWorld('春战副将');
-    let projection = deriveObserverLeadProjection(world);
-    while (world.turn < 8) {
-      const previousHash = world.hash;
-      world = advanceWorld(world);
-      projection = deriveObserverLeadProjection(world, projection.continuity, previousHash);
-    }
-    const lead = projection.leads.find((item) => item.situationId && item.recentChange?.includes(' · '));
+  it('renders a Situation headline once while retaining both evidence lines', () => {
+    const lead = leadsAt(8, '春战副将').leads.find((item) => item.situationId && item.recentChange?.includes(' · '));
     if (!lead?.recentChange) throw new Error('expected a Situation lead with a concrete scene');
-    const markup = renderToStaticMarkup(createElement(ObserverLeads, {
-      leads: [lead],
-      watchedKeys: new Set<string>(),
-      onInspect: vi.fn(),
-      onToggleWatch: vi.fn(),
-    }));
+    const markup = render([lead]);
 
     expect(lead.evidence).not.toContain(lead.recentChange);
     expect(markup.split(lead.recentChange).length - 1).toBe(1);

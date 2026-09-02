@@ -36,6 +36,7 @@ function sourceRegions(): MapRegionView[] {
     terrain: region.terrain,
     population: region.populationBase,
     foodRatio: 1,
+    supplyNote: '供养尚稳',
   }));
 }
 
@@ -43,7 +44,7 @@ describe('WorldBox-style presentation atlas', () => {
   it('reprojects all 82 authoritative regions without mutating simulation coordinates', () => {
     const source = sourceRegions();
     const rawYanjing = { ...source.find((region) => region.id === 'r_yanjing')?.center };
-    const presentation = buildMapPresentation(source, [], [], [], [], [], []);
+    const presentation = buildMapPresentation(source, [], [], [], [], []);
 
     expect(presentation.regions).toHaveLength(82);
     expect(presentation.regions.every((region) => region.polygon.length >= 3)).toBe(true);
@@ -53,7 +54,7 @@ describe('WorldBox-style presentation atlas', () => {
   });
 
   it('makes each display site hit its continuous territory on wide and compact maps', () => {
-    const presentation = buildMapPresentation(sourceRegions(), [], [], [], [], [], []);
+    const presentation = buildMapPresentation(sourceRegions(), [], [], [], [], []);
     const viewports = [
       { width: 1210, height: 560 },
       { width: 390, height: 644 },
@@ -80,7 +81,7 @@ describe('WorldBox-style presentation atlas', () => {
   });
 
   it('keeps the deep Bohai bay unowned and unclickable', () => {
-    const presentation = buildMapPresentation(sourceRegions(), [], [], [], [], [], []);
+    const presentation = buildMapPresentation(sourceRegions(), [], [], [], [], []);
     const viewport = { width: 1210, height: 720 };
     const transform = createMapViewportTransform(viewport.width, viewport.height);
     const bayPoint = {
@@ -96,9 +97,8 @@ describe('WorldBox-style presentation atlas', () => {
     )).toBeNull();
   });
 
-  it('projects region- and sea-anchored overlays onto the illustrated atlas', () => {
+  it('projects region-anchored fleets onto the illustrated sea atlas', () => {
     const source = sourceRegions();
-    const yanjing = source.find((region) => region.id === 'r_yanjing') as MapRegionView;
     const presentation = buildMapPresentation(
       source,
       [],
@@ -109,9 +109,6 @@ describe('WorldBox-style presentation atlas', () => {
         center: { x: 650, y: 150 },
         climate: '内海',
         contested: false,
-        traffic: 0,
-        stormRisk: 0,
-        piracy: 0,
         powerShare: 0,
       }],
       [{
@@ -122,23 +119,11 @@ describe('WorldBox-style presentation atlas', () => {
         readiness: 80,
         mission: '护航',
       }],
-      [{
-        id: 'flow-test',
-        kind: 'trade',
-        from: yanjing.center,
-        to: { x: 650, y: 150 },
-        magnitude: 1,
-        label: '试航',
-        selectedKind: 'tradeCorridor',
-        selectedId: 'flow-test',
-      }],
       [],
     );
 
     expect(presentation.seaZones[0].center).toEqual({ x: 455, y: 240 });
     expect(presentation.fleets[0].position).toEqual({ x: 455, y: 240 });
-    expect(presentation.flows[0].from).toEqual({ x: 367, y: 188 });
-    expect(presentation.flows[0].to).toEqual({ x: 455, y: 240 });
   });
 
   it('uses the same offset screen anchors to draw and hit stacked land armies', () => {
@@ -153,7 +138,7 @@ describe('WorldBox-style presentation atlas', () => {
       regionId: 'r_yanjing',
       strength: 8_000,
     }];
-    const presentation = buildMapPresentation(sourceRegions(), [], armies, [], [], [], []);
+    const presentation = buildMapPresentation(sourceRegions(), [], armies, [], [], []);
     const viewport = { width: 1210, height: 560 };
     const transform = createMapViewportTransform(viewport.width, viewport.height);
     const layouts = layoutMapArmyIcons(presentation.armies, presentation.regions, transform);
@@ -190,7 +175,7 @@ describe('WorldBox-style presentation atlas', () => {
       regionId: 'r_yanjing',
       strength: 15_000,
     }];
-    const presentation = buildMapPresentation(regions, [], armies, [], [], [], []);
+    const presentation = buildMapPresentation(regions, [], armies, [], [], []);
     const inputBefore = JSON.stringify({ regions, armies, presentation });
     const viewport = { width: 390, height: 644 };
     const zoomed = zoomMapCameraAtPoint(
@@ -242,11 +227,8 @@ describe('WorldBox-style presentation atlas', () => {
       center: { x: 650, y: 150 },
       climate: '近海',
       contested: false,
-      traffic: 0,
-      stormRisk: 0,
-      piracy: 0,
       powerShare: 0,
-    }], [], [], []);
+    }], [], []);
     const viewport = { width: 1210, height: 560 };
     const transform = createMapViewportTransform(viewport.width, viewport.height);
     const target = presentation.regions[0];
@@ -342,7 +324,7 @@ describe('WorldBox-style presentation atlas', () => {
   });
 
   it('resolves visible territories and keeps the visible Bohai bay as sea after zoom and pan', () => {
-    const presentation = buildMapPresentation(sourceRegions(), [], [], [], [], [], []);
+    const presentation = buildMapPresentation(sourceRegions(), [], [], [], [], []);
     const viewport = { width: 390, height: 644 };
     const zoomed = zoomMapCameraAtPoint(
       { zoom: 1, panX: 0, panY: 0 },

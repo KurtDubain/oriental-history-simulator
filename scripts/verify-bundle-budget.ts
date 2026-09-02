@@ -4,10 +4,10 @@ import { gzipSync } from 'node:zlib';
 
 const KIB = 1024;
 const budgets = {
-  // v1.21 adds authoritative military orders, allegiance and truthful landing
-  // resolution. Its measured growth earns two KiB; keep the new ceiling tight.
+  // COMPACT01 removes duplicate observer systems and specialist map layers.
+  // Keep that recovered headroom instead of letting the bundle grow back.
   singleJavaScriptRawBytes: 585 * KIB,
-  totalJavaScriptGzipBytes: 420 * KIB,
+  totalJavaScriptGzipBytes: 410 * KIB,
   totalCssGzipBytes: 40 * KIB,
 } as const;
 

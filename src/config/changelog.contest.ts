@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.22.0',
+    date: '2026-09-02',
+    title: '收去重影，聚焦军争',
+    items: [
+      '人物目标和最近结果直接读取当前权威状态与已结算事实，不再维护另一份本地盘算账本。',
+      '“当世三问”直接选择最多三条当前局势，结案最多回响一季，不再保存任期、挑战者或固定槽位。',
+      '舆图只保留疆界、军争、供养、地势四项；海军并入军争，其他后台领域只在形成主要压力时说明。模拟规则和 schema 4 存档不变。',
+    ],
+  },
+  {
     version: '1.21.1',
     date: '2026-09-02',
     title: '群像有别，界面归汉',

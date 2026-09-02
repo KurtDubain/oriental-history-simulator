@@ -22,18 +22,14 @@ function agency(stage: PersonAgencyCommandRequestStage): PersonAgencyView {
       id: 'goal-command',
       label: '谋求独领一军',
       status: 'active',
-      progress: 70,
-      commitment: 82,
       reason: '已有军中历练，也希望建立自己的功名',
       barrier: '',
     },
-    secondaryGoals: [],
     currentPlanSteps: [
       { label: '积累可查证的功绩', status: 'completed', reason: '近年战功已有记载' },
       { label: '向朝廷请领军令', status: stage === 'planned' ? 'blocked' : 'available', reason: '等候合适时机' },
     ],
     memories: [],
-    quarterChoice: null,
     commandRequest: {
       id: `request-${stage}`,
       stage,
@@ -334,5 +330,30 @@ describe('mobile roster dossier contract', () => {
     expect(markup).toContain('aria-label="返回人物名录"');
     expect(markup).toContain('下划或点按返回人物名录');
     expect(markup).not.toContain('aria-label="关闭档案"');
+  });
+
+  it('puts the current supply pressure directly into a region quick look on the supply layer', () => {
+    const markup = renderToStaticMarkup(createElement(Inspector, {
+      kind: 'region',
+      data: {
+        id: 'region-river',
+        name: '河间',
+        terrain: '平原',
+        polityName: '燕国',
+        population: '12万',
+        food: '4.8万 · 0.4 季',
+        cityLevel: '3 级',
+        defense: 52,
+        unrest: 64,
+        summary: '地方生产承压。',
+        supplyNote: '粮储危急，已难支撑军民',
+      },
+      showSupplyNote: true,
+      mobileExpanded: false,
+    }));
+
+    expect(markup).toContain('data-testid="map-quick-look-current"');
+    expect(markup).toContain('供养：粮储危急，已难支撑军民。');
+    expect(markup).not.toContain('地方生产承压。 人口');
   });
 });

@@ -4,7 +4,6 @@ import type {
   MapArmyView,
   MapCamera,
   MapFleetView,
-  MapFlowView,
   MapMarkerView,
   MapLodScene,
   MapPoint,
@@ -13,7 +12,7 @@ import type {
   MapSeaZoneView,
   MapViewportTransform,
 } from './map-contract';
-import { isPoliticalMapMarker, layoutMapMarkers } from './map-marker-layout';
+import { layoutMapMarkers } from './map-marker-layout';
 
 // Every current MapProfile uses this stable scene-space contract. Individual
 // coastlines and display sites stay inside the selected profile; camera math
@@ -27,9 +26,6 @@ export const DEFAULT_MAP_CAMERA: MapCamera = { zoom: MAP_MIN_ZOOM, panX: 0, panY
 
 const MAP_DESKTOP_RENDER_HEIGHT = MAP_WORLD_HEIGHT;
 const MAP_COMPACT_RENDER_HEIGHT = MAP_WORLD_HEIGHT;
-
-const clamp = (value: number, min = 0, max = 1) =>
-  Math.min(max, Math.max(min, value));
 
 function createBaseMapViewportTransform(
   width: number,
@@ -385,7 +381,6 @@ export type MapSceneHit =
   | { kind: 'army'; army: MapArmyView }
   | { kind: 'marker'; marker: MapMarkerView }
   | { kind: 'regionNode'; node: MapRegionNodeLayout }
-  | { kind: 'flow'; flow: MapFlowView }
   | { kind: 'region'; region: MapRegionView }
   | { kind: 'seaZone'; seaZone: MapSeaZoneView };
 
@@ -403,46 +398,6 @@ function nearestByDistance<T>(
   return values
     .map((value) => ({ value, distance: distance(value) }))
     .sort((left, right) => left.distance - right.distance)[0] ?? null;
-}
-
-function distanceToSegment(point: MapPoint, start: MapPoint, end: MapPoint) {
-  const dx = end.x - start.x;
-  const dy = end.y - start.y;
-  const denominator = dx * dx + dy * dy || 1;
-  const ratio = clamp(
-    ((point.x - start.x) * dx + (point.y - start.y) * dy) / denominator,
-  );
-  return Math.hypot(
-    point.x - (start.x + ratio * dx),
-    point.y - (start.y + ratio * dy),
-  );
-}
-
-function distanceToFlowCurve(
-  point: MapPoint,
-  flow: MapFlowView,
-  transform: MapViewportTransform,
-) {
-  const from = worldToScreenPoint(flow.from, transform);
-  const to = worldToScreenPoint(flow.to, transform);
-  const bend = Math.min(24, Math.hypot(to.x - from.x, to.y - from.y) * 0.16);
-  const control = {
-    x: (from.x + to.x) / 2,
-    y: (from.y + to.y) / 2 - bend,
-  };
-  let nearest = Number.POSITIVE_INFINITY;
-  let previous = from;
-  for (let step = 1; step <= 20; step += 1) {
-    const ratio = step / 20;
-    const inverse = 1 - ratio;
-    const current = {
-      x: inverse * inverse * from.x + 2 * inverse * ratio * control.x + ratio * ratio * to.x,
-      y: inverse * inverse * from.y + 2 * inverse * ratio * control.y + ratio * ratio * to.y,
-    };
-    nearest = Math.min(nearest, distanceToSegment(point, previous, current));
-    previous = current;
-  }
-  return nearest;
 }
 
 function regionNearScreenPoint(
@@ -501,7 +456,7 @@ export function resolveMapSceneHit(
 
   const markerLayouts = layoutMapMarkers(presentation.markers, transform);
   const nearestPoliticalMarker = nearestByDistance(
-    markerLayouts.filter((layout) => isPoliticalMapMarker(layout.marker)),
+    markerLayouts,
     (layout) => Math.hypot(layout.point.x - scenePoint.x, layout.point.y - scenePoint.y),
   );
   const politicalMarkerHit = nearestPoliticalMarker
@@ -569,22 +524,6 @@ export function resolveMapSceneHit(
   }
 
   if (politicalMarkerHit) return { kind: 'marker', marker: politicalMarkerHit.value.marker };
-
-  const nearestMarker = nearestByDistance(
-    markerLayouts.filter((layout) => !isPoliticalMapMarker(layout.marker)),
-    (layout) => Math.hypot(layout.point.x - scenePoint.x, layout.point.y - scenePoint.y),
-  );
-  if (nearestMarker && nearestMarker.distance <= Math.max(coarse ? 22 : 12, nearestMarker.value.radius + 3)) {
-    return { kind: 'marker', marker: nearestMarker.value.marker };
-  }
-
-  const nearestFlow = nearestByDistance(
-    presentation.flows,
-    (flow) => distanceToFlowCurve(scenePoint, flow, transform),
-  );
-  if (nearestFlow && nearestFlow.distance <= (coarse ? 22 : 9)) {
-    return { kind: 'flow', flow: nearestFlow.value };
-  }
 
   const region = directRegion ?? regionNearScreenPoint(
     presentation.regions,

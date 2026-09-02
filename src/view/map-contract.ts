@@ -29,12 +29,9 @@ export interface MapRegionView {
   portLevel?: number;
   capital?: boolean;
   cityLevel?: number;
-  defense?: number;
   strategicValue?: number;
-  diseasePressure?: number;
-  knowledgeAdoption?: number;
-  refugeePopulation?: number;
-  tradeVolume?: number;
+  /** Read-only summary of the strongest current pressure on local support. */
+  supplyNote: string;
 }
 
 export interface MapRouteView {
@@ -67,6 +64,13 @@ export interface MapArmyView {
   orderTargetRegionId?: string | null;
   orderIssuerName?: string;
   orderBlocked?: boolean;
+  /** Current enemy already present at this army's active order destination. */
+  expectedContact?: {
+    armyId: string;
+    armyName: string;
+    regionId: string;
+    regionName: string;
+  };
 }
 
 export interface MapSeaZoneView {
@@ -74,12 +78,7 @@ export interface MapSeaZoneView {
   name: string;
   center: MapPoint;
   climate: string;
-  controllerName?: string;
-  controllerColor?: string;
   contested: boolean;
-  traffic: number;
-  stormRisk: number;
-  piracy: number;
   powerShare: number;
 }
 
@@ -96,27 +95,12 @@ export interface MapFleetView {
   mission: string;
 }
 
-export type MapFlowKind = "trade" | "migration" | "disease" | "knowledge" | "naval";
-
-export interface MapFlowView {
-  id: string;
-  kind: MapFlowKind;
-  from: MapPoint;
-  to: MapPoint;
-  magnitude: number;
-  label: string;
-  selectedKind: "tradeCorridor" | "migration" | "outbreak" | "practice" | "seaZone";
-  selectedId: string;
-  alert?: boolean;
-}
-
 export interface MapMarkerView {
   id: string;
-  kind: "outbreak" | "practice" | "capitalPulse" | "powerRoot";
+  kind: "capitalPulse" | "powerRoot";
   position: MapPoint;
   magnitude: number;
   label: string;
-  alert?: boolean;
   targetKind?: MapMarkerTargetKind;
   targetId?: string;
   polityId?: string;
@@ -132,16 +116,10 @@ export interface MapMarkerView {
 export type MapOverlay =
   | "political"
   | "food"
-  | "population"
   | "war"
-  | "trade"
-  | "migration"
-  | "naval"
-  | "disease"
-  | "knowledge"
   | "none";
 
-export type MapObjectKind = MapFlowView["selectedKind"] | "seaZone" | "fleet" | "army" | "country";
+export type MapObjectKind = "seaZone" | "fleet" | "army" | "country";
 
 export type MapMarkerTargetKind = MapObjectKind | "region";
 
@@ -168,7 +146,6 @@ export interface MapPresentationView {
   armies: MapArmyView[];
   seaZones: MapSeaZoneView[];
   fleets: MapFleetView[];
-  flows: MapFlowView[];
   markers: MapMarkerView[];
 }
 

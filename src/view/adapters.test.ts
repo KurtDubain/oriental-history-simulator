@@ -182,72 +182,29 @@ describe('map object dossiers', () => {
 });
 
 describe('person Agency dossier', () => {
-  it('shows a bounded natural-language intention without changing the world', () => {
+  it('shows derived desires without inventing a goal for a person absent from the decision system', () => {
     const world = advanceWorldBy(createWorld('人物所图档案'), 4);
-    const person = world.characters.find((character) => character.alive && character.age >= 16) as CharacterState;
+    const authoritativeActorIds = new Set(world.agencyDecisionSystem.actors.map((actor) => actor.characterId));
+    const person = world.characters.find((character) => (
+      character.alive && character.age >= 16 && !authoritativeActorIds.has(character.id)
+    )) as CharacterState;
     const before = serializeWorld(world);
     const inspector = toPersonInspector(world, person);
     const archive = toPersonArchive(world, person);
 
     expect(inspector.agency?.availability).toBe('active');
     expect(inspector.agency?.desires).toHaveLength(2);
-    expect(inspector.agency?.primaryGoal).toBeTruthy();
-    expect(inspector.agency?.secondaryGoals.length).toBeLessThanOrEqual(2);
-    expect(inspector.agency?.currentPlanSteps.length).toBeLessThanOrEqual(5);
-    expect(inspector.summary).toContain(inspector.agency?.primaryGoal?.label);
-    expect(archive.chapters.find((chapter) => chapter.id === 'mind')?.paragraphs.join('')).toContain(
-      inspector.agency?.primaryGoal?.label,
-    );
+    expect(inspector.agency?.primaryGoal).toBeNull();
+    expect(inspector.agency?.currentPlanSteps).toEqual([]);
+    expect(inspector.summary).toContain('眼下仍在权衡');
+    expect(archive.chapters.find((chapter) => chapter.id === 'mind')?.paragraphs.join('')).toContain('眼下尚未形成明确打算');
 
     const playerFacing = JSON.stringify(inspector.agency);
-    expect(playerFacing).not.toContain('sourceWorldHash');
-    expect(playerFacing).not.toContain('authority');
-    expect(playerFacing).not.toContain('identityAnchorTurn');
-    expect(playerFacing).not.toContain('action');
+    expect(playerFacing).not.toMatch(/sourceWorldHash|authority|identityAnchorTurn|secondaryGoals|recentDecision|quarterChoice/);
     expect(serializeWorld(world)).toBe(before);
   });
 
-  it('lets an authoritative command request replace the same-quarter observer comparison', () => {
-    const world = advanceWorldBy(createWorld('请令进展档案'), 4);
-    const person = world.characters.find((character) => character.alive && character.age >= 16) as CharacterState;
-    const before = serializeWorld(world);
-    const commandRequest = {
-      id: 'request-authoritative',
-      stage: 'approved' as const,
-      periodLabel: '初元二年 · 夏',
-      statusLabel: '军令已授',
-      title: `获授北府军军令`,
-      summary: '此前请令获准，现已升任北府军主帅。',
-      evidence: [
-        { tone: 'support' as const, label: '有利', detail: '副将任职与近期战功均有记录' },
-        { tone: 'support' as const, label: '有利', detail: '朝廷认可其军中声望' },
-      ],
-      sourceEventId: world.history.at(-1)?.id ?? null,
-    };
-    const quarterChoice = {
-      periodLabel: '初元二年 · 夏',
-      intended: '旧观察账中的请令盘算',
-      actual: '旧制任命',
-      outcome: 'aligned' as const,
-      reason: '这段旧对照不应与权威请令重复出现',
-      sourceEventId: world.history.at(-1)?.id ?? null,
-    };
-
-    const inspector = toPersonInspector(world, person, { commandRequest, quarterChoice });
-    const archive = toPersonArchive(world, person, { commandRequest, quarterChoice });
-    const archiveMind = archive.chapters.find((chapter) => chapter.id === 'mind')?.paragraphs.join('') ?? '';
-
-    expect(inspector.agency?.commandRequest).toEqual(commandRequest);
-    expect(inspector.agency?.quarterChoice).toBeNull();
-    expect(inspector.summary).toContain('获授北府军军令');
-    expect(inspector.summary).toContain('现已升任北府军主帅');
-    expect(archiveMind).toContain('此前请令获准');
-    expect(archiveMind).not.toContain('这些只是当下盘算');
-    expect(JSON.stringify(inspector.agency)).not.toMatch(/Intent|Resolver|request_independent_command|threshold|score/i);
-    expect(serializeWorld(world)).toBe(before);
-  });
-
-  it('automatically reads a C10 command plan and gives it ownership over the old comparison', () => {
+  it('reads the current goal and plan directly from the authoritative decision system', () => {
     const world = advanceWorldBy(createWorld('权威请令计划投影'), 1);
     const army = world.armies.find((item) => item.deputyCommanderId !== null);
     const deputy = world.characters.find((item) => item.id === army?.deputyCommanderId);
@@ -295,45 +252,31 @@ describe('person Agency dossier', () => {
     } satisfies WorldState['agencyDecisionSystem']['actors'][number];
     world.agencyDecisionSystem = { version: 1, reviewedThroughTurn: world.turn - 1, actors: [actor] };
 
-    const inspector = toPersonInspector(world, deputy, {
-      quarterChoice: {
-        periodLabel: '第 1 年 · 春',
-        intended: '旧观察盘算',
-        actual: '旧制没有行动',
-        outcome: 'unobserved',
-        reason: '这段旧对照应由 C10 让位',
-        sourceEventId: null,
-      },
-    });
+    const before = serializeWorld(world);
+    const inspector = toPersonInspector(world, deputy);
 
+    expect(inspector.agency?.primaryGoal).toMatchObject({ id: goalId, status: 'active' });
+    expect(inspector.agency?.currentPlanSteps).toHaveLength(actor.plan.steps.length);
     expect(inspector.agency?.commandRequest).toMatchObject({
       stage: 'planned',
       statusLabel: '已有此意',
       title: `想独领${army.name}`,
       periodLabel: '起意于第 1 年 · 春',
     });
-    expect(inspector.agency?.quarterChoice).toBeNull();
     expect(inspector.agency?.commandRequest?.evidence.length).toBeLessThanOrEqual(3);
     expect(inspector.agency?.commandRequest?.evidence[0]).toEqual(expect.objectContaining({
       tone: 'barrier',
       detail: '尚不能正式请令',
     }));
+    expect(JSON.stringify(inspector.agency)).not.toMatch(/secondaryGoals|recentDecision|quarterChoice/);
+    expect(serializeWorld(world)).toBe(before);
   });
 
   it('projects a resolved request from its exact Fact without exposing decision scores', () => {
     const { world, deputy, sourceEvent } = rejectedCommandFixture('权威请令裁定投影');
 
     const before = JSON.stringify(world);
-    const inspector = toPersonInspector(world, deputy, {
-      quarterChoice: {
-        periodLabel: '旧观察账',
-        intended: '旧盘算',
-        actual: '旧任命',
-        outcome: 'diverged',
-        reason: '不得重复展示',
-        sourceEventId: sourceEvent.id,
-      },
-    });
+    const inspector = toPersonInspector(world, deputy);
     const requestText = JSON.stringify(inspector.agency?.commandRequest);
 
     expect(inspector.agency?.commandRequest).toMatchObject({
@@ -345,7 +288,6 @@ describe('person Agency dossier', () => {
       tone: 'barrier',
       detail: expect.stringContaining('军权过重'),
     }));
-    expect(inspector.agency?.quarterChoice).toBeNull();
     expect(requestText).not.toMatch(/decisionScore|decisionThreshold|61|48|Resolver|Intent/i);
     expect(JSON.stringify(world)).toBe(before);
   });

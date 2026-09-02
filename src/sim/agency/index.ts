@@ -17,19 +17,9 @@ export {
 } from './decision';
 
 export {
-  MAX_PLAN_STEPS,
-  MAX_RECENTLY_CLOSED_GOALS,
-  MAX_SECONDARY_GOALS,
-  PRIMARY_GOAL_MINIMUM_TURNS,
-  PRIMARY_REPLACEMENT_CONFIRMATIONS,
-  PRIMARY_REPLACEMENT_MARGIN,
   ROOT_DESIRES,
   ROOT_DESIRE_LABELS,
-  SECONDARY_GOAL_MINIMUM_TURNS,
-  evaluateGoalTerminalState,
-  projectCharacterAgency,
   projectCharacterDesires,
-  toCharacterAgencyPlayerProjection,
 } from './projection';
 
 export {
@@ -114,24 +104,6 @@ export type {
 } from './decision';
 
 export type {
-  AgencyEntityKind,
-  AgencyEntityRef,
-  AgencyGoalClosureReason,
-  AgencyGoalContext,
-  AgencyGoalProjection,
-  AgencyGoalStatus,
-  AgencyGoalType,
-  AgencyPlanAction,
-  AgencyPlanProjection,
-  AgencyPlanStepProjection,
-  AgencyPlanStepStatus,
-  AgencyPrimaryChallenge,
-  CharacterAgencyShadowProjection,
-  CharacterAgencyPlayerDesire,
-  CharacterAgencyPlayerDecision,
-  CharacterAgencyPlayerGoal,
-  CharacterAgencyPlayerPlanStep,
-  CharacterAgencyPlayerProjection,
   CharacterDesireProjection,
   DesireAxisProjection,
   DesirePressureProjection,

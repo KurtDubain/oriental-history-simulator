@@ -96,8 +96,12 @@ try {
   assert.equal(await page.locator('input[name="world-map-profile"]').getAttribute('value'), 'contest-v01');
 
   await page.locator('#continue-world').tap();
-  await page.waitForFunction(() => document.querySelector('.world-start__error')?.textContent?.includes('v03-82'));
-  assert.match(await page.locator('.world-start__error').textContent() ?? '', /当前版本未包含/);
+  const continueError = page.locator('.world-start__error');
+  await continueError.waitFor();
+  assert.match(
+    await continueError.textContent() ?? '',
+    /本地史册损坏、缺页，或来自暂不支持的版本/,
+  );
   assert.equal((await allSaves(page)).find((row) => row.key === 'autosave')?.value.payload, privatePayload);
 
   await page.locator('#open-world-collection').tap();

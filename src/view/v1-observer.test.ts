@@ -2,7 +2,6 @@ import { describe, expect, it } from 'vitest';
 import { createWorld } from '../sim';
 import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations/types';
-import type { ObserverLeadContinuityState } from './observer-leads';
 import {
   OBSERVER_DESK_SETTINGS_VERSION,
   MAX_OBSERVER_WATCH_ITEMS,
@@ -285,55 +284,12 @@ describe('V1 observer desk persistence', () => {
     expect(parseObserverDeskSettings(serializeObserverDeskSettings(settings))).toEqual(settings);
   });
 
-  it('round-trips bounded lead continuity and detaches it from caller-owned data', () => {
-    const continuity: ObserverLeadContinuityState = {
-      version: 1,
-      worldSeed: ' 春战副将 ',
-      lastTurn: 8,
-      lastWorldHash: 'hash-turn-8',
-      slots: [
-        {
-          slot: 'person', leadId: 'lead-situation:situation-person', situationId: 'situation-person',
-          selectedSinceTurn: 6, retainThroughTurn: 99, challengerId: null, challengerAheadTurns: 0,
-          decision: 'incumbent_stable',
-        },
-        {
-          slot: 'polity', leadId: 'lead-situation:situation-polity', situationId: 'situation-polity',
-          selectedSinceTurn: 7, retainThroughTurn: 99, challengerId: 'lead-situation:challenger', challengerAheadTurns: 1,
-          decision: 'critical_challenger_pending',
-        },
-        {
-          slot: 'tension', leadId: 'lead-tension-region:r_yanjing', situationId: null,
-          selectedSinceTurn: 8, retainThroughTurn: 99, challengerId: null, challengerAheadTurns: 2,
-          decision: 'legacy_fallback',
-        },
-      ],
-    };
-    const settings = normalizeObserverDeskSettings({
-      ...createObserverDeskSettings(),
-      leadContinuity: continuity,
-    });
-    const restored = parseObserverDeskSettings(serializeObserverDeskSettings(settings));
-
-    expect(restored.version).toBe(OBSERVER_DESK_SETTINGS_VERSION);
-    expect(restored.leadContinuity).toEqual({
-      ...continuity,
-      slots: [
-        { ...continuity.slots[0], retainThroughTurn: 8 },
-        { ...continuity.slots[1], retainThroughTurn: 9 },
-        { ...continuity.slots[2], retainThroughTurn: 10, challengerAheadTurns: 0 },
-      ],
-    });
-    expect(restored.leadContinuity).not.toBe(continuity);
-    expect(restored.leadContinuity?.slots).not.toBe(continuity.slots);
-    continuity.slots[0].leadId = 'mutated-after-normalize';
-    expect(restored.leadContinuity?.slots[0].leadId).toBe('lead-situation:situation-person');
-  });
-
-  it('rejects incomplete or duplicated continuity slots without disturbing other observer settings', () => {
+  it('ignores legacy lead continuity without disturbing other observer settings', () => {
     const settings = normalizeObserverDeskSettings({
       ...createObserverDeskSettings(),
       watchlist: [{ kind: 'person', id: 'character-1', label: '赵衡' }],
+      pauseRules: { enabled: false, wars: false, situationChanges: true },
+      guide: { completedSteps: ['quarter-advanced'], dismissed: true },
       leadContinuity: {
         version: 1,
         worldSeed: '春战副将',
@@ -346,11 +302,18 @@ describe('V1 observer desk persistence', () => {
         ],
       },
     });
+    const serialized = serializeObserverDeskSettings(settings);
+    const restored = parseObserverDeskSettings(serialized);
 
-    expect(settings.leadContinuity).toBeNull();
-    expect(settings.watchlist).toEqual([
+    expect(settings).not.toHaveProperty('leadContinuity');
+    expect(JSON.parse(serialized)).not.toHaveProperty('leadContinuity');
+    expect(restored.watchlist).toEqual([
       expect.objectContaining({ kind: 'person', id: 'character-1', label: '赵衡' }),
     ]);
+    expect(restored.pauseRules.enabled).toBe(false);
+    expect(restored.pauseRules.wars).toBe(false);
+    expect(restored.pauseRules.situationChanges).toBe(true);
+    expect(restored.guide).toEqual({ completedSteps: ['quarter-advanced'], dismissed: true });
   });
 
   it('adds, replaces, removes and clears watch items without mutating the input', () => {

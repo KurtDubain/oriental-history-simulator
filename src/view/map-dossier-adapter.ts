@@ -8,6 +8,7 @@ import type {
   WorldState,
 } from '../sim/types';
 import { projectMilitaryAuthority } from './military-authority-reading';
+import { regionSupplyNote } from './map-adapter';
 import {
   character,
   polity,
@@ -162,6 +163,7 @@ export function toRegionInspector(world: WorldState, item: RegionState): RegionI
     cityLevel: `${item.cityLevel} 级`,
     defense: item.defense,
     unrest: item.unrest,
+    supplyNote: regionSupplyNote(world, item),
     governor: governor?.name ?? '暂缺',
     resources,
     related,

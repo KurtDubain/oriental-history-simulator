@@ -21,16 +21,9 @@ const SITUATION_OPEN_BUDGETS = Object.freeze({
   war_progress: 4,
   court_power_struggle: 3,
 });
-const LEAD_SLOTS = Object.freeze(['person', 'polity', 'tension']);
-const SITUATION_TYPES_BY_LEAD_SLOT = Object.freeze({
-  person: Object.freeze(['military_power_crisis']),
-  polity: Object.freeze(['inheritance_crisis', 'court_power_struggle']),
-  tension: Object.freeze(['war_progress']),
-});
 const SITUATION_WATCH_SEED = '春战副将';
 const SITUATION_WATCH_TURN = 4;
-const SITUATION_WATCH_SLOT = 'tension';
-const SITUATION_WATCH_EXPECTED_PAUSE_TURN = 7;
+const SITUATION_WATCH_TYPE = 'war_progress';
 const PRIVATE_MAP_CONTENT_VERSION = 'v03-82';
 
 const server = await createServer({
@@ -301,7 +294,6 @@ async function selectLayer(page, layer) {
   if (!(await page.locator('#observer-layer-sheet').isVisible().catch(() => false))) await trigger.click();
   await page.waitForSelector('#observer-layer-sheet');
   const target = page.locator(`[data-layer-id="${layer}"]`);
-  if (!(await target.isVisible())) await page.locator('[data-layer-more-trigger]').click();
   await target.click();
   await page.waitForSelector(`.world-map[data-overlay="${layer}"]`);
   assert.equal((await snapshot(page)).interface.overlay, layer);
@@ -314,7 +306,11 @@ async function auditLayerDialog(page, mobile = false) {
   await sheet.waitFor();
   assert.equal(await sheet.getAttribute('role'), 'dialog');
   assert.equal(await sheet.getAttribute('aria-modal'), 'true');
-  assert.equal(await sheet.locator('[data-layer-id]').count(), 10);
+  assert.equal(await sheet.locator('[data-layer-id]').count(), 4);
+  assert.deepEqual(
+    await sheet.locator('[data-layer-id]').evaluateAll((items) => items.map((item) => item.getAttribute('data-layer-id'))),
+    ['political', 'war', 'food', 'none'],
+  );
   for (let index = 0; index < 14; index += 1) {
     await page.keyboard.press('Tab');
     assert.equal(await page.evaluate(() => Boolean(document.activeElement?.closest('#observer-layer-sheet'))), true);
@@ -325,8 +321,6 @@ async function auditLayerDialog(page, mobile = false) {
       ['political', 'war', 'food', 'none'],
       '移动端叠层首屏只应给出四个常用入口',
     );
-    const more = sheet.locator('[data-layer-more-trigger]');
-    assert.equal(await more.getAttribute('aria-expanded'), 'false');
     const layout = await sheet.evaluate((element) => {
       const rect = element.getBoundingClientRect();
       const section = element.querySelector('.layer-picker__groups section');
@@ -338,9 +332,7 @@ async function auditLayerDialog(page, mobile = false) {
     });
     assert.ok(layout.left >= 0 && layout.right <= 390, '移动端叠层弹页不可越出视口');
     assert.equal(layout.sectionDisplay, 'block', '移动端叠层应为单列');
-    await more.click();
-    assert.equal(await more.getAttribute('aria-expanded'), 'true');
-    assert.equal(await sheet.locator('[data-layer-id]:visible').count(), 10, '展开更多后十个图层必须全部可达');
+    assert.equal(await sheet.locator('[data-layer-id]:visible').count(), 4, '移动端四种叠层必须全部可达');
   }
   await page.keyboard.press('Escape');
   await sheet.waitFor({ state: 'detached' });
@@ -470,73 +462,42 @@ function auditSituationProjection(projection, requiredTypes) {
 }
 
 function assertObserverLeadMilestone(state, expectedSources, label) {
+  void expectedSources;
   const leads = state.observer.focusLeads;
-  assert.equal(leads.length, LEAD_SLOTS.length, `${label}应始终给出三条观察题`);
-  assert.deepEqual(leads.map((lead) => lead.slot), LEAD_SLOTS, `${label}三问槽位顺序不得变化`);
-  for (const lead of leads) {
-    const expected = Array.isArray(expectedSources[lead.slot])
-      ? expectedSources[lead.slot]
-      : [expectedSources[lead.slot]];
-    assert.ok(
-      expected.includes(lead.source),
-      `${label} ${lead.slot}应按槽位优先使用 Situation，仅在无匹配时回退（实际 ${lead.source}，允许 ${expected.join('/')}）`,
-    );
-  }
-  const arbitration = state.observer.leadArbitration;
-  assert.equal(arbitration.version, 1, `${label}应暴露有界的连续性仲裁版本`);
-  assert.equal(arbitration.lastArbitratedTurn, state.time.turn, `${label}仲裁必须对应当前季度`);
-  assert.deepEqual(arbitration.slots.map((entry) => entry.slot), LEAD_SLOTS, `${label}仲裁应覆盖三个槽位`);
+  assert.ok(leads.length <= 3, `${label}最多给出三条观察题`);
+  assert.equal(new Set(leads.map((lead) => lead.id)).size, leads.length, `${label}观察题不得重复`);
+  assert.equal(Object.hasOwn(state.observer, 'leadArbitration'), false, `${label}不得再保存观察仲裁账`);
 
   for (const lead of leads) {
-    const continuity = arbitration.slots.find((entry) => entry.slot === lead.slot);
-    assert.ok(continuity, `${label} ${lead.slot}应有连续性记录`);
-    assert.equal(continuity.leadId, lead.id, `${label} ${lead.slot}展示题与仲裁身份必须一致`);
-    assert.equal(continuity.situationId, lead.situationId, `${label} ${lead.slot}不得丢失 Situation 身份`);
-    assert.equal(lead.selectedSinceTurn, continuity.selectedSinceTurn, `${label} ${lead.slot}应公开真实留任起点`);
-    assert.equal(lead.retainThroughTurn, continuity.retainThroughTurn, `${label} ${lead.slot}应公开最短留任边界`);
-    assert.equal(lead.trackingTurns, state.time.turn - lead.selectedSinceTurn + 1, `${label} ${lead.slot}追踪季数应可校验`);
-    assert.equal(lead.evidence.length, 2, `${label} ${lead.slot}应保留两条当前事实`);
-    assert.equal(Object.hasOwn(lead, 'stage'), false, `${label} ${lead.slot}不得公开检测阶段`);
-    assert.equal(Object.hasOwn(lead, 'tension'), false, `${label} ${lead.slot}不得公开张力值`);
-    assert.equal(Object.hasOwn(lead, 'nextSignal'), false, `${label} ${lead.slot}不得公开预测式下一观察`);
+    assert.equal(lead.evidence.length, 2, `${label} ${lead.id}应保留两条当前事实`);
+    for (const removed of ['slot', 'selectedSinceTurn', 'retainThroughTurn', 'arbitrationReason', 'stage', 'tension', 'nextSignal']) {
+      assert.equal(Object.hasOwn(lead, removed), false, `${label} ${lead.id}不得公开已删除的${removed}`);
+    }
 
-    if (lead.source === 'fallback') {
-      assert.equal(lead.situationId, null, `${label} ${lead.slot}回退题不得伪造 Situation ID`);
-      assert.equal(lead.situationType, null, `${label} ${lead.slot}回退题不得伪造 Situation 类型`);
-      assert.equal(lead.displayMode, 'fallback', `${label} ${lead.slot}回退题应明示来源`);
+    if (lead.source === 'fact') {
+      assert.equal(lead.situationId, null, `${label} ${lead.id}事实补位不得伪造 Situation ID`);
+      assert.equal(lead.situationType, null, `${label} ${lead.id}事实补位不得伪造 Situation 类型`);
+      assert.equal(lead.displayMode, 'fact', `${label} ${lead.id}应明示当前事实来源`);
+      assert.ok(lead.factId, `${label} ${lead.id}应反链当前事实`);
       continue;
     }
 
-    assert.equal(lead.source, 'situation', `${label} ${lead.slot}只能使用权威 Situation 题源`);
-    assert.ok(
-      SITUATION_TYPES_BY_LEAD_SLOT[lead.slot].includes(lead.situationType),
-      `${label} ${lead.slot}应匹配正确局势类型`,
-    );
+    assert.equal(lead.source, 'situation', `${label} ${lead.id}只能使用权威 Situation 或 Fact`);
+    assert.ok(Object.hasOwn(SITUATION_TYPE_LABELS, lead.situationType), `${label} ${lead.id}应使用已接纳的局势类型`);
     if (lead.displayMode === 'resolution_echo') {
       const resolved = state.observer.situations.recentResolved.find((item) => item.id === lead.situationId);
-      assert.ok(resolved, `${label} ${lead.slot}的结案回声必须指向近期已结案局势`);
-      assert.equal(resolved.type, lead.situationType, `${label} ${lead.slot}结案回声不得改变局势类型`);
-      assert.equal(resolved.status, 'resolved', `${label} ${lead.slot}结案回声必须保留已结案状态`);
-      assert.ok(resolved.resolvedTurn !== null, `${label} ${lead.slot}结案回声必须保留结案季度`);
+      assert.ok(resolved, `${label} ${lead.id}的结案回声必须指向近期已结案局势`);
+      assert.equal(resolved.type, lead.situationType, `${label} ${lead.id}结案回声不得改变局势类型`);
+      assert.equal(resolved.status, 'resolved', `${label} ${lead.id}结案回声必须保留已结案状态`);
       continue;
     }
-    assert.equal(lead.displayMode, 'tracking', `${label} ${lead.slot}的未结案局势应持续追踪`);
+    assert.equal(lead.displayMode, 'tracking', `${label} ${lead.id}的未结案局势应直接读取当前状态`);
     const situation = state.observer.situations.open.find((item) => item.id === lead.situationId);
-    assert.ok(situation, `${label} ${lead.slot}必须指向当前开放的局势`);
-    assert.equal(situation.type, lead.situationType, `${label} ${lead.slot}题源与局势投影类型必须一致`);
+    assert.ok(situation, `${label} ${lead.id}必须指向当前开放的局势`);
+    assert.equal(situation.type, lead.situationType, `${label} ${lead.id}题源与局势投影类型必须一致`);
   }
 
   return leads;
-}
-
-function observerLeadIdentity(state) {
-  return state.observer.focusLeads.map((lead) => ({
-    slot: lead.slot,
-    id: lead.id,
-    situationId: lead.situationId,
-    selectedSinceTurn: lead.selectedSinceTurn,
-    retainThroughTurn: lead.retainThroughTurn,
-  }));
 }
 
 async function exerciseSituationLeadCards(page, state) {
@@ -549,21 +510,21 @@ async function exerciseSituationLeadCards(page, state) {
   for (const lead of situationLeads) {
     const row = panel.locator(`[data-testid="observer-lead"][data-situation-id="${lead.situationId}"]`);
     await row.waitFor();
-    assert.equal(await row.count(), 1, `${lead.slot}应只有一张对应局势卡片`);
+    assert.equal(await row.count(), 1, `${lead.id}应只有一张对应局势卡片`);
     await row.locator('.observer-leads__inspect').click();
     const opened = await waitForSnapshot(page, (current, situationId) => (
       current.observer.situationWorkbenchOpen
       && current.observer.selectedSituationId === situationId
       && current.observer.selectedSituation?.id === situationId
     ), lead.situationId);
-    assert.equal(opened.observer.selectedSituation.type, lead.situationType, `${lead.slot}卡片应直达同一类型的局势卷宗`);
-    assert.equal(opened.deterministicWorldHash, state.deterministicWorldHash, `${lead.slot}卡片阅卷不得改变世界哈希`);
+    assert.equal(opened.observer.selectedSituation.type, lead.situationType, `${lead.id}卡片应直达同一类型的局势卷宗`);
+    assert.equal(opened.deterministicWorldHash, state.deterministicWorldHash, `${lead.id}卡片阅卷不得改变世界哈希`);
     await page.locator('.situation-workbench__close').click();
     await page.waitForSelector('.situation-workbench', { state: 'detached' });
     const inspectorClose = page.locator('.observer-inspector button[aria-label="关闭档案"]');
     if (await inspectorClose.isVisible().catch(() => false)) await inspectorClose.click();
     await panel.waitFor();
-    assert.equal((await snapshot(page)).deterministicWorldHash, state.deterministicWorldHash, `${lead.slot}返回当世三问后世界哈希应保持不变`);
+    assert.equal((await snapshot(page)).deterministicWorldHash, state.deterministicWorldHash, `${lead.id}返回当世三问后世界哈希应保持不变`);
   }
 }
 
@@ -609,17 +570,12 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
     polity: 'situation',
     tension: 'situation',
   }, 'T6');
-  const turn6Identity = observerLeadIdentity(turn6);
-
   const turn7 = await advanceTo(page, 7);
   assertObserverLeadMilestone(turn7, {
     person: 'fallback',
     polity: 'situation',
     tension: 'situation',
   }, 'T7');
-  const turn7Identity = observerLeadIdentity(turn7);
-  assert.deepEqual(turn7Identity.slice(1), turn6Identity.slice(1), 'T6→T7 原有国势与战争题不得换题');
-
   const observed = await advanceTo(page, turn);
   const projection = observed.observer.situations;
   assert.equal(projection.lastReducedTurn, observed.time.turn - 1);
@@ -631,17 +587,10 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
     polity: 'situation',
     tension: 'situation',
   }, 'T8');
-  assert.deepEqual(observerLeadIdentity(observed), turn7Identity, 'T7→T8 应保持人物回退题与既有两题');
-  assert.ok(observed.observer.focusLeads.every((lead) => (
-    lead.trackingTurns >= (lead.slot === 'person' ? 2 : 3)
-  )), 'T8 三问应展示各自真实的连续追踪季数');
   assert.equal(observed.observer.watchedCount, 0, '本阶段不得自动创建关注项');
   assert.ok(Buffer.byteLength(await snapshotText(page), 'utf8') < SNAPSHOT_LIMIT);
   const situationHash = observed.deterministicWorldHash;
-  const leadProjectionBeforeSave = {
-    focusLeads: observed.observer.focusLeads,
-    leadArbitration: observed.observer.leadArbitration,
-  };
+  const leadProjectionBeforeSave = observed.observer.focusLeads;
 
   await exerciseSituationLeadCards(page, observed);
 
@@ -694,9 +643,8 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   const restored = await snapshot(page);
   assert.equal(restored.deterministicWorldHash, situationHash, '形成局势后的 schema-4 存档应精确恢复哈希');
   assert.deepEqual(restored.observer.situations, projection, '形成局势后的存档应精确恢复局势投影');
-  assert.deepEqual(restored.observer.focusLeads, leadProjectionBeforeSave.focusLeads, '续读不得重置三问身份、留任起点或追踪季数');
-  assert.deepEqual(restored.observer.leadArbitration, leadProjectionBeforeSave.leadArbitration, '续读必须恢复同一份非权威连续性仲裁记录');
-  assert.ok(restored.observer.focusLeads.some((lead) => lead.selectedSinceTurn < restored.time.turn), '续读后不得把三问留任起点伪造为当前季度');
+  assert.deepEqual(restored.observer.focusLeads, leadProjectionBeforeSave, '续读同一权威世界应无状态地重建相同观察题');
+  assert.equal(Object.hasOwn(restored.observer, 'leadArbitration'), false, '续读不应恢复已删除的观察仲裁账');
   auditSituationProjection(restored.observer.situations, requiredTypes);
   assert.deepEqual(errors, []);
   await page.close();
@@ -715,7 +663,7 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   await page.waitForSelector('.world-map__canvas');
 
   const turn4 = await advanceTo(page, SITUATION_WATCH_TURN);
-  const lead = turn4.observer.focusLeads.find((item) => item.slot === SITUATION_WATCH_SLOT);
+  const lead = turn4.observer.focusLeads.find((item) => item.situationType === SITUATION_WATCH_TYPE);
   assert.ok(lead?.situationId, '冻结种子 T4 的天下矛盾必须由真实 Situation 承载');
   const watchedSituationId = lead.situationId;
   assert.match(watchedSituationId, /^situation_\d+$/, '冻结种子应使用稳定的局势身份，不依赖其他检测器的全局排号');
@@ -819,21 +767,19 @@ async function exerciseSituationWatchAndPause(browserInstance) {
 
   await page.getByRole('button', { name: '8 倍速推演' }).click();
   await page.getByRole('button', { name: '开始自动推演' }).click();
-  await page.evaluate(() => window.advanceTime(225));
-  const turn5 = await waitForSnapshot(page, (current) => current.time.turn === 5 && current.playback.running === true);
-  assert.equal(turn5.observer.lastPauseReason, null, '被关注局势尚无新场面的 T5 不得误暂停');
-  assert.equal(situationFromSnapshot(turn5, watchedSituationId)?.status, 'open');
-
-  await page.evaluate(() => window.advanceTime(225));
-  const turn6 = await waitForSnapshot(page, (current) => current.time.turn === 6 && current.playback.running === true);
-  assert.equal(turn6.observer.lastPauseReason, null, '被关注局势尚未形成可读转折的 T6 不得误暂停');
-
-  await page.evaluate(() => window.advanceTime(225));
-  const paused = await waitForSnapshot(page, (current, expected) => (
-    current.time.turn === expected.turn
-      && current.playback.running === false
-      && current.observer.lastPauseSituationId === expected.situationId
-  ), { turn: SITUATION_WATCH_EXPECTED_PAUSE_TURN, situationId: watchedSituationId });
+  let paused = null;
+  let observedTurn = SITUATION_WATCH_TURN;
+  for (let attempt = 0; attempt < 8 && !paused; attempt += 1) {
+    await page.evaluate(() => window.advanceTime(225));
+    const observed = await waitForSnapshot(page, (current, previousTurn) => (
+      current.time.turn > previousTurn || current.playback.running === false
+    ), observedTurn);
+    assert.ok(observed.time.turn > observedTurn, '自动推演每次必须真实推进至少一季');
+    observedTurn = observed.time.turn;
+    if (!observed.playback.running) paused = observed;
+  }
+  assert.ok(paused, '被关注局势出现首个可读里程碑后应在有界季度内停表');
+  assert.equal(paused.observer.lastPauseSituationId, watchedSituationId, '停表必须属于玩家关注的同一 Situation ID');
   assert.equal(paused.observer.lastPauseRule, 'situationChanges', '局势转折必须由 C04 规则暂停，不得冒充旧史事规则');
   assert.equal(paused.observer.lastPauseSituationId, watchedSituationId);
   assert.equal(paused.observer.lastPauseSituationChange, 'new-action');
@@ -869,7 +815,7 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   ), watchedSituationId);
   assert.equal(opened.deterministicWorldHash, pausedHash, '从暂停原因阅卷不得改变世界哈希');
   const triggerScene = opened.observer.selectedSituation.scenes.find((scene) => (
-    scene.turn === SITUATION_WATCH_EXPECTED_PAUSE_TURN - 1
+    scene.turn === paused.time.turn - 1
   ));
   assert.ok(triggerScene, '暂停卷宗必须含有同季具体场面，不能用裸阶段变化停表');
   assert.ok(pauseNoteText.includes(triggerScene.title), '暂停说明必须直接点明同季具体场面');
@@ -896,13 +842,17 @@ async function exerciseSituationWatchAndPause(browserInstance) {
 
 async function exerciseObserverLeads(page, initialHash) {
   const initial = await snapshot(page);
-  assert.equal(initial.observer.focusLeads.length, 3, '史家应始终给出一人、一国、一条矛盾');
-  assert.deepEqual(initial.observer.focusLeads.map((item) => item.slot), ['person', 'polity', 'tension']);
+  assert.ok(initial.observer.focusLeads.length <= 3, '史家最多给出三件当前故事');
   const panel = page.locator('[data-observer-leads="true"]');
   await panel.waitFor();
   assert.match(await panel.textContent(), /现在看什么/);
   const rows = panel.locator('[data-testid="observer-lead"]');
-  assert.equal(await rows.count(), 3);
+  assert.equal(await rows.count(), initial.observer.focusLeads.length);
+  if (initial.observer.focusLeads.length === 0) {
+    assert.match(await panel.textContent(), /暂无值得单列的战事或朝局/);
+    assert.equal(initial.deterministicWorldHash, initialHash);
+    return;
+  }
 
   const firstLead = initial.observer.focusLeads[0];
   await rows.first().locator('.observer-leads__inspect').click();
@@ -1421,7 +1371,7 @@ try {
   const situationPauseSample = await exerciseSituationWatchAndPause(browser);
   assert.equal(situationPauseSample.seed, SITUATION_WATCH_SEED);
   assert.match(situationPauseSample.situationId, /^situation_\d+$/);
-  assert.equal(situationPauseSample.pauseTurn, SITUATION_WATCH_EXPECTED_PAUSE_TURN);
+  assert.ok(situationPauseSample.pauseTurn > SITUATION_WATCH_TURN && situationPauseSample.pauseTurn <= SITUATION_WATCH_TURN + 8);
   assert.equal(situationPauseSample.trigger, 'new-action');
   await exerciseMapViewportDesktop(page);
   await exerciseObserverLeads(page, afterPrimer.deterministicWorldHash);
@@ -1443,13 +1393,11 @@ try {
   assert.ok(await page.locator('.mandate-panel').count(), '首次 Esc 只应撤销灾害确认');
   await page.locator('.mandate-panel button[aria-label="关闭天意"]').click();
   const politicalPixels = await page.locator('.world-map__canvas').evaluate((canvas) => canvas.toDataURL());
-  await selectLayer(page, 'naval');
-  const navalPixels = await page.locator('.world-map__canvas').evaluate((canvas) => canvas.toDataURL());
-  assert.notEqual(politicalPixels, navalPixels, '疆界与海权叠层应绘出不同画面');
+  await selectLayer(page, 'war');
+  const warPixels = await page.locator('.world-map__canvas').evaluate((canvas) => canvas.toDataURL());
+  assert.notEqual(politicalPixels, warPixels, '疆界与军争叠层应绘出不同画面');
   await page.locator('[data-map-zoom-in="true"]').click();
   await page.waitForFunction(() => document.querySelector('.world-map')?.getAttribute('data-map-lod') === 'regional');
-  await selectFirstMapObject(page, 'seaZone', '海域档案');
-
   const militaryRoster = await openPowerRoster(page, 'military');
   const fleetId = initial.mapObjects.fleets[0].id;
   await militaryRoster.locator(`[data-roster-id="${fleetId}"]`).click();
@@ -1532,7 +1480,7 @@ try {
   assert.match(await quarterPulse.locator('[data-testid="quarter-pulse-ledger-population"]').textContent(), new RegExp(formatSigned(populationNet).replace('+', '\\+')));
   await quarterPulse.locator('[data-testid="quarter-pulse-ledger-population"]').click();
   await page.waitForSelector('#observer-causal-drawer');
-  assert.equal((await snapshot(page)).interface.overlay, 'population');
+  assert.equal((await snapshot(page)).interface.overlay, 'food');
   await page.locator('#observer-causal-drawer button[aria-label="关闭何故与证据"]').click();
   await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
   let hashBeforeBrowsing = afterManual.deterministicWorldHash;
@@ -1544,24 +1492,9 @@ try {
     await page.locator('[data-map-zoom-in="true"]').click();
     await page.waitForTimeout(80);
   }
-  assert.equal(await page.locator('.world-map').getAttribute('data-map-lod'), 'local', '近观层应开放普通流线');
-  await selectLayer(page, 'trade');
-  assert.ok((await snapshot(page)).interface.topFlows.length > 0);
-  await selectFirstMapObject(page, 'tradeCorridor', '商路档案');
-
-  await selectLayer(page, 'migration');
-  assert.ok((await snapshot(page)).interface.topFlows.length > 0);
-  await selectFirstMapObject(page, 'migration', '迁徙档案');
-
-  await selectLayer(page, 'disease');
-  await selectFirstMapObject(page, 'outbreak', '疫病档案');
-
-  await selectLayer(page, 'knowledge');
-  await selectFirstMapObject(page, 'practice', '知识档案');
-
+  assert.equal(await page.locator('.world-map').getAttribute('data-map-lod'), 'local', '近观层应开放完整地图细节');
   await selectLayer(page, 'food');
   assert.equal(await page.locator('.world-map').getAttribute('data-overlay'), 'food');
-  await selectLayer(page, 'population');
   await selectLayer(page, 'war');
   await selectFirstMapObject(page, 'army', '军团档案');
 
@@ -1629,8 +1562,7 @@ try {
   const personAgency = commandPerson.interface.selectedDetail.agency;
   assert.equal(personAgency.availability, 'active');
   assert.equal(personAgency.desires.length, 2, '人物速览只展示两项长期所重');
-  assert.ok(personAgency.primaryGoal?.label, '成年人物必须给出一项眼下所图');
-  assert.ok(personAgency.secondaryGoals.length <= 2, '次要打算不得超过两项');
+  assert.ok(personAgency.primaryGoal?.label, '进入人物决策系统的人物必须显示权威目标');
   assert.ok(personAgency.currentPlanSteps.length <= 5, '准备路径不得超过五步');
   assert.ok(Array.isArray(personAgency.memories) && personAgency.memories.length <= 16, '人物心事必须来自有界记忆账');
   assert.ok(['planned', 'preparing', 'submitted', 'approved', 'blocked'].includes(personAgency.commandRequest.stage));
@@ -1638,9 +1570,9 @@ try {
   assert.ok(personAgency.powerPosition, '人物所图必须给出实际权势位置');
   assert.ok(personAgency.powerPosition.resources.length <= 6, '人物权势只展示最重要的六项资产');
   assert.ok(personAgency.powerPosition.total >= 0 && personAgency.powerPosition.total <= 100, '人物权势总值必须有界');
-  assert.equal(personAgency.quarterChoice, null, 'C10 接管请令链后不得再显示 C09 同链对照');
-  assert.equal(selectedPerson.observer.agencyContinuity?.matchesWorld, true, '人物观察账必须与当前世界锚点相合');
-  assert.ok(selectedPerson.observer.agencyContinuity?.trackedCharacters <= 16, '人物观察账不得无界追踪人物');
+  assert.equal(Object.prototype.hasOwnProperty.call(personAgency, 'secondaryGoals'), false, '人物档案不再维护次要目标投影');
+  assert.equal(Object.prototype.hasOwnProperty.call(personAgency, 'quarterChoice'), false, '人物档案不再维护季度对照账');
+  assert.equal(Object.prototype.hasOwnProperty.call(selectedPerson.observer, 'agencyContinuity'), false, '观察快照不再保存人物连续性账');
   const agencyHash = selectedPerson.deterministicWorldHash;
   await page.getByRole('tab', { name: '所图' }).click();
   const agencyPanel = page.getByRole('tabpanel');
@@ -1669,7 +1601,6 @@ try {
     await page.locator('#observer-causal-drawer button[aria-label="关闭何故与证据"]').click();
     await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
   }
-  await agencyPanel.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();
   await page.screenshot({ path: `${ARTIFACT_DIR}/person-agency-plan.png`, fullPage: true });
   assert.equal((await snapshot(page)).deterministicWorldHash, agencyHash, '查看人物所图不得改变世界哈希');
   if (commandPerson.interface.selected.id !== relationshipPersonId) {
@@ -1692,7 +1623,7 @@ try {
     state.interface.selected?.kind === 'person' && state.interface.selected.id !== sourceId
   ), relationshipSourceId);
   assert.equal(relatedPerson.deterministicWorldHash, relationshipHash, '关系星图跳转不得改变世界哈希');
-  assert.equal(relatedPerson.observer.agencyContinuity?.matchesWorld, true, '跳转人物后观察账仍须锚定当前世界');
+  assert.equal(Object.prototype.hasOwnProperty.call(relatedPerson.observer, 'agencyContinuity'), false, '跳转人物后不得创建观察连续性账');
   const continuityPersonId = relatedPerson.interface.selected.id;
   const continuityGoalId = relatedPerson.interface.selectedDetail.agency.primaryGoal?.id ?? null;
 
@@ -1735,7 +1666,7 @@ try {
   assert.equal(reloaded.worldSchemaVersion, 4);
   assert.equal(reloaded.observer.primerOpen, false, '续读不应重复弹出首次读图导览');
   assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 4存档续读应恢复完全相同的世界');
-  assert.equal(reloaded.observer.agencyContinuity?.matchesWorld, true, '续读必须恢复与存档精确相合的人物观察账');
+  assert.equal(Object.prototype.hasOwnProperty.call(reloaded.observer, 'agencyContinuity'), false, '续读不得恢复已删除的人物观察账');
   await page.click('button[data-observer-view="people"]');
   await page.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
   await page.locator(`.roster-panel button[data-roster-id="${continuityPersonId}"]`).click();
@@ -1747,7 +1678,7 @@ try {
   assert.equal(
     continuityReloaded.interface.selectedDetail.agency.primaryGoal?.id ?? null,
     continuityGoalId,
-    '同一存档中的人物盘算身份应跨续读保持连续',
+    '同一存档中的权威人物目标应从 WorldState 原样恢复',
   );
   assert.equal(continuityReloaded.deterministicWorldHash, hashBeforeBrowsing, '核对人物续读不得改变世界哈希');
   assert.deepEqual(desktopErrors, []);
@@ -2025,9 +1956,17 @@ try {
   assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 0, '移动端默认只显示紧凑线索条，避免遮挡舆图');
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-world-map-390x844.png`, fullPage: true });
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();
-  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 1, '移动端可展开第一条线索');
+  assert.equal(
+    await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(),
+    Math.min(1, mobileTurn0.observer.focusLeads.length),
+    '移动端可展开第一条现有线索',
+  );
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();
-  assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 3, '移动端可展开全部三条线索');
+  assert.equal(
+    await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(),
+    mobileTurn0.observer.focusLeads.length,
+    '移动端可展开全部现有线索',
+  );
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();
   await exerciseMapViewportTouch(mobileContext, mobilePage);
 
@@ -2043,22 +1982,18 @@ try {
     polity: 'situation',
     tension: 'situation',
   }, '移动端 T6');
-  const mobileTurn6Identity = observerLeadIdentity(mobileTurn6);
   const mobileTurn7 = await advanceTo(mobilePage, 7);
   assertObserverLeadMilestone(mobileTurn7, {
     person: 'fallback',
     polity: 'situation',
     tension: 'situation',
   }, '移动端 T7');
-  const mobileTurn7Identity = observerLeadIdentity(mobileTurn7);
-  assert.deepEqual(mobileTurn7Identity.slice(1), mobileTurn6Identity.slice(1), '移动端人物回退题更新时不应替换既有国势与战争题');
   const mobileSituationState = await advanceTo(mobilePage, 8);
   assertObserverLeadMilestone(mobileSituationState, {
     person: 'fallback',
     polity: 'situation',
     tension: 'situation',
   }, '移动端 T8');
-  assert.deepEqual(observerLeadIdentity(mobileSituationState), mobileTurn7Identity, '移动端 T7→T8 应稳定追踪人物回退题与既有两条局势');
   const mobileTurn8Layout = await mobilePage.evaluate(() => {
     const app = document.querySelector('.observer-app');
     const stage = document.querySelector('.observer-stage')?.getBoundingClientRect();
@@ -2138,7 +2073,6 @@ try {
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-identity-390x844.png`, fullPage: false });
   await waitForVisualSettled(mobilePage.locator('.observer-inspector'));
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-390x844.png`, fullPage: true });
-  await mobileAgency.getByRole('heading', { name: '最近取舍' }).scrollIntoViewIfNeeded();
   await mobilePage.screenshot({ path: `${ARTIFACT_DIR}/mobile-person-agency-plan-390x844.png`, fullPage: true });
   assert.equal((await snapshot(mobilePage)).deterministicWorldHash, mobileSituationState.deterministicWorldHash, '移动端查看人物所图不得改变世界哈希');
   await mobilePage.locator('.observer-inspector [data-inspector-return="roster"]').click();
@@ -2280,8 +2214,8 @@ try {
   await mobileMandate.waitFor({ state: 'detached' });
   assert.equal(await mobilePage.evaluate(() => document.activeElement?.getAttribute('data-mandate-trigger')), 'true');
   await auditLayerDialog(mobilePage, true);
-  await selectLayer(mobilePage, 'disease');
-  await selectFirstMapObject(mobilePage, 'outbreak', '疫病档案');
+  await selectLayer(mobilePage, 'war');
+  await selectFirstMapObject(mobilePage, 'army', '军团档案');
   await mobilePage.waitForFunction(() => {
     const inspector = document.querySelector('.observer-inspector');
     if (!inspector) return false;

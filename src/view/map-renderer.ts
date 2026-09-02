@@ -2,7 +2,6 @@ import type { MapPresentationDefinition } from '../maps/types';
 import type {
   MapCamera,
   MapFleetView,
-  MapFlowView,
   MapLodLevel,
   MapMarkerView,
   MapLodScene,
@@ -24,11 +23,7 @@ import {
   type MapArmyIconLayout,
   type MapRegionNodeLayout,
 } from './map-scene-geometry';
-import {
-  isPoliticalMapMarker,
-  layoutMapMarkers,
-  mapMarkerMatchesSelection,
-} from './map-marker-layout';
+import { layoutMapMarkers, mapMarkerMatchesSelection } from './map-marker-layout';
 
 export interface MapCanvasSize {
   width: number;
@@ -188,14 +183,8 @@ export function terrainLabel(terrain: string) {
 }
 
 function overlayTitle(overlay: MapOverlay) {
-  if (overlay === "food") return "粮食余裕";
-  if (overlay === "population") return "人口密度";
-  if (overlay === "war") return "兵势强弱";
-  if (overlay === "trade") return "当季商路";
-  if (overlay === "migration") return "人口迁徙";
-  if (overlay === "naval") return "海权投射";
-  if (overlay === "disease") return "疫病传播";
-  if (overlay === "knowledge") return "知识流传";
+  if (overlay === "food") return "地方供养";
+  if (overlay === "war") return "军争态势";
   if (overlay === "none") return "山河地势";
   return "势力疆域 · 地势底图";
 }
@@ -228,7 +217,7 @@ function shouldDrawRoute(
   const hiddenRoutes = new Set(profile.hiddenRoutePairs.map(([left, right]) => pairKey(left, right)));
   if (type !== "sea" && hiddenRoutes.has(pairKey(route.from, route.to))) return false;
   if (overlay === "political") return type === "river";
-  if (overlay === "naval" || overlay === "trade") return type === "sea" || type === "river";
+  if (overlay === "war") return type === "sea" || type === "river";
   if (overlay === "none") return true;
   return type === "river";
 }
@@ -465,7 +454,6 @@ function drawGeographicContours(
 function regionFill(
   region: MapRegionView,
   overlay: MapOverlay,
-  maxPopulation: number,
 ): { color: string; alpha: number } {
   if (overlay === "none") {
     const terrain = region.terrain.toLowerCase();
@@ -480,27 +468,6 @@ function regionFill(
   if (overlay === "food") {
     const value = clamp(region.foodRatio / 1.35);
     return { color: value < 0.46 ? VERMILION : OLIVE, alpha: 0.1 + Math.abs(value - 0.46) * 0.45 };
-  }
-  if (overlay === "population") {
-    const value = Math.log1p(Math.max(0, region.population)) / Math.log1p(maxPopulation);
-    return { color: INK, alpha: 0.06 + value * 0.42 };
-  }
-  if (overlay === "disease") {
-    const pressure = toUnit(region.diseasePressure);
-    return { color: VERMILION, alpha: 0.02 + pressure * 0.48 };
-  }
-  if (overlay === "knowledge") {
-    return { color: OLIVE, alpha: 0.05 + toUnit(region.knowledgeAdoption) * 0.42 };
-  }
-  if (overlay === "trade") {
-    return { color: region.port ? RIVER : INK, alpha: 0.05 + toUnit(region.tradeVolume) * 0.3 };
-  }
-  if (overlay === "migration") {
-    const ratio = (region.refugeePopulation ?? 0) / Math.max(1, region.population);
-    return { color: VERMILION, alpha: 0.03 + clamp(ratio * 6) * 0.4 };
-  }
-  if (overlay === "naval") {
-    return { color: region.port ? RIVER : INK, alpha: region.port ? 0.19 : 0.05 };
   }
   if (overlay === "war") {
     const value = Math.max(toUnit(region.unrest), toUnit(region.warDamage));
@@ -524,16 +491,16 @@ function drawSeaZones(
     const radiusX = Math.max(17, (strait ? 39 : ocean ? 62 : 50) * transform.scale);
     const radiusY = Math.max(11, (strait ? 23 : ocean ? 42 : 32) * transform.scale);
     const selected = selectedObject?.kind === "seaZone" && selectedObject.id === zone.id;
-    const naval = overlay === "naval";
-    const contextual = naval || overlay === "trade" || selected;
+    const military = overlay === "war";
+    const contextual = military || selected;
     context.save();
     if (contextual) {
       context.beginPath();
       context.ellipse(center.x, center.y, radiusX, radiusY, -0.08, 0, Math.PI * 2);
       context.fillStyle = zone.contested ? "rgba(116, 89, 79, 0.18)" : ocean ? "rgba(74, 111, 120, 0.16)" : "rgba(94, 116, 122, 0.13)";
-      context.globalAlpha = naval ? 0.56 + clamp(zone.powerShare) * 0.32 : 0.32;
+      context.globalAlpha = military ? 0.56 + clamp(zone.powerShare) * 0.32 : 0.32;
       context.fill();
-      context.globalAlpha = naval ? 0.66 : 0.38;
+      context.globalAlpha = military ? 0.66 : 0.38;
       context.strokeStyle = selected ? VERMILION : zone.contested ? "#86685f" : RIVER;
       context.lineWidth = selected ? 2 : zone.contested ? 1.2 : 0.8;
       context.setLineDash(zone.contested ? [3, 3] : ocean ? [7, 5] : strait ? [2, 3] : []);
@@ -617,40 +584,6 @@ function drawSeaGeography(
   context.restore();
 }
 
-function drawFlows(
-  context: CanvasRenderingContext2D,
-  flows: readonly MapFlowView[],
-  transform: MapViewportTransform,
-  selectedObject: MapSelectedObject,
-) {
-  const maximum = Math.max(1, ...flows.map((flow) => flow.magnitude));
-  for (const flow of flows) {
-    const from = worldToScreen(flow.from, transform);
-    const to = worldToScreen(flow.to, transform);
-    const selected = selectedObject?.kind === flow.selectedKind && selectedObject.id === flow.selectedId;
-    context.save();
-    context.beginPath();
-    context.moveTo(from.x, from.y);
-    const bend = Math.min(24, Math.hypot(to.x - from.x, to.y - from.y) * 0.16);
-    context.quadraticCurveTo((from.x + to.x) / 2, (from.y + to.y) / 2 - bend, to.x, to.y);
-    context.strokeStyle = flow.alert || flow.kind === "disease" ? VERMILION : flow.kind === "knowledge" ? OLIVE : RIVER;
-    context.globalAlpha = selected ? 0.95 : 0.38 + clamp(flow.magnitude / maximum) * 0.38;
-    context.lineWidth = selected ? 2.7 : 0.9 + clamp(flow.magnitude / maximum) * 2.1;
-    if (flow.kind === "migration" || flow.kind === "disease") context.setLineDash([5, 4]);
-    context.stroke();
-    context.setLineDash([]);
-    const angle = Math.atan2(to.y - from.y, to.x - from.x);
-    context.translate(to.x, to.y);
-    context.rotate(angle);
-    context.beginPath();
-    context.moveTo(-7, -3);
-    context.lineTo(0, 0);
-    context.lineTo(-7, 3);
-    context.stroke();
-    context.restore();
-  }
-}
-
 function drawFleets(
   context: CanvasRenderingContext2D,
   fleets: readonly MapFleetView[],
@@ -701,12 +634,8 @@ function drawMarkers(
       : marker.tone === 'watch'
         ? '#8a6535'
         : marker.color ?? OLIVE;
-    context.strokeStyle = marker.kind === "outbreak" ? VERMILION : isPoliticalMapMarker(marker) ? politicalColor : OLIVE;
-    context.fillStyle = marker.kind === "outbreak"
-      ? "rgba(163, 58, 46, 0.12)"
-      : isPoliticalMapMarker(marker)
-        ? 'rgba(244, 238, 223, 0.9)'
-        : "rgba(102, 112, 91, 0.13)";
+    context.strokeStyle = politicalColor;
+    context.fillStyle = 'rgba(244, 238, 223, 0.9)';
     context.lineWidth = selected ? 2.1 : 1.2;
     context.beginPath();
     if (marker.kind === 'capitalPulse') {
@@ -723,12 +652,6 @@ function drawMarkers(
       context.lineTo(radius, -radius * 0.25);
       context.lineTo(radius * 0.55, radius * 0.65);
       context.lineTo(-radius * 0.55, radius * 0.65);
-      context.closePath();
-    } else if (marker.kind === "practice") {
-      context.moveTo(0, -radius);
-      context.lineTo(radius, 0);
-      context.lineTo(0, radius);
-      context.lineTo(-radius, 0);
       context.closePath();
     } else if (marker.kind === 'powerRoot') {
       context.rect(-radius * 0.7, -radius * 0.7, radius * 1.4, radius * 1.4);
@@ -868,6 +791,38 @@ function drawArmyOrders(
     context.lineTo(end.x - Math.cos(angle + 0.55) * 6, end.y - Math.sin(angle + 0.55) * 6);
     context.closePath();
     context.fill();
+    context.restore();
+  }
+  if (overlay !== 'war') return;
+  const shownContacts = new Set<string>();
+  for (const { army } of layouts) {
+    const contact = army.expectedContact;
+    if (!contact) continue;
+    const contactKey = `${contact.armyId}:${contact.regionId}`;
+    if (shownContacts.has(contactKey)) continue;
+    const contactRegion = regionById.get(contact.regionId);
+    if (!contactRegion) continue;
+    shownContacts.add(contactKey);
+    const point = worldToScreen(contactRegion.center, transform);
+    const label = `预计接敌 · ${contact.armyName}（${contact.regionName}）`;
+    context.save();
+    context.strokeStyle = PAPER_LIGHT;
+    context.fillStyle = VERMILION;
+    context.lineWidth = 3;
+    context.font = '600 9px "Noto Serif SC", "Songti SC", STSong, serif';
+    context.textAlign = 'center';
+    context.textBaseline = 'bottom';
+    context.strokeText(label, point.x, point.y - 15);
+    context.fillText(label, point.x, point.y - 15);
+    context.translate(point.x, point.y - 10);
+    context.lineWidth = 1.4;
+    context.strokeStyle = VERMILION;
+    context.beginPath();
+    context.moveTo(-4, -3);
+    context.lineTo(4, 3);
+    context.moveTo(4, -3);
+    context.lineTo(-4, 3);
+    context.stroke();
     context.restore();
   }
 }
@@ -1122,21 +1077,12 @@ function drawLegend(
     visibleColors.slice(0, 8).forEach((color, index, items) => {
       gradient.addColorStop(items.length === 1 ? 0 : index / (items.length - 1), color);
     });
-  } else if (overlay === "war" || overlay === "disease" || overlay === "migration") {
+  } else if (overlay === "war") {
     gradient.addColorStop(0, "rgba(163, 58, 46, 0.06)");
     gradient.addColorStop(1, "rgba(163, 58, 46, 0.62)");
-  } else if (overlay === "population") {
-    gradient.addColorStop(0, "rgba(41, 43, 39, 0.05)");
-    gradient.addColorStop(1, "rgba(41, 43, 39, 0.52)");
   } else if (overlay === "food") {
     gradient.addColorStop(0, "rgba(163, 58, 46, 0.48)");
     gradient.addColorStop(1, "rgba(102, 112, 91, 0.58)");
-  } else if (overlay === "knowledge") {
-    gradient.addColorStop(0, "rgba(102, 112, 91, 0.06)");
-    gradient.addColorStop(1, "rgba(102, 112, 91, 0.62)");
-  } else if (overlay === "trade" || overlay === "naval") {
-    gradient.addColorStop(0, "rgba(101, 117, 122, 0.06)");
-    gradient.addColorStop(1, "rgba(101, 117, 122, 0.64)");
   } else {
     gradient.addColorStop(0, "rgba(80, 80, 72, 0.12)");
     gradient.addColorStop(1, "rgba(80, 80, 72, 0.54)");
@@ -1216,7 +1162,6 @@ export function drawWorldMap(
     armies,
     seaZones,
     fleets,
-    flows,
     markers,
     profile,
   } = scene;
@@ -1231,7 +1176,7 @@ export function drawWorldMap(
     offsetY: baseTransform.offsetY + focusOffset.y,
   };
   const compactMap = transform.scale < 0.42;
-  const renderedSeaZones = seaZones.filter((zone) => scene.interactiveSeaZoneIds.has(zone.id));
+  const renderedSeaZones = seaZones;
   const regionById = new Map(regions.map((region) => [region.id, region]));
   const regionNodesByRegion = new Map<string, MapRegionNodeLayout[]>();
   for (const node of layoutMapRegionNodes(regions, seaZones, transform, {
@@ -1244,7 +1189,6 @@ export function drawWorldMap(
   }
   const highlightedRegions = new Set(highlightedRegionIds);
   const highlightStrength = clamp(visualSettings.highlightStrength ?? 1);
-  const maxPopulation = Math.max(1, ...regions.map((region) => region.population));
   const geography = deriveGeography(regions, routes, profile);
 
   drawPaper(context, width, height, visualSettings);
@@ -1260,7 +1204,7 @@ export function drawWorldMap(
   regions.forEach((region) => {
     if (region.polygon.length < 3) return;
     const path = makeRegionPath(region, transform);
-    const fill = regionFill(region, overlay, maxPopulation);
+    const fill = regionFill(region, overlay);
     context.save();
     clipToRegionCoast(context, region, transform, profile);
     context.globalAlpha = fill.alpha;
@@ -1311,9 +1255,6 @@ export function drawWorldMap(
 
   drawMajorRiverSystems(context, transform, compactMap, profile);
   drawSeaGeography(context, renderedSeaZones, routes, regions, transform, compactMap);
-
-  drawFlows(context, flows, transform, selectedObject);
-  drawMarkers(context, markers.filter((marker) => !isPoliticalMapMarker(marker)), transform, selectedObject);
 
   regions.forEach((region) => {
     const center = worldToScreen(region.center, transform);
@@ -1376,7 +1317,7 @@ export function drawWorldMap(
   });
 
   drawPolityLabels(context, regions, transform, overlay, compactMap, scene.level);
-  drawMarkers(context, markers.filter(isPoliticalMapMarker), transform, selectedObject);
+  drawMarkers(context, markers, transform, selectedObject);
 
   const armyLayouts = layoutMapArmyIcons(armies, regions, transform);
   drawArmyOrders(context, armyLayouts, regions, transform, overlay, selectedObject);

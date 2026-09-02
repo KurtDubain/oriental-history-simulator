@@ -515,37 +515,35 @@ async function exerciseLayerPicker(page, scenario, baseline) {
   const sheet = page.locator('#observer-layer-sheet');
   await sheet.waitFor();
   const radios = sheet.locator('[data-layer-id]');
-  assert.equal(await radios.count(), 10, `${scenario.slug} 十种叠层必须保持唯一可达`);
-  assert.equal(new Set(await radios.evaluateAll((items) => items.map((item) => item.getAttribute('data-layer-id')))).size, 10);
+  assert.equal(await radios.count(), 4, `${scenario.slug} 四种叠层必须保持唯一可达`);
+  assert.deepEqual(
+    await radios.evaluateAll((items) => items.map((item) => item.getAttribute('data-layer-id'))),
+    ['political', 'war', 'food', 'none'],
+  );
 
   if (scenario.viewport.width <= 760) {
     assert.deepEqual(
       await sheet.locator('[data-layer-id]:visible').evaluateAll((items) => items.map((item) => item.getAttribute('data-layer-id'))),
       ['political', 'war', 'food', 'none'],
-      `${scenario.slug} 首屏只给常用叠层`,
+      `${scenario.slug} 四种叠层应全部可见`,
     );
-    const more = sheet.locator('[data-layer-more-trigger]');
-    await assertTouchTarget(more, scenario, '更多图层入口');
-    await activate(more, scenario);
-    assert.equal(await sheet.locator('[data-layer-id]:visible').count(), 10, `${scenario.slug} 展开后十种叠层应全部可见`);
-    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-layers-more.png`, fullPage: false });
+    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-layers.png`, fullPage: false });
   }
 
-  await activate(sheet.locator('[data-layer-id="knowledge"]'), scenario);
+  await activate(sheet.locator('[data-layer-id="food"]'), scenario);
   await sheet.waitFor({ state: 'detached' });
   let current = await snapshot(page);
-  assert.equal(current.interface.overlay, 'knowledge');
+  assert.equal(current.interface.overlay, 'food');
   assert.equal(current.time.turn, baseline.time.turn);
   assert.equal(current.deterministicWorldHash, baseline.deterministicWorldHash);
 
   await activate(trigger, scenario);
   await sheet.waitFor();
-  const knowledge = sheet.locator('[data-layer-id="knowledge"]');
-  await page.waitForFunction(() => document.activeElement?.getAttribute('data-layer-id') === 'knowledge');
-  assert.equal(await knowledge.isVisible(), true, `${scenario.slug} 当前专业叠层必须直接露出`);
-  assert.equal(await knowledge.getAttribute('data-layer-tier'), 'current');
-  assert.equal(await sheet.locator('[data-layer-more-trigger]').getAttribute('aria-expanded'), 'false');
-  await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-layers-current.png`, fullPage: false });
+  const food = sheet.locator('[data-layer-id="food"]');
+  await page.waitForFunction(() => document.activeElement?.getAttribute('data-layer-id') === 'food');
+  assert.equal(await food.isVisible(), true, `${scenario.slug} 当前供养叠层必须直接露出`);
+  assert.equal(await food.getAttribute('aria-pressed'), 'true');
+  await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-layers-active.png`, fullPage: false });
   await activate(sheet.locator('[data-layer-id="political"]'), scenario);
   current = await snapshot(page);
   assert.equal(current.interface.overlay, 'political');

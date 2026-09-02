@@ -1,5 +1,5 @@
 import { advanceWorld, createWorld, serializeWorld } from '../src/sim';
-import { deriveObserverLeadProjection, type ObserverLeadContinuityState } from '../src/view/observer-leads';
+import { deriveObserverLeads } from '../src/view/observer-leads';
 import { projectQuarterPulse } from '../src/view/quarter-pulse-stories';
 import { projectSituationWorkbench } from '../src/view/situation-detail';
 
@@ -43,7 +43,6 @@ function overlaps(left: readonly string[], right: readonly string[]): boolean {
 
 for (const seed of seeds) {
   let world = createWorld(seed);
-  let continuity: ObserverLeadContinuityState | null = null;
   let visibleStories = 0;
   let quietQuarters = 0;
   let duplicatedStories = 0;
@@ -52,7 +51,6 @@ for (const seed of seeds) {
   let situationDossiers = 0;
 
   for (let quarter = 0; quarter < quarters; quarter += 1) {
-    const previousHash = world.hash;
     world = advanceWorld(world);
     const authority = {
       hash: world.hash,
@@ -61,8 +59,7 @@ for (const seed of seeds) {
       save: serializeWorld(world),
     };
     const pulse = projectQuarterPulse(world);
-    const leads = deriveObserverLeadProjection(world, continuity, previousHash);
-    continuity = leads.continuity;
+    const leads = deriveObserverLeads(world);
     const dossier = projectSituationWorkbench(world);
     if (dossier.selected) situationDossiers += 1;
 
@@ -83,7 +80,7 @@ for (const seed of seeds) {
 
     const visibleCopy = [
       ...pulse.stories.flatMap((story) => [story.title, story.summary]),
-      ...leads.leads.flatMap((lead) => [lead.question, ...lead.evidence, lead.recentChange ?? '']),
+      ...leads.flatMap((lead) => [lead.question, ...lead.evidence, lead.recentChange ?? '']),
       ...(dossier.selected
         ? [dossier.selected.currentChange, ...dossier.selected.playerSummary]
         : []),

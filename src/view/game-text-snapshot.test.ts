@@ -12,7 +12,6 @@ import { createObserverInterfaceSettings } from './observer-interface-settings';
 import { createObserverNavigationState } from './observer-navigation';
 import type { SnapshotOptions } from './observer-shell-contract';
 import { createRosterDiscoveryStates, createRosterVisibleCounts, ROSTER_PAGE_SIZE } from './roster-discovery';
-import { createAgencyShadowLedger } from './v1-agency-shadow';
 
 function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
   return {
@@ -43,8 +42,6 @@ function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
     mobileInspectorExpanded: false,
     mapGestureActive: false,
     focusedPoliticalFactionId: null,
-    agencyShadowLedger: createAgencyShadowLedger(),
-    agencyShadowBranchId: null,
     embodiedCharacterId: null,
     pendingEmbodiedAction: null,
     embodimentClosure: null,
@@ -389,7 +386,12 @@ describe('render_game_to_text projection boundary', () => {
       expect(lead).not.toHaveProperty('stage');
       expect(lead).not.toHaveProperty('tension');
       expect(lead).not.toHaveProperty('nextSignal');
+      expect(lead).not.toHaveProperty('slot');
+      expect(lead).not.toHaveProperty('selectedSinceTurn');
+      expect(lead).not.toHaveProperty('retainThroughTurn');
+      expect(lead).not.toHaveProperty('arbitrationReason');
     }
+    expect(snapshot.observer).not.toHaveProperty('leadArbitration');
     expect(snapshot.observer).not.toHaveProperty('lastPauseSituationTrigger');
     for (const situation of [
       ...snapshot.observer.situations.open,

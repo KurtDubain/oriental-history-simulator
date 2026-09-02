@@ -19,10 +19,11 @@ const root = process.cwd();
 const sourceRoot = resolve(root, 'src');
 
 const FILE_LINE_BUDGETS: Readonly<Record<string, number>> = {
-  'src/App.tsx': 2_600,
+  'src/App.tsx': 2_300,
   'src/sim/engine.ts': 3_120,
   'src/sim/invariants.ts': 2_665,
   'src/components/WorldMap.tsx': 1_100,
+  'src/view/observer-leads.ts': 400,
   'src/view/adapters.ts': 100,
 };
 const TYPE_CYCLE_NODE_BUDGET = 12;

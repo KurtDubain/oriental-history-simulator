@@ -19,7 +19,6 @@ import {
   projectRosterCollection,
   rosterScopeFor,
   toCountryInspector,
-  toMapFlows,
   toMapMarkers,
   toPersonInspector,
   toSystemInspector,
@@ -28,7 +27,6 @@ import {
 import { projectEmbodimentTextSnapshot } from './embodiment-view';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import { shouldShowObserverSoundInvitation } from './observer-interface-settings';
-import { agencyDossierOptions } from './observer-agency-projection';
 import { deriveObserverLeadProjection } from './observer-leads';
 import {
   observerLayerIsOpen,
@@ -283,11 +281,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
   } else if (options.selection?.kind === 'person') {
     const item = world.characters.find((character) => character.id === options.selection?.id);
     if (item) {
-      const personDossier = toPersonInspector(
-        world,
-        item,
-        agencyDossierOptions(options.agencyShadowLedger, options.agencyShadowBranchId, item.id),
-      );
+      const personDossier = toPersonInspector(world, item);
       selectedDetail = {
         kind: 'person',
         id: item.id,
@@ -354,15 +348,6 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
   const visibleRoster = rosterProjection?.items
     ?? (view === 'chronicle' ? historyRoster(world) : []);
   const visibleRosterLimit = rosterScope ? options.rosterVisibleCounts[rosterScope] : 60;
-  const topFlows = (options.historicalTurn === null ? toMapFlows(world, options.overlay) : []).map((flow) => ({
-    id: flow.id,
-    kind: flow.kind,
-    from: [flow.from.x, flow.from.y],
-    to: [flow.to.x, flow.to.y],
-    magnitude: flow.magnitude,
-    label: flow.label,
-    target: { kind: flow.selectedKind, id: flow.selectedId },
-  }));
   const politicalMarkers = options.historicalTurn === null && options.overlay === 'political'
     ? toMapMarkers(world, 'political', options.focusedPoliticalFactionId)
     : [];
@@ -465,42 +450,21 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       primerStep: options.primerStep,
       focusLeads: focusLeads.map((lead) => ({
         id: lead.id,
-        slot: lead.slot,
-        source: lead.source ?? 'fallback',
-        situationId: lead.situationId ?? null,
-        situationType: lead.situationType ?? null,
-        displayMode: lead.displayMode ?? 'fallback',
-        selectedSinceTurn: lead.selectedSinceTurn ?? world.turn,
-        retainThroughTurn: lead.retainThroughTurn ?? world.turn,
-        trackingTurns: lead.trackingTurns ?? 1,
-        recentChange: lead.recentChange ?? null,
-        arbitrationReason: lead.arbitrationReason ?? 'legacy_fallback',
+        source: lead.source,
+        situationId: lead.situationId,
+        situationType: lead.situationType,
+        factId: lead.factId,
+        displayMode: lead.displayMode,
+        trackingTurns: lead.trackingTurns,
+        recentChange: lead.recentChange,
         label: lead.label,
-        startedLabel: lead.startedLabel ?? null,
+        startedLabel: lead.startedLabel,
         question: lead.question,
         evidence: lead.evidence,
         target: lead.target,
         overlay: lead.overlay,
       })),
-      leadArbitration: {
-        version: focusLeadProjection.continuity.version,
-        lastArbitratedTurn: focusLeadProjection.continuity.lastTurn,
-        slots: focusLeadProjection.continuity.slots.map((entry) => ({ ...entry })),
-      },
       situations: projectPlayerSituationDirectory(world),
-      agencyContinuity: (() => {
-        const branch = options.agencyShadowBranchId
-          ? options.agencyShadowLedger.branches.find((item) => item.id === options.agencyShadowBranchId)
-          : null;
-        return branch ? {
-          trackedCharacters: branch.projections.length,
-          recordedComparisons: branch.comparisons.length,
-          throughTurn: branch.head.turn,
-          matchesWorld: branch.head.seed === world.seed
-            && branch.head.turn === world.turn
-            && branch.head.hash === world.hash,
-        } : null;
-      })(),
       embodiment: projectEmbodimentTextSnapshot(
         world,
         options.embodiedCharacterId,
@@ -605,7 +569,6 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         activeFilterCount: rosterProjection.activeFilterCount,
         conditionSummary: rosterProjection.conditionSummary,
       } : null,
-      topFlows,
     },
     mandate: {
       available: availableMandate(world),

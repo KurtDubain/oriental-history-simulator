@@ -4,7 +4,6 @@ import type { MapPresentationDefinition } from '../maps/types';
 import type {
   MapArmyView,
   MapFleetView,
-  MapFlowView,
   MapMarkerView,
   MapPresentationView,
   MapRegionView,
@@ -36,6 +35,7 @@ function region(
     polityId,
     population: 100,
     foodRatio: 1,
+    supplyNote: '供养尚稳',
     cityLevel: 2,
     strategicValue: 7,
     ...options,
@@ -63,32 +63,13 @@ function fixture(): MapPresentationView {
     { id: 'f_a_large', name: '甲水师', polityId: 'p_a', position: { x: 30, y: 20 }, strength: 40, readiness: 60, mission: '巡逻' },
     { id: 'f_b', name: '乙水师', polityId: 'p_b', position: { x: 40, y: 20 }, strength: 30, readiness: 60, mission: '巡逻' },
   ];
-  const flows: MapFlowView[] = [{
-    id: 'flow_trade',
-    kind: 'trade',
-    from: { x: 5, y: 5 },
-    to: { x: 25, y: 25 },
-    magnitude: 20,
-    label: '商路',
-    selectedKind: 'tradeCorridor',
-    selectedId: 'trade_1',
-  }];
-  const markers: MapMarkerView[] = [{
-    id: 'outbreak_1',
-    kind: 'outbreak',
-    position: { x: 5, y: 5 },
-    magnitude: 20,
-    label: '疫病',
-  }];
+  const markers: MapMarkerView[] = [];
   const seaZones: MapSeaZoneView[] = [{
     id: 'sea_1',
     name: '近海',
     center: { x: 50, y: 50 },
     climate: '温带',
     contested: false,
-    traffic: 0,
-    stormRisk: 0,
-    piracy: 0,
     powerShare: 0,
   }];
 
@@ -99,7 +80,6 @@ function fixture(): MapPresentationView {
     armies,
     seaZones,
     fleets,
-    flows,
     markers,
   };
 }
@@ -130,17 +110,16 @@ describe('map LOD hysteresis', () => {
 });
 
 describe('map LOD scene', () => {
-  it('keeps only capitals, polity leaders and no local flows at overview', () => {
+  it('keeps only capitals and the strongest military objects at overview', () => {
     const source = fixture();
     const scene = buildMapLodScene(source, 'overview');
 
     expect([...scene.regionLabelIds]).toEqual(['r_a_capital', 'r_b_capital']);
     expect([...scene.cityRegionIds]).toEqual(['r_a_capital', 'r_b_capital']);
     expect([...scene.portRegionIds]).toEqual([]);
-    expect([...scene.interactiveSeaZoneIds]).toEqual([]);
+    expect([...scene.interactiveSeaZoneIds]).toEqual(['sea_1']);
     expect(scene.armies.map((item) => item.id)).toEqual(['a_a_large', 'a_b_tie_a']);
     expect(scene.fleets.map((item) => item.id)).toEqual(['f_a_large', 'f_b']);
-    expect(scene.flows).toEqual([]);
     expect(scene.markers).toEqual([]);
   });
 
@@ -160,7 +139,6 @@ describe('map LOD scene', () => {
     expect(scene.armies).toEqual(source.armies);
     expect(scene.armies).not.toBe(source.armies);
     expect(scene.fleets).toEqual(source.fleets);
-    expect(scene.flows).toEqual([]);
     expect(scene.markers).toEqual([]);
   });
 
@@ -173,11 +151,10 @@ describe('map LOD scene', () => {
     expect([...scene.portRegionIds]).toEqual(['r_a_strategic', 'r_b_key']);
     expect(scene.armies).toEqual(source.armies);
     expect(scene.fleets).toEqual(source.fleets);
-    expect(scene.flows).toEqual(source.flows);
     expect(scene.markers).toEqual(source.markers);
   });
 
-  it('keeps restrained political marks legible at every LOD without promoting unrelated marks', () => {
+  it('keeps authoritative political marks legible at every LOD', () => {
     const source = fixture();
     const capitalPulse: MapMarkerView = {
       id: 'capital-pulse', kind: 'capitalPulse', position: { x: 5, y: 5 }, magnitude: 60,
@@ -195,7 +172,7 @@ describe('map LOD scene', () => {
     expect(buildMapLodScene(source, 'regional').markers.map((marker) => marker.id))
       .toEqual(['capital-pulse', 'power-root']);
     expect(buildMapLodScene(source, 'local').markers.map((marker) => marker.id))
-      .toEqual(['outbreak_1', 'capital-pulse', 'power-root']);
+      .toEqual(['capital-pulse', 'power-root']);
   });
 
   it('promotes the exact selected object while keeping other hidden peers absent', () => {
@@ -215,16 +192,10 @@ describe('map LOD scene', () => {
       'a_b_tie_a',
     ]);
 
-    const selectedFlow = buildMapLodScene(source, 'regional', {
-      selectedObject: { kind: 'tradeCorridor', id: 'trade_1' },
+    const selectedFleet = buildMapLodScene(source, 'overview', {
+      selectedObject: { kind: 'fleet', id: 'f_a_small' },
     });
-    expect(selectedFlow.flows.map((item) => item.id)).toEqual(['flow_trade']);
-    expect(selectedFlow.markers).toEqual([]);
-
-    const selectedMarker = buildMapLodScene(source, 'overview', {
-      selectedObject: { kind: 'outbreak', id: 'outbreak_1' },
-    });
-    expect(selectedMarker.markers.map((item) => item.id)).toEqual(['outbreak_1']);
+    expect(selectedFleet.fleets.map((item) => item.id)).toEqual(['f_a_small', 'f_a_large', 'f_b']);
 
     const selectedSea = buildMapLodScene(source, 'overview', {
       selectedObject: { kind: 'seaZone', id: 'sea_1' },

@@ -1,38 +1,18 @@
 import type { MapOverlay } from '../components/WorldMap';
 import type { SituationPhase, SituationState } from '../sim/situations';
-import type {
-  DiplomacyState,
-  DiseaseHostState,
-  PolityState,
-  RegionState,
-  SeaZoneState,
-  WarState,
-  WorldState,
-} from '../sim/types';
-import { historyTurnDate } from './v1-history';
+import type { SimulationFact, WorldState } from '../sim/types';
+import { projectFactNarrative, projectSituationHistoricalScenes } from './historical-scenes';
 import {
   projectSituationSnapshotItem,
   situationOutcomeLabel,
   type SituationParticipantGroupKey,
   type SituationSnapshotItem,
 } from './situation-snapshot';
-import { projectSituationHistoricalScenes } from './historical-scenes';
+import { historyTurnDate } from './v1-history';
 
-export type ObserverLeadSlot = 'person' | 'polity' | 'tension';
-export type ObserverLeadStage = '伏线' | '升温' | '临界' | '回响';
-export type ObserverLeadTargetKind = 'person' | 'country' | 'region' | 'outbreak' | 'seaZone';
-export type ObserverLeadSource = 'situation' | 'fallback';
-export type ObserverLeadDisplayMode = 'tracking' | 'resolution_echo' | 'fallback';
-export type ObserverLeadArbitrationReason =
-  | 'situation_priority'
-  | 'legacy_fallback'
-  | 'minimum_tenure'
-  | 'critical_challenger_pending'
-  | 'fallback_challenger_pending'
-  | 'incumbent_stable'
-  | 'critical_challenger'
-  | 'fallback_challenger'
-  | 'resolution_echo';
+export type ObserverLeadTargetKind = 'person' | 'country' | 'region';
+export type ObserverLeadSource = 'situation' | 'fact';
+export type ObserverLeadDisplayMode = 'tracking' | 'resolution_echo' | 'fact';
 
 export interface ObserverLeadTarget {
   kind: ObserverLeadTargetKind;
@@ -41,451 +21,79 @@ export interface ObserverLeadTarget {
 
 export interface ObserverLead {
   id: string;
-  slot: ObserverLeadSlot;
-  label: string;
+  label: '军争' | '朝局';
   question: string;
   evidence: readonly [string, string];
-  nextSignal: string;
-  stage: ObserverLeadStage;
-  tension: number;
   target: ObserverLeadTarget;
   overlay: MapOverlay;
-  source?: ObserverLeadSource;
-  situationId?: string | null;
-  situationType?: string | null;
-  displayMode?: ObserverLeadDisplayMode;
-  startedTurn?: number | null;
-  startedLabel?: string | null;
-  selectedSinceTurn?: number;
-  retainThroughTurn?: number;
-  trackingTurns?: number;
-  recentChange?: string;
-  arbitrationReason?: ObserverLeadArbitrationReason;
-}
-
-interface RankedLead extends ObserverLead {
-  rankScore: number;
-  editorial?: {
-    situation: SituationState;
-    polityIds: readonly string[];
-    regionIds: readonly string[];
-    characterIds: readonly string[];
-  };
-}
-
-export interface ObserverLeadContinuityEntry {
-  slot: ObserverLeadSlot;
-  leadId: string;
+  source: ObserverLeadSource;
   situationId: string | null;
-  selectedSinceTurn: number;
-  retainThroughTurn: number;
-  challengerId: string | null;
-  challengerAheadTurns: number;
-  decision: ObserverLeadArbitrationReason;
+  situationType: string | null;
+  factId: string | null;
+  displayMode: ObserverLeadDisplayMode;
+  startedLabel: string | null;
+  trackingTurns: number;
+  recentChange: string | null;
 }
 
-export interface ObserverLeadContinuityState {
-  version: 1;
-  worldSeed: string;
-  lastTurn: number;
-  lastWorldHash: string;
-  slots: ObserverLeadContinuityEntry[];
-}
-
+/** A stateless wrapper retained for the app/text-snapshot integration boundary. */
 export interface ObserverLeadProjection {
-  version: 2;
   leads: ObserverLead[];
-  continuity: ObserverLeadContinuityState;
 }
 
-export const OBSERVER_LEAD_MIN_TENURE_TURNS = 3;
-export const OBSERVER_LEAD_CRITICAL_MARGIN = 20;
-export const OBSERVER_LEAD_CHALLENGER_TURNS = 2;
-export const OBSERVER_LEAD_RESOLUTION_ECHO_TURNS = 1;
 export const OBSERVER_LEAD_VISIBILITY_THRESHOLD = 40;
-export const OBSERVER_LEAD_FALLBACK_MARGIN = 8;
+export const OBSERVER_LEAD_RESOLUTION_ECHO_TURNS = 1;
 
-const LEAD_SLOTS: readonly ObserverLeadSlot[] = ['person', 'polity', 'tension'];
-const SITUATION_SLOT_BY_TYPE: Readonly<Record<string, ObserverLeadSlot>> = {
-  military_power_crisis: 'person',
-  inheritance_crisis: 'polity',
-  war_progress: 'tension',
-  court_power_struggle: 'polity',
+const PHASE_ORDER: Readonly<Record<SituationPhase, number>> = {
+  critical: 0,
+  active: 1,
+  emerging: 2,
 };
-
-const compact = new Intl.NumberFormat('zh-CN', {
-  notation: 'compact',
-  maximumFractionDigits: 1,
-});
-
-function clamp(value: number, minimum = 0, maximum = 100): number {
-  return Math.max(minimum, Math.min(maximum, value));
-}
-
-function rounded(value: number): number {
-  return Math.round(clamp(value));
-}
-
-function stageFor(tension: number): ObserverLeadStage {
-  if (tension >= 78) return '临界';
-  if (tension >= 58) return '升温';
-  return '伏线';
-}
-
-function polityName(world: WorldState, id: string): string {
-  return world.polities.find((item) => item.id === id)?.name ?? '未知政权';
-}
-
-function regionName(world: WorldState, id: string): string {
-  return world.regions.find((item) => item.id === id)?.name ?? '未知之地';
-}
-
-function sortedByRank<T extends { rankScore: number; id: string }>(items: T[]): T[] {
-  return items.sort((left, right) => right.rankScore - left.rankScore || left.id.localeCompare(right.id));
-}
-
-function derivePersonLead(world: WorldState): RankedLead {
-  const rulerIds = new Set(world.polities.filter((item) => item.alive).map((item) => item.rulerId));
-  const candidates = world.characters.filter((item) => item.alive && item.age >= 16);
-  const pool = candidates.filter((item) => !rulerIds.has(item.id));
-  const eligible = pool.length ? pool : candidates.length ? candidates : world.characters;
-  const ranked = eligible.map((person) => {
-    const commandWeight = person.commandingArmyId || person.commandingFleetId ? 9 : person.role === '将领' ? 5 : 0;
-    const ambitionGap = clamp(person.ambition - person.loyalty + 50);
-    const rankScore = person.rebellionReadiness * 0.28
-      + person.ambition * 0.2
-      + (100 - person.loyalty) * 0.13
-      + person.influence * 0.16
-      + ambitionGap * 0.09
-      + person.renown * 0.05
-      + (100 - person.caution) * 0.04
-      + commandWeight;
-    return { person, rankScore };
-  });
-  const winner = sortedByRank(ranked.map(({ person, rankScore }) => ({ id: person.id, person, rankScore })))[0];
-  const person = winner?.person ?? world.characters[0];
-  if (!person) {
-    const region = world.regions[0];
-    return {
-      id: `lead-person-fallback:${region?.id ?? 'world'}`,
-      slot: 'person',
-      label: '人物线',
-      question: '当世有哪些人物已经被记名？',
-      evidence: ['当世暂无记名人物', '地方仍在积累机会'],
-      nextSignal: '留意新人物被推到历史前台',
-      stage: '伏线',
-      tension: 32,
-      target: { kind: 'region', id: region?.id ?? '' },
-      overlay: 'political',
-      rankScore: 32,
-    };
-  }
-
-  const tension = rounded(winner.rankScore);
-  const openlyRestive = person.rebellionReadiness >= 45
-    || (person.rebellionReadiness >= 28 && person.ambition - person.loyalty >= 24);
-  const commandsForces = Boolean(person.commandingArmyId || person.commandingFleetId || person.role === '将领');
-  const question = commandsForces
-    ? `${person.name}现在掌着哪支兵马？`
-    : `${person.name}目前凭什么立足？`;
-  const nextSignal = openlyRestive
-    ? '留意拒令、割据或公开举兵'
-    : commandsForces
-      ? '留意新战功、主帅更替与军心归属'
-      : '留意升迁、结盟与朝堂权力转移';
-  const position = person.commandingArmyId
-    ? world.armies.find((item) => item.id === person.commandingArmyId)?.name ?? '掌军在手'
-    : person.commandingFleetId
-      ? world.fleets.find((item) => item.id === person.commandingFleetId)?.name ?? '统领水师'
-      : `${person.role} · 影响${Math.round(person.influence)}`;
-  const location = regionName(world, person.locationRegionId);
-
-  return {
-    id: `lead-person:${person.id}`,
-    slot: 'person',
-    label: '人物线',
-    question,
-    evidence: [
-      `${person.role} · ${person.age}岁 · 声望${Math.round(person.renown)}`,
-      `${position} · 现于${location}`,
-    ],
-    nextSignal,
-    stage: stageFor(tension),
-    tension,
-    target: { kind: 'person', id: person.id },
-    overlay: openlyRestive ? 'war' : 'political',
-    rankScore: winner.rankScore,
-  };
-}
-
-function polityFactionPressure(world: WorldState, polity: PolityState): number {
-  return world.factions
-    .filter((item) => item.active && item.polityId === polity.id)
-    .reduce((maximum, item) => Math.max(maximum, item.power * (0.45 + item.cohesion / 180)), 0);
-}
-
-function polityUnrest(world: WorldState, polity: PolityState): number {
-  const regions = world.regions.filter((item) => item.controllerId === polity.id);
-  if (!regions.length) return 100;
-  return regions.reduce((sum, item) => sum + item.unrest, 0) / regions.length;
-}
-
-function activeWarForPolity(world: WorldState, id: string): WarState | undefined {
-  return world.wars.find((item) => item.active && (item.attackerId === id || item.defenderId === id));
-}
-
-function derivePolityLead(world: WorldState): RankedLead {
-  const alive = world.polities.filter((item) => item.alive);
-  const eligible = alive.length ? alive : world.polities;
-  const ranked = eligible.map((polity) => {
-    const ruler = world.characters.find((item) => item.id === polity.rulerId);
-    const successionPressure = ruler
-      ? clamp((ruler.age - 48) * 1.8 + (100 - ruler.health) * 0.36)
-      : 88;
-    const factionPressure = polityFactionPressure(world, polity);
-    const unrest = polityUnrest(world, polity);
-    const war = activeWarForPolity(world, polity.id);
-    const rankScore = (100 - polity.legitimacy) * 0.24
-      + (100 - polity.authority) * 0.22
-      + (100 - polity.administration) * 0.1
-      + polity.warWeariness * 0.13
-      + successionPressure * 0.13
-      + factionPressure * 0.1
-      + unrest * 0.08
-      + (war ? 12 : 0);
-    return { id: polity.id, polity, ruler, successionPressure, factionPressure, war, rankScore };
-  });
-  const winner = sortedByRank(ranked)[0];
-  const polity = winner?.polity ?? world.polities[0];
-  if (!polity) {
-    const region = world.regions[0];
-    return {
-      id: `lead-polity-fallback:${region?.id ?? 'world'}`,
-      slot: 'polity',
-      label: '国势线',
-      question: '天下眼下由哪些政权治理？',
-      evidence: ['天下暂无成形政权', '地方秩序仍在重组'],
-      nextSignal: '留意新政权建立与首都出现',
-      stage: '临界',
-      tension: 88,
-      target: { kind: 'region', id: region?.id ?? '' },
-      overlay: 'political',
-      rankScore: 88,
-    };
-  }
-
-  const tension = rounded(winner.rankScore);
-  const ruler = winner.ruler;
-  const faction = world.factions
-    .filter((item) => item.active && item.polityId === polity.id)
-    .sort((left, right) => right.power * right.cohesion - left.power * left.cohesion || left.id.localeCompare(right.id))[0];
-  const war = winner.war;
-  const enemyId = war ? (war.attackerId === polity.id ? war.defenderId : war.attackerId) : null;
-  const question = war
-    ? `${polity.name}眼下与谁交兵？`
-    : winner.successionPressure >= 58
-      ? `${polity.name}的君位眼下由谁维系？`
-      : polity.legitimacy < 58 || polity.authority < 55
-        ? `${polity.name}眼下能调动多少地方？`
-        : `${polity.name}眼下靠什么维持秩序？`;
-  const secondEvidence = war
-    ? `正与${polityName(world, enemyId ?? '')}交兵 · 疲惫${Math.round(polity.warWeariness)} · 耗竭${Math.round(war.exhaustion)}`
-    : winner.successionPressure >= 58
-      ? `${ruler?.name ?? '君位空悬'} · ${ruler ? `${ruler.age}岁 · 健康${Math.round(ruler.health)}` : '继承未定'}`
-      : faction
-        ? `${faction.name} · 势力${Math.round(faction.power)} · 凝聚${Math.round(faction.cohesion)}`
-        : `行政${Math.round(polity.administration)} · 疲惫${Math.round(polity.warWeariness)}`;
-  const nextSignal = war
-    ? '留意会战、首府失守与求和'
-    : winner.successionPressure >= 58
-      ? '留意君主健康、摄政与继承安排'
-      : polity.authority < 55
-        ? '留意地方拒令、权臣与派系行动'
-        : '留意财政、行政与边疆动荡的同步变化';
-
-  return {
-    id: `lead-polity:${polity.id}`,
-    slot: 'polity',
-    label: '国势线',
-    question,
-    evidence: [
-      `合法性${Math.round(polity.legitimacy)} · 权威${Math.round(polity.authority)}`,
-      secondEvidence,
-    ],
-    nextSignal,
-    stage: stageFor(tension),
-    tension,
-    target: { kind: 'country', id: polity.id },
-    overlay: war ? 'war' : 'political',
-    rankScore: winner.rankScore,
-  };
-}
-
-function warLead(world: WorldState, war: WarState): RankedLead {
-  const attacker = polityName(world, war.attackerId);
-  const defender = polityName(world, war.defenderId);
-  const scoreGap = Math.abs(war.attackerScore - war.defenderScore);
-  const tension = rounded(80 + war.exhaustion * 0.12 + Math.max(0, 12 - scoreGap * 0.12));
-  return {
-    id: `lead-tension-war:${war.id}`,
-    slot: 'tension',
-    label: '天下矛盾',
-    question: `${attacker}与${defender}目前打到哪里？`,
-    evidence: [
-      `战局 ${Math.round(war.attackerScore)} : ${Math.round(war.defenderScore)}`,
-      `${war.goal}之战 · 耗竭${Math.round(war.exhaustion)}`,
-    ],
-    nextSignal: '留意会战、补给崩溃与议和',
-    stage: stageFor(tension),
-    tension,
-    target: { kind: 'country', id: war.attackerId },
-    overlay: 'war',
-    rankScore: tension + 25,
-  };
-}
-
-function outbreakLead(world: WorldState, infection: DiseaseHostState): RankedLead {
-  const pathogen = world.pathogens.find((item) => item.id === infection.pathogenId);
-  const total = infection.susceptible + infection.exposed + infection.infectious + infection.recovered;
-  const active = infection.exposed + infection.infectious;
-  const hostRegion = infection.hostKind === 'region'
-    ? world.regions.find((item) => item.id === infection.hostId)
-    : null;
-  const hostName = infection.hostKind === 'region'
-    ? regionName(world, infection.hostId)
-    : infection.hostKind === 'army'
-      ? world.armies.find((item) => item.id === infection.hostId)?.name ?? '行军军团'
-      : world.fleets.find((item) => item.id === infection.hostId)?.name ?? '海上船队';
-  const prevalence = active / Math.max(1, total) * 100;
-  const portPressure = hostRegion?.port ? 8 : 0;
-  const sourcePressure = Math.min(12, infection.recentSources.length * 3);
-  const raw = 42
-    + Math.log10(active + 1) * 6.5
-    + prevalence * 1.1
-    + (pathogen?.transmissibility ?? 0.5) * 100 * 0.1
-    + (pathogen?.fatality ?? 0.02) * 100 * 0.08
-    + portPressure
-    + sourcePressure;
-  const tension = rounded(raw);
-  return {
-    id: `lead-tension-outbreak:${infection.id}`,
-    slot: 'tension',
-    label: '天下矛盾',
-    question: `${hostName}眼下有多少人染病？`,
-    evidence: [
-      `染病${compact.format(infection.infectious)} · 潜伏${compact.format(infection.exposed)}`,
-      `传播${Math.round((pathogen?.transmissibility ?? 0) * 100)}% · 输入来源${infection.recentSources.length}`,
-    ],
-    nextSignal: hostRegion?.port
-      ? '留意港口商旅把病势带向外海'
-      : '留意相邻地区、军旅与迁徙输入',
-    stage: stageFor(tension),
-    tension,
-    target: { kind: 'outbreak', id: infection.id },
-    overlay: 'disease',
-    rankScore: raw + 8,
-  };
-}
-
-function diplomacyLead(world: WorldState, relation: DiplomacyState): RankedLead {
-  const a = polityName(world, relation.polityAId);
-  const b = polityName(world, relation.polityBId);
-  const maximumThreat = Math.max(relation.threatAtoB, relation.threatBtoA);
-  const raw = maximumThreat * 0.34
-    + relation.grievance * 0.28
-    + (100 - relation.trust) * 0.24
-    + (100 - relation.culturalAffinity) * 0.06
-    + (relation.status === '联盟' ? 6 : relation.status === '战争' ? 28 : 0);
-  const tension = rounded(raw);
-  return {
-    id: `lead-tension-diplomacy:${relation.id}`,
-    slot: 'tension',
-    label: '天下矛盾',
-    question: relation.status === '联盟'
-      ? `${a}与${b}眼下如何结盟？`
-      : `${a}与${b}眼下是什么关系？`,
-    evidence: [
-      `威胁${Math.round(maximumThreat)} · 积怨${Math.round(relation.grievance)}`,
-      `信任${Math.round(relation.trust)} · 贸易依存${Math.round(relation.tradeDependency)}`,
-    ],
-    nextSignal: relation.status === '联盟'
-      ? '留意背约、拒援与贸易中断'
-      : '留意边境摩擦、盟友站队与宣战',
-    stage: stageFor(tension),
-    tension,
-    target: { kind: 'country', id: relation.polityAId },
-    overlay: 'war',
-    rankScore: raw,
-  };
-}
-
-function seaLead(zone: SeaZoneState): RankedLead {
-  const raw = 38 + (zone.contested ? 25 : 0) + zone.piracy * 0.2 + Math.min(20, Math.log10(zone.traffic + 1) * 7);
-  const tension = rounded(raw);
-  return {
-    id: `lead-tension-sea:${zone.id}`,
-    slot: 'tension',
-    label: '天下矛盾',
-    question: `${zone.name}眼下由谁通航或争夺？`,
-    evidence: [
-      `航流${compact.format(zone.traffic)} · 海盗${Math.round(zone.piracy)}`,
-      `${zone.contested ? '多方争夺' : '海权未定'} · 港口${zone.portRegionIds.length}`,
-    ],
-    nextSignal: '留意舰队集结、封锁与商路改道',
-    stage: stageFor(tension),
-    tension,
-    target: { kind: 'seaZone', id: zone.id },
-    overlay: 'naval',
-    rankScore: raw,
-  };
-}
-
-function regionLead(region: RegionState): RankedLead {
-  const foodPressure = region.food < region.population * 0.55 ? 28 : region.food < region.population ? 12 : 0;
-  const raw = region.unrest * 0.44 + region.devastation * 0.3 + foodPressure + region.strategicValue * 0.08;
-  const tension = rounded(raw);
-  return {
-    id: `lead-tension-region:${region.id}`,
-    slot: 'tension',
-    label: '天下矛盾',
-    question: `${region.name}眼下发生了什么？`,
-    evidence: [
-      `动荡${Math.round(region.unrest)} · 破坏${Math.round(region.devastation)}`,
-      `粮食可支${(region.food / Math.max(1, region.population)).toFixed(1)}季 · 战略${Math.round(region.strategicValue)}`,
-    ],
-    nextSignal: '留意缺粮、迁徙与地方军队扩大',
-    stage: stageFor(tension),
-    tension,
-    target: { kind: 'region', id: region.id },
-    overlay: foodPressure ? 'food' : 'war',
-    rankScore: raw,
-  };
-}
-
-function deriveTensionLead(world: WorldState): RankedLead {
-  const candidates: RankedLead[] = [];
-  world.wars.filter((item) => item.active).forEach((item) => candidates.push(warLead(world, item)));
-  world.infections
-    .filter((item) => item.exposed + item.infectious > 0)
-    .forEach((item) => candidates.push(outbreakLead(world, item)));
-  world.diplomacy
-    .filter((item) => world.polities.some((polity) => polity.id === item.polityAId && polity.alive)
-      && world.polities.some((polity) => polity.id === item.polityBId && polity.alive))
-    .forEach((item) => candidates.push(diplomacyLead(world, item)));
-  world.seaZones.forEach((item) => candidates.push(seaLead(item)));
-  world.regions.forEach((item) => candidates.push(regionLead(item)));
-  return sortedByRank(candidates)[0] ?? regionLead(world.regions[0]);
-}
+const WAR_SITUATION_TYPES = new Set(['war_progress', 'military_power_crisis']);
+const STORY_FACT_KINDS = new Set<SimulationFact['kind']>([
+  'war_started',
+  'war_ended',
+  'battle',
+  'territory_control_changed',
+  'army_order_changed',
+  'appointment_started',
+  'appointment_ended',
+  'agency_support_resolved',
+  'agency_intent_resolved',
+  'faction_lifecycle',
+  'faction_relation_changed',
+  'court_action_resolved',
+  'embodied_action_resolved',
+]);
+const WAR_FACT_KINDS = new Set<SimulationFact['kind']>([
+  'war_started',
+  'war_ended',
+  'battle',
+  'territory_control_changed',
+  'army_order_changed',
+  'agency_support_resolved',
+  'agency_intent_resolved',
+]);
+const HIGH_OFFICES = new Set([
+  '君主',
+  '宰辅',
+  '枢密使',
+  '军团主帅',
+  '军团副将',
+  '水师提督',
+  '水师副将',
+]);
 
 function stableCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
 
-function situationStage(phase: SituationPhase, resolvedEcho: boolean): ObserverLeadStage {
-  if (resolvedEcho) return '回响';
-  if (phase === 'critical') return '临界';
-  if (phase === 'active') return '升温';
-  return '伏线';
+function compareSituations(left: SituationState, right: SituationState): number {
+  return PHASE_ORDER[left.phase] - PHASE_ORDER[right.phase]
+    || right.importance - left.importance
+    || right.tension - left.tension
+    || left.startedTurn - right.startedTurn
+    || stableCompare(left.id, right.id);
 }
 
 function participant(
@@ -495,726 +103,213 @@ function participant(
   return item.participants.find((group) => group.key === key)?.entities[0] ?? null;
 }
 
-function situationQuestion(item: SituationSnapshotItem, state: SituationState, resolvedEcho: boolean): string {
-  if (resolvedEcho) {
-    const outcome = situationOutcomeLabel(state.resolution?.outcomeKey ?? '');
-    return `${item.title}如何以“${outcome}”收束？`;
-  }
-  const core = participant(item, 'coreCharacterIds')?.label ?? '这名将领';
-  const polity = participant(item, 'polityIds')?.label ?? '该政权';
-  if (item.type === 'military_power_crisis') {
-    return `${core}现在掌着什么兵权？`;
-  }
-  if (item.type === 'inheritance_crisis') {
-    return `${polity}的继承问题现在卡在哪里？`;
-  }
-  if (item.type === 'court_power_struggle') {
-    const rootKeys = new Set([
-      'challenger_central_office',
-      'challenger_regional_office',
-      'challenger_military_command',
-      'challenger_family_renown',
-      'challenger_alliance_support',
-      'challenger_cohesion',
-    ]);
-    const actualRoots = item.evidence
-      .filter((entry) => entry.contribution > 0 && rootKeys.has(entry.key))
-      .sort((left, right) => right.contribution - left.contribution || stableCompare(left.key, right.key))
-      .slice(0, 3)
-      .map((entry) => entry.label);
-    const rootCopy = actualRoots.length > 0 ? actualRoots.join('、') : '已登记的权势根基';
-    return `${polity}眼下谁凭${rootCopy}左右朝局？`;
-  }
-  return `${item.title.replace(/的战争进程$/u, '')}，目前打到哪里？`;
-}
-
-function situationTarget(
+function targetForSituation(
   world: WorldState,
-  state: SituationState,
+  situation: SituationState,
   item: SituationSnapshotItem,
-  slot: ObserverLeadSlot,
 ): ObserverLeadTarget | null {
-  if (slot === 'person') {
+  if (situation.type === 'military_power_crisis') {
     const person = participant(item, 'coreCharacterIds')
       ?? participant(item, 'supportingCharacterIds')
       ?? participant(item, 'opposingCharacterIds');
-    return person ? { kind: 'person', id: person.id } : null;
+    if (person) return { kind: 'person', id: person.id };
   }
-  if (state.type === 'war_progress') {
-    const attackerId = world.wars.find((war) => war.id === state.scopeKey)?.attackerId;
+  if (situation.type === 'war_progress') {
+    const attackerId = world.wars.find((war) => war.id === situation.scopeKey)?.attackerId;
     if (attackerId) return { kind: 'country', id: attackerId };
   }
   const polity = participant(item, 'polityIds');
   if (polity) return { kind: 'country', id: polity.id };
+  const person = participant(item, 'coreCharacterIds');
+  if (person) return { kind: 'person', id: person.id };
   const region = participant(item, 'regionIds');
   return region ? { kind: 'region', id: region.id } : null;
 }
 
+function questionForSituation(
+  item: SituationSnapshotItem,
+  situation: SituationState,
+  resolvedEcho: boolean,
+): string {
+  if (resolvedEcho) {
+    return `${item.title}如何以“${situationOutcomeLabel(situation.resolution?.outcomeKey ?? '')}”收束？`;
+  }
+  const core = participant(item, 'coreCharacterIds')?.label ?? '这名将领';
+  const polity = participant(item, 'polityIds')?.label ?? '该政权';
+  if (item.type === 'military_power_crisis') return `${core}现在掌着什么兵权？`;
+  if (item.type === 'inheritance_crisis') return `${polity}的继承问题现在卡在哪里？`;
+  if (item.type === 'court_power_struggle') return `${polity}眼下由谁左右朝局？`;
+  return `${item.title.replace(/的战争进程$/u, '')}，目前打到哪里？`;
+}
+
 function situationEvidence(
   world: WorldState,
+  situation: SituationState,
   item: SituationSnapshotItem,
-  state: SituationState,
   resolvedEcho: boolean,
 ): readonly [string, string] {
-  const scene = projectSituationHistoricalScenes(world, state, 1, null, 'active')[0];
+  const scene = projectSituationHistoricalScenes(world, situation, 1, null, 'active')[0];
   if (scene) {
-    const evidence = [scene.summary.trim(), scene.result.trim()]
-      .filter((line, index, lines) => Boolean(line) && lines.indexOf(line) === index);
-    const sceneEntities = [
-      ...scene.actorIds.map((id) => world.characters.find((character) => character.id === id)?.name),
-      ...scene.polityIds.map((id) => world.polities.find((polity) => polity.id === id)?.name),
-      ...scene.regionIds.map((id) => world.regions.find((region) => region.id === id)?.name),
-    ].filter((label, index, labels): label is string => Boolean(label) && labels.indexOf(label) === index);
-    const participantEntities = item.participants
-      .flatMap((group) => group.entities.map((entity) => entity.label))
-      .filter((label, index, labels) => labels.indexOf(label) === index);
-    const context = (sceneEntities.length ? sceneEntities : participantEntities).slice(0, 3);
-    if (evidence.length < 2 && context.length) evidence.push(`相关各方 · ${context.join('、')}`);
-    if (evidence.length < 2) evidence.push(`始于${historyTurnDate(item.startedTurn).label} · ${item.typeLabel}`);
-    return [evidence[0], evidence[1]];
+    const lines = [scene.summary.trim(), scene.result.trim()]
+      .filter((line, index, all) => Boolean(line) && all.indexOf(line) === index);
+    if (lines.length < 2) {
+      const names = item.participants
+        .flatMap((group) => group.entities.map((entity) => entity.label))
+        .filter((label, index, all) => all.indexOf(label) === index)
+        .slice(0, 3);
+      lines.push(names.length ? `相关各方 · ${names.join('、')}` : `始于${historyTurnDate(item.startedTurn).label}`);
+    }
+    return [lines[0], lines[1]];
   }
   if (resolvedEcho) {
     return [
-      `结案结果 · ${situationOutcomeLabel(state.resolution?.outcomeKey ?? '')}`,
+      `结案结果 · ${situationOutcomeLabel(situation.resolution?.outcomeKey ?? '')}`,
       item.latestChange ? `${historyTurnDate(item.latestChange.turn).label} · ${item.latestChange.label}` : '结果事实已经封存',
     ];
   }
-  const labels = item.evidence
+  const lines = item.evidence
     .filter((entry) => entry.role !== 'outcome')
     .map((entry) => entry.label)
     .filter((label, index, all) => all.indexOf(label) === index)
     .slice(0, 2);
-  const core = participant(item, 'coreCharacterIds')?.label;
-  const polity = participant(item, 'polityIds')?.label;
-  if (labels.length < 2) labels.push([core, polity].filter(Boolean).join(' · ') || `始于${historyTurnDate(item.startedTurn).label}`);
-  if (labels.length < 2) labels.push('本季没有新的具名行动');
-  return [labels[0], labels[1]];
+  if (lines.length < 2) lines.push(`始于${historyTurnDate(item.startedTurn).label} · ${item.typeLabel}`);
+  if (lines.length < 2) lines.push('本季没有新的具名行动');
+  return [lines[0], lines[1]];
 }
 
-function situationRecentChange(world: WorldState, state: SituationState): string {
-  const scene = projectSituationHistoricalScenes(world, state, 1, null, 'active')[0];
-  if (scene) return `${scene.dateLabel} · ${scene.title}`;
-  if (state.status === 'resolved') return `已以“${situationOutcomeLabel(state.resolution?.outcomeKey ?? '')}”结案`;
-  return '本季无新动作';
-}
-
-function situationRank(state: SituationState, item: SituationSnapshotItem, order: number): number {
-  const phase = item.phase === 'critical' ? 15 : item.phase === 'active' ? 7 : 0;
-  const momentum = Math.max(-10, Math.min(10, item.momentum)) * 0.2;
-  return item.tension * 0.45
-    + state.importance * 0.25
-    + state.visibility * 0.15
-    + phase
-    + momentum
-    - order / 10_000;
-}
-
-function situationCandidate(
+function projectSituationLead(
   world: WorldState,
-  state: SituationState,
-  item: SituationSnapshotItem,
-  order: number,
+  situation: SituationState,
   resolvedEcho: boolean,
-): RankedLead | null {
-  const slot = SITUATION_SLOT_BY_TYPE[state.type];
-  if (!slot) return null;
-  const target = situationTarget(world, state, item, slot);
+): ObserverLead | null {
+  const item = projectSituationSnapshotItem(situation, world);
+  const target = targetForSituation(world, situation, item);
   if (!target) return null;
-  const label = slot === 'person' ? '人物线' : slot === 'polity' ? '国势线' : '天下矛盾';
+  const scene = projectSituationHistoricalScenes(world, situation, 1, null, 'active')[0];
+  const recentChange = scene
+    ? `${scene.dateLabel} · ${scene.title}`
+    : resolvedEcho
+      ? `已以“${situationOutcomeLabel(situation.resolution?.outcomeKey ?? '')}”结案`
+      : '本季无新动作';
   return {
-    id: `lead-situation:${state.id}`,
-    slot,
-    label,
-    question: situationQuestion(item, state, resolvedEcho),
-    evidence: situationEvidence(world, item, state, resolvedEcho),
-    nextSignal: item.nextSignal.label,
-    stage: situationStage(item.phase, resolvedEcho),
-    tension: item.tension,
+    id: `lead-situation:${situation.id}`,
+    label: WAR_SITUATION_TYPES.has(situation.type) ? '军争' : '朝局',
+    question: questionForSituation(item, situation, resolvedEcho),
+    evidence: situationEvidence(world, situation, item, resolvedEcho),
     target,
-    overlay: state.type === 'war_progress' || state.type === 'military_power_crisis' ? 'war' : 'political',
+    overlay: WAR_SITUATION_TYPES.has(situation.type) ? 'war' : 'political',
     source: 'situation',
-    situationId: state.id,
-    situationType: state.type,
+    situationId: situation.id,
+    situationType: situation.type,
+    factId: null,
     displayMode: resolvedEcho ? 'resolution_echo' : 'tracking',
-    startedTurn: state.startedTurn,
-    startedLabel: historyTurnDate(state.startedTurn).label,
-    recentChange: situationRecentChange(world, state),
-    arbitrationReason: resolvedEcho ? 'resolution_echo' : 'situation_priority',
-    rankScore: situationRank(state, item, order),
-    editorial: {
-      situation: state,
-      polityIds: [...state.participants.polityIds],
-      regionIds: [...state.participants.regionIds],
-      characterIds: [
-        ...state.participants.coreCharacterIds,
-        ...state.participants.supportingCharacterIds,
-        ...state.participants.opposingCharacterIds,
-      ],
-    },
+    startedLabel: historyTurnDate(situation.startedTurn).label,
+    trackingTurns: Math.max(1, world.turn - situation.startedTurn + 1),
+    recentChange,
   };
 }
 
-function intersects(left: readonly string[], right: readonly string[]): boolean {
-  if (!left.length || !right.length) return false;
-  const rightIds = new Set(right);
-  return left.some((id) => rightIds.has(id));
-}
-
-function diversityPenalty(leads: readonly RankedLead[]): number {
-  let penalty = 0;
-  for (let leftIndex = 0; leftIndex < leads.length; leftIndex += 1) {
-    const left = leads[leftIndex].editorial;
-    if (!left) continue;
-    for (let rightIndex = leftIndex + 1; rightIndex < leads.length; rightIndex += 1) {
-      const right = leads[rightIndex].editorial;
-      if (!right) continue;
-      if (left.situation.type === right.situation.type) penalty += 12;
-      if (intersects(left.polityIds, right.polityIds)) penalty += 18;
-      if (intersects(left.regionIds, right.regionIds)) penalty += 10;
-      if (intersects(left.characterIds, right.characterIds)) penalty += 8;
-    }
+function isStoryFact(fact: SimulationFact): boolean {
+  if (!STORY_FACT_KINDS.has(fact.kind)) return false;
+  if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
+    return HIGH_OFFICES.has(fact.payload.officeKind);
   }
-  return penalty;
+  return true;
 }
 
-type CandidateLists = Record<ObserverLeadSlot, RankedLead[]>;
-
-function selectLeadCombination(
-  lists: CandidateLists,
-  forced: ReadonlyMap<ObserverLeadSlot, RankedLead> = new Map(),
-): Record<ObserverLeadSlot, RankedLead> {
-  const choices = (slot: ObserverLeadSlot): RankedLead[] => {
-    const fixed = forced.get(slot);
-    return fixed ? [fixed] : lists[slot];
-  };
-  let best: { leads: [RankedLead, RankedLead, RankedLead]; score: number; key: string } | null = null;
-  for (const person of choices('person')) {
-    for (const polity of choices('polity')) {
-      for (const tension of choices('tension')) {
-        const leads: [RankedLead, RankedLead, RankedLead] = [person, polity, tension];
-        const score = leads.reduce((sum, lead) => sum + lead.rankScore, 0) - diversityPenalty(leads);
-        const key = leads.map((lead) => lead.id).join('|');
-        if (!best || score > best.score || (score === best.score && stableCompare(key, best.key) < 0)) {
-          best = { leads, score, key };
-        }
-      }
-    }
-  }
-  if (!best) throw new Error('Observer lead candidate lists must never be empty');
-  return { person: best.leads[0], polity: best.leads[1], tension: best.leads[2] };
+function targetForFact(world: WorldState, fact: SimulationFact): ObserverLeadTarget | null {
+  const actorId = fact.actorIds.find((id) => world.characters.some((character) => character.id === id));
+  if (actorId) return { kind: 'person', id: actorId };
+  const polityId = fact.polityIds.find((id) => world.polities.some((polity) => polity.id === id));
+  if (polityId) return { kind: 'country', id: polityId };
+  const regionId = fact.regionIds.find((id) => world.regions.some((region) => region.id === id));
+  return regionId ? { kind: 'region', id: regionId } : null;
 }
 
-function effectiveRank(
-  candidate: RankedLead,
-  slot: ObserverLeadSlot,
-  selected: Readonly<Record<ObserverLeadSlot, RankedLead>>,
-): number {
-  const others = LEAD_SLOTS.filter((other) => other !== slot).map((other) => selected[other]);
-  const addedPenalty = diversityPenalty([candidate, ...others]) - diversityPenalty(others);
-  return candidate.rankScore - addedPenalty;
-}
-
-function legacyCandidates(world: WorldState): Record<ObserverLeadSlot, RankedLead> {
+function projectFactLead(world: WorldState, fact: SimulationFact): ObserverLead | null {
+  const target = targetForFact(world, fact);
+  if (!target) return null;
+  const narrative = projectFactNarrative(world, fact);
+  const context = [
+    ...fact.actorIds.map((id) => world.characters.find((item) => item.id === id)?.name),
+    ...fact.polityIds.map((id) => world.polities.find((item) => item.id === id)?.shortName),
+    ...fact.regionIds.map((id) => world.regions.find((item) => item.id === id)?.name),
+  ].filter((label, index, all): label is string => Boolean(label) && all.indexOf(label) === index).slice(0, 3);
+  const war = WAR_FACT_KINDS.has(fact.kind);
   return {
-    person: { ...derivePersonLead(world), source: 'fallback', situationId: null, situationType: null, displayMode: 'fallback' },
-    polity: { ...derivePolityLead(world), source: 'fallback', situationId: null, situationType: null, displayMode: 'fallback' },
-    tension: { ...deriveTensionLead(world), source: 'fallback', situationId: null, situationType: null, displayMode: 'fallback' },
-  };
-}
-
-function personLeadForId(world: WorldState, id: string): RankedLead | null {
-  const person = world.characters.find((item) => item.id === id && item.alive && item.age >= 16);
-  if (!person) return null;
-  const commandWeight = person.commandingArmyId || person.commandingFleetId ? 9 : person.role === '将领' ? 5 : 0;
-  const ambitionGap = clamp(person.ambition - person.loyalty + 50);
-  const rankScore = person.rebellionReadiness * 0.28
-    + person.ambition * 0.2
-    + (100 - person.loyalty) * 0.13
-    + person.influence * 0.16
-    + ambitionGap * 0.09
-    + person.renown * 0.05
-    + (100 - person.caution) * 0.04
-    + commandWeight;
-  const tension = rounded(rankScore);
-  const openlyRestive = person.rebellionReadiness >= 45
-    || (person.rebellionReadiness >= 28 && person.ambition - person.loyalty >= 24);
-  const commandsForces = Boolean(person.commandingArmyId || person.commandingFleetId || person.role === '将领');
-  const question = commandsForces
-    ? `${person.name}现在掌着哪支兵马？`
-    : `${person.name}目前凭什么立足？`;
-  const nextSignal = openlyRestive
-    ? '留意拒令、割据或公开举兵'
-    : commandsForces
-      ? '留意新战功、主帅更替与军心归属'
-      : '留意升迁、结盟与朝堂权力转移';
-  const position = person.commandingArmyId
-    ? world.armies.find((item) => item.id === person.commandingArmyId)?.name ?? '掌军在手'
-    : person.commandingFleetId
-      ? world.fleets.find((item) => item.id === person.commandingFleetId)?.name ?? '统领水师'
-      : `${person.role} · 影响${Math.round(person.influence)}`;
-  const location = regionName(world, person.locationRegionId);
-  return {
-    id: `lead-person:${person.id}`,
-    slot: 'person',
-    label: '人物线',
-    question,
-    evidence: [
-      `${person.role} · ${person.age}岁 · 声望${Math.round(person.renown)}`,
-      `${position} · 现于${location}`,
-    ],
-    nextSignal,
-    stage: stageFor(tension),
-    tension,
-    target: { kind: 'person', id: person.id },
-    overlay: openlyRestive ? 'war' : 'political',
-    source: 'fallback',
-    situationId: null,
-    situationType: null,
-    displayMode: 'fallback',
-    rankScore,
-  };
-}
-
-function polityLeadForId(world: WorldState, id: string): RankedLead | null {
-  const polity = world.polities.find((item) => item.id === id && item.alive);
-  if (!polity) return null;
-  const ruler = world.characters.find((item) => item.id === polity.rulerId);
-  const successionPressure = ruler
-    ? clamp((ruler.age - 48) * 1.8 + (100 - ruler.health) * 0.36)
-    : 88;
-  const factionPressure = polityFactionPressure(world, polity);
-  const unrest = polityUnrest(world, polity);
-  const war = activeWarForPolity(world, polity.id);
-  const rankScore = (100 - polity.legitimacy) * 0.24
-    + (100 - polity.authority) * 0.22
-    + (100 - polity.administration) * 0.1
-    + polity.warWeariness * 0.13
-    + successionPressure * 0.13
-    + factionPressure * 0.1
-    + unrest * 0.08
-    + (war ? 12 : 0);
-  const tension = rounded(rankScore);
-  const faction = world.factions
-    .filter((item) => item.active && item.polityId === polity.id)
-    .sort((left, right) => right.power * right.cohesion - left.power * left.cohesion || stableCompare(left.id, right.id))[0];
-  const enemyId = war ? (war.attackerId === polity.id ? war.defenderId : war.attackerId) : null;
-  const question = war
-    ? `${polity.name}眼下与谁交兵？`
-    : successionPressure >= 58
-      ? `${polity.name}的君位眼下由谁维系？`
-      : polity.legitimacy < 58 || polity.authority < 55
-        ? `${polity.name}眼下能调动多少地方？`
-        : `${polity.name}眼下靠什么维持秩序？`;
-  const secondEvidence = war
-    ? `正与${polityName(world, enemyId ?? '')}交兵 · 疲惫${Math.round(polity.warWeariness)} · 耗竭${Math.round(war.exhaustion)}`
-    : successionPressure >= 58
-      ? `${ruler?.name ?? '君位空悬'} · ${ruler ? `${ruler.age}岁 · 健康${Math.round(ruler.health)}` : '继承未定'}`
-      : faction
-        ? `${faction.name} · 势力${Math.round(faction.power)} · 凝聚${Math.round(faction.cohesion)}`
-        : `行政${Math.round(polity.administration)} · 疲惫${Math.round(polity.warWeariness)}`;
-  const nextSignal = war
-    ? '留意会战、首府失守与求和'
-    : successionPressure >= 58
-      ? '留意君主健康、摄政与继承安排'
-      : polity.authority < 55
-        ? '留意地方拒令、权臣与派系行动'
-        : '留意财政、行政与边疆动荡的同步变化';
-  return {
-    id: `lead-polity:${polity.id}`,
-    slot: 'polity',
-    label: '国势线',
-    question,
-    evidence: [`合法性${Math.round(polity.legitimacy)} · 权威${Math.round(polity.authority)}`, secondEvidence],
-    nextSignal,
-    stage: stageFor(tension),
-    tension,
-    target: { kind: 'country', id: polity.id },
+    id: `lead-fact:${fact.id}`,
+    label: war ? '军争' : '朝局',
+    question: `${narrative.title}，结果如何？`,
+    evidence: [narrative.summary, `${historyTurnDate(fact.turn).label} · ${context.join('、')}`],
+    target,
     overlay: war ? 'war' : 'political',
-    source: 'fallback',
+    source: 'fact',
     situationId: null,
     situationType: null,
-    displayMode: 'fallback',
-    rankScore,
+    factId: fact.id,
+    displayMode: 'fact',
+    startedLabel: null,
+    trackingTurns: 1,
+    recentChange: null,
   };
 }
 
-function legacyCandidateForId(world: WorldState, entry: ObserverLeadContinuityEntry): RankedLead | null {
-  if (entry.slot === 'person' && entry.leadId.startsWith('lead-person:')) {
-    return personLeadForId(world, entry.leadId.slice('lead-person:'.length));
-  }
-  if (entry.slot === 'polity' && entry.leadId.startsWith('lead-polity:')) {
-    return polityLeadForId(world, entry.leadId.slice('lead-polity:'.length));
-  }
-  if (entry.slot !== 'tension') return null;
-  const sources: Array<[string, () => RankedLead | null]> = [
-    ['lead-tension-war:', () => {
-      const id = entry.leadId.slice('lead-tension-war:'.length);
-      const war = world.wars.find((item) => item.id === id && item.active);
-      return war ? warLead(world, war) : null;
-    }],
-    ['lead-tension-outbreak:', () => {
-      const id = entry.leadId.slice('lead-tension-outbreak:'.length);
-      const infection = world.infections.find((item) => item.id === id && item.exposed + item.infectious > 0);
-      return infection ? outbreakLead(world, infection) : null;
-    }],
-    ['lead-tension-diplomacy:', () => {
-      const id = entry.leadId.slice('lead-tension-diplomacy:'.length);
-      const relation = world.diplomacy.find((item) => item.id === id);
-      const bothSidesAlive = relation
-        ? world.polities.some((item) => item.id === relation.polityAId && item.alive)
-          && world.polities.some((item) => item.id === relation.polityBId && item.alive)
-        : false;
-      return relation && bothSidesAlive ? diplomacyLead(world, relation) : null;
-    }],
-    ['lead-tension-sea:', () => {
-      const id = entry.leadId.slice('lead-tension-sea:'.length);
-      const zone = world.seaZones.find((item) => item.id === id);
-      return zone ? seaLead(zone) : null;
-    }],
-    ['lead-tension-region:', () => {
-      const id = entry.leadId.slice('lead-tension-region:'.length);
-      const region = world.regions.find((item) => item.id === id);
-      return region ? regionLead(region) : null;
-    }],
-  ];
-  for (const [prefix, project] of sources) {
-    if (!entry.leadId.startsWith(prefix)) continue;
-    const candidate = project();
-    return candidate ? {
-      ...candidate,
-      source: 'fallback',
-      situationId: null,
-      situationType: null,
-      displayMode: 'fallback',
-    } : null;
-  }
-  return null;
-}
-
-function buildLeadCandidates(
-  world: WorldState,
-  previousEntries: readonly ObserverLeadContinuityEntry[] = [],
-): {
-  lists: CandidateLists;
-  allById: Map<string, RankedLead>;
-} {
-  const legacy = legacyCandidates(world);
-  const lists: CandidateLists = {
-    person: [legacy.person],
-    polity: [legacy.polity],
-    tension: [legacy.tension],
-  };
-  const allById = new Map<string, RankedLead>(LEAD_SLOTS.map((slot) => [legacy[slot].id, legacy[slot]]));
-  for (const entry of previousEntries) {
-    if (entry.situationId) continue;
-    const retained = legacyCandidateForId(world, entry);
-    if (retained) allById.set(retained.id, retained);
-  }
-  const phaseOrder: Record<SituationPhase, number> = { critical: 0, active: 1, emerging: 2 };
-  const openStates = world.situationSystem.situations
-    .filter((state) => state.status === 'open' && state.visibility >= OBSERVER_LEAD_VISIBILITY_THRESHOLD)
-    .sort((left, right) => (
-      phaseOrder[left.phase] - phaseOrder[right.phase]
-      || right.importance - left.importance
-      || right.tension - left.tension
-      || left.startedTurn - right.startedTurn
-      || stableCompare(left.id, right.id)
-    ));
-  openStates.forEach((state, order) => {
-    const item = projectSituationSnapshotItem(state, world);
-    const candidate = situationCandidate(world, state, item, order, false);
-    if (!candidate) return;
-    lists[candidate.slot].unshift(candidate);
-    allById.set(candidate.id, candidate);
-  });
-  world.situationSystem.situations
-    .filter((state) => state.status === 'resolved'
-      && state.resolvedTurn !== null
-      && state.visibility >= OBSERVER_LEAD_VISIBILITY_THRESHOLD
-      && world.turn - state.resolvedTurn >= 0
-      && world.turn - state.resolvedTurn <= OBSERVER_LEAD_RESOLUTION_ECHO_TURNS)
-    .forEach((state, order) => {
-      const candidate = situationCandidate(world, state, projectSituationSnapshotItem(state, world), order, true);
-      if (candidate) allById.set(candidate.id, candidate);
-    });
-  for (const slot of LEAD_SLOTS) {
-    lists[slot].sort((left, right) => right.rankScore - left.rankScore || stableCompare(left.id, right.id));
-    if (lists[slot].some((candidate) => candidate.source === 'situation')) {
-      lists[slot] = lists[slot].filter((candidate) => candidate.source === 'situation');
-    }
-  }
-  return { lists, allById };
-}
-
-function cloneContinuity(state: ObserverLeadContinuityState): ObserverLeadContinuityState {
-  return { ...state, slots: state.slots.map((entry) => ({ ...entry })) };
-}
-
-function continuityIsValid(
-  world: WorldState,
-  previous: ObserverLeadContinuityState | null,
-  previousWorldHash: string | null,
-): previous is ObserverLeadContinuityState {
-  if (!previous || previous.version !== 1 || previous.worldSeed !== world.seed || previous.lastTurn > world.turn) return false;
-  if (previous.lastWorldHash === world.hash) return previous.lastTurn === world.turn;
-  return previousWorldHash !== null
-    && previous.lastWorldHash === previousWorldHash
-    && (world.turn === previous.lastTurn || world.turn === previous.lastTurn + 1);
-}
-
-function publicLead(candidate: RankedLead, entry: ObserverLeadContinuityEntry, worldTurn: number): ObserverLead {
-  const { rankScore: _rankScore, editorial: _editorial, ...lead } = candidate;
-  return {
-    ...lead,
-    source: candidate.source ?? 'fallback',
-    situationId: candidate.situationId ?? null,
-    situationType: candidate.situationType ?? null,
-    displayMode: candidate.displayMode ?? 'fallback',
-    startedTurn: candidate.startedTurn ?? null,
-    startedLabel: candidate.startedLabel ?? null,
-    selectedSinceTurn: entry.selectedSinceTurn,
-    retainThroughTurn: entry.retainThroughTurn,
-    trackingTurns: Math.max(1, worldTurn - entry.selectedSinceTurn + 1),
-    recentChange: candidate.recentChange ?? '旧题源按当前状态重新评估',
-    arbitrationReason: entry.decision,
-  };
-}
-
-function normalizedInteger(value: unknown, minimum: number, maximum: number): number | null {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value)) return null;
-  return Math.max(minimum, Math.min(maximum, value));
-}
-
-/** Normalizes non-authoritative local observer metadata without accepting arbitrary unbounded input. */
-export function normalizeObserverLeadContinuity(value: unknown): ObserverLeadContinuityState | null {
-  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null;
-  const record = value as Record<string, unknown>;
-  if (record.version !== 1 || typeof record.worldSeed !== 'string' || typeof record.lastWorldHash !== 'string') return null;
-  const lastTurn = normalizedInteger(record.lastTurn, 0, Number.MAX_SAFE_INTEGER);
-  if (lastTurn === null || !record.worldSeed.trim() || !record.lastWorldHash.trim() || !Array.isArray(record.slots)) return null;
-  const slots: ObserverLeadContinuityEntry[] = [];
-  const seen = new Set<ObserverLeadSlot>();
-  for (const raw of record.slots) {
-    if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) continue;
-    const entry = raw as Record<string, unknown>;
-    if (!LEAD_SLOTS.includes(entry.slot as ObserverLeadSlot) || seen.has(entry.slot as ObserverLeadSlot)) continue;
-    if (typeof entry.leadId !== 'string' || !entry.leadId.trim()) continue;
-    const selectedSinceTurn = normalizedInteger(entry.selectedSinceTurn, 0, lastTurn);
-    const challengerAheadTurns = normalizedInteger(entry.challengerAheadTurns, 0, OBSERVER_LEAD_CHALLENGER_TURNS);
-    if (selectedSinceTurn === null || challengerAheadTurns === null) continue;
-    const situationId = typeof entry.situationId === 'string' && entry.situationId.trim() ? entry.situationId.slice(0, 180) : null;
-    const challengerId = typeof entry.challengerId === 'string' && entry.challengerId.trim() ? entry.challengerId.slice(0, 220) : null;
-    const allowedReasons: ObserverLeadArbitrationReason[] = [
-      'situation_priority', 'legacy_fallback', 'minimum_tenure', 'critical_challenger_pending',
-      'fallback_challenger_pending', 'incumbent_stable', 'critical_challenger',
-      'fallback_challenger', 'resolution_echo',
-    ];
-    const decision = allowedReasons.includes(entry.decision as ObserverLeadArbitrationReason)
-      ? entry.decision as ObserverLeadArbitrationReason
-      : situationId ? 'incumbent_stable' : 'legacy_fallback';
-    const slot = entry.slot as ObserverLeadSlot;
-    seen.add(slot);
-    slots.push({
-      slot,
-      leadId: entry.leadId.slice(0, 220),
-      situationId,
-      selectedSinceTurn,
-      retainThroughTurn: selectedSinceTurn + OBSERVER_LEAD_MIN_TENURE_TURNS - 1,
-      challengerId,
-      challengerAheadTurns: challengerId ? challengerAheadTurns : 0,
-      decision,
-    });
-  }
-  if (slots.length !== LEAD_SLOTS.length) return null;
-  slots.sort((left, right) => LEAD_SLOTS.indexOf(left.slot) - LEAD_SLOTS.indexOf(right.slot));
-  return {
-    version: 1,
-    worldSeed: record.worldSeed.slice(0, 180),
-    lastTurn,
-    lastWorldHash: record.lastWorldHash.slice(0, 180),
-    slots,
-  };
+function coveredFactIds(situations: readonly SituationState[]): Set<string> {
+  return new Set(situations.flatMap((situation) => [
+    ...situation.causalFactIds,
+    ...situation.milestoneFactIds,
+    ...(situation.resolution?.resultFactIds ?? []),
+    ...situation.recentChanges.flatMap((change) => change.sourceFactIds),
+  ]));
 }
 
 /**
- * Produces the bounded Situation-first editorial selection plus non-authoritative continuity metadata.
- * Re-reading the same world/hash is idempotent and never advances challenger streaks.
+ * Selects at most three current stories without retaining observer-owned state.
+ * Open Situations lead, a one-quarter resolution echo may fill vacancies, and
+ * current-quarter war/court Facts provide the final sparse fallback.
  */
-export function deriveObserverLeadProjection(
-  world: WorldState,
-  previous: ObserverLeadContinuityState | null = null,
-  previousWorldHash: string | null = null,
-): ObserverLeadProjection {
-  const normalizedPrevious = normalizeObserverLeadContinuity(previous);
-  const validPrevious = continuityIsValid(world, normalizedPrevious, previousWorldHash)
-    ? normalizedPrevious
-    : null;
-  const candidates = buildLeadCandidates(world, validPrevious?.slots ?? []);
-  const previousBySlot = new Map(validPrevious?.slots.map((entry) => [entry.slot, entry]) ?? []);
+export function deriveObserverLeads(world: WorldState): ObserverLead[] {
+  const open = world.situationSystem.situations
+    .filter((item) => item.status === 'open' && item.visibility >= OBSERVER_LEAD_VISIBILITY_THRESHOLD)
+    .sort(compareSituations);
+  const selectedSituations = open.slice(0, 3);
+  const leads = selectedSituations
+    .map((item) => projectSituationLead(world, item, false))
+    .filter((item): item is ObserverLead => Boolean(item));
 
-  if (validPrevious && validPrevious.lastTurn === world.turn && validPrevious.lastWorldHash === world.hash) {
-    const exact = LEAD_SLOTS.map((slot) => ({ entry: previousBySlot.get(slot), candidate: candidates.allById.get(previousBySlot.get(slot)?.leadId ?? '') }));
-    if (exact.every((item) => item.entry && item.candidate)) {
-      return {
-        version: 2,
-        leads: exact.map((item) => publicLead(item.candidate as RankedLead, item.entry as ObserverLeadContinuityEntry, world.turn)),
-        continuity: cloneContinuity(validPrevious),
-      };
+  if (leads.length < 3) {
+    const echoes = world.situationSystem.situations
+      .filter((item) => item.status === 'resolved'
+        && item.resolvedTurn !== null
+        && item.visibility >= OBSERVER_LEAD_VISIBILITY_THRESHOLD
+        && world.turn - item.resolvedTurn >= 0
+        && world.turn - item.resolvedTurn <= OBSERVER_LEAD_RESOLUTION_ECHO_TURNS)
+      .sort(compareSituations);
+    for (const situation of echoes) {
+      const lead = projectSituationLead(world, situation, true);
+      if (lead) {
+        leads.push(lead);
+        selectedSituations.push(situation);
+      }
+      if (leads.length >= 3) break;
     }
   }
 
-  const forced = new Map<ObserverLeadSlot, RankedLead>();
-  const pending = new Map<ObserverLeadSlot, { challengerId: string | null; aheadTurns: number; decision: ObserverLeadArbitrationReason }>();
-  const unresolved = new Set<ObserverLeadSlot>();
-  if (validPrevious) {
-    for (const slot of LEAD_SLOTS) {
-      const entry = previousBySlot.get(slot);
-      if (!entry) continue;
-      const incumbent = candidates.allById.get(entry.leadId);
-      if (!incumbent) continue;
-      if (entry.situationId && incumbent.displayMode === 'resolution_echo') {
-        forced.set(slot, incumbent);
-        pending.set(slot, { challengerId: null, aheadTurns: 0, decision: 'resolution_echo' });
-      } else {
-        unresolved.add(slot);
-      }
+  if (leads.length < 3 && world.lastTurn) {
+    const currentFactIds = new Set(world.lastTurn.factIds);
+    const covered = coveredFactIds(selectedSituations);
+    const facts = world.facts
+      .filter((fact) => currentFactIds.has(fact.id) && !covered.has(fact.id) && isStoryFact(fact))
+      .sort((left, right) => right.importance - left.importance || stableCompare(left.id, right.id));
+    for (const fact of facts) {
+      const lead = projectFactLead(world, fact);
+      if (lead) leads.push(lead);
+      if (leads.length >= 3) break;
     }
   }
-
-  type LeadEvaluation = {
-    slot: ObserverLeadSlot;
-    incumbent: RankedLead;
-    proposal: RankedLead;
-    replace: boolean;
-    challengerId: string | null;
-    aheadTurns: number;
-    decision: ObserverLeadArbitrationReason;
-  };
-
-  // Resolve every undecided slot against one shared combination. Retentions are
-  // fixed first, then the remaining proposals are recalculated. This prevents a
-  // later forced slot from silently changing an earlier accepted lead.
-  while (validPrevious && unresolved.size > 0) {
-    const contextualSelection = selectLeadCombination(candidates.lists, forced);
-    const evaluations: LeadEvaluation[] = [];
-    for (const slot of LEAD_SLOTS) {
-      if (!unresolved.has(slot)) continue;
-      const entry = previousBySlot.get(slot) as ObserverLeadContinuityEntry;
-      const incumbent = candidates.allById.get(entry.leadId) as RankedLead;
-      const proposal = contextualSelection[slot];
-      if (proposal.id === incumbent.id) {
-        evaluations.push({
-          slot,
-          incumbent,
-          proposal,
-          replace: false,
-          challengerId: null,
-          aheadTurns: 0,
-          decision: 'incumbent_stable',
-        });
-        continue;
-      }
-      const minimumTenureComplete = world.turn > entry.retainThroughTurn;
-      if (incumbent.source !== 'situation' && proposal.source === 'situation') {
-        evaluations.push({
-          slot,
-          incumbent,
-          proposal,
-          replace: minimumTenureComplete,
-          challengerId: minimumTenureComplete ? null : proposal.id,
-          aheadTurns: 0,
-          decision: minimumTenureComplete ? 'situation_priority' : 'minimum_tenure',
-        });
-        continue;
-      }
-      const margin = effectiveRank(proposal, slot, contextualSelection)
-        - effectiveRank(incumbent, slot, contextualSelection);
-      const qualifies = incumbent.source === 'situation'
-        ? proposal.source === 'situation'
-          && proposal.editorial?.situation.phase === 'critical'
-          && margin >= OBSERVER_LEAD_CRITICAL_MARGIN
-        : proposal.source !== 'situation' && margin >= OBSERVER_LEAD_FALLBACK_MARGIN;
-      const consecutive = qualifies
-        ? entry.challengerId === proposal.id && validPrevious.lastTurn + 1 === world.turn
-          ? Math.min(OBSERVER_LEAD_CHALLENGER_TURNS, entry.challengerAheadTurns + 1)
-          : 1
-        : 0;
-      const replace = qualifies
-        && consecutive >= OBSERVER_LEAD_CHALLENGER_TURNS
-        && minimumTenureComplete;
-      evaluations.push({
-        slot,
-        incumbent,
-        proposal,
-        replace,
-        challengerId: replace ? null : qualifies ? proposal.id : null,
-        aheadTurns: replace ? 0 : consecutive,
-        decision: replace
-          ? incumbent.source === 'situation' ? 'critical_challenger' : 'fallback_challenger'
-          : !minimumTenureComplete
-            ? 'minimum_tenure'
-            : qualifies
-              ? incumbent.source === 'situation' ? 'critical_challenger_pending' : 'fallback_challenger_pending'
-              : 'incumbent_stable',
-      });
-    }
-
-    const retentions = evaluations.filter((evaluation) => !evaluation.replace);
-    const resolved = retentions.length > 0 ? retentions : evaluations;
-    for (const evaluation of resolved) {
-      forced.set(evaluation.slot, evaluation.replace ? evaluation.proposal : evaluation.incumbent);
-      pending.set(evaluation.slot, {
-        challengerId: evaluation.challengerId,
-        aheadTurns: evaluation.aheadTurns,
-        decision: evaluation.decision,
-      });
-      unresolved.delete(evaluation.slot);
-    }
-  }
-
-  const selected = selectLeadCombination(candidates.lists, forced);
-
-  const slots = LEAD_SLOTS.map((slot): ObserverLeadContinuityEntry => {
-    const candidate = selected[slot];
-    const prior = previousBySlot.get(slot);
-    const same = prior?.leadId === candidate.id;
-    const selectedSinceTurn = same ? prior.selectedSinceTurn : world.turn;
-    const replacementDecision = pending.get(slot)?.decision;
-    const decision = same
-      ? pending.get(slot)?.decision ?? (candidate.source === 'situation' ? 'incumbent_stable' : 'legacy_fallback')
-      : replacementDecision === 'critical_challenger'
-        || replacementDecision === 'fallback_challenger'
-        || replacementDecision === 'situation_priority'
-        ? replacementDecision
-        : candidate.source === 'situation'
-          ? 'situation_priority'
-          : 'legacy_fallback';
-    return {
-      slot,
-      leadId: candidate.id,
-      situationId: candidate.situationId ?? null,
-      selectedSinceTurn,
-      retainThroughTurn: selectedSinceTurn + OBSERVER_LEAD_MIN_TENURE_TURNS - 1,
-      challengerId: same ? pending.get(slot)?.challengerId ?? null : null,
-      challengerAheadTurns: same ? pending.get(slot)?.aheadTurns ?? 0 : 0,
-      decision,
-    };
-  });
-  const continuity: ObserverLeadContinuityState = {
-    version: 1,
-    worldSeed: world.seed,
-    lastTurn: world.turn,
-    lastWorldHash: world.hash,
-    slots,
-  };
-  return {
-    version: 2,
-    leads: LEAD_SLOTS.map((slot) => publicLead(selected[slot], slots.find((entry) => entry.slot === slot) as ObserverLeadContinuityEntry, world.turn)),
-    continuity,
-  };
+  return leads.slice(0, 3);
 }
 
-/** Builds a stateless Situation-first read-only layer for callers that do not retain UI continuity. */
-export function deriveObserverLeads(world: WorldState): ObserverLead[] {
-  return deriveObserverLeadProjection(world).leads;
+export function deriveObserverLeadProjection(world: WorldState): ObserverLeadProjection {
+  return { leads: deriveObserverLeads(world) };
 }

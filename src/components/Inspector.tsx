@@ -54,6 +54,7 @@ export interface RegionInspectorData {
   cityLevel: DisplayValue;
   defense: number;
   unrest: number;
+  supplyNote?: string;
   governor?: string;
   resources?: string[];
   summary?: string;
@@ -192,14 +193,12 @@ export interface PersonAgencyDesireView {
   reason?: string;
 }
 
-export type PersonAgencyGoalStatus = 'active' | 'achieved' | 'invalidated' | 'abandoned';
+export type PersonAgencyGoalStatus = 'active' | 'achieved' | 'invalidated';
 
 export interface PersonAgencyGoalView {
   id: string;
   label: string;
   status: PersonAgencyGoalStatus;
-  progress: number;
-  commitment: number;
   reason: string;
   barrier: string;
 }
@@ -212,12 +211,6 @@ export interface PersonAgencyPlanStepView {
   reason: string;
 }
 
-export interface PersonAgencyDecisionView {
-  label: string;
-  status: Exclude<PersonAgencyGoalStatus, 'active'>;
-  reason: string;
-}
-
 export interface PersonAgencyMemoryView {
   id: string;
   dateLabel: string;
@@ -225,17 +218,6 @@ export interface PersonAgencyMemoryView {
   title: string;
   interpretation: string;
   pinned: boolean;
-  sourceEventId?: string | null;
-}
-
-export type PersonAgencyQuarterChoiceOutcome = 'aligned' | 'diverged' | 'unobserved' | 'not_applicable';
-
-export interface PersonAgencyQuarterChoiceView {
-  periodLabel: string;
-  intended: string;
-  actual: string;
-  outcome: PersonAgencyQuarterChoiceOutcome;
-  reason: string;
   sourceEventId?: string | null;
 }
 
@@ -265,11 +247,8 @@ export interface PersonAgencyView {
   longTermDirectionLabel: string;
   desires: readonly PersonAgencyDesireView[];
   primaryGoal: PersonAgencyGoalView | null;
-  secondaryGoals: readonly PersonAgencyGoalView[];
   currentPlanSteps: readonly PersonAgencyPlanStepView[];
-  recentDecision?: PersonAgencyDecisionView | null;
   memories?: readonly PersonAgencyMemoryView[];
-  quarterChoice?: PersonAgencyQuarterChoiceView | null;
   commandRequest?: PersonAgencyCommandRequestView | null;
   powerPosition?: {
     total: number;
@@ -398,6 +377,7 @@ interface InspectorSharedProps {
   entrySource?: InspectorEntrySource;
   returnToOrigin?: boolean;
   returnLabel?: string;
+  showSupplyNote?: boolean;
 }
 
 export type InspectorProps =
@@ -738,7 +718,6 @@ const PERSON_GOAL_STATUS_LABELS = {
   active: '正在谋求',
   achieved: '已经达成',
   invalidated: '已无从继续',
-  abandoned: '已经搁下',
 } satisfies Record<PersonAgencyGoalStatus, string>;
 
 const PERSON_PLAN_STATUS_LABELS = {
@@ -748,29 +727,10 @@ const PERSON_PLAN_STATUS_LABELS = {
   invalidated: '此路已断',
 } satisfies Record<PersonAgencyPlanStepStatus, string>;
 
-const PERSON_QUARTER_CHOICE_LABELS = {
-  aligned: '照着盘算走',
-  diverged: '实际另有去向',
-  unobserved: '尚未见行动',
-  not_applicable: '尚无可比',
-} satisfies Record<PersonAgencyQuarterChoiceOutcome, string>;
-
-function AgencyScale({ label, value }: { label: string; value: number }) {
-  const normalized = Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
-  return (
-    <div className="observer-agency-scale">
-      <div><span>{label}</span><strong>{Math.round(normalized)}</strong></div>
-      <span className="observer-agency-scale__track" role="meter" aria-label={label} aria-valuemin={0} aria-valuemax={100} aria-valuenow={normalized}>
-        <span style={{ width: `${normalized}%` }} />
-      </span>
-    </div>
-  );
-}
-
 function agencyEmptyGoalCopy(agency: PersonAgencyView) {
   if (agency.availability === 'dormant') return { title: '尚未入局', detail: agency.reason || '年岁尚轻，眼下还没有真正进入世事。' };
   if (agency.availability === 'closed') return { title: '生平已定', detail: agency.reason || '此人已不再形成新的打算。' };
-  return { title: '仍在权衡', detail: '此人还没有把心中所重化为明确打算。' };
+  return { title: '尚无明确行动', detail: agency.reason || '眼下没有会进入季度结算的明确打算。' };
 }
 
 export function PersonAgencySections({
@@ -796,17 +756,11 @@ export function PersonAgencySections({
   const memoryListId = useId();
   const visibleMemories = memoriesExpanded ? memories : memories.slice(0, 3);
   const hiddenMemoryCount = Math.max(0, memories.length - visibleMemories.length);
-  const quarterChoice = agency.quarterChoice;
   const commandRequest = agency.commandRequest;
   const commandSourceEventId = commandRequest
     && ['submitted', 'approved', 'blocked'].includes(commandRequest.stage)
     ? commandRequest.sourceEventId
     : null;
-  const choiceReasonLabel = quarterChoice?.outcome === 'aligned'
-    ? '为何相合'
-    : quarterChoice?.outcome === 'diverged'
-      ? '为何有别'
-      : '查考说明';
   return (
     <>
       {embodiment?.active ? (
@@ -944,10 +898,6 @@ export function PersonAgencySections({
           <div className="observer-agency-goal" data-status={agency.primaryGoal.status}>
             <header><span>{PERSON_GOAL_STATUS_LABELS[agency.primaryGoal.status]}</span><strong>{agency.primaryGoal.label}</strong></header>
             <p><b>因何起意</b>{agency.primaryGoal.reason}</p>
-            <div className="observer-agency-goal__scales">
-              <AgencyScale label="进展" value={agency.primaryGoal.progress} />
-              <AgencyScale label="决心" value={agency.primaryGoal.commitment} />
-            </div>
             {agency.primaryGoal.barrier ? <p className="observer-agency__barrier"><b>眼下难处</b>{agency.primaryGoal.barrier}</p> : null}
           </div>
         ) : (
@@ -957,12 +907,6 @@ export function PersonAgencySections({
             {agency.barrier ? <p className="observer-agency__barrier"><b>眼下难处</b>{agency.barrier}</p> : null}
           </div>
         )}
-        {agency.secondaryGoals.length ? (
-          <div className="observer-agency-secondary">
-            <h4>还在留意</h4>
-            <ul>{agency.secondaryGoals.map((goal) => <li key={goal.id}><span>{goal.label}</span><small>{PERSON_GOAL_STATUS_LABELS[goal.status]}</small></li>)}</ul>
-          </div>
-        ) : null}
       </section>
 
       <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-plan-heading">
@@ -1016,29 +960,7 @@ export function PersonAgencySections({
         </section>
       ) : null}
 
-      <section className="observer-inspector__section observer-agency" aria-labelledby="person-agency-decision-heading">
-        <h3 id="person-agency-decision-heading">最近取舍</h3>
-        {quarterChoice ? (
-          <div className="observer-agency-choice" data-outcome={quarterChoice.outcome}>
-            <header><span>{quarterChoice.periodLabel}</span><strong>{PERSON_QUARTER_CHOICE_LABELS[quarterChoice.outcome]}</strong></header>
-            <dl>
-              <div><dt>原先打算</dt><dd>{quarterChoice.intended}</dd></div>
-              <div><dt>本季所行</dt><dd>{quarterChoice.actual}</dd></div>
-            </dl>
-            <p><b>{choiceReasonLabel}</b>{quarterChoice.reason}</p>
-            {quarterChoice.sourceEventId && onSelectEvent ? (
-              <button type="button" className="observer-agency-choice__source" onClick={() => onSelectEvent(quarterChoice.sourceEventId!)}>为何如此</button>
-            ) : null}
-          </div>
-        ) : <p className="observer-inspector__empty">本季尚无可核对的盘算与行动。</p>}
-        {agency.recentDecision ? (
-          <div className="observer-agency-decision" data-status={agency.recentDecision.status} data-after-choice={quarterChoice ? true : undefined}>
-            <div><strong>{quarterChoice ? `主意变了：${agency.recentDecision.label}` : agency.recentDecision.label}</strong><span>{PERSON_GOAL_STATUS_LABELS[agency.recentDecision.status]}</span></div>
-            <p>{agency.recentDecision.reason}</p>
-          </div>
-        ) : null}
-      </section>
-      <p className="observer-agency__note">筹谋会随处境复核；是否成行，还要看职位、资源与关系。</p>
+      <p className="observer-agency__note">这里只展示已经进入季度结算的明确打算；结果仍由职位、军权与朝局裁定。</p>
     </>
   );
 }
@@ -1184,7 +1106,7 @@ function mobileQuickLookFor(props: InspectorProps): MobileQuickLookView {
     name: props.data.name,
     ownerLabel: '辖属',
     owner: props.data.polityName ?? '无主之地',
-    current: `${props.data.summary ?? `${props.data.terrain}地势。`} 人口${display(props.data.population)}，粮况${display(props.data.food)}，动荡${Math.round(props.data.unrest)}。`,
+    current: `${props.showSupplyNote && props.data.supplyNote ? `供养：${props.data.supplyNote}。` : props.data.summary ?? `${props.data.terrain}地势。`} 人口${display(props.data.population)}，粮况${display(props.data.food)}，动荡${Math.round(props.data.unrest)}。`,
     destination: '地方帐簿、局势与往来',
   };
   if (props.kind === 'country') {

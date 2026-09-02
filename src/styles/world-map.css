@@ -75,15 +75,6 @@
   filter: contrast(1.015) saturate(0.96);
 }
 
-.world-map[data-overlay="disease"] .world-map__canvas {
-  filter: saturate(0.94);
-}
-
-.world-map[data-overlay="naval"] .world-map__canvas,
-.world-map[data-overlay="trade"] .world-map__canvas {
-  filter: saturate(0.9) contrast(1.015);
-}
-
 .world-map__tooltip {
   position: absolute;
   z-index: 4;

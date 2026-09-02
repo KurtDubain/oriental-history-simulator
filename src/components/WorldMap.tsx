@@ -19,8 +19,6 @@ import type {
   MapArmyView,
   MapCamera,
   MapFleetView,
-  MapFlowKind,
-  MapFlowView,
   MapLodLevel,
   MapLodScene,
   MapMarkerView,
@@ -72,8 +70,6 @@ export type {
   MapArmyView,
   MapCamera,
   MapFleetView,
-  MapFlowKind,
-  MapFlowView,
   MapLodLevel,
   MapMarkerView,
   MapObjectKind,
@@ -109,7 +105,6 @@ export interface WorldMapProps {
   armies: readonly MapArmyView[];
   seaZones?: readonly MapSeaZoneView[];
   fleets?: readonly MapFleetView[];
-  flows?: readonly MapFlowView[];
   markers?: readonly MapMarkerView[];
   highlightedRegionIds?: readonly string[];
   highlightEpoch?: string | number;
@@ -137,8 +132,7 @@ type HoverState =
   | { kind: "regionNode"; nodeKind: "city" | "port"; region: MapRegionView; x: number; y: number }
   | { kind: "army"; army: MapArmyView; x: number; y: number }
   | { kind: "fleet"; fleet: MapFleetView; x: number; y: number }
-  | { kind: "marker"; marker: MapMarkerView; x: number; y: number }
-  | { kind: "flow"; flow: MapFlowView; x: number; y: number };
+  | { kind: "marker"; marker: MapMarkerView; x: number; y: number };
 
 interface TapFeedback {
   id: number;
@@ -176,14 +170,7 @@ function selectedSceneAnchor(
   }
   const marker = layoutMapMarkers(scene.markers, transform)
     .find((layout) => mapMarkerMatchesSelection(layout.marker, selectedObject));
-  if (marker) return marker.point;
-  const flow = scene.flows.find((item) => (
-    item.selectedKind === selectedObject.kind && item.selectedId === selectedObject.id
-  ));
-  return flow ? worldToScreenPoint({
-    x: (flow.from.x + flow.to.x) / 2,
-    y: (flow.from.y + flow.to.y) / 2,
-  }, transform) : null;
+  return marker?.point ?? null;
 }
 
 function sameOcclusion(
@@ -204,7 +191,6 @@ export function WorldMap({
   armies,
   seaZones = [],
   fleets = [],
-  flows = [],
   markers = [],
   highlightedRegionIds = [],
   highlightEpoch = 'initial',
@@ -257,11 +243,10 @@ export function WorldMap({
       armies,
       seaZones,
       fleets,
-      flows,
       markers,
       mapProfile.presentation,
     ),
-    [armies, fleets, flows, mapProfile, markers, regions, routes, seaZones],
+    [armies, fleets, mapProfile, markers, regions, routes, seaZones],
   );
   const hoveredRegionId = hover?.kind === "region" || hover?.kind === "regionNode"
     ? hover.region.id
@@ -512,7 +497,7 @@ export function WorldMap({
       cameraRef.current,
       {
         coarsePointer: coarse,
-        includeSeaZones: true,
+        includeSeaZones: overlay === "war",
         tolerateRegionEdge: true,
         focusOffset: focusOffsetRef.current,
       },
@@ -543,11 +528,6 @@ export function WorldMap({
       showTapFeedback(point);
       return;
     }
-    if (hit.kind === 'flow' && onSelectObject) {
-      onSelectObject(hit.flow.selectedKind, hit.flow.selectedId);
-      showTapFeedback(point);
-      return;
-    }
     if (hit.kind === 'region') {
       onSelectRegion(hit.region.id);
       showTapFeedback(point);
@@ -557,7 +537,7 @@ export function WorldMap({
       onSelectObject('seaZone', hit.seaZone.id);
       showTapFeedback(point);
     }
-  }, [onSelectBlank, onSelectObject, onSelectRegion, scene, showTapFeedback, size.height, size.width]);
+  }, [onSelectBlank, onSelectObject, onSelectRegion, overlay, scene, showTapFeedback, size.height, size.width]);
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -644,7 +624,6 @@ export function WorldMap({
         x: point.x,
         y: point.y,
       });
-      else if (hit?.kind === 'flow') setHover({ kind: 'flow', flow: hit.flow, x: point.x, y: point.y });
       else if (hit?.kind === 'region') setHover({ kind: 'region', region: hit.region, x: point.x, y: point.y });
       else setHover(null);
     },
@@ -814,16 +793,14 @@ export function WorldMap({
         resetCamera();
         return;
       }
-      const visibleSeaZones = scene.seaZones
-        .filter((item) => scene.interactiveSeaZoneIds.has(item.id))
-        .map((item) => ({ kind: "seaZone" as const, id: item.id }));
-      const contextualObjects: Array<{ kind: MapObjectKind | 'region'; id: string; marker?: MapMarkerView }> = overlay === "naval"
-        ? [...visibleSeaZones, ...scene.fleets.map((item) => ({ kind: "fleet" as const, id: item.id }))]
-        : overlay === "trade"
-          ? [...scene.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId })), ...visibleSeaZones]
-        : overlay === "war"
-          ? scene.armies.map((item) => ({ kind: "army" as const, id: item.id }))
-        : [...scene.markers.map((marker) => ({ ...mapMarkerTarget(marker), marker })), ...scene.flows.map((item) => ({ kind: item.selectedKind, id: item.selectedId }))];
+      const visibleSeaZones = scene.seaZones.map((item) => ({ kind: "seaZone" as const, id: item.id }));
+      const contextualObjects: Array<{ kind: MapObjectKind | 'region'; id: string; marker?: MapMarkerView }> = overlay === "war"
+        ? [
+          ...scene.armies.map((item) => ({ kind: "army" as const, id: item.id })),
+          ...scene.fleets.map((item) => ({ kind: "fleet" as const, id: item.id })),
+          ...visibleSeaZones,
+        ]
+        : [];
       if (scene.regions.length === 0 && contextualObjects.length === 0) return;
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
@@ -839,10 +816,6 @@ export function WorldMap({
           const target = mapMarkerTarget(hover.marker);
           if (target.kind === 'region') onSelectRegion(target.id);
           else onSelectObject?.(target.kind, target.id, hover.marker);
-          return;
-        }
-        if (hover?.kind === "flow") {
-          onSelectObject?.(hover.flow.selectedKind, hover.flow.selectedId);
           return;
         }
         const selectedContext = contextualObjects.find((item) => (
@@ -861,7 +834,7 @@ export function WorldMap({
       }
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
       event.preventDefault();
-      if (contextualObjects.length && overlay !== "political" && overlay !== "none" && overlay !== "food" && overlay !== "population") {
+      if (contextualObjects.length) {
         const currentIndex = contextualObjects.findIndex((item) => item.id === selectedObject?.id);
         const direction = event.key === "ArrowRight" ? 1 : -1;
         const next = contextualObjects[(currentIndex + direction + contextualObjects.length) % contextualObjects.length];
@@ -890,8 +863,7 @@ export function WorldMap({
     ?? seaZones.find((item) => selectedObject?.kind === "seaZone" && item.id === selectedObject.id)?.name
     ?? fleets.find((item) => selectedObject?.kind === "fleet" && item.id === selectedObject.id)?.name
     ?? armies.find((item) => selectedObject?.kind === "army" && item.id === selectedObject.id)?.name
-    ?? markers.find((item) => mapMarkerMatchesSelection(item, selectedObject))?.label
-    ?? flows.find((item) => item.selectedKind === selectedObject?.kind && item.selectedId === selectedObject.id)?.label;
+    ?? markers.find((item) => mapMarkerMatchesSelection(item, selectedObject))?.label;
 
   const hoverTooltip = useMemo(() => {
     if (!hover) return null;
@@ -901,7 +873,7 @@ export function WorldMap({
       rows: [
         ["辖属", hover.region.polityName ?? (hover.region.polityId ? "地方政权" : "无主之地")],
         ["人口", formatPopulation(hover.region.population)],
-        ["粮况", foodDescription(hover.region.foodRatio)],
+        [overlay === "food" ? "供养" : "粮况", overlay === "food" ? hover.region.supplyNote : foodDescription(hover.region.foodRatio)],
       ],
     };
     if (hover.kind === "regionNode") return {
@@ -920,22 +892,14 @@ export function WorldMap({
       rows: [["舰力", formatPopulation(hover.fleet.strength)], ["战备", `${Math.round(hover.fleet.readiness)}`], ["任务", hover.fleet.mission]],
     };
     if (hover.kind === "marker") {
-      const political = hover.marker.kind === 'capitalPulse' || hover.marker.kind === 'powerRoot';
       return {
         name: hover.marker.label,
-        type: political ? `${hover.marker.categoryLabel ?? '朝局'} · 可点击` : hover.marker.kind === "outbreak" ? "疫病 · 可点击" : "技艺 · 可点击",
-        rows: political
-          ? [[hover.marker.kind === 'capitalPulse' ? '主导' : '派系', hover.marker.factionName ?? '尚未成形'], ['实据', hover.marker.detail ?? '当季权势记录']]
-          : [["强度", `${Math.round(hover.marker.magnitude)}`]],
+        type: `${hover.marker.categoryLabel ?? '朝局'} · 可点击`,
+        rows: [[hover.marker.kind === 'capitalPulse' ? '主导' : '派系', hover.marker.factionName ?? '尚未成形'], ['实据', hover.marker.detail ?? '当季权势记录']],
       };
     }
-    const flowNames: Record<MapFlowKind, string> = { trade: "商路", migration: "迁徙", disease: "传播", knowledge: "知识", naval: "航路" };
-    return {
-      name: hover.flow.label,
-      type: `${flowNames[hover.flow.kind]} · 可点击`,
-      rows: [["规模", formatPopulation(hover.flow.magnitude)]],
-    };
-  }, [hover]);
+    return null;
+  }, [hover, overlay]);
 
   return (
     <div
@@ -961,7 +925,6 @@ export function WorldMap({
       data-map-lod={lodLevel}
       data-visible-army-count={scene.armies.length}
       data-visible-fleet-count={scene.fleets.length}
-      data-visible-flow-count={scene.flows.length}
       data-visible-marker-count={scene.markers.length}
       data-political-pulse-ids={scene.markers.filter((item) => item.kind === 'capitalPulse').map((item) => item.id).join(',') || undefined}
       data-political-root-ids={scene.markers.filter((item) => item.kind === 'powerRoot').map((item) => item.id).join(',') || undefined}

@@ -4,7 +4,6 @@ import { buildTerritoryCells } from './map-territories';
 import type {
   MapArmyView,
   MapFleetView,
-  MapFlowView,
   MapMarkerView,
   MapPoint,
   MapPresentationView,
@@ -26,7 +25,6 @@ export function buildMapPresentation(
   armies: readonly MapArmyView[],
   seaZones: readonly MapSeaZoneView[],
   fleets: readonly MapFleetView[],
-  flows: readonly MapFlowView[],
   markers: readonly MapMarkerView[],
   profile: MapPresentationDefinition = getMapProfile().presentation,
 ): MapPresentationView {
@@ -78,7 +76,6 @@ export function buildMapPresentation(
     })),
     seaZones: presentedSeaZones,
     fleets: fleets.map((fleet) => ({ ...fleet, position: projectPoint(fleet.position) })),
-    flows: flows.map((flow) => ({ ...flow, from: projectPoint(flow.from), to: projectPoint(flow.to) })),
     markers: markers.map((marker) => ({ ...marker, position: projectPoint(marker.position) })),
   };
 }

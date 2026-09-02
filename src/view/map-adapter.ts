@@ -2,7 +2,6 @@ import type { WorldState } from '../sim/types';
 import type {
   MapArmyView,
   MapFleetView,
-  MapFlowView,
   MapMarkerView,
   MapOverlay,
   MapRegionView,
@@ -14,22 +13,76 @@ import {
   projectFactionSpatialPowerRoots,
 } from './political-map-projection';
 import { projectMilitaryAuthority } from './military-authority-reading';
-import { compact } from './compact-number';
 import { polity, region } from './dossier-adapter-shared';
 
 function foodSafetyRatio(population: number, food: number) {
   return food / Math.max(1, population);
 }
 
+function supplyPressureNote(
+  population: number,
+  foodRatio: number,
+  unrest: number,
+  devastation: number,
+  refugeePopulation: number,
+  infectiousPopulation: number,
+  tradeVolume: number,
+) {
+  if (foodRatio < 0.55) return '粮储危急，已难支撑军民';
+  if (infectiousPopulation > Math.max(80, population * 0.008)) return '疫病正在削弱地方供养';
+  if (refugeePopulation > Math.max(500, population * 0.04)) return '流民涌入，粮秣承压';
+  if (devastation >= 45 || unrest >= 70) return '战乱与民怨妨碍征粮';
+  if (tradeVolume > 0) return '商路仍在补充地方所需';
+  return foodRatio < 1 ? '粮储偏紧，尚可维持' : '供养尚稳';
+}
+
+export function regionSupplyNote(world: WorldState, item: WorldState['regions'][number]) {
+  const infection = world.infections.find((entry) => entry.hostKind === 'region' && entry.hostId === item.id);
+  const tradeVolume = world.tradeCorridors
+    .filter((entry) => entry.active && (entry.originRegionId === item.id || entry.destinationRegionId === item.id))
+    .reduce((sum, entry) => sum + entry.lastVolume, 0);
+  return supplyPressureNote(
+    item.population,
+    foodSafetyRatio(item.population, item.food),
+    item.unrest,
+    item.devastation,
+    item.refugeePopulation,
+    (infection?.infectious ?? 0) + (infection?.exposed ?? 0),
+    tradeVolume,
+  );
+}
+
+function expectedContact(world: WorldState, army: WorldState['armies'][number]): MapArmyView['expectedContact'] {
+  if (army.order.status !== 'active' || !['advance', 'intercept'].includes(army.order.kind)) return undefined;
+  const war = world.wars.find((item) => item.id === army.order.warId && item.active);
+  if (!war) return undefined;
+  const enemyPolityId = war.attackerId === army.polityId
+    ? war.defenderId
+    : war.defenderId === army.polityId
+      ? war.attackerId
+      : null;
+  if (!enemyPolityId) return undefined;
+  const explicitTarget = army.order.targetArmyId
+    ? world.armies.find((item) => item.id === army.order.targetArmyId)
+    : undefined;
+  const contact = explicitTarget?.polityId === enemyPolityId && explicitTarget.soldiers > 0
+    ? explicitTarget
+    : world.armies
+      .filter((item) => item.polityId === enemyPolityId && item.soldiers > 0 && item.regionId === army.order.targetRegionId)
+      .sort((left, right) => right.soldiers - left.soldiers || left.id.localeCompare(right.id, 'zh-CN'))[0];
+  const contactRegion = contact && world.regions.find((item) => item.id === contact.regionId);
+  return contact && contactRegion ? {
+    armyId: contact.id,
+    armyName: contact.name,
+    regionId: contactRegion.id,
+    regionName: contactRegion.name,
+  } : undefined;
+}
+
 export function toMapRegions(world: WorldState): MapRegionView[] {
   const polities = new Map(world.polities.map((item) => [item.id, item]));
   return world.regions.map((item) => {
     const owner = polities.get(item.controllerId);
-    const infection = world.infections.find((entry) => entry.hostKind === 'region' && entry.hostId === item.id);
-    const practiceStates = world.practiceStates.filter((entry) => entry.regionId === item.id && entry.lostTurn === null);
-    const tradeVolume = world.tradeCorridors
-      .filter((entry) => entry.active && (entry.originRegionId === item.id || entry.destinationRegionId === item.id))
-      .reduce((sum, entry) => sum + entry.lastVolume, 0);
     return {
       id: item.id,
       name: item.name,
@@ -47,16 +100,8 @@ export function toMapRegions(world: WorldState): MapRegionView[] {
       portLevel: item.portLevel,
       capital: owner?.capitalRegionId === item.id,
       cityLevel: item.cityLevel,
-      defense: item.defense,
       strategicValue: item.strategicValue,
-      diseasePressure: infection
-        ? (infection.infectious + infection.exposed) / Math.max(1, item.population) * 100
-        : 0,
-      knowledgeAdoption: practiceStates.length
-        ? practiceStates.reduce((sum, entry) => sum + entry.adoption, 0) / practiceStates.length
-        : 0,
-      refugeePopulation: item.refugeePopulation,
-      tradeVolume: Math.min(100, Math.log1p(tradeVolume) * 8),
+      supplyNote: regionSupplyNote(world, item),
     };
   });
 }
@@ -97,13 +142,13 @@ export function toMapArmies(world: WorldState): MapArmyView[] {
         orderTargetRegionId: reading.orderTargetRegionId,
         orderIssuerName: reading.orderIssuerName,
         orderBlocked: reading.orderBlocked,
+        expectedContact: expectedContact(world, army),
       };
     });
 }
 
 export function toMapSeaZones(world: WorldState): MapSeaZoneView[] {
   return world.seaZones.map((item) => {
-    const controller = polity(world, item.controllerId);
     const totalPower = Object.values(item.powerByPolity)
       .reduce((sum, value) => sum + Math.max(0, value), 0);
     const controllerPower = item.controllerId
@@ -114,12 +159,7 @@ export function toMapSeaZones(world: WorldState): MapSeaZoneView[] {
       name: item.name,
       center: { x: item.x, y: item.y },
       climate: item.climate,
-      controllerName: controller?.name,
-      controllerColor: controller?.color,
       contested: item.contested,
-      traffic: item.traffic,
-      stormRisk: item.stormRisk,
-      piracy: item.piracy,
       powerShare: totalPower > 0 ? controllerPower / totalPower : 0,
     };
   });
@@ -156,164 +196,11 @@ export function toMapFleets(world: WorldState): MapFleetView[] {
   });
 }
 
-function hostPoint(world: WorldState, hostId: string) {
-  const hostRegion = region(world, hostId);
-  if (hostRegion) return { x: hostRegion.x, y: hostRegion.y };
-  const army = world.armies.find((item) => item.id === hostId);
-  const armyRegion = region(world, army?.regionId);
-  if (armyRegion) return { x: armyRegion.x, y: armyRegion.y };
-  return fleetPoint(world, hostId);
-}
-
-export function toMapFlows(world: WorldState, overlay: MapOverlay): MapFlowView[] {
-  const flows: MapFlowView[] = [];
-  if (overlay === 'trade') {
-    for (const corridor of world.tradeCorridors.filter((item) => item.active)) {
-      const from = region(world, corridor.originRegionId);
-      const to = region(world, corridor.destinationRegionId);
-      if (!from || !to) continue;
-      flows.push({
-        id: corridor.id,
-        kind: 'trade',
-        from,
-        to,
-        magnitude: corridor.lastVolume,
-        label: `${corridor.commodity} · ${compact.format(corridor.lastVolume)}`,
-        selectedKind: 'tradeCorridor',
-        selectedId: corridor.id,
-        alert: corridor.risk >= 65,
-      });
-    }
-  }
-  if (overlay === 'migration') {
-    for (const shipment of world.lastTurn?.trade.shipments.filter((item) => item.kind === '迁徙') ?? []) {
-      const from = region(world, shipment.originRegionId);
-      const to = region(world, shipment.destinationRegionId);
-      if (!from || !to) continue;
-      flows.push({
-        id: shipment.id,
-        kind: 'migration',
-        from,
-        to,
-        magnitude: shipment.peopleDeparted,
-        label: `${compact.format(shipment.peopleArrived)}人落籍`,
-        selectedKind: 'migration',
-        selectedId: shipment.id,
-        alert: shipment.peopleLost > 0,
-      });
-    }
-  }
-  if (overlay === 'disease') {
-    for (const infection of world.infections) {
-      const destination = hostPoint(world, infection.hostId);
-      if (!destination) continue;
-      for (const source of infection.recentSources) {
-        const origin = hostPoint(world, source.sourceHostId);
-        if (!origin || source.importedExposures <= 0) continue;
-        flows.push({
-          id: `${infection.id}-${source.turn}-${source.shipmentId ?? source.sourceHostId}`,
-          kind: 'disease',
-          from: origin,
-          to: destination,
-          magnitude: source.importedExposures,
-          label: `输入暴露 ${source.importedExposures}`,
-          selectedKind: 'outbreak',
-          selectedId: infection.id,
-          alert: true,
-        });
-      }
-    }
-  }
-  if (overlay === 'knowledge') {
-    for (const state of world.practiceStates.filter((item) => item.sourceRegionId && item.mastery > 0)) {
-      const from = region(world, state.sourceRegionId);
-      const to = region(world, state.regionId);
-      const practice = world.practices.find((item) => item.id === state.practiceId);
-      if (!from || !to || !practice) continue;
-      flows.push({
-        id: state.id,
-        kind: 'knowledge',
-        from,
-        to,
-        magnitude: Math.max(state.adoption, state.mastery),
-        label: `${practice.name} · 采用${Math.round(state.adoption)}`,
-        selectedKind: 'practice',
-        selectedId: practice.id,
-      });
-    }
-  }
-  if (overlay === 'naval') {
-    for (const lane of world.seaLanes) {
-      const from = world.seaZones.find((item) => item.id === lane.fromSeaZoneId);
-      const to = world.seaZones.find((item) => item.id === lane.toSeaZoneId);
-      if (!from || !to) continue;
-      flows.push({
-        id: lane.id,
-        kind: 'naval',
-        from,
-        to,
-        magnitude: lane.capacity,
-        label: lane.strait ? '海峡航道' : '海上航道',
-        selectedKind: 'seaZone',
-        selectedId: to.id,
-        alert: lane.baseRisk >= 65,
-      });
-    }
-  }
-  return flows
-    .sort((left, right) => right.magnitude - left.magnitude || left.id.localeCompare(right.id))
-    .slice(0, 16);
-}
-
 export function toMapMarkers(
   world: WorldState,
   overlay: MapOverlay,
   focusedFactionId: string | null = null,
 ): MapMarkerView[] {
-  if (overlay === 'disease') {
-    return world.infections
-      .filter((item) => item.infectious > 0 || item.exposed > 0)
-      .flatMap((item) => {
-        const position = hostPoint(world, item.hostId);
-        const pathogen = world.pathogens.find((candidate) => candidate.id === item.pathogenId);
-        const total = item.susceptible + item.exposed + item.infectious + item.recovered;
-        return position ? [{
-          id: item.id,
-          kind: 'outbreak' as const,
-          position,
-          magnitude: Math.min(100, (item.exposed + item.infectious) / Math.max(1, total) * 1_000),
-          label: pathogen?.name ?? '疫病',
-          alert: item.infectious > 0,
-          targetKind: 'outbreak' as const,
-          targetId: item.id,
-        }] : [];
-      })
-      .sort((left, right) => right.magnitude - left.magnitude)
-      .slice(0, 20);
-  }
-  if (overlay === 'knowledge') {
-    return world.practiceStates
-      .filter((item) => item.innovationProgress > 0 || item.mastery > 0)
-      .sort((left, right) => (
-        Math.max(right.adoption, right.mastery, right.innovationProgress)
-        - Math.max(left.adoption, left.mastery, left.innovationProgress)
-      ))
-      .flatMap((item) => {
-        const practice = world.practices.find((candidate) => candidate.id === item.practiceId);
-        const practiceRegion = region(world, item.regionId);
-        return practice && practiceRegion ? [{
-          id: practice.id,
-          kind: 'practice' as const,
-          position: { x: practiceRegion.x, y: practiceRegion.y },
-          magnitude: Math.max(item.adoption, item.mastery, item.innovationProgress),
-          label: practice.name,
-          targetKind: 'practice' as const,
-          targetId: practice.id,
-        }] : [];
-      })
-      .filter((item, index, items) => items.findIndex((candidate) => candidate.id === item.id) === index)
-      .slice(0, 20);
-  }
   if (overlay === 'political') {
     const capitalPulses: MapMarkerView[] = projectCapitalPoliticalPulses(world, 'active')
       .flatMap((pulse) => {

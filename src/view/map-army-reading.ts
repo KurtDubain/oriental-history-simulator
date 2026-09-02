@@ -15,6 +15,9 @@ export function mapArmyHoverReading(army: MapArmyView) {
       ['兵权', authority],
       ['军势', `${compact.format(army.strength)}${retinue}`],
       ['军令', army.orderLabel ?? army.status ?? '在营'],
+      ...(army.expectedContact
+        ? [['预计接敌', `${army.expectedContact.armyName} · ${army.expectedContact.regionName}`]]
+        : []),
     ],
   };
 }

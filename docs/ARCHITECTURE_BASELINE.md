@@ -1,15 +1,19 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，v1.21.1 更新于 2026-09-02，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.22.0 COMPACT01 更新于 2026-09-02，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
-- `src` 下生产 TypeScript / TSX：167 个文件，65,024 行（测试排除）。
-- 相对模块依赖：643 条，其中 412 条 runtime、231 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环，正好落在 12/12 的不增长预算内。
-- 当前热点：`engine.ts` 3,117/3,120 行、`invariants.ts` 2,664/2,665 行、`App.tsx` 2,569/2,600 行（实际/门禁）。
-- 其次为 `v02.ts` 2,488 行、`v03-ocean.ts` 2,409 行、`agency/decision.ts` 2,029 行、`v1-agency-shadow.ts` 1,479 行、`map-renderer.ts` 1,460 行与 `Inspector.tsx` 1,397 行。`WorldMap.tsx` 为 1,085/1,100 行，继续由 Scene / renderer / gesture 契约支撑；`view/adapters.ts` 为 53/100 行。
+- `src` 下生产 TypeScript / TSX：164 个文件，60,796 行（测试排除）；相对 v1.21.1 净减 3 个生产文件、4,228 行。
+- 相对模块依赖：626 条，其中 403 条 runtime、223 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环，正好落在 12/12 的不增长预算内。
+- 当前热点：`engine.ts` 3,117/3,120 行、`invariants.ts` 2,664/2,665 行、`App.tsx` 2,289/2,300 行（实际/门禁）。
+- 其次为 `v02.ts` 2,488 行、`v03-ocean.ts` 2,409 行、`agency/decision.ts` 2,029 行、`map-renderer.ts` 1,401 行与 `Inspector.tsx` 1,319 行。`observer-leads.ts` 为 316/400 行，`WorldMap.tsx` 为 1,048/1,100 行，`view/adapters.ts` 为 51/100 行。
 
 行数是增长预警，不是机械拆文件指标。新增领域规则不得再默认进入四个最高热点；只有形成稳定输入、输出和所有权后才拆分。
+
+### 权威状态准入规则
+
+任何新数据进入 `WorldState` 前必须同时回答“下一季哪个系统会消费它”或“它如何防止同一事实被重复消费”。两者都不能回答的数据不得进入 `WorldState`；展示排序、恢复焦点、题目留任、比较账、UI 分支和调试摘要应当由当前权威状态纯投影，或在确有交互恢复需要时进入有界 observer-only 设置。不得以“以后可能用到”为由增加顶层字段、季度阶段或持久兼容层。
 
 ## 已知依赖风险
 
@@ -19,7 +23,29 @@ v1.10.1 的扫描已从正则匹配改为 TypeScript AST 与 Tarjan SCC，能区
 - 类型总图仅有一个 12 模块 SCC：`types.ts` 汇总 `WorldState`，Facts、Agency 和 Situation 合约又以 type-only 方式反向参照总状态。相关 import 不进入浏览器 JavaScript，所以这是契约所有权债务，不是初始化顺序或 `undefined` 风险。
 - 门禁将 runtime cycle 与跨层依赖视为硬失败；type-only SCC 先锁定为 12 模块的不增长预算。后续只在对应领域纵切中把持久化 DTO 与可执行实现分开，不为消除图上的线一次性搬动存档契约。
 
-## 本纵切的所有权
+## COMPACT01 删除的状态所有权
+
+```text
+人物目标 / 计划
+  → 唯一 owner：WorldState.agencyDecisionSystem
+  → 最近提交与结果：typed agency / embodied Facts
+  ✕ 删除：AgencyShadowLedger / branch / restore point / comparison / localStorage
+
+当世三问
+  → 当前 Situation + 本季战争 / 朝堂 Facts 的无状态投影
+  ✕ 删除：ObserverLeadContinuityState / 固定槽位 / 任期 / 挑战者 / 仲裁账
+
+舆图
+  → 疆界 / 军争 / 供养 / 地势四种玩家概念
+  ✕ 删除：六种专业叠层、MapFlow DTO、流线命中、专业 marker 与选择策略
+```
+
+- 旧 `canghai-agency-shadow-ledger-v1` 和 ObserverDesk 中的 `leadContinuity` 都直接忽略，不迁移到新 store 或 wrapper。
+- `App.tsx` 继续是唯一 `WorldState` React owner；世界打开、推进、天意、收藏与存读档不再同步观察账本。
+- `WorldState` 仍为 44 个顶层字段，季度流水线仍为 22 个阶段；本轮没有升级 schema，也没有改变领域结算顺序。
+- 个人版 / 参赛版 JavaScript gzip 为 406,311 / 406,220 bytes，均低于收紧后的 410 KiB 门禁；CSS gzip 均为 38,651 bytes。包体余量不用于恢复已删除概念。
+
+## 军权纵切的所有权
 
 ```text
 ArmyState.allegiance / retinues / order
@@ -91,8 +117,8 @@ NavalOperationState.manifest
 
 - `App.tsx` 从 v1.10.0 的约 3,301 行降至约 2,525 行。对象标签/关注转换、Agency 跟踪/档案投影、`render_game_to_text` 快照和它们的 observer-only 合约已有独立 owner；纯投影回归同时核对输出和世界不变性。页面壳仍是权威世界唯一 React owner，拆分模块不保存第二份模拟状态。
 - `calendar.ts` 和 `world-hash.ts` 成为纪年/权威摘要的纯 owner，`engine.ts` 只保留兼容 re-export。`invariants.ts`、`v03-intervention.ts` 和 `persistence.ts` 改为直接依赖纯模块；运行时闭包分别从 33 降至 21、32 降至 4 与 34 降至 32。`engine.ts` 从 3,210 行降至约 3,098 行，哈希构造顺序、保留窗口、schema 和存档均未改变。
-- 架构门直接拒绝 runtime SCC、禁止的跨层依赖、type-only 债务增长和热点预算超标。当前预算为 `App.tsx` 2,600、`engine.ts` 3,120、`invariants.ts` 2,665、`WorldMap.tsx` 1,100、`view/adapters.ts` 100 行；这些是防反弹上限，不是为了凑行数填满的目标。
-- Vite 将 framework、simulation、maps 和应用入口分为稳定产物边界。v1.21.1 本地个人版 / 参赛版 JavaScript gzip 均为 429,895 bytes，按 40 位发布提交标识复核为 429,904 bytes；CSS gzip 均为 39,273 bytes。单 JS raw 585 KiB、JS gzip 总量 420 KiB、CSS gzip 总量 40 KiB 的门禁均未放宽，线上发布形态只余 176 bytes；下一纵切必须先拆分或删除，不能无依据提高预算。
+- 架构门直接拒绝 runtime SCC、禁止的跨层依赖、type-only 债务增长和热点预算超标。当前预算为 `App.tsx` 2,300、`observer-leads.ts` 400、`engine.ts` 3,120、`invariants.ts` 2,665、`WorldMap.tsx` 1,100、`view/adapters.ts` 100 行；这些是防反弹上限，不是为了凑行数填满的目标。
+- Vite 将 framework、simulation、maps 和应用入口分为稳定产物边界。v1.21.1 曾达到约 429,904 bytes JavaScript gzip，COMPACT01 已通过真实删除回落到上方实测并把总 JavaScript gzip 门禁收紧为 410 KiB；单 JS raw 585 KiB 与 CSS gzip 40 KiB 门禁均未提高。
 - `.github/workflows/quality.yml` 在 Pull Request 和 `main` 推送上使用 `.nvmrc` 固定 Node 22，以 `npm ci` 从锁文件安装，依次执行单测、架构门、两种构建/产物预算、安全更新与关键浏览器链；失败时上传 `output/` 以便复现。发布检查同时约束 `package.json` / lockfile / 个人版更新记录 / 参赛版更新记录一致，并在生产变更时要求版本递增。
 
 ## v1.19.0 政治投影与地图载荷边界

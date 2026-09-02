@@ -1,6 +1,6 @@
 import type {
   PersonAgencyCommandRequestView,
-  PersonAgencyQuarterChoiceView,
+  PersonAgencyView,
   PersonInspectorData,
   PersonRelationshipView,
 } from '../components/Inspector';
@@ -19,10 +19,12 @@ import {
   readWorldHistory,
 } from '../sim/archive';
 import {
-  projectCharacterAgency,
-  toCharacterAgencyPlayerProjection,
+  projectCharacterDesires,
+  ROOT_DESIRE_LABELS,
   toPersonalMemoryPlayerViews,
-  type CharacterAgencyShadowProjection,
+  type CharacterAgencyDecisionState,
+  type CharacterDesireProjection,
+  type RootDesire,
 } from '../sim/agency';
 import { calculateCharacterPowerPosition } from '../sim/politics/power-ledger';
 import { projectHistoricalScenes } from './historical-scenes';
@@ -384,18 +386,6 @@ function projectPersonRelationships(world: WorldState, item: CharacterState): Pe
     });
 }
 
-export interface PersonAgencyDossierOptions {
-  projection?: CharacterAgencyShadowProjection | null;
-  quarterChoice?: PersonAgencyQuarterChoiceView | null;
-  commandRequest?: PersonAgencyCommandRequestView | null;
-}
-
-function naturalAgencyLabel(label: string): string {
-  if (label === '争取独立统军') return '谋求独领一军';
-  if (label === '正式请求独立军令') return '向朝廷请领军令';
-  return label;
-}
-
 type AgencyIntentSubmittedFact = Extract<SimulationFact, { kind: 'agency_intent_submitted' }>;
 type AgencyIntentResolvedFact = Extract<SimulationFact, { kind: 'agency_intent_resolved' }>;
 
@@ -570,11 +560,6 @@ function preparedCommandEvidence(
   return [...supportEvidence, ...requestBarrier, ...missing.slice(0, supportEvidence.length || requestBarrier.length ? 0 : 1), ...completed].slice(0, 3);
 }
 
-interface CommandRequestProjection {
-  view: PersonAgencyCommandRequestView | null;
-  authoritative: boolean;
-}
-
 type AgencyDecisionActor = WorldState['agencyDecisionSystem']['actors'][number];
 
 function latestTerminalCommandResolution(
@@ -721,12 +706,12 @@ function currentTerminalCommandRequest(
 export function toPersonCommandRequestView(
   world: WorldState,
   characterId: string,
-): CommandRequestProjection {
+): PersonAgencyCommandRequestView | null {
   const actor = world.agencyDecisionSystem?.actors.find((entry) => entry.characterId === characterId);
-  if (!actor) return { view: null, authoritative: false };
+  if (!actor) return null;
   const armyName = world.armies.find((army) => army.id === actor.goal.targetArmyId)?.name ?? '所部军团';
   const terminalView = currentTerminalCommandRequest(world, actor, armyName);
-  if (terminalView) return { view: terminalView, authoritative: true };
+  if (terminalView) return terminalView;
   const resolved = actor.lastResolutionFactId
     ? world.facts.find((fact): fact is AgencyIntentResolvedFact => (
       fact.kind === 'agency_intent_resolved'
@@ -737,14 +722,11 @@ export function toPersonCommandRequestView(
   if (resolved) {
     const copy = commandResolutionCopy(resolved, armyName);
     return {
-      authoritative: true,
-      view: {
-        id: resolved.payload.submissionFactId,
-        periodLabel: turnLabel(resolved.turn),
-        ...copy,
-        evidence: commandCheckEvidence(resolved),
-        sourceEventId: commandSourceEventId(world, resolved.id),
-      },
+      id: resolved.payload.submissionFactId,
+      periodLabel: turnLabel(resolved.turn),
+      ...copy,
+      evidence: commandCheckEvidence(resolved),
+      sourceEventId: commandSourceEventId(world, resolved.id),
     };
   }
   const resolvedSubmissionIds = new Set(world.facts
@@ -760,20 +742,17 @@ export function toPersonCommandRequestView(
     .sort((left, right) => right.turn - left.turn || right.id.localeCompare(left.id))[0];
   if (submitted) {
     return {
-      authoritative: true,
-      view: {
-        id: submitted.id,
-        stage: 'submitted',
-        periodLabel: turnLabel(submitted.turn),
-        statusLabel: '已经请令',
-        title: `已向朝廷请领${armyName}军令`,
-        summary: '请令已经入册，尚待朝廷作出裁定。',
-        evidence: [{ tone: 'support', label: '已行', detail: '正式请令已经递出，不再只是个人盘算' }],
-        sourceEventId: commandSourceEventId(world, submitted.id),
-      },
+      id: submitted.id,
+      stage: 'submitted',
+      periodLabel: turnLabel(submitted.turn),
+      statusLabel: '已经请令',
+      title: `已向朝廷请领${armyName}军令`,
+      summary: '请令已经入册，尚待朝廷作出裁定。',
+      evidence: [{ tone: 'support', label: '已行', detail: '正式请令已经递出，不再只是个人盘算' }],
+      sourceEventId: commandSourceEventId(world, submitted.id),
     };
   }
-  if (actor.goal.status !== 'active') return { view: null, authoritative: true };
+  if (actor.goal.status !== 'active') return null;
   const completedCount = actor.plan.steps.filter((step) => (
     step.action !== 'request_independent_command' && step.status === 'completed'
   )).length;
@@ -781,44 +760,117 @@ export function toPersonCommandRequestView(
   const requestStep = actor.plan.steps.find((step) => step.action === 'request_independent_command');
   const stage = completedCount > 0 ? 'preparing' : 'planned';
   return {
-    authoritative: true,
-    view: {
-      id: actor.goal.id,
-      stage,
-      periodLabel: `起意于${turnLabel(actor.goal.createdTurn)}`,
-      statusLabel: stage === 'planned' ? '已有此意' : '正在筹备',
-      title: stage === 'planned' ? `想独领${armyName}` : `为请领${armyName}军令铺路`,
-      summary: currentStep
-        ? currentStep.action === 'request_independent_command'
-          ? '所需条件已经大致齐备，下一步才会正式请令。'
-          : `眼下先${COMMAND_PLAN_STEP_LABELS[currentStep.action] ?? '补足所需准备'}；尚未正式请令。`
-        : requestStep?.evidence
-          ? `${naturalCommandEvidence(requestStep.evidence)}，尚未正式请令。`
-          : '所需准备尚未齐备，眼下还不能正式请令。',
-      evidence: preparedCommandEvidence(world, actor),
-      sourceEventId: null,
-    },
+    id: actor.goal.id,
+    stage,
+    periodLabel: `起意于${turnLabel(actor.goal.createdTurn)}`,
+    statusLabel: stage === 'planned' ? '已有此意' : '正在筹备',
+    title: stage === 'planned' ? `想独领${armyName}` : `为请领${armyName}军令铺路`,
+    summary: currentStep
+      ? currentStep.action === 'request_independent_command'
+        ? '所需条件已经大致齐备，下一步才会正式请令。'
+        : `眼下先${COMMAND_PLAN_STEP_LABELS[currentStep.action] ?? '补足所需准备'}；尚未正式请令。`
+      : requestStep?.evidence
+        ? `${naturalCommandEvidence(requestStep.evidence)}，尚未正式请令。`
+        : '所需准备尚未齐备，眼下还不能正式请令。',
+    evidence: preparedCommandEvidence(world, actor),
+    sourceEventId: null,
+  };
+}
+
+function readableDesireReason(
+  desire: CharacterDesireProjection,
+  kind: RootDesire,
+): string {
+  const axis = desire.axes.find((item) => item.kind === kind);
+  const sources = axis?.sources
+    .filter((source) => source.kind !== 'seed' && source.contribution > 0)
+    .sort((left, right) => right.contribution - left.contribution)
+    .slice(0, 2)
+    .map((source) => source.summary) ?? [];
+  if (sources.length === 1) return `源于${sources[0]}`;
+  if (sources.length > 1) return `源于${sources[0]}，也受到${sources[1]}影响`;
+  return '眼下没有特别强烈的外部推力';
+}
+
+function decisionClosureReason(actor: CharacterAgencyDecisionState): string {
+  if (actor.goal.status === 'achieved' || actor.goal.closureReason === 'command_obtained') {
+    return '已经获得这支军团的正式军令';
+  }
+  if (actor.goal.closureReason === 'actor_dead') return '人物已经去世，这项打算随之终止';
+  if (actor.goal.closureReason === 'position_lost') return '已不再担任所指军团的副将，无从继续请令';
+  if (actor.goal.closureReason === 'target_missing') return '所指军团已经不复存在';
+  if (actor.goal.closureReason === 'request_exhausted') return '多次请令未获准，此事暂且搁下';
+  return '这项打算已经结束';
+}
+
+function projectAuthoritativeAgency(
+  world: WorldState,
+  item: CharacterState,
+  commandRequest: PersonAgencyCommandRequestView | null,
+): PersonAgencyView {
+  const desire = projectCharacterDesires(world, item.id);
+  const actor = world.agencyDecisionSystem.actors.find((entry) => entry.characterId === item.id);
+  const coreKinds = actor?.coreDesireKinds ?? desire.coreDesireKinds.slice(0, 2);
+  const desires = coreKinds
+    .filter((kind, index, values) => values.indexOf(kind) === index)
+    .slice(0, 2)
+    .map((kind) => ({
+      label: ROOT_DESIRE_LABELS[kind],
+      core: true,
+      reason: readableDesireReason(desire, kind),
+    }));
+  const availability: PersonAgencyView['availability'] = !item.alive
+    ? 'closed'
+    : item.age < 16 || item.lifeStage === '幼年' || item.lifeStage === '成长'
+      ? 'dormant'
+      : 'active';
+  const currentStep = actor?.plan.steps.find((step) => step.status === 'available')
+    ?? actor?.plan.steps.find((step) => step.status === 'blocked');
+  const armyName = actor
+    ? world.armies.find((army) => army.id === actor.goal.targetArmyId)?.name ?? '所部军团'
+    : null;
+  const primaryGoal = actor && armyName ? {
+    id: actor.goal.id,
+    label: `谋求独领${armyName}`,
+    status: actor.goal.status,
+    reason: actor.goal.status === 'active'
+      ? `${turnLabel(actor.goal.createdTurn)}起，此人开始为独领${armyName}作准备`
+      : decisionClosureReason(actor),
+    barrier: actor.goal.status === 'active' ? naturalCommandEvidence(currentStep?.evidence ?? '') : '',
+  } : null;
+  const currentPlanSteps = actor?.plan.steps.map((step) => ({
+    label: COMMAND_PLAN_STEP_LABELS[step.action] ?? '推进眼下的打算',
+    status: step.status,
+    reason: naturalCommandEvidence(step.evidence),
+  })) ?? [];
+  const reason = availability === 'closed'
+    ? '人物已经去世，不再形成新的行动'
+    : availability === 'dormant'
+      ? '尚未成年，眼下还没有进入世事'
+      : actor
+        ? '这项打算已经进入季度结算，会随职位、履历和朝局继续推进'
+        : '眼下没有形成会进入季度结算的明确行动';
+  return {
+    availability,
+    reason,
+    barrier: primaryGoal?.barrier || null,
+    longTermDirectionLabel: ROOT_DESIRE_LABELS[coreKinds[0] ?? 'safety'],
+    desires,
+    primaryGoal,
+    currentPlanSteps,
+    memories: toPersonalMemoryPlayerViews(world, item.id),
+    commandRequest,
   };
 }
 
 export function toPersonInspector(
   world: WorldState,
   item: CharacterState,
-  options: PersonAgencyDossierOptions = {},
 ): PersonInspectorProjection {
   const owner = polity(world, item.polityId);
   const home = region(world, item.locationRegionId);
   const personFamily = family(world, item.familyId);
-  const projectedAgency = toCharacterAgencyPlayerProjection(
-    options.projection ?? projectCharacterAgency(world, item.id),
-  );
-  const projectedCommandRequest = toPersonCommandRequestView(world, item.id);
-  const commandRequest = options.commandRequest !== undefined
-    ? options.commandRequest
-    : projectedCommandRequest.view;
-  const hasAuthoritativeCommandRequest = options.commandRequest !== undefined
-    ? Boolean(options.commandRequest)
-    : projectedCommandRequest.authoritative;
+  const commandRequest = toPersonCommandRequestView(world, item.id);
   const powerPosition = calculateCharacterPowerPosition(world, item.id);
   const powerFaction = powerPosition.factionId
     ? world.factions.find((faction) => faction.id === powerPosition.factionId)
@@ -840,21 +892,7 @@ export function toPersonInspector(
     'active',
   ).map(toHistoricalSceneView);
   const agency = {
-    ...projectedAgency,
-    primaryGoal: projectedAgency.primaryGoal
-      ? { ...projectedAgency.primaryGoal, label: naturalAgencyLabel(projectedAgency.primaryGoal.label) }
-      : null,
-    secondaryGoals: projectedAgency.secondaryGoals.map((goal) => ({
-      ...goal,
-      label: naturalAgencyLabel(goal.label),
-    })),
-    currentPlanSteps: projectedAgency.currentPlanSteps.map((step) => ({
-      ...step,
-      label: naturalAgencyLabel(step.label),
-    })),
-    memories: toPersonalMemoryPlayerViews(world, item.id),
-    quarterChoice: hasAuthoritativeCommandRequest ? null : options.quarterChoice ?? null,
-    commandRequest,
+    ...projectAuthoritativeAgency(world, item, commandRequest),
     powerPosition: {
       total: powerPosition.total,
       standing: powerPosition.standing,
@@ -903,7 +941,7 @@ export function toPersonInspector(
     relationships,
     experiences,
     politicalFocus: projectPersonPoliticalFocus(world, item),
-    summary: commandRequest && ['submitted', 'approved', 'blocked'].includes(commandRequest.stage)
+    summary: commandRequest
       ? `请令：${commandRequest.title}。${commandRequest.summary}`
       : agency.primaryGoal
         ? `所图：${agency.primaryGoal.label}。${currentStep ? `眼下先${currentStep.label}` : agency.primaryGoal.reason}${agency.primaryGoal.barrier ? `；难处在于${agency.primaryGoal.barrier}` : ''}。`
@@ -918,9 +956,8 @@ export function toPersonInspector(
 export function toPersonArchive(
   world: WorldState,
   item: CharacterState,
-  options: PersonAgencyDossierOptions = {},
 ): PersonArchiveProjection {
-  const inspector = toPersonInspector(world, item, options);
+  const inspector = toPersonInspector(world, item);
   const owner = polity(world, item.polityId);
   const personFamily = family(world, item.familyId);
   const records: ArchiveRecord[] = toPersonExperienceRecords(world, item);

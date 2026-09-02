@@ -34,8 +34,6 @@ export function ObserverLeads({
   const [mobileOpen, setMobileOpen] = useState(false);
   const [mobileExpanded, setMobileExpanded] = useState(false);
 
-  if (!leads.length) return null;
-
   return (
     <aside
       className="observer-leads"
@@ -49,7 +47,7 @@ export function ObserverLeads({
         <div>
           <span>观察线索 · 现在看什么</span>
           <h2 id="observer-leads-title">当世三问</h2>
-          <small>一人 · 一国 · 一条矛盾</small>
+          <small>战争 · 人物 · 朝局</small>
         </div>
         {onOpenSituations && situationCount > 0 ? (
           <button
@@ -69,7 +67,7 @@ export function ObserverLeads({
           data-testid="observer-leads-mobile-toggle"
           data-fully-expanded={mobileExpanded || undefined}
           aria-expanded={mobileOpen}
-          aria-label={!mobileOpen ? '展开第一条观察线索' : mobileExpanded ? '收起观察线索' : '展开全部三条观察线索'}
+          aria-label={!mobileOpen ? '展开第一条观察线索' : mobileExpanded ? '收起观察线索' : '展开全部观察线索'}
           onClick={() => {
             if (!mobileOpen) {
               setMobileOpen(true);
@@ -89,6 +87,11 @@ export function ObserverLeads({
       </header>
 
       <ol className="observer-leads__list">
+        {leads.length === 0 ? (
+          <li className="observer-leads__empty">
+            眼下暂无值得单列的战事或朝局；推进一季，再看世事如何落笔。
+          </li>
+        ) : null}
         {leads.map((lead) => {
           const targetKey = observerLeadTargetKey(lead);
           const watchKey = observerLeadWatchKey(lead);
@@ -97,11 +100,10 @@ export function ObserverLeads({
           return (
             <li
               key={lead.id}
-              data-slot={lead.slot}
-              data-source={lead.source ?? 'fallback'}
+              data-source={lead.source}
               data-lead-id={lead.id}
               data-situation-id={lead.situationId ?? undefined}
-              data-display-mode={lead.displayMode ?? 'fallback'}
+              data-display-mode={lead.displayMode}
               data-selected={selected || undefined}
               data-watched={watched || undefined}
               data-testid="observer-lead"
@@ -117,7 +119,7 @@ export function ObserverLeads({
                 </span>
                 <strong data-testid="observer-lead-question">{lead.question}</strong>
                 {lead.situationId ? (
-                  <span className="observer-leads__continuity" data-testid="observer-lead-change">
+                  <span className="observer-leads__situation-age" data-testid="observer-lead-change">
                     <Clock3 size={10} aria-hidden="true" />
                     始于{lead.startedLabel} · 延续{lead.trackingTurns ?? 1}季 · {lead.recentChange}
                   </span>
@@ -151,7 +153,7 @@ export function ObserverLeads({
       </ol>
 
       <footer className="observer-leads__footer">
-        <p>选一条关注，推进下一季；有动向时会提醒并停下。</p>
+        <p>{leads.length ? '选一件关注，推进下一季；有动向时会提醒并停下。' : '这里不会用空泛题目凑满三条。'}</p>
       </footer>
     </aside>
   );

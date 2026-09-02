@@ -92,7 +92,6 @@ async function mapMetrics(page) {
       lod: map.getAttribute('data-map-lod'),
       visibleArmyIds: (map.getAttribute('data-visible-army-ids') ?? '').split(',').filter(Boolean),
       visibleFleetIds: (map.getAttribute('data-visible-fleet-ids') ?? '').split(',').filter(Boolean),
-      visibleFlowCount: numberAttribute('data-visible-flow-count'),
       selectionAvoided: map.getAttribute('data-selection-avoided') === 'true',
       selectedScreenX: map.hasAttribute('data-selected-screen-x')
         ? numberAttribute('data-selected-screen-x')
@@ -152,7 +151,6 @@ async function selectLayer(page, layer) {
   await trigger.click();
   await page.waitForSelector('#observer-layer-sheet');
   const target = page.locator(`[data-layer-id="${layer}"]`);
-  if (!(await target.isVisible())) await page.locator('[data-layer-more-trigger]').click();
   await target.click();
   await page.waitForSelector(`.world-map[data-overlay="${layer}"]`);
   await waitForState(page, (current, expected) => current.interface.overlay === expected, layer);
@@ -414,44 +412,6 @@ async function tapBlankToClose(page, baseline, scenario) {
   assert.fail(`${scenario.slug} 地图空白触控未能关闭速览`);
 }
 
-function projectedRawPoint(rawPoint, snapshot, geometry) {
-  const samePoint = (left, right) => Math.abs(left[0] - right[0]) < 0.001 && Math.abs(left[1] - right[1]) < 0.001;
-  const region = snapshot.mapObjects.regions.find((item) => samePoint(item.center, rawPoint));
-  if (region && geometry.regionSites[region.id]) return geometry.regionSites[region.id];
-  const sea = snapshot.mapObjects.seaZones.find((item) => samePoint(item.center, rawPoint));
-  if (sea && geometry.seaCenters[sea.id]) return geometry.seaCenters[sea.id];
-  return { x: rawPoint[0], y: rawPoint[1] };
-}
-
-async function exerciseHiddenFlow(page, baseline, geometry, scenario) {
-  await selectLayer(page, 'trade');
-  const trade = await state(page);
-  assertObserverInvariant(trade, baseline, `${scenario.slug} 切换商路叠层`);
-  const metrics = await mapMetrics(page);
-  assert.equal(metrics.lod, 'overview');
-  assert.equal(metrics.visibleFlowCount, 0, `${scenario.slug} overview 不得绘制普通商路`);
-  if (!trade.interface.topFlows.length) {
-    await selectLayer(page, 'political');
-    return false;
-  }
-  const flow = trade.interface.topFlows[0];
-  const from = projectedRawPoint(flow.from, trade, geometry);
-  const to = projectedRawPoint(flow.to, trade, geometry);
-  const midpoint = screenPoint(metrics, { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }, false);
-  await page.touchscreen.tap(midpoint.x, midpoint.y);
-  await page.waitForTimeout(80);
-  const afterTap = await state(page);
-  assert.notDeepEqual(
-    afterTap.interface.selected && { kind: afterTap.interface.selected.kind, id: afterTap.interface.selected.id },
-    flow.target,
-    `${scenario.slug} overview 隐藏商路不得保留点击热区`,
-  );
-  assertObserverInvariant(afterTap, baseline, `${scenario.slug} 点击隐藏商路位置`);
-  await closeQuickLook(page);
-  await selectLayer(page, 'political');
-  return true;
-}
-
 async function exerciseMapGestures(page, dispatch, baseline, scenario) {
   const selectedBefore = (await state(page)).interface.selected;
   const metrics = await mapMetrics(page);
@@ -506,8 +466,6 @@ async function runScenario(browser, scenario) {
     const geometry = await profileGeometry(page, scenario.contentVersion);
     assert.ok(await page.evaluate(() => navigator.maxTouchPoints > 0), `${scenario.slug} 必须使用真实触控上下文`);
     await exerciseLodButtons(page, baseline, scenario);
-    const hiddenFlowChecked = await exerciseHiddenFlow(page, baseline, geometry, scenario);
-
     await page.locator('[data-map-zoom-in="true"]').click();
     await assertLod(page, 'regional', baseline, `${scenario.slug} 对象点选进入 regional`);
     let snapshot = await state(page);
@@ -537,7 +495,7 @@ async function runScenario(browser, scenario) {
 
     await page.locator('[data-map-zoom-in="true"]').click();
     await assertLod(page, 'regional', baseline, `${scenario.slug} 水师点选进入 regional`);
-    await selectLayer(page, 'naval');
+    await selectLayer(page, 'war');
     snapshot = await state(page);
     metrics = await mapMetrics(page);
     const fleetsToTap = fleetCandidates(snapshot, geometry, metrics);
@@ -565,7 +523,6 @@ async function runScenario(browser, scenario) {
       profile: scenario.profileId,
       viewport: `${scenario.viewport.width}x${scenario.viewport.height}`,
       hash: baseline.deterministicWorldHash,
-      hiddenFlowChecked,
       focusAvoided: regionQuick.avoided || armyQuick.avoided || fleetQuick.avoided,
       region: selectedRegionId,
       army: selectedArmyId,
@@ -596,7 +553,7 @@ try {
   const results = [];
   for (const scenario of SCENARIOS) results.push(await runScenario(browser, scenario));
   process.stdout.write(`FUX01 mobile E2E passed (${PACKAGE_VERSION}): ${results.map((result) => (
-    `${result.scenario} ${result.profile} ${result.viewport} ${result.hash.slice(0, 12)} region=${result.region} army=${result.army} fleet=${result.fleet} flow=${result.hiddenFlowChecked ? 'checked' : 'none'} focus=${result.focusAvoided ? 'avoided' : 'clear'}`
+    `${result.scenario} ${result.profile} ${result.viewport} ${result.hash.slice(0, 12)} region=${result.region} army=${result.army} fleet=${result.fleet} focus=${result.focusAvoided ? 'avoided' : 'clear'}`
   )).join(' | ')}\n`);
 } finally {
   await browser?.close();

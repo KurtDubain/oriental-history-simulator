@@ -1,9 +1,5 @@
 import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations/types';
-import {
-  normalizeObserverLeadContinuity,
-  type ObserverLeadContinuityState,
-} from './observer-leads';
 import { projectSituationHistoricalScenes } from './historical-scenes';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 
@@ -62,7 +58,6 @@ export interface ObserverDeskSettings {
   watchlist: ObserverWatchItem[];
   pauseRules: ObserverPauseRules;
   guide: ObserverGuideState;
-  leadContinuity: ObserverLeadContinuityState | null;
 }
 
 export type ObserverSituationPauseTrigger =
@@ -111,7 +106,7 @@ export const OBSERVER_GUIDE_STEPS: ReadonlyArray<{
 }> = [
   { id: 'world-opened', label: '开启一个世界', detail: '输入种子，让第一卷历史落笔。' },
   { id: 'quarter-advanced', label: '推进一个季度', detail: '观察人口、财政与人物选择如何共同结算。' },
-  { id: 'overlay-switched', label: '切换舆图叠层', detail: '从疆界转到粮情、商路、疾疫或海权。' },
+  { id: 'overlay-switched', label: '切换舆图叠层', detail: '从疆界转到军争、供养或地势。' },
   { id: 'cause-traced', label: '追溯一次因果', detail: '在史册中打开“为何如此”，查看所据史实与直接变化。' },
   { id: 'entity-watched', label: '关注一个对象', detail: '把人物、家族、政权或地区留在观察台。' },
 ] as const;
@@ -205,7 +200,6 @@ export function createObserverDeskSettings(): ObserverDeskSettings {
       situationChanges: true,
     },
     guide: { completedSteps: [], dismissed: false },
-    leadContinuity: null,
   };
 }
 
@@ -252,7 +246,6 @@ export function normalizeObserverDeskSettings(value: unknown): ObserverDeskSetti
       completedSteps: [...new Set(completedSteps)],
       dismissed: safeBoolean(rawGuide.dismissed, false),
     },
-    leadContinuity: normalizeObserverLeadContinuity(value.leadContinuity),
   };
 }
 

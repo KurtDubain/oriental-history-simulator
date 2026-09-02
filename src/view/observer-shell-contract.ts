@@ -13,7 +13,6 @@ import type {
   ObserverInterfaceSettings,
 } from './observer-interface-settings';
 import type { ObserverLeadProjection } from './observer-leads';
-import type { AgencyShadowLedger } from './v1-agency-shadow';
 import type {
   ObserverPauseMatch,
   ObserverWatchItem,
@@ -58,8 +57,6 @@ export interface SnapshotOptions {
   mobileInspectorExpanded: boolean;
   mapGestureActive: boolean;
   focusedPoliticalFactionId: string | null;
-  agencyShadowLedger: AgencyShadowLedger;
-  agencyShadowBranchId: string | null;
   embodiedCharacterId: string | null;
   pendingEmbodiedAction: EmbodiedActionCommand | null;
   embodimentClosure: EmbodimentClosure | null;

@@ -9,13 +9,12 @@ import {
 import {
   toMapArmies,
   toMapFleets,
-  toMapFlows,
   toMapMarkers,
   toMapRegions,
   toMapRoutes,
   toMapSeaZones,
 } from './map-adapter';
-import { toSystemInspector } from './map-dossier-adapter';
+import { toRegionInspector, toSystemInspector } from './map-dossier-adapter';
 import {
   cameraForPinch,
   createMultiPointerGesture,
@@ -35,7 +34,7 @@ import {
   worldToScreenPoint,
   zoomMapCameraAtPoint,
 } from './map-scene-geometry';
-import { isPoliticalMapMarker, layoutMapMarkers } from './map-marker-layout';
+import { layoutMapMarkers } from './map-marker-layout';
 
 function mapProjection(seed: string) {
   const world = createWorld(seed);
@@ -52,7 +51,6 @@ function mapProjection(seed: string) {
       armies,
       seaZones,
       fleets,
-      toMapFlows(world, 'war'),
       toMapMarkers(world, 'war'),
     ),
   };
@@ -68,15 +66,13 @@ describe('map adapter boundary', () => {
     const armies = toMapArmies(world);
     const zones = toMapSeaZones(world);
     const fleets = toMapFleets(world);
-    const flows = ['trade', 'migration', 'naval', 'disease', 'knowledge']
-      .flatMap((overlay) => toMapFlows(world, overlay as Parameters<typeof toMapFlows>[1]));
 
     expect(regions).toHaveLength(82);
     expect(routes.length).toBeGreaterThan(0);
     expect(armies.length).toBeGreaterThan(0);
     expect(zones.length).toBeGreaterThan(0);
     expect(fleets.length).toBeGreaterThan(0);
-    expect(flows.every((flow) => Number.isFinite(flow.magnitude))).toBe(true);
+    expect(regions.every((region) => region.supplyNote.length > 0)).toBe(true);
     expect(toMapRegionsFromBarrel(world)).toEqual(regions);
     expect(toMapArmiesFromBarrel(world)).toEqual(armies);
     expect(toSystemInspectorFromBarrel(world, 'army', world.armies[0].id))
@@ -131,13 +127,66 @@ describe('map adapter boundary', () => {
 
   it('never leaks political markers into another map overlay', () => {
     const world = advanceWorldBy(createWorld('图层不串色'), 4);
-    const overlays = [
-      'food', 'population', 'war', 'trade', 'migration', 'naval', 'disease', 'knowledge', 'none',
-    ] as const;
+    const overlays = ['food', 'war', 'none'] as const;
 
     for (const overlay of overlays) {
-      expect(toMapMarkers(world, overlay).filter(isPoliticalMapMarker)).toEqual([]);
+      expect(toMapMarkers(world, overlay)).toEqual([]);
     }
+  });
+
+  it('projects an expected contact only when an active order has a verifiable enemy at its destination', () => {
+    const world = createWorld('预计接敌投影');
+    const attacker = world.armies[0];
+    const defender = world.armies.find((army) => army.polityId !== attacker.polityId);
+    if (!defender) throw new Error('expected armies from two polities');
+    const warId = 'war_expected_contact_test';
+    world.wars.push({
+      id: warId,
+      kind: 'interstate',
+      attackerId: attacker.polityId,
+      defenderId: defender.polityId,
+      startedTurn: world.turn,
+      endedTurn: null,
+      active: true,
+      attackerScore: 0,
+      defenderScore: 0,
+      reason: '投影测试',
+      lastBattleTurn: -1,
+      goal: '边境',
+      targetRegionIds: [defender.regionId],
+      exhaustion: 0,
+    });
+    attacker.order = {
+      ...attacker.order,
+      kind: 'intercept',
+      warId,
+      targetArmyId: defender.id,
+      targetRegionId: defender.regionId,
+      status: 'active',
+    };
+    const before = serializeWorld(world);
+
+    expect(toMapArmies(world).find((army) => army.id === attacker.id)?.expectedContact).toEqual({
+      armyId: defender.id,
+      armyName: defender.name,
+      regionId: defender.regionId,
+      regionName: world.regions.find((region) => region.id === defender.regionId)?.name,
+    });
+    expect(serializeWorld(world)).toBe(before);
+
+    const emptyEnemyRegion = world.regions.find((item) => !world.armies.some((army) => (
+      army.polityId === defender.polityId && army.regionId === item.id && army.soldiers > 0
+    )));
+    if (!emptyEnemyRegion) throw new Error('expected a region without the enemy army');
+    attacker.order = { ...attacker.order, kind: 'advance', targetArmyId: null, targetRegionId: emptyEnemyRegion.id };
+    expect(toMapArmies(world).find((army) => army.id === attacker.id)?.expectedContact).toBeUndefined();
+  });
+
+  it('uses the same supply note in the map and region dossier projections', () => {
+    const world = createWorld('供养说明同源');
+    const target = world.regions[0];
+    expect(toRegionInspector(world, target).supplyNote)
+      .toBe(toMapRegions(world).find((region) => region.id === target.id)?.supplyNote);
   });
 });
 
@@ -200,6 +249,27 @@ describe('shared map scene hit boundary', () => {
     expect(hiddenHit?.kind === 'army' && hiddenHit.army.id === hiddenLayout?.army.id).toBe(false);
   });
 
+  it('keeps a painted sea zone touchable at overview LOD', () => {
+    const { presentation } = mapProjection('海域总览命中');
+    const scene = buildMapLodScene(presentation, 'overview');
+    const seaZone = scene.seaZones[0];
+    const viewport = { width: 390, height: 644 };
+    const point = worldToScreenPoint(
+      seaZone.center,
+      createMapViewportTransform(viewport.width, viewport.height),
+    );
+
+    expect(scene.interactiveSeaZoneIds.has(seaZone.id)).toBe(true);
+    expect(resolveMapSceneHit(
+      { ...scene, regions: [], armies: [], fleets: [], markers: [] },
+      point,
+      viewport.width,
+      viewport.height,
+      undefined,
+      { coarsePointer: true, includeSeaZones: true },
+    )).toMatchObject({ kind: 'seaZone', seaZone: { id: seaZone.id } });
+  });
+
   it('applies the observer focus offset equally to painting anchors and hits', () => {
     const { presentation } = mapProjection('避让命中边界');
     const scene = { ...buildMapLodScene(presentation, 'regional'), fleets: [] };
@@ -231,13 +301,18 @@ describe('shared map scene hit boundary', () => {
       ...scene,
       armies: [],
       fleets: [],
-      flows: [],
       markers: [{
         id: 'marker-under-node',
-        kind: 'practice' as const,
-        position: node.region.center,
+        kind: 'capitalPulse' as const,
+        position: screenToWorldPoint(
+          { x: node.point.x + 20, y: node.point.y + 18 },
+          viewport.width,
+          viewport.height,
+        ),
         magnitude: 80,
         label: '节点下方标记',
+        targetKind: 'country' as const,
+        targetId: node.region.polityId ?? 'polity-test',
       }],
     };
 
@@ -273,7 +348,6 @@ describe('shared map scene hit boundary', () => {
       ...scene,
       armies: [],
       fleets: [],
-      flows: [],
       markers: [marker],
     };
 
@@ -368,7 +442,6 @@ describe('shared map scene hit boundary', () => {
     const scene = {
       ...presentation,
       fleets: [],
-      flows: [],
       markers: [marker],
       armies: [armyLayout.army],
     };
@@ -433,7 +506,6 @@ describe('shared map scene hit boundary', () => {
       regions: [],
       armies: [],
       fleets: [],
-      flows: [],
       seaZones: [],
       markers: [target.marker],
     };
@@ -455,50 +527,6 @@ describe('shared map scene hit boundary', () => {
     )).toBeNull();
   });
 
-  it('hits the same quadratic flow curve that the renderer paints', () => {
-    const { presentation } = mapProjection('曲线命中边界');
-    const viewport = { width: 1_000, height: 700 };
-    const transform = createMapViewportTransform(viewport.width, viewport.height);
-    const flow = {
-      id: 'curved-flow',
-      kind: 'trade' as const,
-      from: { x: 100, y: 350 },
-      to: { x: 900, y: 350 },
-      magnitude: 100,
-      label: '曲线商路',
-      selectedKind: 'tradeCorridor' as const,
-      selectedId: 'corridor-curved',
-    };
-    const from = worldToScreenPoint(flow.from, transform);
-    const to = worldToScreenPoint(flow.to, transform);
-    const bend = Math.min(24, Math.hypot(to.x - from.x, to.y - from.y) * 0.16);
-    const paintedMidpoint = {
-      x: (from.x + to.x) / 2,
-      y: (from.y + to.y) / 2 - bend / 2,
-    };
-    const scene = {
-      ...buildMapLodScene(presentation, 'local'),
-      regions: [],
-      armies: [],
-      fleets: [],
-      markers: [],
-      seaZones: [],
-      flows: [flow],
-    };
-
-    expect(resolveMapSceneHit(
-      scene,
-      paintedMidpoint,
-      viewport.width,
-      viewport.height,
-    )).toMatchObject({ kind: 'flow', flow: { id: flow.id } });
-    expect(resolveMapSceneHit(
-      scene,
-      { x: paintedMidpoint.x, y: paintedMidpoint.y + bend / 2 },
-      viewport.width,
-      viewport.height,
-    )).toBeNull();
-  });
 });
 
 describe('map gesture boundary', () => {

@@ -971,32 +971,7 @@
   background: rgb(255 252 241 / 28%);
 }
 
-.observer-agency__direction {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 12px;
-  margin: 0;
-  padding: 1px 0 10px;
-  border-bottom: 1px dotted var(--observer-line-strong);
-}
-
-.observer-agency__direction span {
-  color: var(--observer-ink-soft);
-  font-size: 9px;
-  letter-spacing: 0.08em;
-}
-
-.observer-agency__direction strong {
-  color: var(--observer-ink);
-  font-family: var(--observer-serif);
-  font-size: 15px;
-  font-weight: 650;
-  letter-spacing: 0.06em;
-}
-
 .observer-agency-desires,
-.observer-agency-secondary ul,
 .observer-agency-plan,
 .observer-agency-memory-list {
   margin: 0;
@@ -1019,7 +994,6 @@
 
 .observer-agency-section-heading > button,
 .observer-agency-memory__source,
-.observer-agency-choice__source,
 .observer-agency-command__source {
   display: inline-flex;
   min-height: 32px;
@@ -1038,7 +1012,6 @@
 
 .observer-agency-section-heading > button:hover,
 .observer-agency-memory__source:hover,
-.observer-agency-choice__source:hover,
 .observer-agency-command__source:hover {
   text-decoration: underline;
   text-underline-offset: 3px;
@@ -1046,7 +1019,6 @@
 
 .observer-agency-section-heading > button:focus-visible,
 .observer-agency-memory__source:focus-visible,
-.observer-agency-choice__source:focus-visible,
 .observer-agency-command__source:focus-visible,
 .observer-person-quick-mind:focus-visible {
   outline: 2px solid var(--observer-vermilion);
@@ -1121,7 +1093,6 @@
 }
 
 .observer-agency-memory__source,
-.observer-agency-choice__source,
 .observer-agency-command__source {
   margin-top: 3px;
   margin-left: -4px;
@@ -1262,31 +1233,27 @@
   border-bottom: 1px dotted var(--observer-line-strong);
 }
 
-.observer-agency-desires li > div,
-.observer-agency-decision > div {
+.observer-agency-desires li > div {
   display: flex;
   align-items: baseline;
   justify-content: space-between;
   gap: 10px;
 }
 
-.observer-agency-desires strong,
-.observer-agency-decision strong {
+.observer-agency-desires strong {
   font-family: var(--observer-serif);
   font-size: 12px;
   font-weight: 650;
 }
 
-.observer-agency-desires li > div span,
-.observer-agency-decision > div span {
+.observer-agency-desires li > div span {
   flex: 0 0 auto;
   color: var(--observer-ink-soft);
   font-size: 8px;
   letter-spacing: 0.08em;
 }
 
-.observer-agency-desires p,
-.observer-agency-decision p {
+.observer-agency-desires p {
   margin: 4px 0 0;
   color: var(--observer-ink-soft);
   font-family: var(--observer-serif);
@@ -1345,42 +1312,6 @@
   letter-spacing: 0.08em;
 }
 
-.observer-agency-goal__scales {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.observer-agency-scale > div {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  margin-bottom: 5px;
-  color: var(--observer-ink-soft);
-  font-size: 8px;
-}
-
-.observer-agency-scale > div strong {
-  color: var(--observer-ink-soft);
-  font-size: 9px;
-  font-variant-numeric: tabular-nums;
-}
-
-.observer-agency-scale__track {
-  display: block;
-  height: 3px;
-  overflow: hidden;
-  background: rgb(43 43 37 / 10%);
-}
-
-.observer-agency-scale__track > span {
-  display: block;
-  height: 100%;
-  background: var(--observer-ink-faint);
-  transition: width 280ms ease;
-}
-
 .observer-agency-goal .observer-agency__barrier,
 .observer-agency-empty .observer-agency__barrier {
   margin-top: 10px;
@@ -1397,49 +1328,6 @@
 .observer-agency-empty {
   padding-left: 11px;
   border-left: 2px solid var(--observer-line-strong);
-}
-
-.observer-agency-secondary {
-  margin-top: 14px;
-  padding-top: 11px;
-  border-top: 1px dotted var(--observer-line-strong);
-}
-
-.observer-agency-secondary h4 {
-  margin: 0 0 4px;
-  color: var(--observer-ink-soft);
-  font-size: 8px;
-  font-weight: 750;
-  letter-spacing: 0.1em;
-}
-
-.observer-agency-secondary li {
-  display: flex;
-  min-width: 0;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  padding: 7px 0;
-  color: var(--observer-ink-soft);
-  font-family: var(--observer-serif);
-  font-size: 10px;
-}
-
-.observer-agency-secondary li + li {
-  border-top: 1px dotted var(--observer-line);
-}
-
-.observer-agency-secondary li span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.observer-agency-secondary li small {
-  flex: 0 0 auto;
-  color: var(--observer-ink-soft);
-  font-family: var(--observer-sans);
-  font-size: 8px;
 }
 
 .observer-agency-plan li {
@@ -1525,20 +1413,6 @@
   font-family: var(--observer-serif);
   font-size: 9px;
   line-height: 1.6;
-}
-
-.observer-agency-decision {
-  padding-left: 11px;
-  border-left: 2px solid var(--observer-line-strong);
-}
-
-.observer-agency-choice {
-  padding-left: 11px;
-  border-left: 2px solid var(--observer-line-strong);
-}
-
-.observer-agency-choice[data-outcome="diverged"] {
-  border-left-color: var(--observer-vermilion);
 }
 
 .observer-agency-command__record {
@@ -1633,82 +1507,6 @@
   font-family: var(--observer-serif);
   font-size: 10px;
   line-height: 1.6;
-}
-
-.observer-agency-choice > header {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-}
-
-.observer-agency-choice > header span {
-  color: var(--observer-ink-faint);
-  font-size: 8px;
-  letter-spacing: 0.08em;
-}
-
-.observer-agency-choice > header strong {
-  color: var(--observer-ink-soft);
-  font-size: 9px;
-  font-weight: 750;
-}
-
-.observer-agency-choice[data-outcome="diverged"] > header strong {
-  color: var(--observer-vermilion-dark);
-}
-
-.observer-agency-choice dl {
-  margin: 10px 0 0;
-}
-
-.observer-agency-choice dl > div {
-  display: grid;
-  grid-template-columns: 66px minmax(0, 1fr);
-  gap: 8px;
-  padding: 6px 0;
-  border-top: 1px dotted var(--observer-line);
-}
-
-.observer-agency-choice dt,
-.observer-agency-choice dd {
-  margin: 0;
-}
-
-.observer-agency-choice dt {
-  color: var(--observer-ink-faint);
-  font-size: 8px;
-  letter-spacing: 0.06em;
-}
-
-.observer-agency-choice dd {
-  color: var(--observer-ink);
-  font-family: var(--observer-serif);
-  font-size: 10px;
-  line-height: 1.6;
-}
-
-.observer-agency-choice > p {
-  margin: 7px 0 0;
-  color: var(--observer-ink-soft);
-  font-family: var(--observer-serif);
-  font-size: 10px;
-  line-height: 1.7;
-}
-
-.observer-agency-choice > p b {
-  margin-right: 7px;
-  color: var(--observer-ink-faint);
-  font-family: var(--observer-sans);
-  font-size: 8px;
-  letter-spacing: 0.06em;
-}
-
-.observer-agency-decision[data-after-choice="true"] {
-  margin-top: 12px;
-  padding-top: 11px;
-  border-top: 1px dotted var(--observer-line-strong);
-  border-left: 0;
 }
 
 .observer-agency__note {
@@ -3381,17 +3179,11 @@ button.observer-causal-chain__evidence:hover {
     padding: 0 4px;
   }
 
-  .observer-agency__direction strong {
-    font-size: 16px;
-  }
-
-  .observer-agency-desires strong,
-  .observer-agency-decision strong {
+  .observer-agency-desires strong {
     font-size: 13px;
   }
 
   .observer-agency-desires p,
-  .observer-agency-decision p,
   .observer-agency-goal > p,
   .observer-agency-empty > p {
     font-size: 11px;
@@ -3402,7 +3194,6 @@ button.observer-causal-chain__evidence:hover {
     font-size: 16px;
   }
 
-  .observer-agency-secondary li,
   .observer-agency-plan li > div > strong {
     font-size: 12px;
   }
@@ -3414,7 +3205,6 @@ button.observer-causal-chain__evidence:hover {
 
   .observer-agency-section-heading > button,
   .observer-agency-memory__source,
-  .observer-agency-choice__source,
   .observer-agency-command__source,
   .observer-scene-list li > button,
   .observer-power-position__resources li > button,
@@ -3431,8 +3221,6 @@ button.observer-causal-chain__evidence:hover {
   }
 
   .observer-agency-memory-list li > p,
-  .observer-agency-choice dd,
-  .observer-agency-choice > p,
   .observer-agency-command__record > p,
   .observer-agency-command__evidence dd {
     font-size: 11px;
@@ -3616,7 +3404,6 @@ button.observer-causal-chain__evidence:hover {
   }
 
   .observer-meter__fill,
-  .observer-agency-scale__track > span,
   .observer-inspector-tabs button::after,
   .observer-navigation__item,
   .observer-chronicle__event,
