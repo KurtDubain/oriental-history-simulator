@@ -137,6 +137,11 @@ export interface CountryDiplomacyView {
   tradeDependency: number;
 }
 
+export interface MilitaryPoliticalImpactView {
+  summary: string;
+  sourceEventId?: string | null;
+}
+
 export interface CountryInspectorData {
   id: string;
   name: string;
@@ -166,6 +171,7 @@ export interface CountryInspectorData {
   maritimeAssets?: SystemInspectorLink[];
   courtScenes?: readonly HistoricalSceneView[];
   court?: CourtProjectionView;
+  coreImpact?: MilitaryPoliticalImpactView | null;
 }
 
 export interface PersonAbilitySet {
@@ -354,6 +360,7 @@ export interface SystemInspectorData {
   meters?: Array<{ label: string; value: number }>;
   links?: SystemInspectorLink[];
   history?: InspectorRecord[];
+  coreImpact?: MilitaryPoliticalImpactView | null;
 }
 
 export type InspectorEntrySource = 'map' | 'roster' | 'link';
@@ -495,6 +502,16 @@ function InspectorTabs<T extends string>({ value, items, onChange, idPrefix }: {
 function LinkedName({ kind, id, children, onSelect }: { kind: ArchiveEntityKind; id?: string | null; children: string; onSelect?: (kind: ArchiveEntityKind, id: string) => void }) {
   if (!id || !onSelect) return <>{children}</>;
   return <button type="button" className="observer-text-link" onClick={() => onSelect(kind, id)}>{children}</button>;
+}
+
+function MilitaryPoliticalImpact({ impact, onSelectEvent }: { impact?: MilitaryPoliticalImpactView | null; onSelectEvent?: (eventId: string) => void }) {
+  if (!impact) return null;
+  return (
+    <div className="observer-core-impact" data-testid="military-political-impact">
+      <strong>军政牵动</strong><p>{impact.summary}</p>
+      {impact.sourceEventId && onSelectEvent ? <button type="button" onClick={() => onSelectEvent(impact.sourceEventId!)}>查看实据</button> : null}
+    </div>
+  );
 }
 
 function RecordList({ records, onSelectEvent }: { records: InspectorRecord[]; onSelectEvent?: (eventId: string) => void }) {
@@ -662,6 +679,7 @@ function CountryInspector({ data, initialTab, tabRequestKey, courtFocus, onShowF
       ) : null}
       {tab === 'court' ? (
         <div id={`${tabsId}-panel-court`} role="tabpanel" aria-labelledby={`${tabsId}-tab-court`}>
+          <MilitaryPoliticalImpact impact={data.coreImpact} onSelectEvent={actions.onSelectEvent} />
           {data.court ? (
             <CourtProjection
               court={data.court}
@@ -1079,6 +1097,7 @@ function SystemInspector({ data, ...actions }: Extract<InspectorProps, { kind: '
       <p className="observer-inspector__summary">{data.summary}</p>
       <InspectorTabs value={tab} onChange={setTab} items={[{ id: 'status', label: '现状' }, { id: 'history', label: '沿革' }]} />
       {tab === 'status' ? <div role="tabpanel">
+        {data.kind === 'army' ? <MilitaryPoliticalImpact impact={data.coreImpact} onSelectEvent={actions.onSelectEvent} /> : null}
         <section className="observer-inspector__section" aria-labelledby="system-ledger-heading">
           <h3 id="system-ledger-heading">当季所见</h3>
           <dl className="observer-facts">{data.facts.map((fact) => <Fact key={`${fact.label}-${fact.value}`} label={fact.label} value={fact.value} />)}</dl>

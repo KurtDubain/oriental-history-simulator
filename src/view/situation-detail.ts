@@ -13,6 +13,7 @@ import {
 import type { SimulationFact } from '../sim/facts/types';
 import type { DeltaValue, StateDelta, WorldState } from '../sim/types';
 import { readWorldFacts, readWorldHistory } from '../sim/archive';
+import { projectCoreImpacts } from './core-impact-projection';
 import { historyTurnDate } from './v1-history';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import {
@@ -159,6 +160,7 @@ export interface SituationDetailProjection {
   durationLabel: string;
   playerSummary: string[];
   currentChange: string;
+  coreImpact: null | { summary: string; sourceEventId: string | null };
   recentDeltas: SituationDetailDelta[];
   nextWatch: string;
   outcome: null | {
@@ -703,6 +705,11 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
   const latestScene = scenes[0];
   const lastSettledTurn = world.lastTurn?.turn ?? Math.max(0, world.turn - 1);
   const recentFactIds = new Set(latestScene?.sourceFactIds ?? []);
+  const coreImpact = (recentFactIds.size
+    ? projectCoreImpacts(world, { sourceFactIds: [...recentFactIds], limit: 1 })[0]
+    : undefined) ?? (situation.type === 'war_progress'
+    ? projectCoreImpacts(world, { warId: situation.scopeKey, limit: 1 })[0]
+    : undefined);
   const recentDeltas = evidence
     .filter((fact) => recentFactIds.has(fact.id))
     .flatMap((fact) => fact.stateDeltas)
@@ -743,6 +750,7 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
       : situation.status === 'resolved' && outcomeLabel
         ? `${dateLabel(situation.resolvedTurn ?? situation.lastUpdatedTurn)}，本案以“${outcomeLabel}”结案。`
         : '本季无新动作；卷宗里还没有可确认的具名行动或明确结果。',
+    coreImpact: coreImpact ? { summary: coreImpact.summary, sourceEventId: coreImpact.sourceEventIds[0] ?? null } : null,
     recentDeltas,
     nextWatch: item.nextSignal.label,
     outcome: outcomeKey ? {

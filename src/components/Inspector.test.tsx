@@ -302,6 +302,26 @@ describe('entity history gateways', () => {
   });
 });
 
+describe('military-political impact reading', () => {
+  it('adds one compact verified consequence to an army dossier without a new tab or page', () => {
+    const markup = renderToStaticMarkup(createElement(Inspector, {
+      kind: 'system',
+      data: {
+        id: 'army-test', kind: 'army', name: '雪塞行营', subtitle: '燕国 · 雪塞',
+        summary: '军团正在执行撤退军令。', facts: [{ label: '兵力', value: 4300 }],
+        coreImpact: { summary: '因军粮不足，补给仅27，军令由进军改为撤退。', sourceEventId: 'event-supply-order' },
+      },
+      onSelectEvent: () => undefined,
+    }));
+
+    expect(markup).toContain('data-testid="military-political-impact"');
+    expect(markup).toContain('军政牵动');
+    expect(markup).toContain('补给仅27');
+    expect(markup).toContain('查看实据');
+    expect(markup.match(/data-inspector-tab=/g)).toHaveLength(2);
+  });
+});
+
 describe('mobile roster dossier contract', () => {
   it('renders an explicit return route in a full dossier opened from a roster', () => {
     const markup = renderToStaticMarkup(createElement(Inspector, {

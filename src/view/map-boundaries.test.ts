@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { advanceWorldBy, createWorld, serializeWorld } from '../sim';
+import type { CommodityKind, ShipmentRecord, WorldState } from '../sim';
 import {
   toMapArmies as toMapArmiesFromBarrel,
   toMapRegions as toMapRegionsFromBarrel,
@@ -53,6 +54,53 @@ function mapProjection(seed: string) {
       fleets,
       toMapMarkers(world, 'war'),
     ),
+  };
+}
+
+function quietSupplyRegion(world: WorldState) {
+  const target = world.regions[0];
+  target.population = 10_000;
+  target.food = 20_000;
+  target.unrest = 0;
+  target.devastation = 0;
+  target.refugeePopulation = 0;
+  for (const infection of world.infections) {
+    if (infection.hostKind === 'region' && infection.hostId === target.id) {
+      infection.exposed = 0;
+      infection.infectious = 0;
+    }
+  }
+  return target;
+}
+
+function deliveredTrade(
+  id: string,
+  commodity: CommodityKind,
+  originRegionId: string,
+  destinationRegionId: string,
+  acceptedAmount: number,
+  deliveredAmount = acceptedAmount,
+): ShipmentRecord {
+  return {
+    id,
+    kind: '贸易',
+    commodity,
+    originRegionId,
+    destinationRegionId,
+    acceptedAmount,
+    deliveredAmount,
+    lostAmount: acceptedAmount - deliveredAmount,
+    raidedAmount: 0,
+    peopleDeparted: 0,
+    peopleArrived: 0,
+    peopleLost: 0,
+    contactVolume: acceptedAmount,
+    legs: [],
+    carrierArmyId: null,
+    carrierFleetId: null,
+    value: deliveredAmount,
+    tariff: 0,
+    status: acceptedAmount === deliveredAmount ? '交付' : '受损',
   };
 }
 
@@ -187,6 +235,48 @@ describe('map adapter boundary', () => {
     const target = world.regions[0];
     expect(toRegionInspector(world, target).supplyNote)
       .toBe(toMapRegions(world).find((region) => region.id === target.id)?.supplyNote);
+  });
+
+  it('describes a verified net grain import as replenishing local supply', () => {
+    const world = advanceWorldBy(createWorld('供养粮食进口'), 1);
+    const target = quietSupplyRegion(world);
+    const origin = world.regions[1];
+    if (!world.lastTurn) throw new Error('expected a completed turn report');
+    world.lastTurn.trade.shipments = [
+      deliveredTrade('shipment_food_import', '粮食', origin.id, target.id, 900, 840),
+      deliveredTrade('shipment_food_export', '粮食', target.id, origin.id, 200),
+    ];
+
+    expect(toMapRegions(world).find((region) => region.id === target.id)?.supplyNote)
+      .toBe('粮食净流入，正在补充地方供养');
+  });
+
+  it('does not describe a grain-exporting region as receiving supply', () => {
+    const world = advanceWorldBy(createWorld('供养粮食出口'), 1);
+    const target = quietSupplyRegion(world);
+    const destination = world.regions[1];
+    if (!world.lastTurn) throw new Error('expected a completed turn report');
+    world.lastTurn.trade.shipments = [
+      deliveredTrade('shipment_food_export_only', '粮食', target.id, destination.id, 700),
+    ];
+
+    const note = toMapRegions(world).find((region) => region.id === target.id)?.supplyNote;
+    expect(note).toBe('商路仍有往来');
+    expect(note).not.toContain('补充');
+  });
+
+  it('does not treat an imported non-food commodity as local provisioning', () => {
+    const world = advanceWorldBy(createWorld('供养非粮进口'), 1);
+    const target = quietSupplyRegion(world);
+    const origin = world.regions[1];
+    if (!world.lastTurn) throw new Error('expected a completed turn report');
+    world.lastTurn.trade.shipments = [
+      deliveredTrade('shipment_luxury_import', '奢侈品', origin.id, target.id, 180),
+    ];
+
+    const note = toMapRegions(world).find((region) => region.id === target.id)?.supplyNote;
+    expect(note).toBe('商路仍有往来');
+    expect(note).not.toContain('供养');
   });
 });
 

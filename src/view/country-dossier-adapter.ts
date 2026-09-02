@@ -7,6 +7,7 @@ import {
   recentFactionPowerMovements,
 } from '../sim/politics/power-ledger';
 import { projectCourt } from './court-projection';
+import { projectCoreImpacts } from './core-impact-projection';
 import { projectHistoricalScenes } from './historical-scenes';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import {
@@ -41,6 +42,8 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     .map((faction) => ({ faction, ledger: calculateFactionPowerLedger(world, faction) }))
     .sort((a, b) => b.ledger.total - a.ledger.total || a.faction.id.localeCompare(b.faction.id));
   const activeCourt = projectCourt(world, item.id, 'active');
+  const coreImpact = projectCoreImpacts(world, { target: { kind: 'polity', id: item.id }, limit: 3 })
+    .find((impact) => impact.source === '地方压力' || impact.source === '疾病');
   const courtPositionByFactionId = new Map(activeCourt.factionPositions.map((position) => [position.factionId, position]));
   const powerholders = activeCourt.seats.map((seat) => ({
     id: seat.holderId,
@@ -123,6 +126,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     maritimeOrientation: item.maritimeOrientation,
     maritimeAssets,
     courtScenes,
+    coreImpact: coreImpact ? { summary: coreImpact.summary, sourceEventId: coreImpact.sourceEventIds[0] ?? null } : null,
     court: activeCourt,
     history: scopedHistory(world, (event) => event.polityIds.includes(item.id)),
     status: !item.alive

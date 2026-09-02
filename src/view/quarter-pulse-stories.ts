@@ -1,4 +1,5 @@
 import type { HistoryEvent, WorldState } from '../sim/types';
+import { projectCoreImpacts, type CoreImpactProjection } from './core-impact-projection';
 import { toChronicleEvent } from './history-causal-adapter';
 import { projectHistoricalScenes } from './historical-scenes';
 import type { QuarterPulseSituationChange } from './quarter-pulse-situations';
@@ -175,6 +176,7 @@ function chronicleFallbackStories(
   world: WorldState,
   coveredFacts: ReadonlySet<string>,
   coveredEvents: ReadonlySet<string>,
+  coreImpactEventIds: ReadonlySet<string>,
 ): QuarterPulseEventStory[] {
   const report = world.lastTurn;
   if (!report) return [];
@@ -197,6 +199,7 @@ function chronicleFallbackStories(
       && event.turn === report.turn
       && event.kind !== 'quarter_summary'
       && !event.kind.startsWith('situation_')
+      && (!['人口', '经济', '疾病', '知识', '迁徙'].includes(event.category) || coreImpactEventIds.has(event.id))
       && hasConcreteAnchor(event)
       && !coveredEvents.has(event.id)
       && !event.sourceFactIds.some((id) => coveredFacts.has(id))
@@ -251,14 +254,19 @@ export function selectQuarterPulseStories(
 
 export function projectQuarterPulse(world: WorldState): QuarterPulseProjection {
   if (!world.lastTurn) return { stories: [], highlightedRegionIds: [] };
+  const coreImpacts = projectCoreImpacts(world);
+  const coreImpactEventIds = new Set(coreImpacts.flatMap((impact) => impact.sourceEventIds));
   const facts = currentFactStories(world);
   const coveredFacts = new Set(facts.flatMap((story) => story.sourceFactIds));
   const coveredEvents = new Set(facts.flatMap((story) => story.historyEventIds));
   const candidates: QuarterPulseStory[] = [
     ...facts,
-    ...chronicleFallbackStories(world, coveredFacts, coveredEvents),
+    ...chronicleFallbackStories(world, coveredFacts, coveredEvents, coreImpactEventIds),
   ];
-  const stories = selectQuarterPulseStories(candidates);
+  const stories = selectQuarterPulseStories(candidates).map((story) => {
+    const impact = coreImpacts.find((candidate) => sharesImpactEvidence(story, candidate));
+    return impact ? { ...story, summary: `${story.summary} 军政牵动：${impact.summary}`.trim() } : story;
+  });
   const knownRegions = new Set(world.regions.map((region) => region.id));
   return {
     stories,
@@ -266,4 +274,11 @@ export function projectQuarterPulse(world: WorldState): QuarterPulseProjection {
       .filter((id) => knownRegions.has(id))
       .slice(0, 16),
   };
+}
+
+function sharesImpactEvidence(story: QuarterPulseStory, impact: CoreImpactProjection): boolean {
+  const facts = new Set(story.sourceFactIds);
+  if (impact.sourceFactIds.some((id) => facts.has(id))) return true;
+  const events = new Set(story.historyEventIds);
+  return impact.sourceEventIds.some((id) => events.has(id));
 }

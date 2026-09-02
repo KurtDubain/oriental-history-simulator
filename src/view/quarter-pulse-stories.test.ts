@@ -233,6 +233,33 @@ describe('TRIM01 QuarterPulse story projection', () => {
     });
   });
 
+  it('keeps ordinary trade, migration and disease out of the default three stories without a proven military or court consequence', () => {
+    const base = advanceWorld(createWorld('军政无关周边不得抢位'));
+    const region = base.regions[0];
+    const background = [
+      chronicleEvent(base, 'ordinary-trade', {
+        category: '经济', kind: 'trade_delivery', title: '一批纺织品到岸', importance: 5,
+        regionIds: [region.id], stateDeltas: [{ entityType: 'region', entityId: region.id, field: 'wealth', before: 10, after: 12 }],
+      }),
+      chronicleEvent(base, 'ordinary-migration', {
+        category: '迁徙', kind: 'refugee_settlement', title: '流民落籍', importance: 5,
+        regionIds: [region.id], stateDeltas: [{ entityType: 'region', entityId: region.id, field: 'refugeePopulation', before: 10, after: 30 }],
+      }),
+      chronicleEvent(base, 'ordinary-disease', {
+        category: '疾病', kind: 'outbreak_detected', title: '地方察觉时疫', importance: 5,
+        regionIds: [region.id], stateDeltas: [{ entityType: 'infection', entityId: 'infection-background', field: 'infectious', before: 0, after: 20 }],
+      }),
+    ];
+    const world: WorldState = {
+      ...base,
+      facts: [],
+      history: background,
+      lastTurn: { ...base.lastTurn!, factIds: [], eventIds: background.map((event) => event.id) },
+    };
+
+    expect(projectQuarterPulse(world).stories).toEqual([]);
+  });
+
   it('uses stable story identity as the final tie-break regardless of candidate order', () => {
     const candidates = [
       eventStory('event-c', 60, { historyEventIds: ['history-c'] }),

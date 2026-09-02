@@ -26,21 +26,50 @@ function supplyPressureNote(
   devastation: number,
   refugeePopulation: number,
   infectiousPopulation: number,
-  tradeVolume: number,
+  hasTrade: boolean,
+  netFoodImported: number,
 ) {
   if (foodRatio < 0.55) return '粮储危急，已难支撑军民';
   if (infectiousPopulation > Math.max(80, population * 0.008)) return '疫病正在削弱地方供养';
   if (refugeePopulation > Math.max(500, population * 0.04)) return '流民涌入，粮秣承压';
   if (devastation >= 45 || unrest >= 70) return '战乱与民怨妨碍征粮';
-  if (tradeVolume > 0) return '商路仍在补充地方所需';
+  if (netFoodImported > 0) return '粮食净流入，正在补充地方供养';
+  if (hasTrade) return '商路仍有往来';
   return foodRatio < 1 ? '粮储偏紧，尚可维持' : '供养尚稳';
+}
+
+function regionalTradeReading(world: WorldState, regionId: string) {
+  const shipments = world.lastTurn?.trade.shipments.filter((shipment) => (
+    shipment.kind === '贸易'
+    && shipment.deliveredAmount > 0
+    && (shipment.originRegionId === regionId || shipment.destinationRegionId === regionId)
+  ));
+  if (shipments) {
+    const netFoodImported = shipments.reduce((net, shipment) => {
+      if (shipment.commodity !== '粮食') return net;
+      if (shipment.destinationRegionId === regionId) return net + shipment.deliveredAmount;
+      return net - shipment.acceptedAmount;
+    }, 0);
+    return { hasTrade: shipments.length > 0, netFoodImported };
+  }
+
+  // T0 没有季度运输账。此时只使用本季有实际到货量的商路，
+  // 不把仍在保留期的旧 active 商路误认为当前补给。
+  const corridors = world.tradeCorridors.filter((corridor) => (
+    corridor.lastVolume > 0
+    && (corridor.originRegionId === regionId || corridor.destinationRegionId === regionId)
+  ));
+  const netFoodImported = corridors.reduce((net, corridor) => {
+    if (corridor.commodity !== '粮食') return net;
+    if (corridor.destinationRegionId === regionId) return net + corridor.lastVolume;
+    return net - corridor.lastVolume;
+  }, 0);
+  return { hasTrade: corridors.length > 0, netFoodImported };
 }
 
 export function regionSupplyNote(world: WorldState, item: WorldState['regions'][number]) {
   const infection = world.infections.find((entry) => entry.hostKind === 'region' && entry.hostId === item.id);
-  const tradeVolume = world.tradeCorridors
-    .filter((entry) => entry.active && (entry.originRegionId === item.id || entry.destinationRegionId === item.id))
-    .reduce((sum, entry) => sum + entry.lastVolume, 0);
+  const trade = regionalTradeReading(world, item.id);
   return supplyPressureNote(
     item.population,
     foodSafetyRatio(item.population, item.food),
@@ -48,7 +77,8 @@ export function regionSupplyNote(world: WorldState, item: WorldState['regions'][
     item.devastation,
     item.refugeePopulation,
     (infection?.infectious ?? 0) + (infection?.exposed ?? 0),
-    tradeVolume,
+    trade.hasTrade,
+    trade.netFoodImported,
   );
 }
 

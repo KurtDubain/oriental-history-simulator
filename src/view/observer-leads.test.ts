@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { advanceWorld, createWorld, serializeWorld } from '../sim';
 import type { SituationState } from '../sim/situations';
-import type { WorldState } from '../sim/types';
+import type { SimulationFact, WorldState } from '../sim/types';
 import {
   OBSERVER_LEAD_RESOLUTION_ECHO_TURNS,
   OBSERVER_LEAD_VISIBILITY_THRESHOLD,
@@ -12,6 +12,12 @@ import { projectSituationHistoricalScenes } from './historical-scenes';
 
 function worldAt(turn: number, seed = '春战副将'): WorldState {
   let world = createWorld(seed);
+  while (world.turn < turn) world = advanceWorld(world);
+  return world;
+}
+
+function contestWorldAt(turn: number, seed = '沧衡-甲子'): WorldState {
+  let world = createWorld(seed, 'contest-v01');
   while (world.turn < turn) world = advanceWorld(world);
   return world;
 }
@@ -67,6 +73,78 @@ function resolvedSituation(source: SituationState, resolvedTurn: number): Situat
   };
 }
 
+function appointmentFact(
+  world: WorldState,
+  id: string,
+  kind: 'appointment_started' | 'appointment_ended',
+  officeKind: '军团主帅' | '军团副将',
+  holderId: string,
+  armyId: string,
+): Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }> {
+  const polityId = world.armies.find((army) => army.id === armyId)?.polityId ?? world.polities[0].id;
+  return {
+    id,
+    turn: world.turn,
+    year: world.year,
+    season: world.season,
+    kind,
+    category: '政治',
+    importance: 3,
+    actorIds: [holderId],
+    polityIds: [polityId],
+    regionIds: [],
+    causes: [],
+    stateDeltas: [],
+    sourceFactIds: [],
+    payload: {
+      appointmentId: `${id}:office`,
+      action: kind === 'appointment_started' ? 'started' : 'ended',
+      officeKind,
+      holderId,
+      polityId,
+      regionId: null,
+      armyId,
+      fleetId: null,
+      rank: officeKind === '军团主帅' ? 90 : 70,
+    },
+  };
+}
+
+function withCurrentFacts(world: WorldState, facts: readonly SimulationFact[]): WorldState {
+  if (!world.lastTurn) throw new Error('expected an advanced world');
+  return withSituations({
+    ...world,
+    facts: [...world.facts, ...facts],
+  }, [], world.turn, { ...world.lastTurn, factIds: facts.map((fact) => fact.id) });
+}
+
+function lowSupplyBattleFact(world: WorldState): Extract<SimulationFact, { kind: 'battle' }> {
+  if (!world.lastTurn) throw new Error('expected an advanced world');
+  const attacker = world.armies[0];
+  const defender = world.armies.find((army) => army.polityId !== attacker.polityId) ?? world.armies[1];
+  const region = world.regions.find((item) => item.controllerId === defender.polityId) ?? world.regions[0];
+  const snapshot = (army: typeof attacker, supplyBefore: number) => ({
+    armyId: army.id, polityId: army.polityId, commanderId: army.commanderId,
+    deputyCommanderId: army.deputyCommanderId, soldiersBefore: army.soldiers,
+    soldiersAfter: Math.max(0, army.soldiers - 300), moraleBefore: army.morale,
+    moraleAfter: Math.max(0, army.morale - 8), trainingBefore: army.training,
+    supplyBefore, losses: 300,
+  });
+  return {
+    id: 'fact-test-low-supply-battle', turn: world.lastTurn.turn, year: world.lastTurn.year,
+    season: world.lastTurn.season, kind: 'battle', category: '军事', importance: 3,
+    actorIds: [attacker.commanderId, defender.commanderId], polityIds: [attacker.polityId, defender.polityId],
+    regionIds: [region.id], causes: [{ label: '结算前补给士气', weight: 1, evidence: '攻方补给22已进入战力结算' }],
+    stateDeltas: [{ entityType: 'army', entityId: attacker.id, field: 'soldiers', before: attacker.soldiers, after: attacker.soldiers - 300, delta: -300 }],
+    sourceFactIds: [],
+    payload: {
+      warId: world.wars[0]?.id ?? 'war-test', targetRegionId: region.id,
+      routeId: world.routes[0].id, attackerWon: false, attackerPower: 1200, defenderPower: 1800,
+      militiaLosses: 0, attacker: snapshot(attacker, 22), defenders: [snapshot(defender, 90)],
+    },
+  };
+}
+
 describe('observer story leads', () => {
   it('does not manufacture an opening question before a Situation or current Fact exists', () => {
     const world = createWorld('当世三问-如实留空');
@@ -95,6 +173,21 @@ describe('observer story leads', () => {
     expect(deriveObserverLeads(world).map((item) => item.id)).toEqual(expectedIds);
     expect(deriveObserverLeads(reversed)).toEqual(deriveObserverLeads(world));
     expect(deriveObserverLeads(world)).toHaveLength(3);
+  });
+
+  it('never repeats one principal historical scene or Fact across three different Situations', () => {
+    const world = contestWorldAt(12);
+    const leads = deriveObserverLeads(world);
+
+    expect(leads.length).toBeGreaterThan(1);
+    expect(new Set(leads.map((lead) => lead.primarySceneId)).size).toBe(leads.length);
+    for (let index = 0; index < leads.length; index += 1) {
+      for (let other = index + 1; other < leads.length; other += 1) {
+        const otherFacts = new Set(leads[other].primarySourceFactIds);
+        expect(leads[index].primarySourceFactIds.some((id) => otherFacts.has(id))).toBe(false);
+      }
+    }
+    expect(leads.filter((lead) => lead.recentChange?.includes('雪塞之战'))).toHaveLength(1);
   });
 
   it('uses a one-quarter resolved echo only to fill an open-story vacancy', () => {
@@ -126,6 +219,48 @@ describe('observer story leads', () => {
     expect(leads.every((item) => item.source === 'fact' && item.displayMode === 'fact')).toBe(true);
     expect(leads.every((item) => item.factId && currentFactIds.has(item.factId))).toBe(true);
     expect(leads.every((item) => item.situationId === null && item.situationType === null)).toBe(true);
+    expect(leads.every((item) => !item.question.includes('结果如何'))).toBe(true);
+  });
+
+  it('uses a verified low-supply Battle Fact as the second evidence line without changing its principal scene identity', () => {
+    const base = worldAt(3, '当世三问-军政牵动');
+    const fact = lowSupplyBattleFact(base);
+    const world = withCurrentFacts(base, [fact]);
+    const plain = deriveObserverLeads(world)[0];
+    const enriched = deriveObserverLeadProjection(world).leads[0];
+
+    expect(enriched.primarySceneId).toBe(plain.primarySceneId);
+    expect(enriched.primarySourceFactIds).toEqual([fact.id]);
+    expect(enriched.evidence[1]).toContain('军政牵动');
+    expect(enriched.evidence[1]).toContain('补给22');
+  });
+
+  it('asks what changed after appointments, caps them at one, and omits an isolated ordinary departure', () => {
+    const base = worldAt(3, '当世三问-任免补位');
+    const armies = base.armies.slice(0, 3);
+    const holders = base.characters.slice(0, 3);
+    expect(armies).toHaveLength(3);
+    expect(holders).toHaveLength(3);
+    const majorAppointments = armies.map((army, index) => appointmentFact(
+      base,
+      `fact-test-major-${index}`,
+      'appointment_started',
+      '军团主帅',
+      holders[index].id,
+      army.id,
+    ));
+    const majorLeads = deriveObserverLeads(withCurrentFacts(base, majorAppointments));
+    expect(majorLeads).toHaveLength(1);
+    expect(majorLeads[0].question).toContain('兵权或朝局怎样变化');
+
+    const ended = appointmentFact(base, 'fact-test-a-ended', 'appointment_ended', '军团副将', holders[0].id, armies[0].id);
+    const isolated = deriveObserverLeads(withCurrentFacts(base, [ended]));
+    expect(isolated).toEqual([]);
+    const successor = appointmentFact(base, 'fact-test-b-started', 'appointment_started', '军团副将', holders[1].id, armies[0].id);
+    const successionLeads = deriveObserverLeads(withCurrentFacts(base, [ended, successor]));
+    expect(successionLeads).toHaveLength(1);
+    expect(successionLeads[0].question).toContain('谁接掌其权');
+    expect(successionLeads[0].question).not.toContain('结果如何');
   });
 
   it('is deterministic, fact-backed and read-only for the same authoritative world', () => {
@@ -145,6 +280,7 @@ describe('observer story leads', () => {
     expect(first).toEqual(repeated);
     expect(shuffled).toEqual(first);
     expect(new Set(first.map((item) => item.id)).size).toBe(first.length);
+    expect(new Set(first.map((item) => item.primarySceneId)).size).toBe(first.length);
     expect(first.every((item) => item.evidence.length === 2 && item.question.endsWith('？'))).toBe(true);
     expect(first.every((item) => targetExists(world, item.target.kind, item.target.id))).toBe(true);
     for (const lead of first.filter((item) => item.situationId)) {

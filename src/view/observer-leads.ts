@@ -1,11 +1,13 @@
 import type { MapOverlay } from '../components/WorldMap';
 import type { SituationPhase, SituationState } from '../sim/situations';
 import type { SimulationFact, WorldState } from '../sim/types';
-import { projectFactNarrative, projectSituationHistoricalScenes } from './historical-scenes';
+import { projectCoreImpacts } from './core-impact-projection';
+import { projectFactNarrative, projectSituationHistoricalScenes, type HistoricalScene } from './historical-scenes';
 import {
   projectSituationSnapshotItem,
   situationOutcomeLabel,
   type SituationParticipantGroupKey,
+  type SituationSnapshotEvidence,
   type SituationSnapshotItem,
 } from './situation-snapshot';
 import { historyTurnDate } from './v1-history';
@@ -34,6 +36,8 @@ export interface ObserverLead {
   startedLabel: string | null;
   trackingTurns: number;
   recentChange: string | null;
+  primarySceneId: string;
+  primarySourceFactIds: readonly string[];
 }
 
 /** A stateless wrapper retained for the app/text-snapshot integration boundary. */
@@ -83,6 +87,27 @@ const HIGH_OFFICES = new Set([
   '水师提督',
   '水师副将',
 ]);
+const MAJOR_APPOINTMENT_OFFICES = new Set(['君主', '宰辅', '枢密使', '军团主帅', '水师提督']);
+const FACT_QUESTION_SUFFIX: Partial<Record<SimulationFact['kind'], string>> = {
+  war_started: '，战端从何而起？',
+  war_ended: '，双方怎样收兵？',
+  battle: '怎样改变战线？',
+  territory_control_changed: '后，战线归谁掌握？',
+  army_order_changed: '，军团为何这样行动？',
+  agency_support_resolved: '后，请令筹码怎样变化？',
+  agency_intent_resolved: '后，兵权怎样落定？',
+  faction_lifecycle: '后，朝中力量如何重排？',
+  faction_relation_changed: '后，两派关系如何改变？',
+  court_action_resolved: '怎样改变官职、兵权或君位？',
+  embodied_action_resolved: '，人物行动实际改变了什么？',
+};
+
+interface SituationLeadChoice {
+  primarySceneId: string;
+  primarySourceFactIds: readonly string[];
+  evidence: readonly [string, string];
+  recentChange: string;
+}
 
 function stableCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -96,18 +121,11 @@ function compareSituations(left: SituationState, right: SituationState): number 
     || stableCompare(left.id, right.id);
 }
 
-function participant(
-  item: SituationSnapshotItem,
-  key: SituationParticipantGroupKey,
-): { id: string; label: string } | null {
+function participant(item: SituationSnapshotItem, key: SituationParticipantGroupKey): { id: string; label: string } | null {
   return item.participants.find((group) => group.key === key)?.entities[0] ?? null;
 }
 
-function targetForSituation(
-  world: WorldState,
-  situation: SituationState,
-  item: SituationSnapshotItem,
-): ObserverLeadTarget | null {
+function targetForSituation(world: WorldState, situation: SituationState, item: SituationSnapshotItem): ObserverLeadTarget | null {
   if (situation.type === 'military_power_crisis') {
     const person = participant(item, 'coreCharacterIds')
       ?? participant(item, 'supportingCharacterIds')
@@ -126,11 +144,7 @@ function targetForSituation(
   return region ? { kind: 'region', id: region.id } : null;
 }
 
-function questionForSituation(
-  item: SituationSnapshotItem,
-  situation: SituationState,
-  resolvedEcho: boolean,
-): string {
+function questionForSituation(item: SituationSnapshotItem, situation: SituationState, resolvedEcho: boolean): string {
   if (resolvedEcho) {
     return `${item.title}如何以“${situationOutcomeLabel(situation.resolution?.outcomeKey ?? '')}”收束？`;
   }
@@ -142,60 +156,66 @@ function questionForSituation(
   return `${item.title.replace(/的战争进程$/u, '')}，目前打到哪里？`;
 }
 
-function situationEvidence(
-  world: WorldState,
-  situation: SituationState,
-  item: SituationSnapshotItem,
-  resolvedEcho: boolean,
-): readonly [string, string] {
-  const scene = projectSituationHistoricalScenes(world, situation, 1, null, 'active')[0];
-  if (scene) {
-    const lines = [scene.summary.trim(), scene.result.trim()]
-      .filter((line, index, all) => Boolean(line) && all.indexOf(line) === index);
-    if (lines.length < 2) {
-      const names = item.participants
-        .flatMap((group) => group.entities.map((entity) => entity.label))
-        .filter((label, index, all) => all.indexOf(label) === index)
-        .slice(0, 3);
-      lines.push(names.length ? `相关各方 · ${names.join('、')}` : `始于${historyTurnDate(item.startedTurn).label}`);
-    }
-    return [lines[0], lines[1]];
-  }
-  if (resolvedEcho) {
-    return [
-      `结案结果 · ${situationOutcomeLabel(situation.resolution?.outcomeKey ?? '')}`,
-      item.latestChange ? `${historyTurnDate(item.latestChange.turn).label} · ${item.latestChange.label}` : '结果事实已经封存',
-    ];
-  }
-  const lines = item.evidence
-    .filter((entry) => entry.role !== 'outcome')
-    .map((entry) => entry.label)
+function sceneEvidence(item: SituationSnapshotItem, scene: HistoricalScene): readonly [string, string] {
+  const lines = [scene.summary.trim(), scene.result.trim()]
+    .filter((line, index, all) => Boolean(line) && all.indexOf(line) === index);
+  const names = item.participants
+    .flatMap((group) => group.entities.map((entity) => entity.label))
     .filter((label, index, all) => all.indexOf(label) === index)
-    .slice(0, 2);
-  if (lines.length < 2) lines.push(`始于${historyTurnDate(item.startedTurn).label} · ${item.typeLabel}`);
-  if (lines.length < 2) lines.push('本季没有新的具名行动');
+    .slice(0, 3);
+  if (lines.length < 2) lines.push(names.length ? `相关各方 · ${names.join('、')}` : `始于${historyTurnDate(item.startedTurn).label}`);
   return [lines[0], lines[1]];
 }
 
-function projectSituationLead(
-  world: WorldState,
-  situation: SituationState,
-  resolvedEcho: boolean,
-): ObserverLead | null {
+function primaryFactId(world: WorldState, scene: HistoricalScene): string | null {
+  const priorities: Partial<Record<SimulationFact['kind'], number>> = scene.id.startsWith('scene:war:')
+    ? { battle: 0, war_ended: 1, war_started: 2, territory_control_changed: 3 }
+    : scene.id.startsWith('scene:agency:')
+      ? { agency_intent_resolved: 0, agency_intent_submitted: 1, agency_support_resolved: 2 }
+      : {};
+  return world.facts
+    .filter((fact) => scene.sourceFactIds.includes(fact.id))
+    .sort((left, right) => (priorities[left.kind] ?? 10) - (priorities[right.kind] ?? 10)
+      || right.turn - left.turn || right.importance - left.importance || stableCompare(left.id, right.id))[0]?.id ?? null;
+}
+
+function structuralChoice(item: SituationSnapshotItem, evidence: SituationSnapshotEvidence): SituationLeadChoice {
+  const refKey = evidence.refs.map((ref) => ref.kind === 'fact'
+    ? `fact:${ref.factId}`
+    : `${ref.entityType}:${ref.entityId}:${ref.field}:${String(ref.value)}`).sort(stableCompare).join('|');
+  const names = item.participants.flatMap((group) => group.entities.map((entity) => entity.label)).slice(0, 3);
+  const primaryFact = evidence.refs.find((ref) => ref.kind === 'fact');
+  return {
+    primarySceneId: `structure:${evidence.key}:${refKey || 'unreferenced'}`,
+    primarySourceFactIds: primaryFact?.kind === 'fact' ? [primaryFact.factId] : [],
+    evidence: [`结构依据 · ${evidence.label}`, names.length ? `牵涉人物与势力 · ${names.join('、')}` : `始于${historyTurnDate(item.startedTurn).label}`],
+    recentChange: `当前依据 · ${evidence.label}`,
+  };
+}
+
+function situationChoices(world: WorldState, situation: SituationState, item: SituationSnapshotItem): SituationLeadChoice[] {
+  const scenes = projectSituationHistoricalScenes(world, situation, 8, null, 'active').map((scene) => {
+    const factId = primaryFactId(world, scene);
+    return {
+      primarySceneId: scene.id,
+      primarySourceFactIds: factId ? [factId] : [],
+      evidence: sceneEvidence(item, scene),
+      recentChange: `${scene.dateLabel} · ${scene.title}`,
+    };
+  });
+  const structural = item.evidence.filter((entry) => entry.role === 'structural').map((entry) => structuralChoice(item, entry));
+  return scenes.length ? [scenes[0], ...structural, ...scenes.slice(1)] : structural;
+}
+
+function projectSituationLead(world: WorldState, situation: SituationState, resolvedEcho: boolean, choice: SituationLeadChoice): ObserverLead | null {
   const item = projectSituationSnapshotItem(situation, world);
   const target = targetForSituation(world, situation, item);
   if (!target) return null;
-  const scene = projectSituationHistoricalScenes(world, situation, 1, null, 'active')[0];
-  const recentChange = scene
-    ? `${scene.dateLabel} · ${scene.title}`
-    : resolvedEcho
-      ? `已以“${situationOutcomeLabel(situation.resolution?.outcomeKey ?? '')}”结案`
-      : '本季无新动作';
   return {
     id: `lead-situation:${situation.id}`,
     label: WAR_SITUATION_TYPES.has(situation.type) ? '军争' : '朝局',
     question: questionForSituation(item, situation, resolvedEcho),
-    evidence: situationEvidence(world, situation, item, resolvedEcho),
+    evidence: choice.evidence,
     target,
     overlay: WAR_SITUATION_TYPES.has(situation.type) ? 'war' : 'political',
     source: 'situation',
@@ -205,15 +225,32 @@ function projectSituationLead(
     displayMode: resolvedEcho ? 'resolution_echo' : 'tracking',
     startedLabel: historyTurnDate(situation.startedTurn).label,
     trackingTurns: Math.max(1, world.turn - situation.startedTurn + 1),
-    recentChange,
+    recentChange: choice.recentChange,
+    primarySceneId: choice.primarySceneId,
+    primarySourceFactIds: choice.primarySourceFactIds,
   };
 }
 
-function isStoryFact(fact: SimulationFact): boolean {
+function sameAppointmentSeat(left: SimulationFact, right: SimulationFact): boolean {
+  if ((left.kind !== 'appointment_started' && left.kind !== 'appointment_ended')
+    || (right.kind !== 'appointment_started' && right.kind !== 'appointment_ended')) return false;
+  return left.payload.polityId === right.payload.polityId
+    && left.payload.officeKind === right.payload.officeKind
+    && left.payload.regionId === right.payload.regionId
+    && left.payload.armyId === right.payload.armyId
+    && left.payload.fleetId === right.payload.fleetId;
+}
+
+function isStoryFact(fact: SimulationFact, currentFacts: readonly SimulationFact[]): boolean {
   if (!STORY_FACT_KINDS.has(fact.kind)) return false;
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
-    return HIGH_OFFICES.has(fact.payload.officeKind);
+    if (!HIGH_OFFICES.has(fact.payload.officeKind)) return false;
+    return MAJOR_APPOINTMENT_OFFICES.has(fact.payload.officeKind) || currentFacts.some((other) => (
+      other.id !== fact.id && (sameAppointmentSeat(fact, other)
+        || other.sourceFactIds.includes(fact.id) || fact.sourceFactIds.includes(other.id))
+    ));
   }
+  if (fact.kind === 'embodied_action_resolved' && fact.payload.domainFactId) return false;
   return true;
 }
 
@@ -236,10 +273,15 @@ function projectFactLead(world: WorldState, fact: SimulationFact): ObserverLead 
     ...fact.regionIds.map((id) => world.regions.find((item) => item.id === id)?.name),
   ].filter((label, index, all): label is string => Boolean(label) && all.indexOf(label) === index).slice(0, 3);
   const war = WAR_FACT_KINDS.has(fact.kind);
+  const question = fact.kind === 'appointment_started'
+    ? `${narrative.title}后，兵权或朝局怎样变化？`
+    : fact.kind === 'appointment_ended'
+      ? `${narrative.title}后，谁接掌其权？`
+      : `${narrative.title}${FACT_QUESTION_SUFFIX[fact.kind] ?? '带来了什么变化？'}`;
   return {
     id: `lead-fact:${fact.id}`,
     label: war ? '军争' : '朝局',
-    question: `${narrative.title}，结果如何？`,
+    question,
     evidence: [narrative.summary, `${historyTurnDate(fact.turn).label} · ${context.join('、')}`],
     target,
     overlay: war ? 'war' : 'political',
@@ -251,6 +293,8 @@ function projectFactLead(world: WorldState, fact: SimulationFact): ObserverLead 
     startedLabel: null,
     trackingTurns: 1,
     recentChange: null,
+    primarySceneId: `scene:fact:${fact.id}`,
+    primarySourceFactIds: [fact.id],
   };
 }
 
@@ -272,10 +316,28 @@ export function deriveObserverLeads(world: WorldState): ObserverLead[] {
   const open = world.situationSystem.situations
     .filter((item) => item.status === 'open' && item.visibility >= OBSERVER_LEAD_VISIBILITY_THRESHOLD)
     .sort(compareSituations);
-  const selectedSituations = open.slice(0, 3);
-  const leads = selectedSituations
-    .map((item) => projectSituationLead(world, item, false))
-    .filter((item): item is ObserverLead => Boolean(item));
+  const selectedSituations: SituationState[] = [];
+  const leads: ObserverLead[] = [];
+  const usedSceneIds = new Set<string>();
+  const usedPrimaryFacts = new Set<string>();
+  const appendSituation = (situation: SituationState, resolvedEcho: boolean) => {
+    const item = projectSituationSnapshotItem(situation, world);
+    const choice = situationChoices(world, situation, item).find((candidate) => (
+      !usedSceneIds.has(candidate.primarySceneId)
+      && candidate.primarySourceFactIds.every((id) => !usedPrimaryFacts.has(id))
+    ));
+    if (!choice) return;
+    const lead = projectSituationLead(world, situation, resolvedEcho, choice);
+    if (!lead) return;
+    leads.push(lead);
+    selectedSituations.push(situation);
+    usedSceneIds.add(choice.primarySceneId);
+    choice.primarySourceFactIds.forEach((id) => usedPrimaryFacts.add(id));
+  };
+  for (const situation of open) {
+    appendSituation(situation, false);
+    if (leads.length >= 3) break;
+  }
 
   if (leads.length < 3) {
     const echoes = world.situationSystem.situations
@@ -286,11 +348,7 @@ export function deriveObserverLeads(world: WorldState): ObserverLead[] {
         && world.turn - item.resolvedTurn <= OBSERVER_LEAD_RESOLUTION_ECHO_TURNS)
       .sort(compareSituations);
     for (const situation of echoes) {
-      const lead = projectSituationLead(world, situation, true);
-      if (lead) {
-        leads.push(lead);
-        selectedSituations.push(situation);
-      }
+      appendSituation(situation, true);
       if (leads.length >= 3) break;
     }
   }
@@ -298,12 +356,21 @@ export function deriveObserverLeads(world: WorldState): ObserverLead[] {
   if (leads.length < 3 && world.lastTurn) {
     const currentFactIds = new Set(world.lastTurn.factIds);
     const covered = coveredFactIds(selectedSituations);
-    const facts = world.facts
-      .filter((fact) => currentFactIds.has(fact.id) && !covered.has(fact.id) && isStoryFact(fact))
+    const currentFacts = world.facts.filter((fact) => currentFactIds.has(fact.id));
+    const facts = currentFacts
+      .filter((fact) => !covered.has(fact.id) && isStoryFact(fact, currentFacts))
       .sort((left, right) => right.importance - left.importance || stableCompare(left.id, right.id));
+    let appointmentSelected = false;
     for (const fact of facts) {
+      const appointment = fact.kind === 'appointment_started' || fact.kind === 'appointment_ended';
+      if ((appointment && appointmentSelected) || usedPrimaryFacts.has(fact.id)) continue;
       const lead = projectFactLead(world, fact);
-      if (lead) leads.push(lead);
+      if (lead) {
+        leads.push(lead);
+        usedSceneIds.add(lead.primarySceneId);
+        usedPrimaryFacts.add(fact.id);
+        if (appointment) appointmentSelected = true;
+      }
       if (leads.length >= 3) break;
     }
   }
@@ -311,5 +378,15 @@ export function deriveObserverLeads(world: WorldState): ObserverLead[] {
 }
 
 export function deriveObserverLeadProjection(world: WorldState): ObserverLeadProjection {
-  return { leads: deriveObserverLeads(world) };
+  return { leads: deriveObserverLeads(world).map((lead) => {
+    const situation = lead.situationId
+      ? world.situationSystem.situations.find((item) => item.id === lead.situationId)
+      : null;
+    const impact = (lead.primarySourceFactIds.length
+      ? projectCoreImpacts(world, { sourceFactIds: lead.primarySourceFactIds, limit: 1 })[0]
+      : undefined) ?? (situation?.type === 'war_progress'
+      ? projectCoreImpacts(world, { warId: situation.scopeKey, limit: 1 })[0]
+      : undefined);
+    return impact ? { ...lead, evidence: [lead.evidence[0], `军政牵动 · ${impact.summary}`] } : lead;
+  }) };
 }

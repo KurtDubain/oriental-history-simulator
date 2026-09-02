@@ -51,6 +51,7 @@ interface Metrics {
   projectionCheckpoints: number;
   projectionPurityChecks: number;
   projectionDeterminismChecks: number;
+  primaryEvidencePairChecks: number;
   situationLeadChecks: number;
   factLeadChecks: number;
   sparseCheckpoints: number;
@@ -72,6 +73,7 @@ function createMetrics(): Metrics {
     projectionCheckpoints: 0,
     projectionPurityChecks: 0,
     projectionDeterminismChecks: 0,
+    primaryEvidencePairChecks: 0,
     situationLeadChecks: 0,
     factLeadChecks: 0,
     sparseCheckpoints: 0,
@@ -159,6 +161,9 @@ function auditLead(world: WorldState, lead: ObserverLead, metrics: Metrics): voi
   if (!lead.question.endsWith('？') || lead.evidence.length !== 2 || lead.evidence.some((line) => !line.trim())) {
     fail(world.seed, world.turn, `${lead.id} does not contain one concrete question and two evidence lines`);
   }
+  if (!lead.primarySceneId || lead.primarySourceFactIds.some((id) => !world.facts.some((fact) => fact.id === id))) {
+    fail(world.seed, world.turn, `${lead.id} does not retain valid principal evidence identity`);
+  }
   if (lead.source === 'fact') {
     metrics.factLeadChecks += 1;
     const reportFactIds = new Set(world.lastTurn?.factIds ?? []);
@@ -207,6 +212,18 @@ function auditProjection(world: WorldState, metrics: Metrics): ObserverLead[] {
   if (leads.length < 3) metrics.sparseCheckpoints += 1;
   if (leads.length > 3 || new Set(leads.map((lead) => lead.id)).size !== leads.length) {
     fail(world.seed, world.turn, 'lead projection must contain at most three unique stories');
+  }
+  for (let index = 0; index < leads.length; index += 1) {
+    for (let other = index + 1; other < leads.length; other += 1) {
+      metrics.primaryEvidencePairChecks += 1;
+      if (leads[index].primarySceneId === leads[other].primarySceneId) {
+        fail(world.seed, world.turn, `${leads[index].id} and ${leads[other].id} repeat one principal scene`);
+      }
+      const otherFacts = new Set(leads[other].primarySourceFactIds);
+      if (leads[index].primarySourceFactIds.some((id) => otherFacts.has(id))) {
+        fail(world.seed, world.turn, `${leads[index].id} and ${leads[other].id} repeat one principal Fact`);
+      }
+    }
   }
   if (world.hash !== beforeHash
     || world.factDigest !== beforeFactDigest
@@ -283,6 +300,7 @@ console.log(JSON.stringify({
   metrics: {
     projectionPurityChecks: aggregate.projectionPurityChecks,
     projectionDeterminismChecks: aggregate.projectionDeterminismChecks,
+    primaryEvidencePairChecks: aggregate.primaryEvidencePairChecks,
     situationLeadChecks: aggregate.situationLeadChecks,
     factLeadChecks: aggregate.factLeadChecks,
     sparseCheckpoints: aggregate.sparseCheckpoints,

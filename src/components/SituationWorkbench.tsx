@@ -220,6 +220,12 @@ export function SituationWorkbench({
               >
                 {detail.currentChange}
               </p>
+              {detail.coreImpact ? (
+                <div className="situation-workbench__core-impact" data-testid="situation-core-impact">
+                  <strong>军政牵动</strong><p>{detail.coreImpact.summary}</p>
+                  {detail.coreImpact.sourceEventId ? <button type="button" onClick={() => onSelectHistoryEvent(detail.coreImpact!.sourceEventId!)}>查看实据</button> : null}
+                </div>
+              ) : null}
               {detail.playerSummary.map((paragraph) => <p key={paragraph}>{paragraph}</p>)}
 
               {detail.recentDeltas.length ? (

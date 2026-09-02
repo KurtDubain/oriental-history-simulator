@@ -1,10 +1,10 @@
-# 沧衡纪：东方架空历史演化模拟器 v1.22.0
+# 沧衡纪：东方架空历史演化模拟器 v1.22.1
 
 一个纯前端、确定性的东方架空历史观察沙盒。你不直接统治国家，而是按季推进时间，主要观察战争进展与人物 / 朝堂权力变化，并在少数节点入世一名人物或用有限“天命”轻推世界。粮食、人口、贸易、迁徙、疾病和知识继续参与演化，但只作为战争与朝局的背景压力出现。
 
 在线试玩：[oriental-history-simulator.vercel.app](https://oriental-history-simulator.vercel.app/)
 
-当前产品版本为 **1.22.0**，权威存档仍为 **schema 4**，两者彼此独立。开启新世界时可从两张固定舆图中选择：**82 州 / 10 海域的私人舆图**，或 **68 州 / 10 海域的完全架空参赛舆图“云海八荒”**。两者共用人物、家族、政治、经济、战争、海洋、Situation 与入世规则。
+当前产品版本为 **1.22.1**，权威存档仍为 **schema 4**，两者彼此独立。开启新世界时可从两张固定舆图中选择：**82 州 / 10 海域的私人舆图**，或 **68 州 / 10 海域的完全架空参赛舆图“云海八荒”**。两者共用人物、家族、政治、经济、战争、海洋、Situation 与入世规则。
 
 schema 4 将真实发生的 Simulation Fact 与面向玩家展示的 Chronicle 分开；军权危机、继承危机、战争进程和朝堂权斗都从真实事实形成、转阶段与结案。“当世三问”直接从当前最值得看的 Situation 中选择最多三条故事，不保存另一套仲裁账本。人物档案直接读取当前权威目标、已发生 Facts 与人物状态；玩家可随时入世一名人物，每季定下一项符合身份和处境的行动，再由同一模拟系统结算。
 
@@ -159,7 +159,7 @@ npm run test:release
 
 `test:release` 会依次执行单元/系统测试、个人版与参赛白名单构建、桌面 Chromium 试玩、1440/768/640/390 四档页面栈与移动安全区、390×844 与 640×900 移动舆图触控门、Phase A/B/C、人物 Agency、权势叙事、地方施政、双地图 80 季与 V0.3 长程审计。`npm run build:contest` 产出 `dist-contest/`：模块图会拒绝私人内容依赖，产物还会核对版本/allowlist 清单并扫描从私人 profile 派生的 328 项名称与 ID。`npm run test:e2e:contest` 另外验证参赛静态产物只提供公开地图，且遇到缺图旧档时不会覆盖原载荷。
 
-`npm run test:audit:architecture` 用 TypeScript AST 区分 runtime/type-only 依赖，对运行时环、跨层回写、热点文件预算和类型环债务增长直接失败。v1.22.0 使用单个 JavaScript 文件原始体积不超过 585 KiB、JavaScript gzip 总量不超过 410 KiB、CSS gzip 总量不超过 40 KiB 的约束；本地个人版 / 参赛版实测 JavaScript gzip 为 406,311 / 406,220 bytes。地图 profile 由构建注入经过校验的 HTML JSON 载荷，不进入主 JavaScript 包的解析与执行路径。`main` 与 Pull Request 会在 Node 22 环境中执行 `npm ci`、单测、架构门、双构建和关键浏览器链，失败时保留浏览器产物供复现。
+`npm run test:audit:architecture` 用 TypeScript AST 区分 runtime/type-only 依赖，对运行时环、跨层回写、热点文件预算和类型环债务增长直接失败。v1.22.1 使用单个 JavaScript 文件原始体积不超过 585 KiB、JavaScript gzip 总量不超过 410 KiB、CSS gzip 总量不超过 40 KiB 的约束；本地个人版 / 参赛版实测 JavaScript gzip 为 411,161 / 411,080 bytes。地图 profile 由构建注入经过校验的 HTML JSON 载荷，不进入主 JavaScript 包的解析与执行路径。`main` 与 Pull Request 会在 Node 22 环境中执行 `npm ci`、单测、架构门、双构建和关键浏览器链，失败时保留浏览器产物供复现。
 
 `npm run test:update` 单独验证构建版本标识、游戏内手动检查、模拟新部署、更新前自动保存与移动端入口。参赛产物与源码隔离边界见 [参赛地图构建说明](./docs/CONTEST_BUILD.md)；发布任务与三主循环归属见 [Roadmap](./docs/ROADMAP_VNEXT.md) 和 [功能归属台账](./docs/FEATURE_LOOP_INVENTORY.md)。
 

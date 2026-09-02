@@ -504,6 +504,24 @@
   line-height: 1.85;
 }
 
+.observer-core-impact {
+  margin: 0 0 12px;
+  padding: 10px 12px;
+  border-left: 2px solid var(--observer-vermilion-dark);
+  background: var(--observer-vermilion-wash);
+}
+
+.observer-core-impact > strong {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--observer-vermilion-dark);
+  font-size: 9px;
+  letter-spacing: .12em;
+}
+
+.observer-core-impact > p { margin: 0; line-height: 1.65; }
+.observer-core-impact > button { margin-top: 6px; min-height: 36px; }
+
 .observer-embodiment-seal {
   display: inline-flex;
   min-height: 20px;

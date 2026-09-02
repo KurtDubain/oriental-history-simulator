@@ -3,6 +3,16 @@ import type { AppReleaseNote } from './changelog';
 /** Public build notes contain only information shipped by the contest atlas. */
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   {
+    version: '1.22.1',
+    date: '2026-09-02',
+    title: '周边入局，军政有因',
+    items: [
+      '“当世三问”不再让多个局势重复讲同一场战役；任免补位改为追问接掌、兵权与朝局变化，无足够实事时允许少于三条。',
+      '军粮、地方压力与具名人物疾病只有在真实改变军令、战役、朝局或职权时，才作为一条可追溯的军政原因出现。',
+      '供养层区分粮食净输入、出口和非粮往来；普通贸易、迁徙与疾病继续留在后台，地图仍只有疆界、军争、供养、地势四层，schema 4 不变。',
+    ],
+  },
+  {
     version: '1.22.0',
     date: '2026-09-02',
     title: '收去重影，聚焦军争',

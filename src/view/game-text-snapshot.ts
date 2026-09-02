@@ -247,6 +247,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       court: countryDossier.court ?? null,
       powerholders: countryDossier.powerholders ?? [],
       courtScenes: countryDossier.courtScenes ?? [],
+      coreImpact: countryDossier.coreImpact ?? null,
       diplomacy: diplomacy.filter((entry) => entry.polityAId === item.id || entry.polityBId === item.id).map((entry) => ({
         with: polityName(entry.polityAId === item.id ? entry.polityBId : entry.polityAId),
         status: entry.status,
@@ -413,6 +414,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         status: situationWorkbench.selected.status,
         playerSummary: situationWorkbench.selected.playerSummary,
         currentChange: situationWorkbench.selected.currentChange,
+        coreImpact: situationWorkbench.selected.coreImpact,
         recentDeltas: situationWorkbench.selected.recentDeltas,
         outcome: situationWorkbench.selected.outcome,
         scenes: situationWorkbench.selected.scenes.map((scene) => ({
@@ -457,6 +459,8 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         displayMode: lead.displayMode,
         trackingTurns: lead.trackingTurns,
         recentChange: lead.recentChange,
+        primarySceneId: lead.primarySceneId,
+        primarySourceFactIds: lead.primarySourceFactIds,
         label: lead.label,
         startedLabel: lead.startedLabel,
         question: lead.question,

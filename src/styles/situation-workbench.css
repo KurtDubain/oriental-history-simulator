@@ -400,6 +400,17 @@
   font-size: 15px;
 }
 
+.situation-workbench__core-impact {
+  margin: 10px 0 14px;
+  padding: 9px 11px;
+  border-left: 2px solid var(--observer-vermilion, #9c352b);
+  background: rgb(156 53 43 / 7%);
+}
+
+.situation-workbench__core-impact > strong { display: block; margin-bottom: 4px; font-size: 9px; letter-spacing: .12em; }
+.situation-workbench__core-impact > p { margin: 0; }
+.situation-workbench__core-impact > button { margin-top: 6px; min-height: 36px; }
+
 .situation-workbench__direct-change {
   margin-top: 17px;
   padding: 13px 15px;

@@ -8,6 +8,7 @@ import type {
   WorldState,
 } from '../sim/types';
 import { projectMilitaryAuthority } from './military-authority-reading';
+import { projectCoreImpacts } from './core-impact-projection';
 import { regionSupplyNote } from './map-adapter';
 import {
   character,
@@ -42,6 +43,7 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
     const deputy = character(world, item.deputyCommanderId);
     const stationed = region(world, item.regionId);
     const authority = projectMilitaryAuthority(world, item);
+    const coreImpact = projectCoreImpacts(world, { target: { kind: 'army', id: item.id }, limit: 1 })[0];
     const readiness = item.supply < 35
       ? '粮道已很吃紧；继续行军或交战，减员会先于正面溃败到来。'
       : item.morale < 40
@@ -92,6 +94,7 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
       ],
       links: [...new Map(links.map((entry) => [`${entry.kind}:${entry.id}`, entry])).values()],
       history: systemHistory(world, 'army', id),
+      coreImpact: coreImpact ? { summary: coreImpact.summary, sourceEventId: coreImpact.sourceEventIds[0] ?? null } : null,
     };
   }
   if (kind === 'fleet') {

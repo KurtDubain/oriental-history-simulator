@@ -1,13 +1,13 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，v1.22.0 COMPACT01 更新于 2026-09-02，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.22.1 COMPACT01 更新于 2026-09-02，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
-- `src` 下生产 TypeScript / TSX：164 个文件，60,796 行（测试排除）；相对 v1.21.1 净减 3 个生产文件、4,228 行。
-- 相对模块依赖：626 条，其中 403 条 runtime、223 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环，正好落在 12/12 的不增长预算内。
+- `src` 下生产 TypeScript / TSX：165 个文件，61,377 行（测试排除）；相对 v1.21.1 净减 2 个生产文件、3,647 行；本次只新增一个只读军政影响投影模块。
+- 相对模块依赖：632 条，其中 408 条 runtime、224 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环，正好落在 12/12 的不增长预算内。
 - 当前热点：`engine.ts` 3,117/3,120 行、`invariants.ts` 2,664/2,665 行、`App.tsx` 2,289/2,300 行（实际/门禁）。
-- 其次为 `v02.ts` 2,488 行、`v03-ocean.ts` 2,409 行、`agency/decision.ts` 2,029 行、`map-renderer.ts` 1,401 行与 `Inspector.tsx` 1,319 行。`observer-leads.ts` 为 316/400 行，`WorldMap.tsx` 为 1,048/1,100 行，`view/adapters.ts` 为 51/100 行。
+- 其次为 `v02.ts` 2,488 行、`v03-ocean.ts` 2,409 行、`agency/decision.ts` 2,029 行、`map-renderer.ts` 1,401 行与 `Inspector.tsx` 1,338 行。`observer-leads.ts` 为 393/400 行，`WorldMap.tsx` 为 1,048/1,100 行，`view/adapters.ts` 为 51/100 行。
 
 行数是增长预警，不是机械拆文件指标。新增领域规则不得再默认进入四个最高热点；只有形成稳定输入、输出和所有权后才拆分。
 
@@ -43,7 +43,16 @@ v1.10.1 的扫描已从正则匹配改为 TypeScript AST 与 Tarjan SCC，能区
 - 旧 `canghai-agency-shadow-ledger-v1` 和 ObserverDesk 中的 `leadContinuity` 都直接忽略，不迁移到新 store 或 wrapper。
 - `App.tsx` 继续是唯一 `WorldState` React owner；世界打开、推进、天意、收藏与存读档不再同步观察账本。
 - `WorldState` 仍为 44 个顶层字段，季度流水线仍为 22 个阶段；本轮没有升级 schema，也没有改变领域结算顺序。
-- 个人版 / 参赛版 JavaScript gzip 为 406,311 / 406,220 bytes，均低于收紧后的 410 KiB 门禁；CSS gzip 均为 38,651 bytes。包体余量不用于恢复已删除概念。
+- 个人版 / 参赛版 JavaScript gzip 为 411,161 / 411,080 bytes，均低于收紧后的 410 KiB 门禁；CSS gzip 均为 38,777 bytes。包体余量不用于恢复已删除概念。
+
+### 周边压力进入军政阅读的边界
+
+`core-impact-projection.ts` 只读取最近一季已结算的 Fact、stateDelta、Shipment 与战役快照，最多投影三条“军粮与战力、征兵与军费、民心与中央权威、官职与兵权”结果。它不持久化、不参与下一季结算，也不根据同时出现的数值推测因果。
+
+- 已有明确凭证时，三问、战局、军团和朝局可附带一条“军政牵动”；普通贸易、迁徙或疫病仍留在地区档案和史册。
+- 疾病只有在人物病故 Fact 与同席位任免 Fact 能闭合时才说明权力交接；现有总量军中病亡不能归因到具体军团，因此保持沉默。
+- 贸易只有军粮 Shipment 能指向具体军团；一般关税与国库支出无法证明资金同源，不描述成征兵、军饷或造舰原因。
+- 该模块是现有权威记录的只读 adapter，不是第二套事实账本；`WorldState` 顶层字段、季度阶段、schema 与四层舆图均未改变。
 
 ## 军权纵切的所有权
 
