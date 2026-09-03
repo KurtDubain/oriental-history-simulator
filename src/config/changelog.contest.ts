@@ -1,14 +1,24 @@
 import type { AppReleaseNote } from './changelog';
 
 /** Public build notes contain only information shipped by the contest atlas. */
-export const LATEST_APP_RELEASE: AppReleaseNote = { version: '1.22.2', date: '2026-09-02', title: '军粮退幕，问答归真', items: [
-  '例行军粮不再算军政后果；只展示真实改令或参战减员。',
-  '战争问卡先答战况；任免写清谁下、谁上和兵权。',
-  '贸易、运输、迁徙和疫情不补位。',
+export const LATEST_APP_RELEASE: AppReleaseNote = { version: '1.23.0', date: '2026-09-03', title: '将领成系，战线入目', items: [
+  '军政集团改按共军、共事、地方、家门与真实支持形成，不再按人物出身分桶。',
+  '战局聚焦会列出各集团实际投入的军队、兵力、主将、军令、战线和当季损失。',
+  '军争舆图分清刚走过的一步、下一步与后续路线，并直示接敌、胜败、推进或退守。',
 ] };
 
 export const APP_RELEASES: readonly AppReleaseNote[] = [
   LATEST_APP_RELEASE,
+  {
+    version: '1.22.2',
+    date: '2026-09-02',
+    title: '军粮退幕，问答归真',
+    items: [
+      '例行军粮不再算军政后果；只展示真实改令或参战减员。',
+      '战争问卡先答战况；任免写清谁下、谁上和兵权。',
+      '贸易、运输、迁徙和疫情不补位。',
+    ],
+  },
   {
     version: '1.22.1',
     date: '2026-09-02',

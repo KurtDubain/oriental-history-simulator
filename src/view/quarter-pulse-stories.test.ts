@@ -110,6 +110,18 @@ describe('TRIM01 QuarterPulse story projection', () => {
     ]);
   });
 
+  it('prefers a browsable military record over an equally important unlinked office record', () => {
+    const military = eventStory('army-raised', 40);
+    const officeRecord = eventStory('office-record', 40, {
+      source: 'fact',
+      eventId: null,
+      historyEventIds: [],
+      sourceFactIds: ['fact-office-record'],
+    });
+
+    expect(selectQuarterPulseStories([officeRecord, military])[0]?.id).toBe(military.id);
+  });
+
   it('uses source Fact and Chronicle identities to collapse duplicate tellings while preserving the winning evidence links', () => {
     const factWinner = eventStory('event-fact-winner', 90, {
       source: 'fact',

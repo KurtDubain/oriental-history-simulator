@@ -32,6 +32,7 @@ export interface SituationWorkbenchProps {
   onSelectCourtFaction?: (target: CourtFactionTarget) => void;
   isWatched?: boolean;
   onToggleWatch?: () => void;
+  onShowWarMap?: () => void;
   returnFocusTo?: HTMLElement | null;
   shouldRestoreFocus?: () => boolean;
 }
@@ -65,6 +66,7 @@ export function SituationWorkbench({
   onSelectCourtFaction,
   isWatched = false,
   onToggleWatch,
+  onShowWarMap,
   returnFocusTo,
   shouldRestoreFocus,
 }: SituationWorkbenchProps) {
@@ -192,6 +194,11 @@ export function SituationWorkbench({
               <h2 id={titleId} ref={titleRef} tabIndex={-1}>{detail.title}</h2>
               {detail.status === 'resolved' ? <span className="situation-workbench__resolved-stamp" aria-label="已结案">结案</span> : null}
               <div className="situation-workbench__progress-row">
+                {detail.type === 'war_progress' && onShowWarMap ? (
+                  <button type="button" className="situation-workbench__war-map" onClick={onShowWarMap}>
+                    <ShieldAlert size={14} aria-hidden="true" />回到舆图看战线
+                  </button>
+                ) : null}
                 {detail.status === 'open' && onToggleWatch ? (
                   <button
                     type="button"

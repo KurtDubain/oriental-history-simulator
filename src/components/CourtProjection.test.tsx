@@ -65,13 +65,13 @@ describe('CourtProjection', () => {
     expect(markup).toContain('data-court-layout="desktop"');
     expect(markup).toContain('按距君主远近排列的中枢席位');
     expect(markup).toContain('座次是官位，不是地盘');
-    expect(markup).toContain('派系次序');
+    expect(markup).toContain('集团次序');
     expect(markup).toContain('查看权势根由');
     expect(markup.match(/data-court-focus-detail/g)).toHaveLength(1);
     expect(markup).toContain('aria-pressed="true"');
     expect(markup).toContain('看领袖 · 隋行简');
     expect(markup).toContain('查看宰辅的由来');
-    expect(markup).toContain('以隋行简为首');
+    expect(markup).toContain('围绕隋行简及其真实军政根基形成');
     expect(markup).not.toContain('由隋行简领袖');
   });
 
@@ -90,7 +90,7 @@ describe('CourtProjection', () => {
     }));
 
     expect(markup).toContain('目前没有中枢席位可列。');
-    expect(markup).toContain('目前没有中枢任官记录，派系格局也未成形。');
+    expect(markup).toContain('目前没有中枢任官记录，军政集团也未成形。');
     expect(markup).not.toContain('中枢座次已有记录');
   });
 
@@ -132,7 +132,7 @@ describe('CourtProjection', () => {
 
     expect(markup).toContain('data-court-focused-faction-id="faction-b"');
     expect(markup).toContain('<h4>清议社</h4>');
-    expect(markup).toContain('以裴观澜为首');
+    expect(markup).toContain('围绕裴观澜及其真实军政根基形成');
   });
 
   it.each([
@@ -148,7 +148,7 @@ describe('CourtProjection', () => {
     expect(markup).toContain('data-court-focus-state="unavailable"');
     expect(markup).not.toContain('data-court-focused-faction-id=');
     expect(markup).not.toContain('aria-pressed="true"');
-    expect(markup).toContain('所请求派系不在当前朝局，未作替代选择。');
+    expect(markup).toContain('所请求集团不在当前朝局，未作替代选择。');
     expect(markup).not.toContain('以隋行简为首');
   });
 

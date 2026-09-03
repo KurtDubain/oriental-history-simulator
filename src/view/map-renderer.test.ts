@@ -205,7 +205,12 @@ describe('map renderer LOD contract', () => {
         armyName: '东丘军',
         regionId: destination.id,
         regionName: destination.name,
+        steps: 1,
+        commanderName: '顾守山',
+        factionName: '东丘系',
       },
+      lawfulCommanderName: '王行简',
+      factionShortName: '西营系',
     };
     const context = recordingContext();
 
@@ -222,7 +227,7 @@ describe('map renderer LOD contract', () => {
     );
 
     expect(context.fillTexts.map((call) => call.text))
-      .toContain('预计接敌 · 东丘军（东丘）');
+      .toContain('王行简·西营系 → 顾守山·东丘系 · 1步');
   });
 
   it('keeps compact overview polity and capital hierarchy without restoring ordinary region names', () => {

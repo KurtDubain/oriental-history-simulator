@@ -179,13 +179,15 @@ describe('V0.2 coupled social simulation', () => {
     const commitmentBefore = beforeDestruction.commitments.find((commitment) => {
       const formation = politicalAllianceFormationFact(beforeDestruction, commitment);
       return formation
-        && [formation.payload.leftFactionId, formation.payload.rightFactionId].includes('fac_0010')
-        && [formation.payload.leftFactionId, formation.payload.rightFactionId].includes('fac_0008');
+        && commitment.status === '生效'
+        && beforeDestruction.factions.some((faction) => (
+          faction.id === formation.payload.rightFactionId
+          && faction.active
+          && faction.memberIds.length > 0
+        ));
     });
     expect(commitmentBefore).toMatchObject({
       kind: '政治联盟',
-      madeTurn: 11,
-      dueTurn: 27,
       status: '生效',
       resolvedTurn: null,
       resolutionEventId: null,
@@ -199,6 +201,10 @@ describe('V0.2 coupled social simulation', () => {
       faction.id === formationFact.payload.rightFactionId
     ));
     if (!endingFaction) throw new Error('expected the alliance carrier faction');
+    const partnerFaction = beforeDestruction.factions.find((faction) => (
+      faction.id === formationFact.payload.leftFactionId
+    ));
+    if (!partnerFaction) throw new Error('expected the surviving alliance faction');
     const endingMemberIds = [...endingFaction.memberIds];
     expect(endingMemberIds.length).toBeGreaterThan(0);
 
@@ -279,8 +285,8 @@ describe('V0.2 coupled social simulation', () => {
         after: '失效',
       }],
     });
-    expect(resolutionEvent?.title).toContain('海台阁');
-    expect(resolutionEvent?.title).toContain('海清议');
+    expect(resolutionEvent?.title).toContain(partnerFaction.name);
+    expect(resolutionEvent?.title).toContain(endingFaction.name);
     expect(resolutionEvent?.summary).not.toContain(commitmentAfter?.promisorId);
     expect(resolutionEvent?.summary).not.toContain(commitmentAfter?.promiseeId);
     const allianceEndEvent = world.history.find((event) => (

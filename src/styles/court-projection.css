@@ -237,6 +237,24 @@
   list-style: none;
 }
 
+.court-projection__relation-fold {
+  margin-top: 9px;
+  border-bottom: 1px solid var(--observer-line);
+}
+
+.court-projection__relation-fold > summary {
+  min-height: 44px;
+  color: var(--observer-ink-faint);
+  font-size: 9px;
+  font-weight: 700;
+  line-height: 44px;
+  cursor: pointer;
+}
+
+.court-projection__relation-fold[open] > summary {
+  color: var(--observer-ink-soft);
+}
+
 .court-projection__relations li {
   display: grid;
   min-width: 0;

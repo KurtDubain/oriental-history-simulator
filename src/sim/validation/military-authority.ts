@@ -46,6 +46,16 @@ export function validateMilitaryAuthority(
   const retinueArmyByOwner = new Map<string, string>();
 
   for (const army of world.armies) {
+    const movement = army.recentMovement;
+    if (movement && (
+      !regions.has(movement.fromRegionId)
+      || !regions.has(movement.toRegionId)
+      || !Number.isSafeInteger(movement.turn)
+      || movement.turn < 0
+      || movement.turn > world.turn
+      || !ORDER_KINDS.has(movement.orderKind)
+      || (movement.warId !== null && !wars.has(movement.warId))
+    )) violations.push(issue('army.recent-movement', `${army.name}最近一步行军记录无效`, army.id));
     const eligible = new Set([
       army.commanderId,
       army.deputyCommanderId,

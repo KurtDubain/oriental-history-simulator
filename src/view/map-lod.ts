@@ -18,6 +18,7 @@ export const MAP_LOD_THRESHOLDS = Object.freeze({
 export interface BuildMapLodSceneOptions {
   selectedRegionId?: string | null;
   selectedObject?: MapSelectedObject;
+  focusedArmyIds?: readonly string[];
 }
 
 function safeZoom(zoom: number) {
@@ -135,10 +136,12 @@ function visibleArmies(
   armies: readonly MapArmyView[],
   level: MapLodLevel,
   selectedObject: MapSelectedObject,
+  focusedArmyIds: readonly string[],
 ) {
-  return level === 'overview'
-    ? visibleForOverview(armies, selectedArmyId(selectedObject))
-    : [...armies];
+  if (level !== 'overview') return [...armies];
+  const visible = visibleForOverview(armies, selectedArmyId(selectedObject));
+  const ids = new Set([...visible.map((item) => item.id), ...focusedArmyIds]);
+  return armies.filter((item) => ids.has(item.id));
 }
 
 function visibleFleets(
@@ -195,7 +198,7 @@ export function buildMapLodScene(
     cityRegionIds,
     portRegionIds,
     interactiveSeaZoneIds,
-    armies: visibleArmies(presentation.armies, level, selectedObject),
+    armies: visibleArmies(presentation.armies, level, selectedObject, options.focusedArmyIds ?? []),
     fleets: visibleFleets(presentation.fleets, level, selectedObject),
     markers: [...presentation.markers],
   };

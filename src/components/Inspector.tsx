@@ -79,6 +79,8 @@ export interface CountryFactionView {
   power: number;
   cohesion: number;
   agenda: string;
+  coreMembers?: readonly { id: string; name: string }[];
+  memberCount?: number;
   resources?: readonly PoliticalPowerResourceView[];
   categories?: readonly PoliticalPowerCategoryView[];
   recentMovement?: PoliticalPowerMovementView | null;

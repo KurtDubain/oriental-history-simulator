@@ -13,6 +13,8 @@ import {
   projectFactionSpatialPowerRoots,
 } from './political-map-projection';
 import { projectMilitaryAuthority } from './military-authority-reading';
+import { armyOrderPath } from '../sim/military/orders';
+import { factionForArmy } from './war-group-projection';
 import { polity, region } from './dossier-adapter-shared';
 
 function foodSafetyRatio(population: number, food: number) {
@@ -95,17 +97,24 @@ function expectedContact(world: WorldState, army: WorldState['armies'][number]):
   const explicitTarget = army.order.targetArmyId
     ? world.armies.find((item) => item.id === army.order.targetArmyId)
     : undefined;
+  const path = armyOrderPath(world, army);
+  const pathIndex = new Map((path ?? []).map((id, index) => [id, index]));
   const contact = explicitTarget?.polityId === enemyPolityId && explicitTarget.soldiers > 0
     ? explicitTarget
     : world.armies
-      .filter((item) => item.polityId === enemyPolityId && item.soldiers > 0 && item.regionId === army.order.targetRegionId)
-      .sort((left, right) => right.soldiers - left.soldiers || left.id.localeCompare(right.id, 'zh-CN'))[0];
+      .filter((item) => item.polityId === enemyPolityId && item.soldiers > 0 && pathIndex.has(item.regionId))
+      .sort((left, right) => (pathIndex.get(left.regionId) ?? 99) - (pathIndex.get(right.regionId) ?? 99)
+        || right.soldiers - left.soldiers || left.id.localeCompare(right.id, 'zh-CN'))[0];
   const contactRegion = contact && world.regions.find((item) => item.id === contact.regionId);
+  const contactFaction = contact ? factionForArmy(world, contact) : null;
   return contact && contactRegion ? {
     armyId: contact.id,
     armyName: contact.name,
     regionId: contactRegion.id,
     regionName: contactRegion.name,
+    steps: Math.max(1, pathIndex.get(contactRegion.id) ?? 1),
+    commanderName: world.characters.find((item) => item.id === contact.commanderId)?.name ?? '无名守将',
+    factionName: contactFaction?.name ?? '未归集团',
   } : undefined;
 }
 
@@ -151,6 +160,8 @@ export function toMapArmies(world: WorldState): MapArmyView[] {
     .filter((army) => army.soldiers > 0)
     .map((army) => {
       const reading = projectMilitaryAuthority(world, army);
+      const faction = factionForArmy(world, army);
+      const path = armyOrderPath(world, army);
       return {
         id: army.id,
         name: army.name,
@@ -162,6 +173,7 @@ export function toMapArmies(world: WorldState): MapArmyView[] {
         status: army.supply < 45 ? '补给吃紧' : reading.orderLabel,
         nominalPolityName: reading.nominalPolityName,
         lawfulCommanderName: reading.lawfulCommanderName,
+        deputyCommanderName: reading.deputyCommanderName,
         actualAllegianceName: reading.actualAllegianceName,
         allegianceStrength: reading.allegianceStrength,
         commandDiverged: reading.commandDiverged,
@@ -172,6 +184,17 @@ export function toMapArmies(world: WorldState): MapArmyView[] {
         orderTargetRegionId: reading.orderTargetRegionId,
         orderIssuerName: reading.orderIssuerName,
         orderBlocked: reading.orderBlocked,
+        warId: army.order.warId,
+        factionId: faction?.id ?? null,
+        factionName: faction?.name ?? '未归集团',
+        factionShortName: (faction?.name ?? '无系').replace(/一系$|旧部$/, '').slice(0, 5),
+        orderPathRegionIds: path ?? [],
+        nextRegionId: path?.[1] ?? null,
+        nextRegionName: world.regions.find((region) => region.id === path?.[1])?.name ?? null,
+        recentMovement: army.recentMovement ? {
+          ...army.recentMovement,
+          current: army.recentMovement.turn === (world.lastTurn?.turn ?? world.turn),
+        } : null,
         expectedContact: expectedContact(world, army),
       };
     });
@@ -222,6 +245,9 @@ export function toMapFleets(world: WorldState): MapFleetView[] {
       strength: item.warships * 3 + item.patrolShips + item.transports * 0.4,
       readiness: item.readiness,
       mission: item.mission,
+      warId: world.navalOperations.find((operation) => (
+        operation.fleetIds.includes(item.id) && operation.stage !== '完成' && operation.stage !== '失败'
+      ))?.warId ?? null,
     }];
   });
 }

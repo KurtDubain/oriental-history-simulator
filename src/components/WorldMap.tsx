@@ -125,6 +125,8 @@ export interface WorldMapProps {
   motionReduced?: boolean;
   politicalFocusPolityId?: string | null;
   politicalFocusFactionId?: string | null;
+  focusedWarId?: string | null;
+  focusedWarArmyIds?: readonly string[];
 }
 
 type HoverState =
@@ -211,6 +213,8 @@ export function WorldMap({
   motionReduced = false,
   politicalFocusPolityId = null,
   politicalFocusFactionId = null,
+  focusedWarId = null,
+  focusedWarArmyIds = [],
 }: WorldMapProps) {
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -222,6 +226,7 @@ export function WorldMap({
   const [hasInteracted, setHasInteracted] = useState(false);
   const [tapFeedback, setTapFeedback] = useState<TapFeedback | null>(null);
   const [pressedFeedback, setPressedFeedback] = useState<TapFeedback | null>(null);
+  const [movementProgress, setMovementProgress] = useState(1);
   const [quickLookOcclusion, setQuickLookOcclusion] = useState<MapFocusOcclusion | null>(null);
   const cameraRef = useRef<MapCamera>({ ...DEFAULT_MAP_CAMERA });
   const lodLevelRef = useRef<MapLodLevel>("overview");
@@ -252,9 +257,22 @@ export function WorldMap({
     ? hover.region.id
     : undefined;
   const scene = useMemo(
-    () => buildMapLodScene(presentation, lodLevel, { selectedRegionId, selectedObject }),
-    [lodLevel, presentation, selectedObject, selectedRegionId],
+    () => buildMapLodScene(presentation, lodLevel, { selectedRegionId, selectedObject, focusedArmyIds: focusedWarArmyIds }),
+    [focusedWarArmyIds, lodLevel, presentation, selectedObject, selectedRegionId],
   );
+  const movementKey = armies.map((army) => army.recentMovement?.current
+    ? `${army.id}:${army.recentMovement.fromRegionId}:${army.recentMovement.toRegionId}:${army.recentMovement.turn}` : '').join('|');
+  useEffect(() => {
+    if (motionReduced || !movementKey.replaceAll('|', '')) { setMovementProgress(1); return undefined; }
+    let frame = 0;
+    const started = performance.now();
+    const animate = (now: number) => {
+      setMovementProgress(Math.min(1, (now - started) / 560));
+      if (now - started < 560) frame = requestAnimationFrame(animate);
+    };
+    setMovementProgress(0); frame = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(frame);
+  }, [motionReduced, movementKey]);
   const selectedAnchor = useMemo(
     () => selectedSceneAnchor(
       scene,
@@ -307,6 +325,25 @@ export function WorldMap({
   const commitCamera = useCallback((next = cameraRef.current) => {
     onCameraChange?.({ ...next });
   }, [onCameraChange]);
+
+  useEffect(() => {
+    if (!focusedWarId || size.width <= 1 || size.height <= 1) return;
+    const ids = new Set(focusedWarArmyIds);
+    const regionIds = new Set(presentation.armies.filter((army) => ids.has(army.id)).flatMap((army) => [army.regionId, army.nextRegionId].filter((id): id is string => Boolean(id))));
+    const points = presentation.regions.filter((region) => regionIds.has(region.id)).map((region) => region.center);
+    if (!points.length) return;
+    const minX = Math.min(...points.map((point) => point.x)); const maxX = Math.max(...points.map((point) => point.x));
+    const minY = Math.min(...points.map((point) => point.y)); const maxY = Math.max(...points.map((point) => point.y));
+    const center = { x: (minX + maxX) / 2, y: (minY + maxY) / 2 };
+    const zoom = Math.hypot(maxX - minX, maxY - minY) > 520 ? 1.15 : Math.hypot(maxX - minX, maxY - minY) > 250 ? 1.35 : 1.65;
+    const base = createMapViewportTransform(size.width, size.height, undefined, DEFAULT_MAP_CAMERA);
+    const next = applyCamera({
+      zoom,
+      panX: size.width / 2 - base.offsetX - center.x * base.scale * zoom,
+      panY: size.height / 2 - base.offsetY - center.y * base.scale * base.yScale * zoom,
+    });
+    commitCamera(next);
+  }, [applyCamera, commitCamera, focusedWarArmyIds, focusedWarId, presentation.armies, presentation.regions, size.height, size.width]);
 
   useEffect(() => {
     if (cameraKeyRef.current === cameraKey) return;
@@ -458,9 +495,11 @@ export function WorldMap({
       camera,
       focusOffset,
       { season, atmosphere: atmosphereEnabled, highlightStrength },
+      focusedWarId,
+      movementProgress,
     );
     recordRuntimeMetric('canvas.draw', runtimeNow() - drawStartedAt);
-  }, [atmosphereEnabled, camera, focusOffset, highlightStrength, highlightedRegionIds, hoveredRegionId, overlay, scene, season, selectedObject, selectedRegionId, size]);
+  }, [atmosphereEnabled, camera, focusOffset, focusedWarId, highlightStrength, highlightedRegionIds, hoveredRegionId, movementProgress, overlay, scene, season, selectedObject, selectedRegionId, size]);
 
   const localPoint = useCallback((event: ReactPointerEvent<HTMLCanvasElement>) => {
     const rect = event.currentTarget.getBoundingClientRect();
@@ -930,6 +969,7 @@ export function WorldMap({
       data-political-root-ids={scene.markers.filter((item) => item.kind === 'powerRoot').map((item) => item.id).join(',') || undefined}
       data-political-focus-polity-id={politicalFocusPolityId ?? undefined}
       data-political-focus-faction-id={politicalFocusFactionId ?? undefined}
+      data-focused-war-id={focusedWarId ?? undefined}
       data-visible-army-ids={scene.armies.map((item) => item.id).join(",")}
       data-visible-fleet-ids={scene.fleets.map((item) => item.id).join(",")}
       data-mobile-quick-look-open={mobileQuickLookOpen || undefined}

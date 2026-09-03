@@ -17,7 +17,7 @@ import {
   compactWorldArchive,
   validateWorldArchiveIntegrity,
 } from '../archive';
-import { markLawfulCommandTransfer, syncArmyPersonnelLocations } from './authority';
+import { markLawfulCommandTransfer, recordArmyMovement, syncArmyPersonnelLocations } from './authority';
 import { armyOrderIsExecutable, issueAmphibiousArmyOrder, planArmyOrders } from './orders';
 
 function factContext(world: WorldState): FactTurnBuffer {
@@ -283,7 +283,28 @@ describe('military authority and persistent army orders', () => {
       ))).toBe(true);
       expect(army.retinues.every((retinue) => retinue.soldiers > 0 && retinue.soldiers <= army.soldiers)).toBe(true);
       expect(army.retinues.reduce((sum, retinue) => sum + retinue.soldiers, 0)).toBeLessThanOrEqual(army.soldiers);
+      expect(army.recentMovement).toBeNull();
     }
+  });
+
+  it('keeps exactly one latest movement step and overwrites it deterministically', () => {
+    const world = createWorld('军团最近一步');
+    const army = world.armies[0];
+    const [first, second] = world.regions.filter((region) => region.id !== army.regionId).slice(0, 2);
+    if (!army || !first || !second) throw new Error('expected an army and two destinations');
+
+    recordArmyMovement(army, army.regionId, first.id, 1, 'advance', 'war_a');
+    recordArmyMovement(army, first.id, second.id, 2, 'retreat', 'war_b');
+
+    expect(army.recentMovement).toEqual({
+      fromRegionId: first.id,
+      toRegionId: second.id,
+      turn: 2,
+      orderKind: 'retreat',
+      warId: 'war_b',
+    });
+    expect(army.lastMovedTurn).toBe(2);
+    expect(Array.isArray(army.recentMovement)).toBe(false);
   });
 
   it('emits one Fact for a meaningful order change and makes that order executable next turn', () => {
@@ -1095,6 +1116,7 @@ describe('military authority and persistent army orders', () => {
       delete army.allegiance;
       delete army.retinues;
       delete army.order;
+      delete army.recentMovement;
     }
     legacy.hash = computeWorldHash(legacy as unknown as WorldState);
 
@@ -1110,6 +1132,7 @@ describe('military authority and persistent army orders', () => {
       && army.order.provenance === 'legacy'
       && army.order.sourceFactId === null
       && army.retinues.every((retinue) => retinue.sourceFactId === null)
+      && army.recentMovement === null
     ))).toBe(true);
   });
 
@@ -1273,6 +1296,8 @@ describe('military authority and persistent army orders', () => {
       fromRegionId: string;
       toRegionId: string;
       sourceFactId: string;
+      movementTurn: number;
+      movementWarId: string | null;
     } | null = null;
 
     for (let quarter = 0; quarter < 48 && !witnessed; quarter += 1) {
@@ -1298,7 +1323,16 @@ describe('military authority and persistent army orders', () => {
           fromRegionId: before.regionId,
           toRegionId: after.regionId,
           sourceFactId: before.order.sourceFactId,
+          movementTurn: after.recentMovement?.turn ?? -1,
+          movementWarId: after.recentMovement?.warId ?? null,
         };
+        expect(after.recentMovement).toMatchObject({
+          fromRegionId: before.regionId,
+          toRegionId: after.regionId,
+          turn: previous.turn,
+          orderKind: before.order.kind,
+          warId: before.order.warId,
+        });
         break;
       }
       world = next;
@@ -1309,6 +1343,8 @@ describe('military authority and persistent army orders', () => {
       fromRegionId: expect.any(String),
       toRegionId: expect.any(String),
       sourceFactId: expect.stringMatching(/^fact_/),
+      movementTurn: expect.any(Number),
+      movementWarId: expect.any(String),
     });
     expect(witnessed?.fromRegionId).not.toBe(witnessed?.toRegionId);
   }, 20_000);

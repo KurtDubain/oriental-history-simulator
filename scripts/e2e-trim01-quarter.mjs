@@ -192,15 +192,18 @@ async function assertTouchTarget(locator, scenario, detail) {
     bounds && bounds.width >= 44 && bounds.height >= 44,
     `${scenario.slug} ${detail}的触控区至少应为 44px，实际 ${JSON.stringify(bounds)}`,
   );
-  const hittable = await locator.evaluate((element) => {
+  const hitTest = await locator.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     const x = rect.left + rect.width / 2;
     const y = rect.top + rect.height / 2;
     const hit = document.elementFromPoint(x, y);
-    return rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight
-      && Boolean(hit && (hit === element || element.contains(hit)));
+    return {
+      ok: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight
+        && Boolean(hit && (hit === element || element.contains(hit))),
+      hit: hit?.closest('button')?.getAttribute('aria-label') ?? hit?.outerHTML.slice(0, 180) ?? null,
+    };
   });
-  assert.equal(hittable, true, `${scenario.slug} ${detail}必须位于视口内且中心点可命中`);
+  assert.equal(hitTest.ok, true, `${scenario.slug} ${detail}必须位于视口内且中心点可命中；命中 ${hitTest.hit}`);
 }
 
 async function assertMapTouchControls(page, scenario) {
@@ -307,7 +310,14 @@ async function exerciseObserverSituationHistoryPath(page, scenario, baseline) {
   await assertTouchTarget(situationClose, scenario, '持续局势关闭入口');
   await situationClose.click();
   await assertHistoryLayer(page, scenario, 'quarter', baseline, '局势阅读后返回季报');
-  await page.waitForFunction(() => document.activeElement?.getAttribute('data-situation-workbench-trigger') === 'true');
+  const warFocusClose = page.getByRole('button', { name: '退出战局聚焦' });
+  if (await warFocusClose.isVisible().catch(() => false)) {
+    await assertTouchTarget(warFocusClose, scenario, '战局聚焦关闭入口');
+    await warFocusClose.click();
+    await page.waitForSelector('[data-testid="war-focus-summary"]', { state: 'detached' });
+  } else {
+    await page.waitForFunction(() => document.activeElement?.getAttribute('data-situation-workbench-trigger') === 'true');
+  }
   return true;
 }
 

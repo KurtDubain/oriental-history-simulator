@@ -54,6 +54,7 @@ export interface MapArmyView {
   status?: string;
   nominalPolityName?: string;
   lawfulCommanderName?: string;
+  deputyCommanderName?: string | null;
   actualAllegianceName?: string;
   allegianceStrength?: number;
   commandDiverged?: boolean;
@@ -64,12 +65,29 @@ export interface MapArmyView {
   orderTargetRegionId?: string | null;
   orderIssuerName?: string;
   orderBlocked?: boolean;
-  /** Current enemy already present at this army's active order destination. */
+  warId?: string | null;
+  factionId?: string | null;
+  factionName?: string;
+  factionShortName?: string;
+  orderPathRegionIds?: readonly string[];
+  nextRegionId?: string | null;
+  nextRegionName?: string | null;
+  recentMovement?: {
+    fromRegionId: string;
+    toRegionId: string;
+    turn: number;
+    current: boolean;
+    orderKind: 'hold' | 'advance' | 'intercept' | 'reinforce' | 'retreat';
+  } | null;
+  /** First current enemy found along this army's authoritative order path. */
   expectedContact?: {
     armyId: string;
     armyName: string;
     regionId: string;
     regionName: string;
+    steps?: number;
+    commanderName?: string;
+    factionName?: string;
   };
 }
 
@@ -93,6 +111,7 @@ export interface MapFleetView {
   strength: number;
   readiness: number;
   mission: string;
+  warId?: string | null;
 }
 
 export interface MapMarkerView {

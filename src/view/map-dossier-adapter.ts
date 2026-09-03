@@ -8,6 +8,7 @@ import type {
   WorldState,
 } from '../sim/types';
 import { projectMilitaryAuthority } from './military-authority-reading';
+import { factionForArmy } from './war-group-projection';
 import { projectCoreImpacts } from './core-impact-projection';
 import { regionSupplyNote } from './map-adapter';
 import {
@@ -43,6 +44,7 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
     const deputy = character(world, item.deputyCommanderId);
     const stationed = region(world, item.regionId);
     const authority = projectMilitaryAuthority(world, item);
+    const faction = factionForArmy(world, item);
     const coreImpact = projectCoreImpacts(world, { target: { kind: 'army', id: item.id }, limit: 1 })[0];
     const readiness = item.supply < 35
       ? '粮道已很吃紧；继续行军或交战，减员会先于正面溃败到来。'
@@ -51,7 +53,7 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
         : item.training >= 70 && item.experience >= 60
           ? '这是一支训练与战阵经验俱佳的常备军，真正的限制来自粮道、主帅和战场位置。'
           : '军团的战力由兵力、训练、军心与补给共同决定，人数并不等同于胜算。';
-    const summary = `${authority.authoritySummary}；${authority.retinueSummary}。当前军令：${authority.orderLabel}。${readiness}`;
+    const summary = `${faction?.name ?? '未归集团'}实际投入此军；${authority.authoritySummary}；${authority.retinueSummary}。当前军令：${authority.orderLabel}。${readiness}`;
     const actual = character(world, authority.actualAllegianceId);
     const orderTarget = authority.orderTargetKind === 'army'
       ? { id: authority.orderTargetId as string, kind: 'army' as const, label: authority.orderTargetName, detail: '军令目标' }
@@ -74,6 +76,7 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
       summary,
       facts: [
         { label: '名义所属', value: authority.nominalPolityName },
+        { label: '军政集团', value: faction?.name ?? '未归集团' },
         { label: '主帅', value: authority.lawfulCommanderName },
         { label: '军中拥戴', value: `${authority.actualAllegianceName} · ${authority.allegianceStrength}` },
         { label: '拥戴凭据', value: authority.allegianceBasis },
@@ -84,7 +87,9 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
         { label: '兵力', value: compact.format(item.soldiers) },
         { label: '军粮', value: compact.format(item.food) },
         { label: '本营', value: region(world, item.originRegionId)?.name ?? '不详' },
-        { label: '最近移动', value: item.lastMovedTurn < 0 ? '尚未移营' : item.lastMovedTurn === world.turn ? '本季' : turnLabel(item.lastMovedTurn) },
+        { label: '最近移动', value: item.recentMovement
+          ? `${region(world, item.recentMovement.fromRegionId)?.name ?? '旧营'}→${region(world, item.recentMovement.toRegionId)?.name ?? '新营'} · ${turnLabel(item.recentMovement.turn)}`
+          : '尚未移营' },
       ],
       meters: [
         { label: '士气', value: item.morale },

@@ -252,7 +252,7 @@ function formedAlliance(
 }
 
 describe('v1.20 embodied court alliance', () => {
-  it('naturally exposes at least one usable court action in a fixed winter world', () => {
+  it('does not invent a court bargain merely because a fixed world reaches winter', () => {
     const world = advanceWorldBy(createWorld('v1.20-natural-court-0'), 3);
     const before = stableHash(world);
     const courtActions = world.characters.flatMap((character) => (
@@ -262,8 +262,7 @@ describe('v1.20 embodied court alliance', () => {
     ));
 
     expect(world.season).toBe('冬');
-    expect(courtActions.length).toBeGreaterThan(0);
-    expect(courtActions.every((action) => action.label === '交换朝中支持')).toBe(true);
+    expect(courtActions).toEqual([]);
     expect(stableHash(world)).toBe(before);
   });
 

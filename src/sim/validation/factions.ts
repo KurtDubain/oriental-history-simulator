@@ -163,7 +163,7 @@ export function validateFactionState(world: WorldState): InvariantViolation[] {
   }
 
   for (const [polityId, count] of activeCountByPolity) {
-    if (count > 6) violations.push(issue('faction.active-cap', `${polityById.get(polityId)?.name ?? polityId}存在${count}个活动派系，超过6席上限`, polityId));
+    if (count > 4) violations.push(issue('faction.active-cap', `${polityById.get(polityId)?.name ?? polityId}存在${count}个活动集团，超过4席上限`, polityId));
   }
   return violations;
 }

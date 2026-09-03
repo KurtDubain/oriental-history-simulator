@@ -425,6 +425,15 @@ export interface ArmyRetinueState {
   sourceFactId: string | null;
 }
 
+/** Bounded, observer-facing trace of the army's latest real map step. */
+export interface ArmyRecentMovementState {
+  fromRegionId: string;
+  toRegionId: string;
+  turn: number;
+  orderKind: ArmyOrderKind;
+  warId: string | null;
+}
+
 export interface ArmyState {
   id: string;
   name: string;
@@ -440,6 +449,7 @@ export interface ArmyState {
   supply: number;
   food: number;
   lastMovedTurn: number;
+  recentMovement: ArmyRecentMovementState | null;
   embarkedOperationId: string | null;
   allegiance: ArmyAllegianceState;
   retinues: ArmyRetinueState[];

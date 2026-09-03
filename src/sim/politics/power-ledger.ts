@@ -497,6 +497,31 @@ export function recentFactionPowerMovements(
           characterIds: [...fact.actorIds],
         } satisfies PoliticalPowerMovement];
       }
+      if (fact.kind === 'battle') {
+        const attacker = fact.payload.attacker;
+        const defenders = fact.payload.defenders;
+        const ownAttacker = [attacker.commanderId, attacker.deputyCommanderId, attacker.allegianceCharacterId]
+          .some((id) => typeof id === 'string' && memberIds.has(id));
+        const ownDefenders = defenders.filter((entry) => (
+          [entry.commanderId, entry.deputyCommanderId, entry.allegianceCharacterId]
+            .some((id) => typeof id === 'string' && memberIds.has(id))
+        ));
+        if (!ownAttacker && !ownDefenders.length) return [];
+        const won = ownAttacker ? fact.payload.attackerWon : !fact.payload.attackerWon;
+        const losses = ownAttacker
+          ? attacker.losses
+          : ownDefenders.reduce((sum, entry) => sum + entry.losses, 0);
+        const region = world.regions.find((item) => item.id === fact.payload.targetRegionId)?.name ?? '战地';
+        return [{
+          id: `movement:${fact.id}:${faction.id}`,
+          turn: fact.turn,
+          direction: won ? 'gained' : 'lost',
+          label: won ? '会战得势' : '会战失利',
+          detail: `${faction.name}所部在${region}${won ? '取胜' : '失利'}，本次折损${losses}人`,
+          factId: fact.id,
+          characterIds: fact.actorIds.filter((id) => memberIds.has(id)),
+        } satisfies PoliticalPowerMovement];
+      }
       if (fact.kind === 'faction_relation_changed' && (fact.payload.leftFactionId === faction.id || fact.payload.rightFactionId === faction.id)) {
         const otherId = fact.payload.leftFactionId === faction.id ? fact.payload.rightFactionId : fact.payload.leftFactionId;
         const other = world.factions.find((item) => item.id === otherId)?.name ?? '另一派系';

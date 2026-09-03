@@ -447,9 +447,13 @@
     backdrop-filter: blur(10px);
   }
 
-  .observer-world-tools[data-mobile-more-open="true"] .observer-world-tools__secondary {
-    display: flex;
-  }
+.observer-world-tools[data-mobile-more-open="true"] .observer-world-tools__secondary {
+  display: flex;
+}
+
+.observer-world-tools[data-mobile-more-open="true"] {
+  z-index: 10;
+}
 }
 
 @media (max-width: 760px) {

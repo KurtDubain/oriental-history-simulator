@@ -329,7 +329,8 @@
   gap: 18px;
 }
 
-.situation-workbench__watch {
+.situation-workbench__watch,
+.situation-workbench__war-map {
   display: inline-flex;
   min-width: 104px;
   min-height: 44px;
@@ -348,6 +349,8 @@
 
 .situation-workbench__watch:hover,
 .situation-workbench__watch:focus-visible,
+.situation-workbench__war-map:hover,
+.situation-workbench__war-map:focus-visible,
 .situation-workbench__watch[data-watched="true"] {
   border-color: rgb(156 53 43 / 48%);
   color: var(--observer-vermilion-dark, #79271f);
@@ -986,7 +989,8 @@
     gap: 10px;
   }
 
-  .situation-workbench__watch {
+  .situation-workbench__watch,
+  .situation-workbench__war-map {
     min-width: 102px;
   }
 

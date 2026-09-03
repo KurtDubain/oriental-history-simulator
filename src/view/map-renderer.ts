@@ -589,11 +589,13 @@ function drawFleets(
   fleets: readonly MapFleetView[],
   transform: MapViewportTransform,
   selectedObject: MapSelectedObject,
+  focusedWarId: string | null,
 ) {
   for (const fleet of fleets) {
     const point = worldToScreen(fleet.position, transform);
     const selected = selectedObject?.kind === "fleet" && selectedObject.id === fleet.id;
     context.save();
+    if (focusedWarId && fleet.warId !== focusedWarId) context.globalAlpha = 0.2;
     context.translate(point.x, point.y);
     if (selected) drawSelectionHalo(context, 11);
     context.fillStyle = PAPER_LIGHT;
@@ -755,56 +757,60 @@ function drawArmyOrders(
   transform: MapViewportTransform,
   overlay: MapOverlay,
   selectedObject: MapSelectedObject,
+  focusedWarId: string | null,
+  movementProgress: number,
 ) {
   const regionById = new Map(regions.map((region) => [region.id, region]));
+  const arrow = (from: MapPoint, to: MapPoint, color: string, alpha: number, width: number, dashed: boolean) => {
+    const angle = Math.atan2(to.y - from.y, to.x - from.x);
+    context.save();
+    context.strokeStyle = color; context.fillStyle = color; context.globalAlpha = alpha; context.lineWidth = width;
+    context.setLineDash(dashed ? [5, 5] : []);
+    context.beginPath(); context.moveTo(from.x, from.y); context.lineTo(to.x, to.y); context.stroke();
+    context.setLineDash([]); context.beginPath(); context.moveTo(to.x, to.y);
+    context.lineTo(to.x - Math.cos(angle - 0.55) * 7, to.y - Math.sin(angle - 0.55) * 7);
+    context.lineTo(to.x - Math.cos(angle + 0.55) * 7, to.y - Math.sin(angle + 0.55) * 7);
+    context.closePath(); context.fill(); context.restore();
+  };
   for (const { army, point } of layouts) {
     const selected = selectedObject?.kind === 'army' && selectedObject.id === army.id;
-    if (army.orderKind === 'hold' || !army.orderTargetRegionId || (overlay !== 'war' && !selected)) continue;
-    const targetRegion = regionById.get(army.orderTargetRegionId);
-    if (!targetRegion) continue;
-    const target = worldToScreen(targetRegion.center, transform);
-    const dx = target.x - point.x;
-    const dy = target.y - point.y;
-    const distance = Math.hypot(dx, dy);
-    if (distance < 18) continue;
-    const normalX = -dy / distance;
-    const normalY = dx / distance;
-    const bend = Math.min(18, distance * 0.12) * (hashString(army.id) % 2 ? 1 : -1);
-    const control = { x: (point.x + target.x) / 2 + normalX * bend, y: (point.y + target.y) / 2 + normalY * bend };
-    const end = { x: target.x - dx / distance * 9, y: target.y - dy / distance * 9 };
-    const angle = Math.atan2(end.y - control.y, end.x - control.x);
     const color = army.orderKind === 'retreat' ? VERMILION : army.polityColor ?? polityFallback(army.polityId ?? army.id);
-    context.save();
-    context.strokeStyle = color;
-    context.fillStyle = color;
-    context.globalAlpha = army.orderBlocked ? 0.34 : selected ? 0.82 : 0.48;
-    context.lineWidth = selected ? 1.8 : 1.15;
-    context.setLineDash(army.orderBlocked ? [2, 5] : army.orderKind === 'intercept' ? [7, 3] : [5, 4]);
-    context.beginPath();
-    context.moveTo(point.x, point.y);
-    context.quadraticCurveTo(control.x, control.y, end.x, end.y);
-    context.stroke();
-    context.setLineDash([]);
-    context.beginPath();
-    context.moveTo(end.x, end.y);
-    context.lineTo(end.x - Math.cos(angle - 0.55) * 6, end.y - Math.sin(angle - 0.55) * 6);
-    context.lineTo(end.x - Math.cos(angle + 0.55) * 6, end.y - Math.sin(angle + 0.55) * 6);
-    context.closePath();
-    context.fill();
-    context.restore();
+    if (overlay === 'war' && army.recentMovement) {
+      const from = regionById.get(army.recentMovement.fromRegionId);
+      const to = regionById.get(army.recentMovement.toRegionId);
+      if (from && to) {
+        const start = worldToScreen(from.center, transform);
+        const finish = worldToScreen(to.center, transform);
+        const actualEnd = army.recentMovement.current
+          ? { x: start.x + (finish.x - start.x) * movementProgress, y: start.y + (finish.y - start.y) * movementProgress }
+          : finish;
+        arrow(start, actualEnd, INK_SOFT, army.recentMovement.current ? 0.72 : 0.28, army.recentMovement.current ? 2.6 : 1.3, false);
+      }
+    }
+    if (army.orderKind === 'hold' || (overlay !== 'war' && !selected) || (focusedWarId && army.warId !== focusedWarId)) continue;
+    const path = army.orderPathRegionIds ?? [];
+    for (let index = 0; index < path.length - 1; index += 1) {
+      const fromRegion = regionById.get(path[index] as string);
+      const toRegion = regionById.get(path[index + 1] as string);
+      if (!fromRegion || !toRegion) continue;
+      const from = index === 0 ? point : worldToScreen(fromRegion.center, transform);
+      const to = worldToScreen(toRegion.center, transform);
+      arrow(from, to, color, army.orderBlocked ? 0.28 : index === 0 ? (selected ? 0.96 : 0.78) : 0.34, index === 0 ? (selected ? 3 : 2.2) : 1.25, index > 0 || Boolean(army.orderBlocked));
+    }
   }
   if (overlay !== 'war') return;
   const shownContacts = new Set<string>();
   for (const { army } of layouts) {
     const contact = army.expectedContact;
     if (!contact) continue;
-    const contactKey = `${contact.armyId}:${contact.regionId}`;
+    if (focusedWarId && army.warId !== focusedWarId) continue;
+    const contactKey = contact.regionId;
     if (shownContacts.has(contactKey)) continue;
     const contactRegion = regionById.get(contact.regionId);
     if (!contactRegion) continue;
     shownContacts.add(contactKey);
     const point = worldToScreen(contactRegion.center, transform);
-    const label = `预计接敌 · ${contact.armyName}（${contact.regionName}）`;
+    const label = `${army.lawfulCommanderName ?? army.name}·${army.factionShortName ?? '无系'} → ${contact.commanderName ?? contact.armyName}·${(contact.factionName ?? '无系').replace(/一系$|旧部$/, '').slice(0, 5)} · ${contact.steps ?? 1}步`;
     context.save();
     context.strokeStyle = PAPER_LIGHT;
     context.fillStyle = VERMILION;
@@ -1155,6 +1161,8 @@ export function drawWorldMap(
   camera: MapCamera,
   focusOffset: MapPoint = { x: 0, y: 0 },
   visualSettings: MapVisualSettings = DEFAULT_VISUAL_SETTINGS,
+  focusedWarId: string | null = null,
+  movementProgress = 1,
 ) {
   const {
     regions,
@@ -1319,14 +1327,32 @@ export function drawWorldMap(
   drawPolityLabels(context, regions, transform, overlay, compactMap, scene.level);
   drawMarkers(context, markers, transform, selectedObject);
 
-  const armyLayouts = layoutMapArmyIcons(armies, regions, transform);
-  drawArmyOrders(context, armyLayouts, regions, transform, overlay, selectedObject);
+  const staticArmyLayouts = layoutMapArmyIcons(armies, regions, transform);
+  const armyLayouts = movementProgress >= 1 ? staticArmyLayouts : staticArmyLayouts.map((layout) => {
+    const movement = layout.army.recentMovement;
+    const from = movement?.current ? regionById.get(movement.fromRegionId) : null;
+    const to = movement?.current ? regionById.get(movement.toRegionId) : null;
+    if (!from || !to) return layout;
+    const fromPoint = worldToScreen(from.center, transform);
+    const toPoint = worldToScreen(to.center, transform);
+    const offset = { x: layout.point.x - toPoint.x, y: layout.point.y - toPoint.y };
+    return { ...layout, point: {
+      x: fromPoint.x + (toPoint.x - fromPoint.x) * movementProgress + offset.x,
+      y: fromPoint.y + (toPoint.y - fromPoint.y) * movementProgress + offset.y,
+    } };
+  });
+  drawArmyOrders(context, armyLayouts, regions, transform, overlay, selectedObject, focusedWarId, movementProgress);
   armyLayouts.forEach(({ army, point, radius }) => {
     const { x, y } = point;
     const color = army.polityColor ?? polityFallback(army.polityId ?? army.id);
     const selected = selectedObject?.kind === "army" && selectedObject.id === army.id;
+    const relevant = !focusedWarId || army.warId === focusedWarId;
+    const compactStrength = army.strength >= 10_000
+      ? `${Math.round(army.strength / 10_000)}万`
+      : `${Math.max(1, Math.round(army.strength / 1000))}千`;
 
     context.save();
+    if (!relevant) context.globalAlpha = 0.18;
     if (selected) {
       context.save();
       context.translate(x, y);
@@ -1350,6 +1376,15 @@ export function drawWorldMap(
         context.beginPath();
         context.arc(x + radius * 0.58, y - radius * 0.58, selected ? 2.2 : 1.8, 0, Math.PI * 2);
         context.fill();
+      }
+      if (overlay === 'war' && relevant && (focusedWarId || selected)) {
+        context.font = '650 8.5px "Noto Serif SC", serif';
+        context.textAlign = 'center'; context.lineWidth = 2.5;
+        context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
+        const label = `${army.lawfulCommanderName ?? '无帅'} · ${army.factionShortName ?? '无系'}`;
+        context.strokeText(label, x, y + radius + 8); context.fillText(label, x, y + radius + 8);
+        context.strokeText(`${army.name.replace(/中军$|行营$|新军$/, '')} · ${compactStrength}`, x, y + radius + 16);
+        context.fillText(`${army.name.replace(/中军$|行营$|新军$/, '')} · ${compactStrength}`, x, y + radius + 16);
       }
       context.restore();
       return;
@@ -1386,13 +1421,19 @@ export function drawWorldMap(
     context.font = '700 7px Inter, "Noto Sans SC", sans-serif';
     context.textAlign = "center";
     context.textBaseline = "middle";
-    const compactStrength =
-      army.strength >= 10_000 ? `${Math.round(army.strength / 10_000)}万` : `${Math.max(1, Math.round(army.strength / 1000))}千`;
     context.fillText(compactStrength, x, y + 0.5);
+    if (overlay === 'war' && relevant) {
+      context.font = '650 9px "Noto Serif SC", serif';
+      context.lineWidth = 3; context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
+      const command = `${army.lawfulCommanderName ?? '无帅'} · ${army.name.replace(/中军$|行营$|新军$/, '')}`;
+      const force = `${compactStrength} · ${army.factionShortName ?? '无系'}`;
+      context.strokeText(command, x, y + radius + 11); context.fillText(command, x, y + radius + 11);
+      context.strokeText(force, x, y + radius + 21); context.fillText(force, x, y + radius + 21);
+    }
     context.restore();
   });
 
-  drawFleets(context, fleets, transform, selectedObject);
+  drawFleets(context, fleets, transform, selectedObject, focusedWarId);
 
   context.restore();
   if (width >= 720) drawLegend(context, width, height, overlay, regions);

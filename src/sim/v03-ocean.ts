@@ -3,7 +3,7 @@ import type { MapProfile } from '../maps/types';
 import { keyedInt, keyedRandom, stableCompare } from './random';
 import { emitSimulationFact, projectFactLinks, type BattleFact, type SimulationFact } from './facts';
 import { practiceEffect } from './v03-life';
-import { refreshArmyMilitaryAuthority, syncArmyPersonnelLocations } from './military/authority';
+import { recordArmyMovement, refreshArmyMilitaryAuthority, syncArmyPersonnelLocations } from './military/authority';
 import { armyOrderFactIds, issueAmphibiousArmyOrder } from './military/orders';
 import type { V03Emit, V03TurnContext } from './v03-context';
 import {
@@ -2003,6 +2003,7 @@ function failLandingVoyage(
   army.soldiers -= losses;
   context.population.militaryDeaths += losses;
   if (origin) {
+    recordArmyMovement(army, operation.targetRegionId, origin.id, context.turn, 'retreat', operation.warId);
     army.regionId = origin.id;
     origin.food += returnedFood;
     context.food.transferred += returnedFood;
@@ -2134,6 +2135,7 @@ function resolveLanding(
   }) as BattleFact;
   let territoryFact: SimulationFact | null = null;
   if (won) {
+    recordArmyMovement(army, operation.originRegionId, target.id, context.turn, army.order.kind, operation.warId);
     army.regionId = target.id;
     syncArmyPersonnelLocations(world, army);
     territoryFact = capture(war, army, target, previousController, battleFact, defenders);
@@ -2152,6 +2154,7 @@ function resolveLanding(
       context.maritime.fleetIds = world.fleets.map((fleet) => fleet.id).sort(stableCompare);
     }
   } else {
+    recordArmyMovement(army, target.id, operation.originRegionId, context.turn, 'retreat', operation.warId);
     army.regionId = operation.originRegionId;
     const returnedFood = whole(operation.foodLoaded * 0.55);
     army.food += returnedFood;

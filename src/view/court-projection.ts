@@ -427,7 +427,7 @@ export function projectCourt(
   const rulerSummary = ruler ? `${ruler.holder}居君位` : '君位空悬';
   const summary = dominant
     ? `${rulerSummary}；${dominant.name}${root}，权势${Math.round(dominant.power)}，居朝中首位。`
-    : `${rulerSummary}；朝中尚无明确派系格局。`;
+    : `${rulerSummary}；朝中尚无明确军政集团。`;
   return {
     polityId,
     summary,

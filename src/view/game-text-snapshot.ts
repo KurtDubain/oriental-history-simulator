@@ -14,6 +14,7 @@ import {
   type WorldState,
 } from '../sim';
 import { findWorldHistoryEvent } from '../sim/archive';
+import { armyOrderPath } from '../sim/military/orders';
 import { APP_VERSION } from '../version';
 import {
   projectRosterCollection,
@@ -42,6 +43,7 @@ import { projectSituationWorkbench } from './situation-detail';
 import { toSituationSnapshot } from './situation-snapshot';
 import { mapMarkerTarget } from './map-marker-layout';
 import { projectMilitaryAuthority } from './military-authority-reading';
+import { factionForArmy, projectWarGroups } from './war-group-projection';
 
 const HISTORY_COLORS: Record<string, string> = {
   世界: '#777267',
@@ -657,6 +659,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       atWar: world.wars.some((war) => war.active && (war.attackerId === item.id || war.defenderId === item.id)),
     })),
     mapObjects: {
+      wars: world.wars.filter((war) => war.active).map((war) => projectWarGroups(world, war.id)),
       regions: importantRegions.map((region) => ({
       id: region.id,
       name: region.name,
@@ -670,6 +673,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       fleets: world.fleets.slice(0, 24).map((fleet) => ({ id: fleet.id, name: fleet.name, polityId: fleet.polityId, seaZoneId: fleet.seaZoneId, portRegionId: fleet.portRegionId, mission: fleet.mission, readiness: fleet.readiness })),
       armies: world.armies.slice(0, 24).map((army) => {
         const authority = projectMilitaryAuthority(world, army);
+        const faction = factionForArmy(world, army);
         return {
           id: army.id,
           name: army.name,
@@ -679,6 +683,8 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
           morale: army.morale,
           supply: army.supply,
           lawfulCommander: authority.lawfulCommanderName,
+          deputyCommander: authority.deputyCommanderName,
+          faction: faction?.name ?? null,
           actualAllegiance: authority.actualAllegianceName,
           allegianceBasis: authority.allegianceBasis,
           commandDiverged: authority.commandDiverged,
@@ -686,6 +692,8 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
           order: authority.orderLabel,
           orderIssuer: authority.orderIssuerName,
           orderTargetRegionId: authority.orderTargetRegionId,
+          recentMovement: army.recentMovement,
+          orderPath: armyOrderPath(world, army),
         };
       }),
     },

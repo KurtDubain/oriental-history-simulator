@@ -109,6 +109,11 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
       power: ledger.total,
       cohesion: faction.cohesion,
       agenda: faction.agenda,
+      coreMembers: faction.coreMemberIds.filter((id) => id !== faction.leaderId).flatMap((id) => {
+        const member = character(world, id);
+        return member ? [{ id: member.id, name: member.name }] : [];
+      }),
+      memberCount: faction.memberIds.length,
       resources: ledger.resources.slice(0, 10).map((resource) => toPowerResourceView(world, resource)),
       categories: ledger.categories.filter((category) => category.value > 0).map((category) => ({
         key: category.category,

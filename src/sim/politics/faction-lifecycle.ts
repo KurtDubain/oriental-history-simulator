@@ -36,13 +36,14 @@ export interface FactionChronicleInput {
 
 export type EmitFactionChronicle = (input: FactionChronicleInput) => HistoryEvent;
 
-const MAX_ACTIVE_FACTIONS_PER_POLITY = 6;
+const MAX_ACTIVE_FACTIONS_PER_POLITY = 4;
 const MAX_CORE_MEMBERS = 5;
 const MAX_LIFECYCLE_RECORDS = 12;
 const MAX_BIOGRAPHY_RECORDS = 80;
 
 const POLITICAL_REASON_TEXT: Readonly<Record<string, string>> = {
-  opening_order: '开局人物依照既有身份与共同主张归入议席',
+  opening_order: '开局人物依照军旅、亲族与现实任职根基结成集团',
+  shared_root: '人物因共同军旅、亲族、任职或明确支持形成集团',
   legacy_boundary: '旧卷只保留当时的派系关系，具体年月已不可考',
   leader_unavailable: '原领袖已无法继续主持派系事务',
   leader_departed: '原领袖已脱离所属政权，不再能主持旧派事务',
@@ -97,14 +98,6 @@ export function factionAgendaFor(character: CharacterState): FactionState['agend
   return character.loyalty >= 72 ? '维持秩序' : '扩张权势';
 }
 
-function defaultAgenda(kind: FactionKind): FactionState['agenda'] {
-  if (kind === '军门') return '对外战争';
-  if (kind === '地方') return '地方自治';
-  if (kind === '宗室') return '维持秩序';
-  if (kind === '士族') return '休养生息';
-  return '扩张权势';
-}
-
 function scoreLeader(character: CharacterState): number {
   return character.influence * 2 + character.renown + character.cunning + character.merit * 0.4;
 }
@@ -116,8 +109,33 @@ function orderedMembers(world: WorldState, memberIds: readonly string[]): Charac
     .sort((left, right) => scoreLeader(right) - scoreLeader(left) || stableCompare(left.id, right.id));
 }
 
+function hasExplicitBacking(world: WorldState, memberId: string, leaderId: string): boolean {
+  return (world.relationships ?? []).some((relation) => (
+    ((relation.sourceId === memberId && relation.targetId === leaderId)
+      || (relation.sourceId === leaderId && relation.targetId === memberId))
+    && (relation.kinship !== '无' || relation.trust >= 64 || relation.gratitude >= 24
+      || relation.memories.some((memory) => ['提携', '共战', '恩义'].includes(memory.kind)))
+  )) || (world.facts ?? []).some((fact) => (
+    fact.kind === 'agency_support_resolved'
+    && fact.payload.outcome === 'secured'
+    && ((fact.payload.actorId === memberId && fact.payload.targetId === leaderId)
+      || (fact.payload.actorId === leaderId && fact.payload.targetId === memberId))
+  ));
+}
+
+function isPowerBearer(world: WorldState, member: CharacterState, leaderId: string): boolean {
+  return member.id === leaderId
+    || Boolean(member.commandingArmyId || member.commandingFleetId || member.governedRegionId)
+    || (world.armies ?? []).some((army) => army.deputyCommanderId === member.id || army.allegiance?.characterId === member.id)
+    || (world.fleets ?? []).some((fleet) => fleet.deputyCommanderId === member.id)
+    || (world.offices ?? []).some((office) => office.active && office.holderId === member.id && office.kind !== '廷臣')
+    || hasExplicitBacking(world, member.id, leaderId);
+}
+
 function coreFor(world: WorldState, memberIds: readonly string[], leaderId: string): string[] {
-  const ordered = orderedMembers(world, memberIds).map((character) => character.id);
+  const ordered = orderedMembers(world, memberIds)
+    .filter((character) => isPowerBearer(world, character, leaderId))
+    .map((character) => character.id);
   return [leaderId, ...ordered.filter((id) => id !== leaderId)].slice(0, MAX_CORE_MEMBERS);
 }
 
@@ -182,11 +200,29 @@ function chineseOrdinal(value: number): string {
   return ['', '二', '三', '四', '五', '六', '七', '八', '九'][value - 1] ?? String(value);
 }
 
-function factionName(world: WorldState, polityId: string, kind: FactionKind): string {
-  const polity = world.polities.find((item) => item.id === polityId);
-  const base = ({ 宗室: '宗议', 官僚: '台阁', 士族: '清议', 军门: '经略府', 地方: '州牧议' } satisfies Record<FactionKind, string>)[kind];
-  const ordinal = world.factions.filter((item) => item.polityId === polityId && item.kind === kind).length + 1;
-  return `${polity?.shortName ?? '朝'}${base}${ordinal === 1 ? '' : chineseOrdinal(ordinal)}`;
+function factionName(world: WorldState, polityId: string, leader: CharacterState): string {
+  const army = (world.armies ?? []).find((item) => item.commanderId === leader.id || item.allegiance?.characterId === leader.id);
+  const governed = leader.governedRegionId
+    ? world.regions.find((item) => item.id === leader.governedRegionId)
+    : null;
+  const office = (world.offices ?? []).find((item) => item.active && item.holderId === leader.id);
+  const family = (world.families ?? []).find((item) => item.id === leader.familyId);
+  const armyRoot = army
+    ? army.name.replace(/中军$|行营$|新军$/, '')
+    : '';
+  const base = army
+    ? `${armyRoot}${army.name.endsWith('行营') ? '边军' : '系'}`
+    : governed
+      ? `${governed.name}系`
+      : office?.kind === '枢密使'
+        ? '枢府一系'
+        : office && ['宰辅', '廷臣'].includes(office.kind)
+          ? '台阁一系'
+          : family
+            ? `${family.familyName}氏`
+            : `${leader.name}旧部`;
+  const duplicates = world.factions.filter((item) => item.polityId === polityId && item.name.startsWith(base)).length;
+  return duplicates === 0 ? base : `${base}${chineseOrdinal(duplicates + 1)}`;
 }
 
 function createFactionState(
@@ -196,9 +232,10 @@ function createFactionState(
   origin: FactionState['origin'],
   agenda: FactionState['agenda'],
   predecessorFactionIds: readonly string[] = [],
+  preferredLeaderId: string | null = null,
 ): FactionState {
   const ordered = [...members].sort((left, right) => scoreLeader(right) - scoreLeader(left) || stableCompare(left.id, right.id));
-  const leader = ordered[0];
+  const leader = ordered.find((item) => item.id === preferredLeaderId) ?? ordered[0];
   if (!leader) throw new Error(`Cannot form an empty faction for ${polityId}`);
   world.counters.faction += 1;
   const kind = factionKindFor(leader);
@@ -207,7 +244,7 @@ function createFactionState(
   const faction: FactionState = {
     id,
     polityId,
-    name: factionName(world, polityId, kind),
+    name: factionName(world, polityId, leader),
     kind,
     leaderId: leader.id,
     memberIds,
@@ -342,17 +379,88 @@ function emitLifecycle(
   return fact;
 }
 
-function openingGroups(world: WorldState, polityId: string): CharacterState[][] {
-  const groups = new Map<FactionKind, CharacterState[]>();
-  for (const character of world.characters.filter((item) => item.alive && item.age >= 16 && item.polityId === polityId)) {
-    const kind = factionKindFor(character);
-    const members = groups.get(kind) ?? [];
-    members.push(character);
-    groups.set(kind, members);
+interface OpeningFactionGroup {
+  leader: CharacterState;
+  members: CharacterState[];
+}
+
+function sharedArmy(world: WorldState, leftId: string, rightId: string): boolean {
+  return world.armies.some((army) => {
+    const attached = new Set([
+      army.commanderId,
+      army.deputyCommanderId,
+      army.allegiance?.characterId,
+      ...(army.retinues ?? []).map((retinue) => retinue.ownerId),
+    ].filter((id): id is string => Boolean(id)));
+    return attached.has(leftId) && attached.has(rightId);
+  });
+}
+
+function groupAffinity(world: WorldState, member: CharacterState, leader: CharacterState): number {
+  if (member.id === leader.id) return 1_000;
+  let score = 0;
+  if (sharedArmy(world, member.id, leader.id)) score += 400;
+  if (member.spouseIds.includes(leader.id) || leader.spouseIds.includes(member.id)) score += 90;
+  if (member.familyId && member.familyId === leader.familyId) score += 70;
+  const relations = (world.relationships ?? []).filter((relation) => (
+    (relation.sourceId === member.id && relation.targetId === leader.id)
+    || (relation.sourceId === leader.id && relation.targetId === member.id)
+  ));
+  for (const relation of relations) {
+    if (relation.kinship !== '无') score += 45;
+    if (relation.trust >= 62) score += (relation.trust - 55) * 0.6;
+    score += relation.gratitude * 0.45;
+    score -= relation.grievance * 0.55;
+    score += relation.memories.filter((memory) => ['提携', '共战', '恩义'].includes(memory.kind)).length * 28;
   }
-  return [...groups.entries()]
-    .sort(([left], [right]) => stableCompare(left, right))
-    .map(([, members]) => members);
+  for (const fact of world.facts ?? []) {
+    if (fact.kind !== 'agency_support_resolved' || fact.payload.outcome !== 'secured') continue;
+    if ((fact.payload.actorId === member.id && fact.payload.targetId === leader.id)
+      || (fact.payload.actorId === leader.id && fact.payload.targetId === member.id)) score += 52;
+  }
+  const central = (character: CharacterState) => (world.offices ?? []).some((office) => (
+    office.active && office.holderId === character.id && ['君主', '宰辅', '枢密使', '廷臣'].includes(office.kind)
+  ));
+  if (central(member) && central(leader)) score += 18;
+  return score;
+}
+
+function anchorScore(world: WorldState, character: CharacterState): number {
+  const army = (world.armies ?? []).find((item) => item.commanderId === character.id || item.allegiance?.characterId === character.id);
+  const governed = character.governedRegionId ? world.regions.find((item) => item.id === character.governedRegionId) : null;
+  const office = (world.offices ?? []).find((item) => item.active && item.holderId === character.id);
+  return scoreLeader(character)
+    + (character.role === '君主' ? 180 : 0)
+    + (army ? 145 + army.soldiers / 180 : 0)
+    + (character.commandingFleetId ? 115 : 0)
+    + (governed ? 75 + governed.strategicValue * 2 : 0)
+    + (office && office.kind !== '廷臣' ? 70 - office.rank * 3 : 0);
+}
+
+function openingGroups(world: WorldState, polityId: string): OpeningFactionGroup[] {
+  const adults = world.characters.filter((item) => item.alive && item.age >= 16 && item.polityId === polityId);
+  const ranked = adults
+    .filter((character) => eligibleFounder(world, character))
+    .sort((left, right) => anchorScore(world, right) - anchorScore(world, left) || stableCompare(left.id, right.id));
+  const anchors: CharacterState[] = [];
+  for (const candidate of ranked) {
+    if (anchors.some((anchor) => groupAffinity(world, candidate, anchor) >= 100)) continue;
+    anchors.push(candidate);
+    if (anchors.length >= MAX_ACTIVE_FACTIONS_PER_POLITY) break;
+  }
+  for (const candidate of ranked) {
+    if (anchors.length >= Math.min(2, adults.length)) break;
+    if (!anchors.some((anchor) => anchor.id === candidate.id)) anchors.push(candidate);
+  }
+  const groups = anchors.map((leader) => ({ leader, members: [leader] }));
+  const anchorIds = new Set(anchors.map((item) => item.id));
+  for (const member of adults.filter((item) => !anchorIds.has(item.id)).sort((left, right) => stableCompare(left.id, right.id))) {
+    const best = groups
+      .map((group) => ({ group, score: groupAffinity(world, member, group.leader) }))
+      .sort((left, right) => right.score - left.score || stableCompare(left.group.leader.id, right.group.leader.id))[0];
+    if (best && best.score >= 35) best.group.members.push(member);
+  }
+  return groups;
 }
 
 export function bootstrapFactionModel(
@@ -367,8 +475,8 @@ export function bootstrapFactionModel(
     }
     for (const character of world.characters) character.factionId = null;
     for (const polity of [...world.polities].sort((left, right) => stableCompare(left.id, right.id))) {
-      for (const members of openingGroups(world, polity.id)) {
-        const faction = createFactionState(world, polity.id, members, 'legacy', defaultAgenda(factionKindFor(members[0] as CharacterState)));
+      for (const group of openingGroups(world, polity.id)) {
+        const faction = createFactionState(world, polity.id, group.members, 'legacy', factionAgendaFor(group.leader), [], group.leader.id);
         rememberLifecycle(faction, { turn: world.turn, transition: 'formed', reasonCode: 'legacy_boundary', factId: null, relatedFactionIds: [] });
       }
     }
@@ -377,16 +485,16 @@ export function bootstrapFactionModel(
   if (world.factions.length > 0) return [];
   const factIds: string[] = [];
   for (const polity of [...world.polities].sort((left, right) => stableCompare(left.id, right.id))) {
-    for (const members of openingGroups(world, polity.id)) {
-      const beforeIds = members.map((item) => item.factionId);
-      const faction = createFactionState(world, polity.id, members, 'opening', defaultAgenda(factionKindFor(members[0] as CharacterState)));
+    for (const group of openingGroups(world, polity.id)) {
+      const beforeIds = group.members.map((item) => item.factionId);
+      const faction = createFactionState(world, polity.id, group.members, 'opening', factionAgendaFor(group.leader), [], group.leader.id);
       if (!context) {
         rememberLifecycle(faction, { turn: world.turn, transition: 'formed', reasonCode: 'opening_order', factId: null, relatedFactionIds: [] });
         continue;
       }
       const fact = emitLifecycle(
         world, context, 'formed', 'opening_order', polity.id, [faction], [faction], [], [], null, faction.leaderId,
-        members.map((member, index) => ({ entityType: 'character', entityId: member.id, field: 'factionId', before: beforeIds[index] ?? null, after: faction.id })),
+        group.members.map((member, index) => ({ entityType: 'character', entityId: member.id, field: 'factionId', before: beforeIds[index] ?? null, after: faction.id })),
       );
       factIds.push(fact.id);
     }
@@ -403,15 +511,9 @@ export function migrateFactionIdentityModel(world: WorldState, forceLegacyBounda
     }
   }
   const claimed = new Set<string>();
-  const ordinalByPolityKind = new Map<string, number>();
   for (const faction of [...world.factions].sort((left, right) => stableCompare(left.id, right.id))) {
     const legacy = faction as FactionState;
-    const key = `${legacy.polityId}:${legacy.kind}`;
-    const ordinal = (ordinalByPolityKind.get(key) ?? 0) + 1;
-    ordinalByPolityKind.set(key, ordinal);
     const polity = world.polities.find((item) => item.id === legacy.polityId);
-    const base = ({ 宗室: '宗议', 官僚: '台阁', 士族: '清议', 军门: '经略府', 地方: '州牧议' } satisfies Record<FactionKind, string>)[legacy.kind];
-    const neutralName = `${polity?.shortName ?? '朝'}${base}${ordinal === 1 ? '' : chineseOrdinal(ordinal)}`;
     const legalMembers = legacy.active
       ? legacy.memberIds
         .map((id) => world.characters.find((character) => character.id === id))
@@ -436,7 +538,10 @@ export function migrateFactionIdentityModel(world: WorldState, forceLegacyBounda
       changed = true;
     }
     if (forceLegacyBoundary || !Object.prototype.hasOwnProperty.call(legacy, 'origin')) {
-      legacy.name = neutralName;
+      if (!legacy.name) {
+        const leader = legalMembers.find((item) => item.id === legacy.leaderId) ?? legalMembers[0];
+        if (leader) legacy.name = factionName(world, legacy.polityId, leader);
+      }
       legacy.origin = 'legacy';
       legacy.formedTurn = null;
       legacy.coreMemberIds = legacy.active ? coreFor(world, legacy.memberIds, legacy.leaderId) : [];
@@ -612,10 +717,7 @@ function repairLeadership(
   }
   const leaderValid = members.some((item) => item.id === faction.leaderId);
   if (leaderValid) {
-    const memberIds = new Set(faction.memberIds);
-    faction.coreMemberIds = faction.coreMemberIds.filter((id) => memberIds.has(id));
-    if (!faction.coreMemberIds.includes(faction.leaderId)) faction.coreMemberIds.unshift(faction.leaderId);
-    faction.coreMemberIds = faction.coreMemberIds.slice(0, MAX_CORE_MEMBERS);
+    faction.coreMemberIds = coreFor(world, faction.memberIds, faction.leaderId);
     return false;
   }
   const survivingCore = members.filter((item) => faction.coreMemberIds.includes(item.id));
@@ -663,22 +765,16 @@ function formUnaffiliatedFaction(
 ): boolean {
   const activeCount = world.factions.filter((item) => item.active && item.polityId === polityId).length;
   if (activeCount >= MAX_ACTIVE_FACTIONS_PER_POLITY) return false;
-  const candidates = world.characters.filter((item) => item.alive && item.age >= 16 && item.polityId === polityId && !item.factionId && eligibleFounder(world, item));
-  const groups = new Map<string, CharacterState[]>();
-  for (const character of candidates) {
-    const key = `${factionKindFor(character)}:${factionAgendaFor(character)}`;
-    const group = groups.get(key) ?? [];
-    group.push(character);
-    groups.set(key, group);
-  }
-  const ranked = [...groups.values()]
-    .filter((group) => group.length >= 2 || (activeCount === 0 && group.some((item) => item.role === '君主')))
-    .sort((left, right) => right.length - left.length || scoreLeader(right[0] as CharacterState) - scoreLeader(left[0] as CharacterState) || stableCompare((left[0] as CharacterState).id, (right[0] as CharacterState).id));
-  const members = ranked[0];
-  if (!members) return false;
+  const candidates = world.characters
+    .filter((item) => item.alive && item.age >= 16 && item.polityId === polityId && !item.factionId && eligibleFounder(world, item))
+    .sort((left, right) => anchorScore(world, right) - anchorScore(world, left) || stableCompare(left.id, right.id));
+  const leader = candidates[0];
+  if (!leader) return false;
+  const members = candidates.filter((candidate) => candidate.id === leader.id || groupAffinity(world, candidate, leader) >= 35);
+  if (members.length < 2 && activeCount >= 2) return false;
   const previous = members.map((item) => item.factionId);
-  const faction = createFactionState(world, polityId, members, 'formed', factionAgendaFor(members[0] as CharacterState));
-  emitLifecycle(world, context, 'formed', 'shared_agenda', polityId, [faction], [faction], [], [], null, faction.leaderId,
+  const faction = createFactionState(world, polityId, members, 'formed', factionAgendaFor(leader), [], leader.id);
+  emitLifecycle(world, context, 'formed', 'shared_root', polityId, [faction], [faction], [], [], null, faction.leaderId,
     members.map((member, index) => ({ entityType: 'character', entityId: member.id, field: 'factionId', before: previous[index] ?? null, after: faction.id })), emit);
   return true;
 }

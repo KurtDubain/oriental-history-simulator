@@ -76,7 +76,7 @@ describe('SituationWorkbench', () => {
   });
 
   it('turns an explicit faction participant into an exact living-court link', () => {
-    const world = advanceWorldBy(createWorld('朝局卷宗精确往返'), 2);
+    const world = advanceWorldBy(createWorld('朝局卷宗精确往返'), 4);
     const projection = projectSituationWorkbench(world);
     const selected = projection.selected;
     const faction = world.factions.find((item) => item.active && world.polities.some((polity) => polity.id === item.polityId && polity.alive));

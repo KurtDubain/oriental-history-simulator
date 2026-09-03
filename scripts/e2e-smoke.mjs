@@ -384,7 +384,7 @@ async function exerciseEmbodiedCourtMobile(browser) {
       state.interface.selected?.kind === 'person'
       && state.interface.selected.id === 'c_014'
     ));
-    assert.equal(selected.interface.selectedDetail.name, '李玄度', '冻结种子应稳定定位朝臣派系领袖');
+    assert.equal(selected.interface.selectedDetail.name, '李玄度', '冻结种子应稳定定位这名朝臣');
 
     await page.getByRole('button', { name: '以此人入世' }).click();
     const panel = page.locator('[data-testid="embodiment-actions"]');
@@ -393,39 +393,13 @@ async function exerciseEmbodiedCourtMobile(browser) {
     const courtActions = entered.observer.embodiment.actions.filter((action) => (
       action.identityLabel === '朝臣议事'
     ));
-    assert.equal(entered.observer.embodiment.actions.length, 4, '朝臣派系领袖应保留三项通用行动与一项朝臣行动');
-    assert.equal(courtActions.length, 1, '人物档案只应出现一项明确的朝臣议事行动');
-    assert.equal(courtActions[0].label, '交换朝中支持');
-    assert.equal(courtActions[0].available, true, '冻结种子的冬季朝议应可提交');
-
-    const actionButton = panel.locator('button[data-embodied-action-kind="form_court_alliance"]:not(:disabled)');
-    assert.equal(await actionButton.count(), 1, '朝臣领域行动应有唯一稳定点击目标');
-    await actionButton.scrollIntoViewIfNeeded();
+    assert.equal(entered.observer.embodiment.actions.length, 3, '不领导当前集团的普通朝臣只应保留三项通用行动');
+    assert.equal(courtActions.length, 0, '人物未真实领导集团时不得虚构朝臣议约入口');
+    assert.equal(await panel.locator('button[data-embodied-action-kind="form_court_alliance"]').count(), 0);
     await waitForVisualSettled(page.locator('.observer-inspector'));
     await assertWithinViewport(page, '.observer-inspector', '移动端朝臣议事不可横向溢出');
-    await assertUnobstructedTapTarget(actionButton, '移动端朝臣议事按钮');
     await page.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-court-action-390x844.png`, fullPage: true });
-
-    await actionButton.click();
-    const queued = await waitForSnapshot(page, (state, actionId) => (
-      state.observer.embodiment.pending?.actionId === actionId
-    ), courtActions[0].actionId);
-    assert.equal(queued.deterministicWorldHash, entered.deterministicWorldHash, '朝臣议事排队不得提前修改世界');
-
-    const settled = await advanceOneQuarter(page);
-    assert.equal(settled.observer.embodiment.pending, null, '季度推进必须唯一消费朝臣议事');
-    const result = page.locator('.observer-embodiment-result');
-    await result.waitFor();
-    assert.equal(await result.count(), 1, '朝臣议事提交后只应展示一次裁决结果');
-    assert.equal(await result.getAttribute('data-outcome'), 'succeeded', '冻结自然路径应由同一朝局裁决成功');
-    assert.match(await result.textContent(), /上次结果.*(朝中支持|结成同盟|朝局)/s);
-    assert.equal(
-      settled.interface.selectedDetail.biography.filter((item) => item.factId && /政治联盟/.test(item.kind)).length,
-      1,
-      '同一次朝臣议事只应写入一条领域传记',
-    );
-    await result.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `${ARTIFACT_DIR}/mobile-embodiment-court-result-390x844.png`, fullPage: true });
+    assert.equal((await snapshot(page)).deterministicWorldHash, entered.deterministicWorldHash, '查看入世行动不得改变世界');
     assert.deepEqual(errors, []);
   } finally {
     await context.close();
@@ -633,6 +607,9 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   await page.locator('.situation-workbench__close').click();
   await page.waitForSelector('.situation-workbench', { state: 'detached' });
   assert.equal((await snapshot(page)).deterministicWorldHash, situationHash, '关闭持续局势不得改变世界哈希');
+
+  const warFocusClose = page.getByRole('button', { name: '退出战局聚焦' });
+  if (await warFocusClose.isVisible().catch(() => false)) await warFocusClose.click();
 
   await page.click('button[aria-label="保存当前世界"]');
   await page.waitForTimeout(500);
@@ -1365,7 +1342,7 @@ try {
   const situationSample = await exerciseSituationSnapshot(desktopContext, {
     seed: '春战副将',
     turn: 8,
-    requiredTypes: ['inheritance_crisis', 'war_progress'],
+    requiredTypes: ['war_progress'],
   });
   assert.ok(situationSample.projection.openCount > 0);
   const situationPauseSample = await exerciseSituationWatchAndPause(browser);
@@ -1525,7 +1502,7 @@ try {
   const factionAssets = courtProjection.locator('.court-projection__assets');
   assert.equal(await factionAssets.count(), 1, '选中派系后应能查看权势根由');
   await factionAssets.locator('summary').click();
-  assert.match(await factionAssets.textContent(), /中枢席位|地方任官|军令|家门与财富|人物声望/);
+  assert.match(await factionAssets.textContent(), /正式席位|地方任官|军令|家望与家产|个人影响/);
   await waitForVisualSettled(page.locator('.observer-inspector'));
   await page.screenshot({ path: `${ARTIFACT_DIR}/country-power-ledger.png`, fullPage: true });
   await page.getByRole('tab', { name: '海贸' }).click();

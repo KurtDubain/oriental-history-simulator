@@ -8,8 +8,10 @@ import {
   syncArmyPersonnelLocations,
 } from './authority-core';
 import type {
+  ArmyOrderKind,
   ArmyOrderState,
   ArmyState,
+  CharacterState,
   MilitaryStateProvenance,
   WorldState,
 } from '../types';
@@ -60,18 +62,57 @@ export function createArmyMilitaryFields(
   };
 }
 
-export function creditBattleCommandRenown(world: WorldState, army: ArmyState, gain: number): void {
+export function selectOpeningArmyDeputy(
+  world: WorldState,
+  polityId: string,
+  commanders: readonly CharacterState[],
+  assignedIds: ReadonlySet<string>,
+  commander: CharacterState,
+): CharacterState | null {
+  return world.characters
+    .filter((character) => (
+      character.polityId === polityId
+      && character.id !== world.polities.find((polity) => polity.id === polityId)?.rulerId
+      && character.id !== commander.id
+      && !character.governedRegionId
+      && !commanders.some((candidate) => candidate.id === character.id)
+      && !assignedIds.has(character.id)
+    ))
+    .sort((left, right) => (
+      right.leadership + right.loyalty * 0.45 - (left.leadership + left.loyalty * 0.45)
+      || stableCompare(left.id, right.id)
+    ))[0] ?? null;
+}
+
+export function recordArmyMovement(
+  army: ArmyState,
+  fromRegionId: string,
+  toRegionId: string,
+  turn: number,
+  orderKind: ArmyOrderKind = army.order.kind,
+  warId: string | null = army.order.warId,
+): void {
+  army.recentMovement = { fromRegionId, toRegionId, turn, orderKind, warId };
+  army.lastMovedTurn = turn;
+}
+
+export function creditBattleCommandStanding(world: WorldState, army: ArmyState, gain: number): void {
   const lawful = world.characters.find((character) => character.id === army.commanderId && character.alive);
   const actual = world.characters.find((character) => character.id === army.allegiance.characterId && character.alive);
   if (!lawful && !actual) return;
   if (!lawful || !actual || lawful.id === actual.id) {
     const credited = actual ?? lawful;
-    if (credited) credited.renown = clamp(credited.renown + gain);
+    if (credited) {
+      credited.renown = clamp(credited.renown + gain);
+      credited.merit = clamp(credited.merit + Math.max(1, Math.round(gain * 0.8)));
+    }
     return;
   }
   const lawfulGain = Math.round(gain * 0.35);
   lawful.renown = clamp(lawful.renown + lawfulGain);
+  lawful.merit = clamp(lawful.merit + Math.max(1, Math.round(lawfulGain * 0.8)));
   actual.renown = clamp(actual.renown + gain - lawfulGain);
+  actual.merit = clamp(actual.merit + Math.max(1, Math.round((gain - lawfulGain) * 0.8)));
 }
 
 export function refreshArmyMilitaryAuthority(
@@ -120,7 +161,11 @@ export function refreshAllArmyMilitaryAuthority(
 export function migrateArmyMilitaryState(world: WorldState): boolean {
   let migrated = false;
   for (const army of world.armies) {
-    const raw = army as ArmyState & Partial<ArmyMilitaryFields>;
+    const raw = army as ArmyState & Partial<ArmyMilitaryFields & Pick<ArmyState, 'recentMovement'>>;
+    if (!Object.prototype.hasOwnProperty.call(raw, 'recentMovement')) {
+      raw.recentMovement = null;
+      migrated = true;
+    }
     const hadOrder = Boolean(raw.order);
     if (!raw.allegiance || !Array.isArray(raw.retinues) || !raw.order) {
       const fields = createArmyMilitaryFields(world, army, 'legacy');

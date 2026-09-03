@@ -62,9 +62,8 @@ import {
   expelFactionMembers,
 } from './politics/faction-lifecycle';
 import {
-  creditBattleCommandRenown,
-  createArmyMilitaryFields,
-  refreshAllArmyMilitaryAuthority,
+  creditBattleCommandStanding, createArmyMilitaryFields,
+  recordArmyMovement, refreshAllArmyMilitaryAuthority, selectOpeningArmyDeputy,
   syncArmyPersonnelLocations,
 } from './military/authority';
 import {
@@ -415,8 +414,11 @@ function createInitialArmies(world: WorldState): void {
     const commanders = world.characters
       .filter((character) => character.polityId === polity.id && character.role === '将领')
       .sort((left, right) => stableCompare(left.id, right.id));
+    const assignedDeputies = new Set<string>();
     for (let index = 0; index < 2; index += 1) {
       const commander = commanders[index] as CharacterState;
+      const deputy = selectOpeningArmyDeputy(world, polity.id, commanders, assignedDeputies, commander);
+      if (deputy) assignedDeputies.add(deputy.id);
       const region = index === 0
         ? world.regions.find((item) => item.id === polity.capitalRegionId) as RegionState
         : borderRegionFor(world, polity.id, index);
@@ -431,7 +433,7 @@ function createInitialArmies(world: WorldState): void {
         name: `${region.name}${index === 0 ? '中军' : '行营'}`,
         polityId: polity.id,
         commanderId: commander.id,
-        deputyCommanderId: null,
+        deputyCommanderId: deputy?.id ?? null,
         regionId: region.id,
         originRegionId: region.id,
         soldiers,
@@ -440,17 +442,18 @@ function createInitialArmies(world: WorldState): void {
         experience: keyedInt(world.seed, 10, 35, 'initial', 'army', polity.id, index, 'experience'),
         supply: 100,
         food,
-        lastMovedTurn: -1,
+        lastMovedTurn: -1, recentMovement: null,
         embarkedOperationId: null,
         ...createArmyMilitaryFields(world, {
           id: `a_${String(world.counters.army).padStart(3, '0')}`,
-          polityId: polity.id, commanderId: commander.id, deputyCommanderId: null,
+          polityId: polity.id, commanderId: commander.id, deputyCommanderId: deputy?.id ?? null,
           regionId: region.id, soldiers,
           morale: keyedInt(world.seed, 58, 78, 'initial', 'army', polity.id, index, 'morale'),
         }),
       };
       commander.commandingArmyId = army.id;
       commander.locationRegionId = region.id;
+      if (deputy) deputy.locationRegionId = region.id;
       world.armies.push(army);
     }
   }
@@ -1411,7 +1414,7 @@ function createArmy(
     experience: 4,
     supply: initialFood >= recruitable ? 100 : integer(initialFood / Math.max(1, recruitable) * 100),
     food: initialFood,
-    lastMovedTurn: -1,
+    lastMovedTurn: -1, recentMovement: null,
     embarkedOperationId: null,
     ...createArmyMilitaryFields(world, {
       id: `a_${String(world.counters.army).padStart(3, '0')}`,
@@ -2166,8 +2169,8 @@ function settleDefendersAfterCapture(
     if (defender.soldiers < MIN_ARMY_SIZE || !retreat) {
       removeArmy(world, defender, context, true);
     } else {
+      recordArmyMovement(defender, capturedRegion.id, retreat.id, context.turn, 'retreat');
       defender.regionId = retreat.id;
-      defender.lastMovedTurn = context.turn;
       defender.morale = Math.round(clamp(defender.morale - 12));
       syncArmyPersonnelLocations(world, defender);
     }
@@ -2457,11 +2460,11 @@ function resolveBattle(
 
   attackerArmy.experience = Math.round(clamp(attackerArmy.experience + (attackerWon ? 5 : 2)));
   attackerArmy.morale = Math.round(clamp(attackerArmy.morale + (attackerWon ? 8 : -13)));
-  creditBattleCommandRenown(world, attackerArmy, attackerWon ? 5 : 1);
+  creditBattleCommandStanding(world, attackerArmy, attackerWon ? 5 : 1);
   for (const defender of defenders) {
     defender.experience = Math.round(clamp(defender.experience + (attackerWon ? 2 : 5)));
     defender.morale = Math.round(clamp(defender.morale + (attackerWon ? -12 : 7)));
-    creditBattleCommandRenown(world, defender, attackerWon ? 1 : 4);
+    creditBattleCommandStanding(world, defender, attackerWon ? 1 : 4);
   }
 
   const battleCauses: EventCause[] = [
@@ -2569,8 +2572,8 @@ function resolveBattle(
 
   if (attackerWon && attackerArmy.soldiers > 0) {
     settleDefendersAfterCapture(world, defenders, target, defenderId, context);
+    recordArmyMovement(attackerArmy, attackerArmy.regionId, target.id, context.turn, attackerArmy.order.kind, war.id);
     attackerArmy.regionId = target.id;
-    attackerArmy.lastMovedTurn = context.turn;
     syncArmyPersonnelLocations(world, attackerArmy);
     captureRegion(world, context, war, attackerArmy, target, defenderId, battleFact);
   } else {
@@ -2721,8 +2724,8 @@ function processMilitary(world: WorldState, context: MutableTurnContext): void {
         if (nextRegion.controllerId === enemyId) {
           resolveBattle(world, context, war, army, nextRegion, route);
         } else {
+          recordArmyMovement(army, army.regionId, nextRegion.id, context.turn, army.order.kind, war.id);
           army.regionId = nextRegion.id;
-          army.lastMovedTurn = context.turn;
           if (route.kind === '海峡') {
             army.morale = Math.round(clamp(army.morale - 3));
             army.supply = Math.round(clamp(army.supply - 6));
@@ -2884,7 +2887,7 @@ function cloneWorld(world: WorldState): WorldState {
       biography: character.biography.map((fact) => ({ ...fact })),
     })),
     armies: world.armies.map((army) => ({
-      ...army, allegiance: { ...army.allegiance }, retinues: army.retinues.map((retinue) => ({ ...retinue })), order: { ...army.order },
+      ...army, recentMovement: army.recentMovement ? { ...army.recentMovement } : null, allegiance: { ...army.allegiance }, retinues: army.retinues.map((retinue) => ({ ...retinue })), order: { ...army.order },
     })),
     fleets: world.fleets.map((fleet) => ({ ...fleet })),
     wars: world.wars.map((war) => ({ ...war, targetRegionIds: [...war.targetRegionIds] })),

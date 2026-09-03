@@ -32,17 +32,11 @@ import {
   type MapPrimerStep,
 } from './components/MapPrimer';
 import { ObserverDesk } from './components/ObserverDesk';
-import {
-  ObserverLeads,
-} from './components/ObserverLeads';
+import { ObserverLeads } from './components/ObserverLeads';
 import { SituationWorkbench } from './components/SituationWorkbench';
 import { SettingsPanel } from './components/SettingsPanel';
 import { QuarterPulse } from './components/QuarterPulse';
-import {
-  HistoricalArchive,
-  type ArchiveDossier,
-  type ArchiveEntityKind,
-} from './components/HistoricalArchive';
+import { HistoricalArchive, type ArchiveDossier, type ArchiveEntityKind } from './components/HistoricalArchive';
 import {
   NavigationRail,
   type MapOverlay,
@@ -58,10 +52,8 @@ import {
 } from './components/WorldMap';
 import { WorldCollectionPanel } from './components/WorldCollectionPanel';
 import { WorldStart } from './components/WorldStart';
-import {
-  gameAudio,
-  type AudioCue,
-} from './audio';
+import { WarFocusSummary } from './components/WarFocusSummary';
+import { gameAudio, type AudioCue } from './audio';
 import {
   checkForAppUpdate,
   getAppUpdateState,
@@ -132,15 +124,11 @@ import {
   worldPopulation,
   type RosterReason,
 } from './view/adapters';
-import {
-  type HistoricalTerritoryView,
-} from './view/v1-history';
-import {
-  deriveObserverLeadProjection,
-  type ObserverLead,
-} from './view/observer-leads';
+import { type HistoricalTerritoryView } from './view/v1-history';
+import { deriveObserverLeadProjection, type ObserverLead } from './view/observer-leads';
 import { projectSituationWorkbench } from './view/situation-detail';
 import { projectQuarterPulse } from './view/quarter-pulse-stories';
+import { projectWarGroups } from './view/war-group-projection';
 import {
   applyObserverEventAlerts,
   completeObserverGuideStep,
@@ -298,6 +286,7 @@ export function App() {
   const { returnTarget: rosterDossierReturn, enteredFromRoster: rosterDossierEntry, compactPresentation: compactRosterDossier, begin: beginRosterDossier, clear: clearRosterDossier, returnToRoster } = useRosterDossierFlow(activeView, powerRosterSection);
   useEffect(() => { setMobileInspectorExpanded(Boolean(rosterDossierReturn)); }, [rosterDossierReturn]);
   const [focusedArmyId, setFocusedArmyId] = useState<string | null>(null);
+  const [focusedWarId, setFocusedWarId] = useState<string | null>(null);
   const [primerStep, setPrimerStep] = useState<MapPrimerStep>('terrain');
   const [mandateBusy, setMandateBusy] = useState(false);
   const [mandateMessage, setMandateMessage] = useState<MandateMessage | null>(null);
@@ -611,6 +600,7 @@ export function App() {
     archiveFocusRestoreAllowedRef.current = false;
     causalFocusRestoreAllowedRef.current = false;
     setFocusedArmyId(null);
+    setFocusedWarId(null);
     setPauseMatch(null);
     setHistoricalView(null);
     setOverlay('political');
@@ -1268,6 +1258,7 @@ export function App() {
       ? projectSituationWorkbench(world, selectedSituationId)
       : null
   ), [selectedSituationId, situationWorkbenchOpen, world]);
+  const focusedWar = useMemo(() => world && focusedWarId ? projectWarGroups(world, focusedWarId) : null, [focusedWarId, world]);
   const rosterDirectory = useMemo(() => (
     world && (activeView === 'people' || activeView === 'powers')
       ? projectRosterDirectory(world, observerSettings.watchlist)
@@ -1400,6 +1391,7 @@ export function App() {
     situationFocusRestoreAllowedRef.current = true;
     const projection = projectSituationWorkbench(current, preferredSituationId);
     if (!projection.selectedId || !projection.selected) return;
+    if (projection.selected.type === 'war_progress') { setOverlay('war'); setFocusedWarId(projection.selected.audit.scopeKey); }
     playback.pause();
     navigation.openLayer({ kind: 'situations', situationId: projection.selectedId });
     gameAudio.play('open', 0.64);
@@ -1810,7 +1802,9 @@ export function App() {
   }, [navigation]);
   const handleSelectSituation = useCallback((situationId: string) => {
     const current = worldRef.current;
-    if (!current?.situationSystem.situations.some((item) => item.id === situationId)) return;
+    const situation = current?.situationSystem.situations.find((item) => item.id === situationId);
+    if (!situation) return;
+    setFocusedWarId(situation.type === 'war_progress' ? situation.scopeKey : null); if (situation.type === 'war_progress') setOverlay('war');
     navigation.replaceTopLayer({ kind: 'situations', situationId });
   }, [navigation]);
   const handleCancelWorldStart = useCallback(() => {
@@ -1839,6 +1833,7 @@ export function App() {
           data-mobile-inspector-mode={inspector ? mobileInspectorExpanded ? 'full' : 'quick' : 'closed'}
           data-audio-invitation-open={audioInvitationVisible || undefined}
           data-map-gesture-active={mapGestureActive || undefined}
+          data-war-focus-open={Boolean(focusedWar && overlay === 'war') || undefined}
           data-focus-open={activeView === 'world' && !historicalView && !inspector || undefined}
           data-motion={interfaceSettings.motion}
           data-interface-density={interfaceSettings.interfaceDensity}
@@ -1898,6 +1893,7 @@ export function App() {
               motionReduced={interfaceSettings.motion === 'reduced'}
               politicalFocusPolityId={world.factions.find((item) => item.id === focusedPoliticalFactionId)?.polityId ?? null}
               politicalFocusFactionId={focusedPoliticalFactionId}
+              focusedWarId={focusedWar?.warId ?? null} focusedWarArmyIds={focusedWar?.armyIds ?? []}
               onSelectBlank={closeInspectorToMap}
               onSelectRegion={(id) => {
                 gameAudio.play('select', 0.46);
@@ -1919,6 +1915,12 @@ export function App() {
                 navigation.goToView('world');
               }}
             />
+
+            {focusedWar && overlay === 'war' && !situationWorkbenchOpen ? <WarFocusSummary
+              war={focusedWar} onClose={() => setFocusedWarId(null)}
+              onInspectArmy={(id) => { setFocusedArmyId(id); setSelection({ kind: 'army', id }); }}
+              onInspectBattle={handleSelectScopedEvent}
+            /> : null}
 
             <div className="observer-world-summary" aria-label="世界总览">
               <span><small>天下人口</small><strong>{compact.format(totalPopulation)}</strong></span>
@@ -2217,6 +2219,7 @@ export function App() {
         onSelectCourtFaction={handleOpenCourtFaction}
         isWatched={Boolean(selectedSituationId && followed.has(`situation:${selectedSituationId}`))}
         onToggleWatch={handleToggleSelectedSituation}
+        onShowWarMap={handleCloseSituationWorkbench}
         returnFocusTo={situationReturnFocusRef.current}
         shouldRestoreFocus={shouldRestoreSituationFocus}
       />

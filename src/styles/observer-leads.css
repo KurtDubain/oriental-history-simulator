@@ -304,6 +304,10 @@
 }
 
 @media (max-width: 760px) {
+  .observer-app[data-war-focus-open="true"] .observer-leads {
+    display: none;
+  }
+
   .observer-leads {
     position: absolute;
     z-index: 8;

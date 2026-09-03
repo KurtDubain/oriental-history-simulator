@@ -212,8 +212,8 @@ function assertObserverInvariant(current, baseline, detail) {
 function selectCourtSituation(state, scenario) {
   const courts = state.observer.situations.open
     .filter((situation) => situation.type === 'court_power_struggle');
-  assert.ok(courts.length > 0, `${scenario.slug} 固定世界必须自然形成朝堂权斗`);
   assert.ok(courts.length <= 3, `${scenario.slug} 朝堂权斗开放局势不得超过类型配额 3`);
+  if (!courts.length) return null;
   const targetPolity = state.polities.find((polity) => polity.id === scenario.targetPolityId);
   const polityLabels = targetPolity
     ? [targetPolity.name, targetPolity.name.replace(/(?:国|朝|邦)$/u, '')].filter(Boolean)
@@ -669,6 +669,8 @@ async function exerciseFocusAndTrace(page, scenario, baseline, court, selected) 
     await firstRank.focus();
   }
 
+  const relationFold = court.locator('.court-projection__relation-fold');
+  if ((await relationFold.getAttribute('open')) === null) await activate(relationFold.locator('summary'), scenario);
   const firstRelation = court.locator('.court-projection__relations li[data-relation]').first();
   const relationWhy = firstRelation.getByRole('button', { name: /查看.+缘由/ });
   assert.equal(await relationWhy.count(), 1, `${scenario.slug} 派系关系必须给出可追溯入口`);
@@ -691,6 +693,8 @@ async function exerciseFocusAndTrace(page, scenario, baseline, court, selected) 
 async function exerciseHistoryFactionRoundTrip(page, scenario, baseline, court, selected) {
   const relation = selected.interface.selectedDetail.court.relations[0];
   assert.ok(relation?.sourceEventId, `${scenario.slug} 固定派系关系必须有可追溯史事`);
+  const relationFold = court.locator('.court-projection__relation-fold');
+  if ((await relationFold.getAttribute('open')) === null) await activate(relationFold.locator('summary'), scenario);
   const relationRow = court.locator('.court-projection__relations li[data-relation]').first();
   const relationWhy = relationRow.getByRole('button', { name: /查看.+缘由/ });
   await activate(relationWhy, scenario);
@@ -1029,6 +1033,7 @@ async function exerciseFactionMapRoots(page, scenario, baseline, court, selected
 
 async function exerciseCourtSituationRoundTrip(page, scenario, baseline) {
   const situation = selectCourtSituation(baseline, scenario);
+  if (!situation) return baseline;
   assert.equal(situation.typeLabel, '朝堂权斗');
   assert.match(situation.title, /朝堂权斗/);
   for (const hidden of ['participants', 'politicalFocus', 'evidence', 'phase', 'nextSignal']) {

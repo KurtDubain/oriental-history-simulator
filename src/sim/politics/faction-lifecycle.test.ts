@@ -14,19 +14,13 @@ import { validateCommitmentState } from '../validation/commitments';
 import { validateFactionState } from '../validation/factions';
 import {
   changeFactionRelation,
+  bootstrapFactionModel,
   endPolityFactions,
   expelFactionMembers,
   factionKindFor,
   processFactionLifecycle,
+  settleFactionDepartures,
 } from './faction-lifecycle';
-
-const NEUTRAL_NAME_BY_KIND: Record<FactionKind, string> = {
-  宗室: '宗议',
-  官僚: '台阁',
-  士族: '清议',
-  军门: '经略府',
-  地方: '州牧议',
-};
 
 function quarterContext(
   world: WorldState,
@@ -58,44 +52,43 @@ function moveToQuarter(
 }
 
 describe('POL02 stable faction identity and lifecycle', () => {
-  it('settles a faction leader rebellion before the audit quarter closes', () => {
-    const before = advanceWorldBy(createWorld('北辰', 'private-v03', 1), 57);
-    const beforeFaction = before.factions.find((faction) => faction.id === 'fac_0021' && faction.active);
-    if (!beforeFaction) throw new Error('expected the rebel leader faction before the failing quarter');
-    const beforeLeader = before.characters.find((character) => character.id === beforeFaction.leaderId);
-    if (!beforeLeader) throw new Error(`missing leader ${beforeFaction.leaderId}`);
-    const after = advanceWorld(before);
-    const afterFaction = after.factions.find((faction) => faction.id === beforeFaction.id);
-    const afterLeader = after.characters.find((character) => character.id === beforeFaction.leaderId);
-    if (!afterFaction || !afterLeader) throw new Error('expected the prior faction and leader after the rebellion');
+  it('settles a group leader departure in the same quarter with causal evidence', () => {
+    const world = createWorld('POL02-首领离境结算');
+    const faction = world.factions.find((item) => item.active && item.coreMemberIds.length >= 2);
+    if (!faction) throw new Error('expected a succession-capable group');
+    const leader = world.characters.find((character) => character.id === faction.leaderId);
+    const destination = world.polities.find((polity) => polity.id !== faction.polityId);
+    if (!leader || !destination) throw new Error('expected leader and destination polity');
+    const context = moveToQuarter(world, 1, '夏');
+    const departureFact = emitSimulationFact(world, context, {
+      kind: 'territory_control_changed', category: '政治', importance: 5,
+      actorIds: [leader.id], polityIds: [faction.polityId, destination.id], regionIds: [leader.locationRegionId],
+      causes: [{ label: '地方离境', role: '结果', weight: 1, evidence: `${leader.name}脱离旧属` }],
+      stateDeltas: [{ entityType: 'character', entityId: leader.id, field: 'factionId', before: faction.id, after: null }],
+      sourceFactIds: [],
+      payload: { regionId: leader.locationRegionId, previousControllerId: faction.polityId, nextControllerId: destination.id, reason: 'rebellion', warId: null },
+    });
+    const previousLeaderId = leader.id;
+    leader.polityId = destination.id;
+    expelFactionMembers(world, faction.id, [leader.id]);
+    settleFactionDepartures(world, context, [faction.id], [departureFact.id]);
+    const afterFaction = world.factions.find((item) => item.id === faction.id);
+    if (!afterFaction) throw new Error('expected the prior group after departure');
 
-    expect(after.turn).toBe(58);
-    expect(afterLeader.polityId).not.toBe(beforeLeader.polityId);
-    expect(afterLeader.factionId).toBeNull();
+    expect(leader.factionId).toBeNull();
     expect(afterFaction.active).toBe(true);
-    expect(afterFaction.leaderId).not.toBe(beforeFaction.leaderId);
+    expect(afterFaction.leaderId).not.toBe(previousLeaderId);
     expect(afterFaction.memberIds).toContain(afterFaction.leaderId);
     expect(afterFaction.coreMemberIds).toContain(afterFaction.leaderId);
-    expect(validateFactionState(after)).toEqual([]);
+    expect(validateFactionState(world)).toEqual([]);
 
-    const departureFact = after.facts.find((fact) => (
-      fact.kind === 'territory_control_changed'
-      && fact.payload.reason === 'rebellion'
-      && fact.stateDeltas.some((delta) => (
-        delta.entityType === 'character'
-        && delta.entityId === beforeLeader.id
-        && delta.field === 'factionId'
-        && delta.before === beforeFaction.id
-        && delta.after === null
-      ))
-    ));
-    const successionFact = after.facts.find((fact) => (
+    const successionFact = context.facts.find((fact) => (
       fact.kind === 'faction_lifecycle'
       && fact.payload.transition === 'leader_changed'
-      && fact.payload.affectedFactionIds.includes(beforeFaction.id)
-      && fact.payload.previousLeaderId === beforeLeader.id
+      && fact.payload.affectedFactionIds.includes(faction.id)
+      && fact.payload.previousLeaderId === previousLeaderId
     ));
-    if (!departureFact || !successionFact || successionFact.kind !== 'faction_lifecycle') {
+    if (!successionFact || successionFact.kind !== 'faction_lifecycle') {
       throw new Error('expected causally linked departure and faction succession Facts');
     }
     expect(successionFact.payload).toMatchObject({
@@ -103,34 +96,42 @@ describe('POL02 stable faction identity and lifecycle', () => {
       nextLeaderId: afterFaction.leaderId,
     });
     expect(successionFact.sourceFactIds).toContain(departureFact.id);
-
-    const restored = deserializeWorld(serializeWorld(after));
-    expect(restored.hash).toBe(after.hash);
-    expect(validateFactionState(restored)).toEqual([]);
   });
-  it('gives every opening adult exactly one neutral faction identity backed by an origin Fact', () => {
+  it('forms two to four deterministic power-root groups per polity without forcing every adult into one', () => {
     const world = createWorld('POL02-开局派系身份');
+    const repeated = createWorld('POL02-开局派系身份');
     const adults = world.characters.filter((character) => character.alive && character.age >= 16);
     const factions = world.factions.filter((faction) => faction.active);
     const membershipIds = factions.flatMap((faction) => faction.memberIds);
 
-    expect(factions.length).toBeGreaterThan(0);
+    expect(stableHash(world.factions)).toBe(stableHash(repeated.factions));
     expect(new Set(membershipIds).size).toBe(membershipIds.length);
-    expect([...membershipIds].sort()).toEqual(adults.map((character) => character.id).sort());
+    expect(membershipIds.length).toBeLessThan(adults.length);
+    let crossedOldClassBoundary = false;
 
     for (const character of adults) {
-      expect(character.factionId).not.toBeNull();
       expect(factions.filter((faction) => faction.memberIds.includes(character.id)).map((faction) => faction.id))
-        .toEqual([character.factionId]);
+        .toEqual(character.factionId ? [character.factionId] : []);
     }
+    for (const polity of world.polities.filter((item) => item.alive)) {
+      const active = factions.filter((faction) => faction.polityId === polity.id);
+      expect(active.length).toBeGreaterThanOrEqual(2);
+      expect(active.length).toBeLessThanOrEqual(4);
+      for (const army of world.armies.filter((item) => item.polityId === polity.id && item.deputyCommanderId)) {
+        const commander = world.characters.find((item) => item.id === army.commanderId);
+        const deputy = world.characters.find((item) => item.id === army.deputyCommanderId);
+        if (commander?.politicalClass !== deputy?.politicalClass) crossedOldClassBoundary = true;
+        expect(commander?.factionId).toBeTruthy();
+        expect(deputy?.factionId).toBe(commander?.factionId);
+      }
+    }
+    expect(crossedOldClassBoundary).toBe(true);
 
     const foundingEvent = world.history.find((event) => event.kind === 'world_created');
     if (!foundingEvent) throw new Error('expected the opening world event');
 
     for (const faction of factions) {
-      const polity = world.polities.find((item) => item.id === faction.polityId);
-      if (!polity) throw new Error(`missing polity ${faction.polityId}`);
-      expect(faction.name).toBe(`${polity.shortName}${NEUTRAL_NAME_BY_KIND[faction.kind]}`);
+      expect(faction.name).not.toMatch(/宗议|台阁$|清议|经略府|州牧议/);
       expect(faction.origin).toBe('opening');
       expect(faction.originFactId).not.toBeNull();
       expect(foundingEvent.sourceFactIds).toContain(faction.originFactId);
@@ -163,6 +164,7 @@ describe('POL02 stable faction identity and lifecycle', () => {
     const office = world.offices.find((item) => item.active && item.holderId === character.id);
     if (!faction || !office) throw new Error('expected the ruler faction and active office');
     const factionId = faction.id;
+    const factionName = faction.name;
 
     const replacementClass: Record<FactionKind, PoliticalClass> = {
       宗室: '官僚',
@@ -178,10 +180,44 @@ describe('POL02 stable faction identity and lifecycle', () => {
     processFactionLifecycle(world, quarterContext(world));
 
     expect(character.factionId).toBe(factionId);
+    expect(faction.name).toBe(factionName);
     expect(faction.memberIds).toContain(character.id);
     expect(world.factions.filter((item) => item.active && item.memberIds.includes(character.id)).map((item) => item.id))
       .toEqual([factionId]);
   });
+
+  it('leaves an unconnected minor person outside the visible groups', () => {
+    const world = createWorld('POL02-不强塞无关系人物');
+    const outsider = world.characters.find((character) => (
+      character.role === '廷臣'
+      && !world.offices.some((office) => office.active && office.holderId === character.id)
+      && !world.armies.some((army) => [army.commanderId, army.deputyCommanderId].includes(character.id))
+    ));
+    if (!outsider) throw new Error('expected an unconnected courtier fixture');
+    world.factions = [];
+    world.counters.faction = 0;
+    for (const character of world.characters) character.factionId = null;
+    outsider.familyId = 'isolated_family';
+    outsider.spouseIds = [];
+    outsider.influence = 0;
+    world.relationships = world.relationships.filter((relation) => (
+      relation.sourceId !== outsider.id && relation.targetId !== outsider.id
+    ));
+
+    bootstrapFactionModel(world, 'opening');
+
+    expect(outsider.factionId).toBeNull();
+    expect(world.factions.some((faction) => faction.memberIds.includes(outsider.id))).toBe(false);
+  });
+
+  it('keeps living polities within the two-to-four visible-group band over sixteen quarters', () => {
+    const world = advanceWorldBy(createWorld('POL02-集团数量长程'), 16);
+    for (const polity of world.polities.filter((item) => item.alive)) {
+      const count = world.factions.filter((faction) => faction.active && faction.polityId === polity.id).length;
+      expect(count).toBeGreaterThanOrEqual(2);
+      expect(count).toBeLessThanOrEqual(4);
+    }
+  }, 15_000);
 
   it('keeps an expelled member unaffiliated on the following quarter instead of rebuilding by class', () => {
     const world = createWorld('POL02-清洗不回填');
@@ -355,6 +391,16 @@ describe('POL02 stable faction identity and lifecycle', () => {
     if (!parent) throw new Error('expected a faction large enough to split');
     const parentId = parent.id;
     const factionIdsBefore = new Set(world.factions.map((item) => item.id));
+    const released = world.factions.find((item) => item.active && item.polityId === parent.polityId && item.id !== parent.id);
+    if (!released) throw new Error('expected another group to release a bounded active slot');
+    released.active = false;
+    released.endedTurn = world.turn;
+    for (const memberId of released.memberIds) {
+      const member = world.characters.find((item) => item.id === memberId);
+      if (member?.factionId === released.id) member.factionId = null;
+    }
+    released.memberIds = [];
+    released.coreMemberIds = [];
     const challengerId = parent.memberIds.find((id) => id !== parent.leaderId);
     const challenger = world.characters.find((item) => item.id === challengerId);
     if (!challenger) throw new Error('expected a non-leader challenger');
@@ -745,6 +791,20 @@ describe('POL02 stable faction identity and lifecycle', () => {
     if (!goneLeft || !goneRight) throw new Error('expected restored legacy alliance endpoints');
     goneLeft.alliedFactionIds = goneLeft.alliedFactionIds.filter((id) => id !== goneRight.id);
     goneRight.alliedFactionIds = goneRight.alliedFactionIds.filter((id) => id !== goneLeft.id);
+    const legacyCommitment = allianceGone.commitments.find((item) => item.id === 'commit_00001');
+    if (!legacyCommitment) throw new Error('expected restored legacy commitment');
+    for (const actorId of [legacyCommitment.promisorId, legacyCommitment.promiseeId]) {
+      const actor = allianceGone.characters.find((character) => character.id === actorId);
+      if (!actor) continue;
+      actor.alive = false;
+      actor.lifeStage = '已故';
+      actor.deathTurn = allianceGone.turn;
+      actor.factionId = null;
+      for (const faction of allianceGone.factions) {
+        faction.memberIds = faction.memberIds.filter((id) => id !== actor.id);
+        faction.coreMemberIds = faction.coreMemberIds.filter((id) => id !== actor.id);
+      }
+    }
     allianceGone.hash = computeWorldHash(allianceGone);
     const conservativelySettled = advanceWorldBy(allianceGone, 4);
     const settledCommitment = conservativelySettled.commitments.find((item) => item.id === 'commit_00001');

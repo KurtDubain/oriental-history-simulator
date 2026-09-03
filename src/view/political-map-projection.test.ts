@@ -72,9 +72,13 @@ describe('POL04/POL05 political map projection', () => {
           expect(region.controllerId).toBe(faction.polityId);
         } else if (asset.kind === 'army') {
           const army = world.armies.find((candidate) => candidate.id === asset.id);
+          const actual = world.characters.find((candidate) => candidate.id === army?.allegiance.characterId);
+          const actualFaction = world.factions.find((candidate) => candidate.id === actual?.factionId && candidate.active);
+          const expectedHolderId = actualFaction?.polityId === army?.polityId ? actual?.id : army?.commanderId;
           expect(root.kind).toBe('army_command');
-          expect(army).toMatchObject({ commanderId: holder?.id, regionId: root.regionId });
-          expect(holder?.commandingArmyId).toBe(army?.id);
+          expect(army).toMatchObject({ regionId: root.regionId });
+          expect(holder?.id).toBe(expectedHolderId);
+          if (holder?.id === army?.commanderId) expect(holder?.commandingArmyId).toBe(army?.id);
         } else {
           const fleet = world.fleets.find((candidate) => candidate.id === asset.id);
           expect(root.kind).toBe('fleet_command');
@@ -83,11 +87,38 @@ describe('POL04/POL05 political map projection', () => {
         }
       }
     }
+    const rootedArmyIds = roots.flatMap((root) => root.assets.filter((asset) => asset.kind === 'army').map((asset) => asset.id));
+    expect(new Set(rootedArmyIds).size).toBe(rootedArmyIds.length);
     for (const factionId of new Set(roots.map((root) => root.factionId))) {
       expect(roots.filter((root) => root.factionId === factionId).length)
         .toBeLessThanOrEqual(POLITICAL_MAP_PROJECTION_LIMITS.rootsPerFaction);
     }
     expect(serializeWorld(world)).toBe(before);
+  });
+
+  it('assigns a disputed army root only to the group its soldiers actually follow', () => {
+    const world = advanceWorldBy(createWorld('军中所从只归一系'), 4);
+    const army = world.armies.find((candidate) => candidate.soldiers > 0);
+    const commander = world.characters.find((candidate) => candidate.id === army?.commanderId);
+    const otherFaction = world.factions.find((candidate) => (
+      candidate.active && candidate.polityId === army?.polityId && candidate.id !== commander?.factionId
+    ));
+    const actual = world.characters.find((candidate) => (
+      candidate.alive && candidate.polityId === army?.polityId && candidate.factionId === otherFaction?.id
+    ));
+    if (!army || !commander || !otherFaction || !actual) throw new Error('expected an army and a second active group');
+    army.allegiance.characterId = actual.id;
+    army.allegiance.strength = 82;
+
+    const roots = projectFactionSpatialPowerRoots(world)
+      .flatMap((root) => root.assets.map((asset) => ({ root, asset })))
+      .filter(({ asset }) => asset.kind === 'army' && asset.id === army.id);
+
+    expect(roots).toHaveLength(1);
+    expect(roots[0]).toMatchObject({
+      root: { factionId: otherFaction.id },
+      asset: { holderId: actual.id, ledgerResourceId: `allegiance:${army.id}` },
+    });
   });
 
   it('does not turn central office, family wealth, renown, cohesion or legacy power into land', () => {

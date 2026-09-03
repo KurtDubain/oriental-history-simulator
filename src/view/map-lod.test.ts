@@ -203,6 +203,21 @@ describe('map LOD scene', () => {
     expect([...selectedSea.interactiveSeaZoneIds]).toEqual(['sea_1']);
   });
 
+  it('keeps every focused-war army visible at overview without promoting unrelated forces', () => {
+    const source = fixture();
+    const focused = buildMapLodScene(source, 'overview', {
+      focusedArmyIds: ['a_a_small', 'a_b_tie_z'],
+    });
+
+    expect(focused.armies.map((army) => army.id)).toEqual([
+      'a_a_small',
+      'a_a_large',
+      'a_b_tie_z',
+      'a_b_tie_a',
+    ]);
+    expect(focused.armies.some((army) => army.id === 'a_unowned')).toBe(false);
+  });
+
   it('does not mutate the presentation projection or its arrays', () => {
     const source = fixture();
     const before = JSON.stringify(source);

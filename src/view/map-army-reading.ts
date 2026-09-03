@@ -13,10 +13,12 @@ export function mapArmyHoverReading(army: MapArmyView) {
     type: `${army.nominalPolityName ?? '无属'}军团 · 可点击`,
     rows: [
       ['兵权', authority],
+      ['集团', army.factionName ?? '未归集团'],
       ['军势', `${compact.format(army.strength)}${retinue}`],
       ['军令', army.orderLabel ?? army.status ?? '在营'],
+      ...(army.nextRegionId ? [['下一步', `${army.orderPathRegionIds?.length ? `尚需${Math.max(1, army.orderPathRegionIds.length - 1)}步 · ` : ''}${army.nextRegionName ?? army.nextRegionId}`]] : []),
       ...(army.expectedContact
-        ? [['预计接敌', `${army.expectedContact.armyName} · ${army.expectedContact.regionName}`]]
+        ? [['预计接敌', `${army.expectedContact.commanderName ?? army.expectedContact.armyName}（${army.expectedContact.factionName ?? '未归集团'}）· ${army.expectedContact.regionName} · 约${army.expectedContact.steps ?? 1}步`]]
         : []),
     ],
   };

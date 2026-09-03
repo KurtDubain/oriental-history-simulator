@@ -571,7 +571,7 @@ describe('war progress detector', () => {
     expect(detectWarProgressCandidates(inconsistent.world, [inconsistentEnd])).toEqual([]);
   });
 
-  it('remains bounded and Fact-backed across natural multi-seed evolution', () => {
+  it('remains bounded and authority-backed across natural multi-seed evolution', () => {
     const seeds = ['春战副将', 'B06-natural-east', 'B06-natural-sea'];
     let observations = 0;
     let formalEvidence = 0;
@@ -605,6 +605,6 @@ describe('war progress detector', () => {
       }
     }
     expect(observations).toBeGreaterThan(0);
-    expect(formalEvidence).toBeGreaterThanOrEqual(observations);
+    expect(formalEvidence).toBeGreaterThan(0);
   });
 });

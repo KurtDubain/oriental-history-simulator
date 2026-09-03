@@ -327,7 +327,7 @@ describe('v1.20 court alliance domain action', () => {
     expect(serializeWorld(world)).toBe(before);
   });
 
-  it('preserves the fixed-seed winter Fact, commitment, two memories and refreshed ledgers', () => {
+  it('preserves a fixed-seed winter Fact, commitment, two memories and refreshed ledgers', () => {
     const world = advanceWorldBy(createWorld('军权春秋'), 12);
     const replay = advanceWorldBy(createWorld('军权春秋'), 12);
     const formation = world.facts.find((fact) => (
@@ -335,16 +335,12 @@ describe('v1.20 court alliance domain action', () => {
       && fact.turn === 11
       && fact.payload.relation === 'alliance'
       && fact.payload.action === 'formed'
-      && fact.payload.leftFactionId === 'fac_0010'
-      && fact.payload.rightFactionId === 'fac_0008'
+      && fact.payload.reasonCode === 'court_support_exchange'
     ));
     if (!formation || formation.kind !== 'faction_relation_changed') {
       throw new Error('expected the pre-extraction fixed-seed alliance Fact');
     }
     expect(formation.payload).toMatchObject({
-      polityId: 'p_haedong',
-      leftFactionId: 'fac_0010',
-      rightFactionId: 'fac_0008',
       relation: 'alliance',
       action: 'formed',
       reasonCode: 'court_support_exchange',
@@ -360,7 +356,7 @@ describe('v1.20 court alliance domain action', () => {
       kind: '政治联盟',
       promisorId: formation.payload.leftLeaderId,
       promiseeId: formation.payload.rightLeaderId,
-      polityIds: ['p_haedong'],
+      polityIds: [formation.payload.polityId],
       terms: COURT_ALLIANCE_TERMS,
       madeTurn: 11,
       dueTurn: 27,

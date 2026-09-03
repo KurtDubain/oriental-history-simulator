@@ -380,6 +380,13 @@ async function followSituationFromDossier(page, scenario, baseline, inspector) {
   );
   await activate(participantInspector.locator('[data-inspector-close]'), scenario);
   await participantInspector.waitFor({ state: 'detached' });
+  const warFocus = page.locator('[data-testid="war-focus-summary"]');
+  if (await warFocus.count()) {
+    const closeWarFocus = warFocus.getByRole('button', { name: '退出战局聚焦', exact: true });
+    await assertTouchTarget(closeWarFocus, scenario, '退出战局聚焦入口');
+    await activate(closeWarFocus, scenario);
+    await warFocus.waitFor({ state: 'detached' });
+  }
   await shortcut.waitFor();
   await activate(shortcut, scenario);
   await waitForState(

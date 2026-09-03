@@ -219,6 +219,9 @@ describe('map adapter boundary', () => {
       armyName: defender.name,
       regionId: defender.regionId,
       regionName: world.regions.find((region) => region.id === defender.regionId)?.name,
+      steps: 1,
+      commanderName: world.characters.find((character) => character.id === defender.commanderId)?.name,
+      factionName: world.factions.find((faction) => faction.id === world.characters.find((character) => character.id === defender.allegiance.characterId)?.factionId)?.name,
     });
     expect(serializeWorld(world)).toBe(before);
 

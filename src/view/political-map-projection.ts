@@ -163,6 +163,19 @@ function resourceForCommand(
   ))) ?? null;
 }
 
+function armyFactionHolder(world: WorldState, army: WorldState['armies'][number]): CharacterState | null {
+  const actual = world.characters.find((character) => (
+    character.id === army.allegiance.characterId && character.alive && character.polityId === army.polityId
+  ));
+  const actualFaction = actual?.factionId
+    ? world.factions.find((faction) => faction.id === actual.factionId && faction.active && faction.polityId === army.polityId)
+    : null;
+  if (actualFaction && actual) return actual;
+  return world.characters.find((character) => (
+    character.id === army.commanderId && character.alive && character.polityId === army.polityId
+  )) ?? null;
+}
+
 function factionSpatialAssets(
   world: WorldState,
   faction: FactionState,
@@ -205,15 +218,18 @@ function factionSpatialAssets(
   }
 
   for (const army of [...world.armies].sort((left, right) => stableCompare(left.id, right.id))) {
-    const commander = memberById.get(army.commanderId);
+    const holder = armyFactionHolder(world, army);
     if (
-      !commander
+      !holder
+      || !memberById.has(holder.id)
       || army.polityId !== faction.polityId
       || army.soldiers <= 0
-      || commander.commandingArmyId !== army.id
       || !world.regions.some((region) => region.id === army.regionId)
     ) continue;
-    const resource = resourceForCommand(ledger, 'army', army.id);
+    const followsActual = holder.id === army.allegiance.characterId && army.commanderId !== holder.id;
+    const resource = followsActual
+      ? ledger.resources.find((item) => item.id === `allegiance:${army.id}`) ?? null
+      : resourceForCommand(ledger, 'army', army.id);
     assets.push({
       rootKind: 'army_command',
       anchorKind: 'region',
@@ -223,9 +239,11 @@ function factionSpatialAssets(
       contribution: resource?.value ?? 0,
       kind: 'army',
       id: army.id,
-      holderId: commander.id,
-      holder: commander.name,
-      label: `${commander.name}统率${army.name}`,
+      holderId: holder.id,
+      holder: holder.name,
+      label: followsActual
+        ? `${holder.name}获${army.name}军中拥戴`
+        : `${holder.name}统率${army.name}`,
       ledgerResourceId: resource?.id ?? null,
     });
   }

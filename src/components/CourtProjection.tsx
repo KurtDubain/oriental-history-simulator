@@ -12,6 +12,8 @@ interface CourtFactionDetail {
   power: number;
   cohesion: number;
   agenda: string;
+  coreMembers?: readonly { id: string; name: string }[];
+  memberCount?: number;
   resources?: readonly {
     id: string;
     label: string;
@@ -247,8 +249,8 @@ export function CourtProjection({ court, factions, focusRequest, onSelectPerson,
           </div>
         ) : null}
         {graphFactions.length ? (
-          <div className="court-projection__faction-rail" role="group" aria-label="朝中主要派系印记，非官位座次">
-            <span className="court-projection__faction-rail-label" aria-hidden="true">派系印记 · 非座次</span>
+          <div className="court-projection__faction-rail" role="group" aria-label="朝中主要军政集团印记，非官位座次">
+            <span className="court-projection__faction-rail-label" aria-hidden="true">集团印记 · 非座次</span>
             {graphFactions.map((position) => (
               <button
                 type="button"
@@ -283,31 +285,23 @@ export function CourtProjection({ court, factions, focusRequest, onSelectPerson,
       </ol>
 
       {court.relations.length ? (
-        <ul className="court-projection__relations" aria-label="派系联盟与对立">
-          {court.relations.map((relation) => (
-            <li key={relation.id} data-relation={relation.kind}>
-              <span>{relation.leftName}</span>
-              <b>{relation.label}</b>
-              <span>{relation.rightName}</span>
-              {relation.sinceLabel ? <small>{relation.sinceLabel}</small> : null}
-              {relation.sourceEventId && onSelectEvent ? (
-                <button
-                  type="button"
-                  title="查看这段关系的缘由"
-                  aria-label={`查看${relation.leftName}与${relation.rightName}${relation.label}的缘由`}
-                  onClick={() => onSelectEvent(relation.sourceEventId!)}
-                >
-                  看缘由
-                </button>
-              ) : null}
-            </li>
-          ))}
-        </ul>
-      ) : <p className="court-projection__no-relations">朝中暂未见公开结盟或相争。</p>}
+        <details className="court-projection__relation-fold">
+          <summary>其他集团关系 · {court.relations.length}</summary>
+          <ul className="court-projection__relations" aria-label="集团联盟与对立">
+            {court.relations.map((relation) => (
+              <li key={relation.id} data-relation={relation.kind}>
+                <span>{relation.leftName}</span><b>{relation.label}</b><span>{relation.rightName}</span>
+                {relation.sinceLabel ? <small>{relation.sinceLabel}</small> : null}
+                {relation.sourceEventId && onSelectEvent ? <button type="button" aria-label={`查看${relation.leftName}与${relation.rightName}的缘由`} title="查看这段关系的缘由" onClick={() => onSelectEvent(relation.sourceEventId!)}>看缘由</button> : null}
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
 
       {court.factionPositions.length ? (
         <div className="court-projection__ranking">
-          <h4>派系次序</h4>
+          <h4>集团次序</h4>
           <ol>
             {court.factionPositions.map((position, index) => (
               <li key={position.factionId}>
@@ -352,7 +346,12 @@ export function CourtProjection({ court, factions, focusRequest, onSelectPerson,
         ) : focusedPosition && focusedFaction ? (
           <>
             <header><span>{focusedPosition.positionLabel}</span><h4>{focusedFaction.name}</h4></header>
-            <p>{focusedPosition.foundedLabel}，以{focusedFaction.leader}为首；所图“{focusedFaction.agenda}”。</p>
+            <p>{focusedPosition.foundedLabel}，围绕{focusedFaction.leader}及其真实军政根基形成。</p>
+            <dl className="court-projection__group-ranks">
+              <div><dt>首领</dt><dd>{focusedFaction.leader}</dd></div>
+              <div><dt>骨干</dt><dd>{focusedFaction.coreMembers?.map((member) => member.name).join('、') || '暂无具名骨干'}</dd></div>
+              <div><dt>部属</dt><dd>{Math.max(0, (focusedFaction.memberCount ?? 1) - 1 - (focusedFaction.coreMembers?.length ?? 0))}人 · 默认折叠</dd></div>
+            </dl>
             <dl>
               <div><dt>权势</dt><dd>{Math.round(focusedFaction.power)}</dd></div>
               <div><dt>凝聚</dt><dd>{Math.round(focusedFaction.cohesion)}</dd></div>
@@ -389,8 +388,8 @@ export function CourtProjection({ court, factions, focusRequest, onSelectPerson,
             </footer>
           </>
         ) : focus?.kind === 'request-miss' ? (
-          <p className="court-projection__empty">所请求派系不在当前朝局，未作替代选择。</p>
-        ) : <p className="court-projection__empty">目前没有中枢任官记录，派系格局也未成形。</p>}
+          <p className="court-projection__empty">所请求集团不在当前朝局，未作替代选择。</p>
+        ) : <p className="court-projection__empty">目前没有中枢任官记录，军政集团也未成形。</p>}
       </div>
     </section>
   );

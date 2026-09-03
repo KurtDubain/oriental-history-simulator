@@ -1196,7 +1196,7 @@
 
 .observer-scene-list li::before {
   position: absolute;
-  top: 14px;
+  top: 64px;
   left: -3px;
   width: 5px;
   height: 5px;
@@ -3429,4 +3429,49 @@ button.observer-causal-chain__evidence:hover {
   .observer-icon-button {
     transition: none;
   }
+}
+
+.war-focus-summary {
+  position: absolute;
+  z-index: 9;
+  top: 64px;
+  right: 14px;
+  width: min(370px, calc(100% - 28px));
+  padding: 12px;
+  color: var(--ink-strong, #2f302b);
+  background: rgba(244, 238, 223, 0.94);
+  border: 1px solid rgba(72, 67, 57, 0.3);
+  box-shadow: 0 10px 28px rgba(40, 37, 31, 0.18);
+  backdrop-filter: blur(8px);
+}
+
+.war-focus-summary header { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
+.war-focus-summary header > span { display: flex; align-items: center; gap: 5px; color: #8f342b; font-size: 11px; }
+.war-focus-summary header > strong, .war-focus-summary header > small { grid-column: 1 / -1; }
+.war-focus-summary header > strong { font: 650 17px "Noto Serif SC", serif; }
+.war-focus-summary header > small { color: #696457; }
+.war-focus-summary header button { width: 32px; height: 32px; border: 0; background: transparent; color: inherit; }
+.war-focus-summary__sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 9px; }
+.war-focus-summary__sides > section { padding: 8px; border-top: 2px solid #a33a2e; background: rgba(255, 253, 245, 0.54); }
+.war-focus-summary__sides > section[data-role="守方"] { border-color: #586d68; }
+.war-focus-summary__sides > section > div:first-child { display: flex; justify-content: space-between; gap: 6px; font-size: 11px; }
+.war-focus-summary__group { margin-top: 7px; padding-top: 6px; border-top: 1px solid rgba(77, 71, 61, 0.16); }
+.war-focus-summary__group > span { display: block; font-weight: 650; font-size: 12px; }
+.war-focus-summary__group > small { display: block; margin: 2px 0 4px; color: #6b6559; font-size: 10px; }
+.war-focus-summary__group button { min-height: 30px; padding: 3px 0; border: 0; background: transparent; color: #473f35; font-size: 10px; text-align: left; text-decoration: underline; text-decoration-color: rgba(71, 63, 53, 0.25); }
+.war-focus-summary__contact { margin: 8px 0 0; padding: 7px 8px; background: rgba(163, 58, 46, 0.08); font-size: 11px; line-height: 1.55; }
+.war-focus-summary__contact strong { margin-right: 6px; color: #96382e; }
+.war-focus-summary__battle { width: 100%; border: 0; color: inherit; font-family: inherit; text-align: left; cursor: pointer; }
+.war-focus-summary__battle:disabled { cursor: default; }
+
+@media (max-width: 840px) {
+  .war-focus-summary { top: 78px; }
+  .war-focus-summary__group button { min-height: 44px; }
+  .war-focus-summary header button { width: 44px; height: 44px; }
+}
+
+@media (max-width: 640px) {
+  .war-focus-summary { right: 8px; width: calc(100% - 16px); max-height: 39%; overflow: auto; padding: 10px; }
+  .war-focus-summary__sides { gap: 5px; }
+  .war-focus-summary__sides > section { padding: 6px; }
 }

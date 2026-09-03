@@ -112,7 +112,11 @@ export function ObserverLeads({
                 type="button"
                 className="observer-leads__inspect"
                 aria-label={`${lead.label}：${lead.question}。${lead.evidence.join('；')}。${lead.situationId ? '打开局势卷宗' : '查看对象'}`}
-                onClick={() => onInspect(lead)}
+                onClick={() => {
+                  setMobileExpanded(false);
+                  setMobileOpen(false);
+                  onInspect(lead);
+                }}
               >
                 <span className="observer-leads__meta">
                   <span>{lead.label}</span>

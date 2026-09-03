@@ -68,7 +68,7 @@ function normalizedImportance(value: number): number {
 }
 
 function storyPriority(story: QuarterPulseStory): number {
-  if (story.kind === 'event') return story.source === 'fact' ? 30 : 10;
+  if (story.kind === 'event') return story.eventId ? (story.source === 'fact' ? 30 : 10) : 0;
   const kindPriority = {
     resolved: 4,
     born: 3,

@@ -197,7 +197,7 @@ describe('self-contained world cold archive', () => {
       && fact.payload.transition === 'formed'
       && fact.payload.reasonCode === 'opening_order'
     ));
-    expect(openingFactionFacts).toHaveLength(40);
+    expect(openingFactionFacts).toHaveLength(32);
     const referencedFactId = (world.agencyDecisionSystem as unknown as { archiveTestFactId: string })
       .archiveTestFactId;
     const referencedFact = world.facts.find((fact) => fact.id === referencedFactId);

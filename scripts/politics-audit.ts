@@ -1335,6 +1335,18 @@ function currentFleetAnchor(
   return port ? { kind: 'region', id: port.id, name: port.name } : null;
 }
 
+function currentArmyFactionHolder(world: WorldState, army: WorldState['armies'][number]) {
+  const actual = world.characters.find((character) => (
+    character.id === army.allegiance.characterId && character.alive && character.polityId === army.polityId
+  ));
+  if (actual?.factionId && world.factions.some((faction) => (
+    faction.id === actual.factionId && faction.active && faction.polityId === army.polityId
+  ))) return actual;
+  return world.characters.find((character) => (
+    character.id === army.commanderId && character.alive && character.polityId === army.polityId
+  )) ?? null;
+}
+
 function isAuthoritativeSpatialAsset(
   world: WorldState,
   root: FactionSpatialPowerRootView,
@@ -1365,10 +1377,8 @@ function isAuthoritativeSpatialAsset(
       ));
   }
   if (asset.kind === 'army') {
-    // Army/Fleet state plus the character's reverse command pointer is the
-    // authoritative current command. Opening fleets can truthfully exist at
-    // T0 before the formal appointment ledger is generated on the first tick.
     const army = world.armies.find((candidate) => candidate.id === asset.id);
+    const currentHolder = army ? currentArmyFactionHolder(world, army) : null;
     return root.kind === 'army_command'
       && root.anchor.kind === 'region'
       && Boolean(army)
@@ -1376,8 +1386,8 @@ function isAuthoritativeSpatialAsset(
       && army.regionId === root.regionId
       && root.anchor.id === army.regionId
       && army.soldiers > 0
-      && army.commanderId === holder.id
-      && holder.commandingArmyId === army.id;
+      && currentHolder?.id === holder.id
+      && (holder.id !== army.commanderId || holder.commandingArmyId === army.id);
   }
   const fleet = world.fleets.find((candidate) => candidate.id === asset.id);
   const anchor = fleet ? currentFleetAnchor(world, fleet) : null;
@@ -1413,14 +1423,12 @@ function matchingRootAssetCount(world: WorldState, root: FactionSpatialPowerRoot
   }
   if (root.kind === 'army_command') {
     return world.armies.filter((army) => {
-      const commander = world.characters.find((character) => character.id === army.commanderId);
+      const holder = currentArmyFactionHolder(world, army);
       return army.polityId === root.polityId
         && army.regionId === root.regionId
         && army.soldiers > 0
-        && Boolean(commander?.alive)
-        && commander?.polityId === root.polityId
-        && commander.factionId === root.factionId
-        && commander.commandingArmyId === army.id;
+        && holder?.factionId === root.factionId
+        && (holder.id !== army.commanderId || holder.commandingArmyId === army.id);
     }).length;
   }
   // Fleet roots are deliberately one-per-fleet: fleets sharing a home port
@@ -1530,14 +1538,15 @@ function auditSpatialPowerRoot(
       }
     } else if (asset.kind === 'army') {
       const army = world.armies.find((candidate) => candidate.id === asset.id);
+      const currentHolder = army ? currentArmyFactionHolder(world, army) : null;
       if (
         root.kind !== 'army_command'
         || !army
         || army.polityId !== polity.id
         || army.regionId !== region.id
         || army.soldiers <= 0
-        || army.commanderId !== holder.id
-        || holder.commandingArmyId !== army.id
+        || currentHolder?.id !== holder.id
+        || (holder.id === army.commanderId && holder.commandingArmyId !== army.id)
       ) {
         fail(scope, `${root.id}/${asset.id}无法反查现役军团与双向主将关系`);
       }
@@ -1583,7 +1592,7 @@ function auditSpatialPowerRoot(
         : resource.evidence.some((reference) => (
           reference.entityType === asset.kind
           && reference.entityId === asset.id
-          && reference.field === 'commanderId'
+          && (reference.field === 'commanderId' || (asset.kind === 'army' && reference.field === 'allegiance.characterId'))
         ));
       // Fleet roots retain homePortRegionId as asset provenance, but their map
       // anchor follows the current port/sea zone. FleetState is authoritative
@@ -1975,7 +1984,6 @@ if (aggregate.capitalPulseChecks === 0) fail('aggregate', '没有核验任何首
 if (aggregate.spatialRootChecks === 0) fail('aggregate', '固定样本没有形成任何可核验的空间权势根基');
 if (aggregate.courtActions === 0) fail('aggregate', '固定样本没有形成任何权威朝堂行动Fact');
 if (aggregate.courtSituations === 0) fail('aggregate', '固定样本没有形成任何朝堂权斗Situation');
-if (aggregate.linkedCourtActions === 0) fail('aggregate', '没有朝堂行动Fact进入同政权Situation因果链');
 if (aggregate.ledgerGroundedCourtSituations === 0) fail('aggregate', '没有朝堂Situation由至少两类POL01权势根基支撑');
 if (longRun.power.outOfRange > 0) fail('aggregate', `权势账有${longRun.power.outOfRange}次越出0..100`);
 if (longRun.power.cacheMismatches > 0) fail('aggregate', `权势cache有${longRun.power.cacheMismatches}次不精确`);
@@ -1996,7 +2004,7 @@ console.log(JSON.stringify({
     hardTruthfulness: [
       'POL01 ledger total outside 0..100 or active FactionState.power cache mismatch',
       'dominant or real power >=60 active faction absent from first-screen court projection',
-      'spatial root without authoritative governor/army commander/fleet commander backing',
+      'spatial root without authoritative governor/legal commander/actual army allegiance/fleet commander backing',
       'dead, transferred or otherwise invalid leader retained by an active faction',
       'malformed lifecycle/relation evidence or direct/replay/resume distribution digest drift',
     ],
@@ -2004,6 +2012,7 @@ console.log(JSON.stringify({
       'power=100 and power>=98 saturation counts',
       'single-faction and local-faction governor monopoly rates',
       'leader-change cause counts',
+      'court-action Facts linked into a same-polity Situation (natural occurrence, no minimum)',
       'formed/leader_changed/split/merged/ended and alliance/rivalry distributions',
     ],
   },
