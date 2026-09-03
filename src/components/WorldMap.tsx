@@ -551,7 +551,7 @@ export function WorldMap({
       onSelectRegion(hit.cluster.regionId);
       const next = applyCamera(zoomMapCameraAtPoint(
         cameraRef.current,
-        Math.max(1.42, cameraRef.current.zoom),
+        Math.max(1.55, cameraRef.current.zoom),
         point,
         size.width,
         size.height,

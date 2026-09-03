@@ -1,13 +1,13 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，v1.24.0 人物军势更新于 2026-09-04，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.24.1 舆图交互修订于 2026-09-04，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
-- `src` 下生产 TypeScript / TSX：169 个文件，61,879 行（测试排除）。新增代码集中在一个兵力权威模块、一个开局/战时编队模块、一个季度上下文模块和一个地图悬停读取模块；同时删除两套 Army-first 只读解释，净规模低于 v1.23.0 的 62,137 行。
+- `src` 下生产 TypeScript / TSX：169 个文件，61,904 行（测试排除）。v1.24.1 只增加地图人物标签的确定性避让与视觉优先级，没有新增模拟 owner、世界字段或页面。
 - 相对模块依赖：652 条，其中 422 条 runtime、230 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环，正好落在 12/12 的不增长预算内。
 - 当前热点：`engine.ts` 3,114/3,120 行、`invariants.ts` 2,665/2,665 行、`App.tsx` 2,296/2,300 行（实际/门禁）。
-- 其次为 `v02.ts` 2,488 行、`v03-ocean.ts` 2,460 行、`agency/decision.ts` 2,032 行、`Inspector.tsx` 1,352 行与 `map-renderer.ts` 1,105 行。`observer-leads.ts` 为 388/400 行，`WorldMap.tsx` 为 1,053/1,100 行，`view/adapters.ts` 为 52/100 行。
+- 其次为 `v02.ts` 2,488 行、`v03-ocean.ts` 2,460 行、`agency/decision.ts` 2,032 行、`Inspector.tsx` 1,352 行与 `map-renderer.ts` 1,128 行。`observer-leads.ts` 为 388/400 行，`WorldMap.tsx` 为 1,053/1,100 行，`view/adapters.ts` 为 52/100 行。
 
 行数是增长预警，不是机械拆文件指标。新增领域规则不得再默认进入四个最高热点；只有形成稳定输入、输出和所有权后才拆分。
 
@@ -92,7 +92,7 @@ PersonalForceState + ArmyState participantIds / commander / allegiance / order
 - 集团名称只在建立时从军团、地方、领袖旧部、家门或中枢根基取得；每季只更新成员层级，不随官职反复改名。旧 schema 4 派系保留原名，不补造旧史。
 - `ArmyState.recentMovement` 是每军一条、覆盖式的兼容记录，用来表现普通境内行军已经走过的真实一步；它不增加 `WorldState` 顶层字段、不形成历史数组，也不参与随机或领域结算。只有跨敌境、接敌、撤退、占领或登陆继续进入原有 Fact / Chronicle。
 - `war-group-projection.ts` 只读当前战争、人物军势、行营、集团和 Battle Fact；观察、战争聚焦与打开战局摘要不会修改世界、RNG、Fact、Chronicle 或序列化正文。
-- v1.24.0 个人版与参赛版 JavaScript gzip 均为 419,815 bytes，CSS gzip 均为 39,425 bytes；仍在既有 410 KiB / 40 KiB 门内，没有提高预算。
+- v1.24.1 个人版与参赛版 JavaScript gzip 均为 419,821 bytes，CSS gzip 均为 39,816 bytes；仍在既有 410 KiB / 40 KiB 门内，没有提高预算。
 
 ## 后续收缩顺序
 

@@ -12,6 +12,8 @@
   --observer-vermilion-wash: rgb(156 53 43 / 10%);
   --observer-positive: #52694d;
   --observer-warning: #aa682d;
+  --observer-control-radius: 5px;
+  --observer-panel-shadow: 0 12px 34px rgb(39 36 29 / 13%);
   --observer-serif: "Noto Serif SC", "Songti SC", STSong, serif;
   --observer-sans: Inter, "PingFang SC", "Microsoft YaHei", sans-serif;
   --observer-safe-top: env(safe-area-inset-top, 0px);
@@ -84,7 +86,7 @@
   box-sizing: border-box;
   border-bottom: 1px solid var(--observer-line-strong);
   background: rgb(235 227 207 / 92%);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 45%) inset;
+  box-shadow: 0 1px 0 rgb(255 255 255 / 52%) inset, 0 5px 18px rgb(42 39 32 / 5%);
   backdrop-filter: blur(10px);
 }
 
@@ -227,7 +229,7 @@
   padding: 0;
   place-items: center;
   border: 1px solid var(--observer-line-strong);
-  border-radius: 2px;
+  border-radius: var(--observer-control-radius);
   color: var(--observer-ink-soft);
   background: transparent;
   cursor: pointer;
@@ -266,7 +268,7 @@
   gap: 8px;
   padding: 0 13px 0 15px;
   border: 1px solid var(--observer-vermilion-dark);
-  border-radius: 2px;
+  border-radius: var(--observer-control-radius);
   color: #f4ead5;
   font-size: 12px;
   font-weight: 700;
@@ -321,7 +323,8 @@
   letter-spacing: 0.08em;
   background: transparent;
   cursor: pointer;
-  transition: color 150ms ease, background 150ms ease;
+  border-radius: 4px;
+  transition: color 150ms ease, background 150ms ease, transform 100ms ease;
 }
 
 .observer-navigation .layer-picker__trigger {
@@ -356,6 +359,11 @@
   position: relative;
   display: grid;
   place-items: center;
+  transition: transform 150ms ease;
+}
+
+.observer-navigation__item:active:not(:disabled) .observer-navigation__glyph {
+  transform: scale(.9);
 }
 
 .observer-navigation__badge {
@@ -2902,9 +2910,9 @@ button.observer-causal-chain__evidence:hover {
     align-items: stretch;
     padding: 4px 5px;
     border: 1px solid rgb(48 47 40 / 24%);
-    border-radius: 2px;
-    background: rgb(232 224 204 / 92%);
-    box-shadow: 0 10px 30px rgb(38 35 29 / 16%);
+    border-radius: 7px;
+    background: rgb(236 228 208 / 95%);
+    box-shadow: 0 12px 34px rgb(38 35 29 / 18%), 0 1px 0 rgb(255 255 255 / 58%) inset;
     overscroll-behavior-x: contain;
   }
 
@@ -2927,6 +2935,10 @@ button.observer-causal-chain__evidence:hover {
     padding: 4px 2px 3px;
     gap: 1px;
     font-size: 9px;
+  }
+
+  .observer-navigation__item[data-active="true"] {
+    background: rgb(156 53 43 / 8%);
   }
 
   .observer-navigation__item::before {
@@ -2959,7 +2971,8 @@ button.observer-causal-chain__evidence:hover {
     width: auto;
     padding: 14px 14px calc(24px + var(--observer-safe-bottom));
     border-left: 0;
-    background: rgb(239 232 215);
+    border-radius: 12px 12px 0 0;
+    background: rgb(242 235 219 / 98%);
     box-shadow: 0 -10px 38px rgb(42 40 34 / 14%);
     backdrop-filter: blur(10px);
     animation-name: observer-inspector-mobile-reveal;
@@ -3296,7 +3309,7 @@ button.observer-causal-chain__evidence:hover {
     gap: 3px;
     padding: 0;
     border: 1px solid var(--observer-line-strong);
-    border-radius: 2px;
+    border-radius: var(--observer-control-radius);
     color: var(--observer-ink-soft);
     background: transparent;
     font-size: 9px;
@@ -3437,22 +3450,25 @@ button.observer-causal-chain__evidence:hover {
   top: 64px;
   right: 14px;
   width: min(370px, calc(100% - 28px));
-  padding: 12px;
+  padding: 13px 14px 14px;
   color: var(--ink-strong, #2f302b);
   background: rgba(244, 238, 223, 0.94);
-  border: 1px solid rgba(72, 67, 57, 0.3);
-  box-shadow: 0 10px 28px rgba(40, 37, 31, 0.18);
-  backdrop-filter: blur(8px);
+  border: 1px solid rgba(72, 67, 57, 0.26);
+  border-left: 3px solid var(--observer-vermilion, #9c352b);
+  border-radius: 6px;
+  box-shadow: 0 14px 36px rgba(40, 37, 31, 0.17), inset 0 1px rgba(255, 255, 255, 0.48);
+  backdrop-filter: blur(12px);
 }
 
 .war-focus-summary header { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
-.war-focus-summary header > span { display: flex; align-items: center; gap: 5px; color: #8f342b; font-size: 11px; }
+.war-focus-summary header > span { display: flex; align-items: center; gap: 5px; color: #8f342b; font-size: 10px; font-weight: 760; letter-spacing: .12em; }
 .war-focus-summary header > strong, .war-focus-summary header > small { grid-column: 1 / -1; }
 .war-focus-summary header > strong { font: 650 17px "Noto Serif SC", serif; }
 .war-focus-summary header > small { color: #696457; }
-.war-focus-summary header button { width: 32px; height: 32px; border: 0; background: transparent; color: inherit; }
+.war-focus-summary header button { width: 32px; height: 32px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; }
+.war-focus-summary header button:hover, .war-focus-summary header button:focus-visible { color: #8f342b; background: rgba(156, 53, 43, .08); }
 .war-focus-summary__sides { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; margin-top: 9px; }
-.war-focus-summary__sides > section { padding: 8px; border-top: 2px solid #a33a2e; background: rgba(255, 253, 245, 0.54); }
+.war-focus-summary__sides > section { padding: 8px; border-top: 2px solid #a33a2e; background: rgba(255, 253, 245, 0.46); }
 .war-focus-summary__sides > section[data-role="守方"] { border-color: #586d68; }
 .war-focus-summary__sides > section > div:first-child { display: flex; justify-content: space-between; gap: 6px; font-size: 11px; }
 .war-focus-summary__groups > summary { min-height: 30px; padding-top: 7px; color: #756d60; cursor: pointer; font-size: 10px; }
@@ -3460,10 +3476,11 @@ button.observer-causal-chain__evidence:hover {
 .war-focus-summary__group > span { display: block; font-weight: 650; font-size: 12px; }
 .war-focus-summary__group > small { display: block; margin: 2px 0 4px; color: #6b6559; font-size: 10px; }
 .war-focus-summary__group button { min-height: 30px; padding: 3px 0; border: 0; background: transparent; color: #473f35; font-size: 10px; text-align: left; text-decoration: underline; text-decoration-color: rgba(71, 63, 53, 0.25); }
-.war-focus-summary__contact { margin: 8px 0 0; padding: 7px 8px; background: rgba(163, 58, 46, 0.08); font-size: 11px; line-height: 1.55; }
+.war-focus-summary__contact { margin: 8px 0 0; padding: 7px 8px 7px 10px; border-left: 2px solid rgba(163, 58, 46, .52); background: rgba(163, 58, 46, 0.065); font-size: 11px; line-height: 1.55; }
 .war-focus-summary__contact strong { margin-right: 6px; color: #96382e; }
 .war-focus-summary__battle { width: 100%; border: 0; color: inherit; font-family: inherit; text-align: left; cursor: pointer; }
 .war-focus-summary__battle small { display: block; margin-top: 4px; color: #6b6559; }
+.war-focus-summary__battle:hover, .war-focus-summary__battle:focus-visible { background: rgba(163, 58, 46, .11); outline: 0; }
 
 @media (max-width: 840px) {
   .war-focus-summary { top: 78px; }
@@ -3473,7 +3490,9 @@ button.observer-causal-chain__evidence:hover {
 }
 
 @media (max-width: 640px) {
-  .war-focus-summary { right: 8px; width: calc(100% - 16px); max-height: 39%; overflow: auto; padding: 10px; }
+  .war-focus-summary { top: 72px; right: 8px; width: calc(100% - 16px); max-height: 34%; overflow: auto; padding: 10px 11px 11px; overscroll-behavior: contain; scrollbar-width: thin; }
   .war-focus-summary__sides { gap: 5px; }
   .war-focus-summary__sides > section { padding: 6px; }
+  .war-focus-summary header > strong { font-size: 16px; }
+  .war-focus-summary__contact { font-size: 10px; }
 }

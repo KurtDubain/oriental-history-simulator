@@ -156,7 +156,8 @@
 }
 
 .observer-leads__list > li[data-selected="true"] {
-  background: rgb(156 53 43 / 8%);
+  background: linear-gradient(90deg, rgb(156 53 43 / 10%), rgb(156 53 43 / 3%) 72%, transparent);
+  box-shadow: 2px 0 0 var(--observer-vermilion, #9c352b) inset;
 }
 
 .observer-leads__list > .observer-leads__empty {
@@ -181,7 +182,7 @@
 .observer-leads__inspect {
   display: grid;
   min-width: 0;
-  padding: 11px 9px 10px 16px;
+  padding: 13px 10px 12px 16px;
   align-content: center;
   gap: 5px;
   text-align: left;
@@ -229,7 +230,7 @@
   display: -webkit-box;
   overflow: hidden;
   font-family: var(--observer-serif, "Noto Serif SC", "Songti SC", serif);
-  font-size: 13px;
+  font-size: 14px;
   font-weight: 690;
   line-height: 1.4;
   -webkit-box-orient: vertical;
@@ -240,8 +241,8 @@
 .observer-leads__situation-age {
   overflow: hidden;
   color: var(--observer-ink-faint, #858174);
-  font-size: 8px;
-  line-height: 1.4;
+  font-size: 9px;
+  line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
 }

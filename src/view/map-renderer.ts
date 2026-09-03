@@ -1045,13 +1045,20 @@ export function drawWorldMap(
     }
     context.restore();
   }
-  for (const { person, point, radius } of personLayouts) {
+  const personLabels: Array<(typeof personLayouts)[number] & {
+    label: string;
+    priority: number;
+    selected: boolean;
+  }> = [];
+  for (const layout of personLayouts) {
+    const { person, point, radius } = layout;
     const selected = selectedObject?.kind === 'person' && selectedObject.id === person.id;
     const relevant = !focusedWarId || person.warId === focusedWarId;
+    const quiet = !selected && !person.showLabel;
     const strength = person.soldiers >= 10_000 ? `${(person.soldiers / 10_000).toFixed(1)}万`
       : person.soldiers >= 1_000 ? `${(person.soldiers / 1_000).toFixed(1)}千` : `${person.soldiers}`;
     context.save();
-    if (!relevant) context.globalAlpha = 0.16;
+    context.globalAlpha = !relevant ? 0.16 : quiet ? 0.52 : 1;
     if (selected) { context.translate(point.x, point.y); drawSelectionHalo(context, radius + 3); context.translate(-point.x, -point.y); }
     context.fillStyle = person.isCommander ? INK : PAPER_LIGHT;
     context.strokeStyle = selected ? VERMILION : person.polityColor;
@@ -1073,13 +1080,29 @@ export function drawWorldMap(
         context.closePath(); context.fill();
       }
     }
-    if (person.showLabel && (relevant || selected)) {
-      context.font = `${person.isCommander ? 700 : 600} ${compactMap ? 8 : 9}px "Noto Serif SC", serif`;
-      context.textAlign = 'center'; context.textBaseline = 'top'; context.lineWidth = 3;
-      context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
-      const label = `${person.personName} · ${strength}`;
-      context.strokeText(label, point.x, point.y + radius + 3); context.fillText(label, point.x, point.y + radius + 3);
-    }
+    const compactLabel = selected || person.isFactionLeader || scene.level === 'local'
+      || overlay === 'war' && (person.isCommander || focusedWarId && person.warId === focusedWarId);
+    if (person.showLabel && (relevant || selected) && (!compactMap || compactLabel)) personLabels.push({
+      ...layout,
+      label: `${person.personName} · ${strength}`,
+      priority: selected ? 100 : focusedWarId && person.warId === focusedWarId ? 60 : person.isCommander ? 40 : person.isFactionLeader ? 30 : 10,
+      selected,
+    });
+    context.restore();
+  }
+  const occupiedLabels = new Set<number>();
+  for (const { person, point, radius, label, selected } of personLabels.sort((left, right) => (
+    right.priority - left.priority || right.person.soldiers - left.person.soldiers
+  ))) {
+    context.save();
+    context.font = `${person.isCommander ? 700 : 600} ${compactMap ? 8 : 9}px "Noto Serif SC", serif`;
+    const labelY = point.y + radius + 3;
+    const cell = Math.round(point.x / 112) + Math.round(labelY / 30) * 100;
+    if (occupiedLabels.has(cell) && !selected) { context.restore(); continue; }
+    occupiedLabels.add(cell);
+    context.textAlign = 'center'; context.textBaseline = 'top'; context.lineWidth = 3.5;
+    context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
+    context.strokeText(label, point.x, labelY); context.fillText(label, point.x, labelY);
     context.restore();
   }
   for (const { cluster, point, radius } of layoutMapPersonClusters(scene.personClusters ?? [], transform)) {

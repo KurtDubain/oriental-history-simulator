@@ -6,7 +6,7 @@
   min-width: 0;
   min-height: 72px;
   border: 1px solid rgb(48 47 40 / 24%);
-  border-radius: 2px;
+  border-radius: 6px;
   color: var(--observer-ink, #272822);
   font-family: var(--observer-sans, Inter, "PingFang SC", sans-serif);
   background:
@@ -512,6 +512,10 @@
   .quarter-pulse__event-cause {
     font-size: 9px;
     line-height: 1.25;
+  }
+
+  .quarter-pulse__event-list {
+    scroll-snap-type: x mandatory;
   }
 
   .quarter-pulse--empty {

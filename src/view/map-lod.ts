@@ -169,7 +169,13 @@ function visiblePersonForces(
     return {
       persons: source.map((person) => ({
         ...person,
-        showLabel: level === 'local' || person.id === selectedId || person.isFactionLeader || person.status !== '驻留',
+        showLabel: level === 'local'
+          || person.id === selectedId
+          || person.isFactionLeader
+          || person.isCommander
+          || person.status === '交战'
+          || person.status === '撤退'
+          || Boolean(person.formationId && focused.has(person.formationId)),
       })),
       clusters: [],
     };

@@ -83,6 +83,7 @@
   color: #292b27;
   background: rgb(244 238 223 / 96%);
   border-top: 2px solid #a33a2e;
+  border-radius: 0 0 5px 5px;
   box-shadow:
     0 10px 26px rgb(44 39 31 / 18%),
     inset 0 0 0 1px rgb(49 47 41 / 7%);
@@ -136,10 +137,10 @@
   min-height: 34px;
   overflow: hidden;
   border: 1px solid rgb(45 44 37 / 21%);
-  border-radius: 2px;
+  border-radius: 6px;
   color: #54534a;
   background: rgb(239 233 216 / 90%);
-  box-shadow: 0 9px 26px rgb(41 38 31 / 12%);
+  box-shadow: 0 10px 28px rgb(41 38 31 / 14%), 0 1px 0 rgb(255 255 255 / 48%) inset;
   backdrop-filter: blur(10px);
 }
 
@@ -199,7 +200,7 @@
   margin: 0;
   padding: 5px 8px;
   border: 1px solid rgb(45 44 37 / 13%);
-  border-radius: 2px;
+  border-radius: 4px;
   color: rgb(76 75 66 / 76%);
   background: rgb(239 233 216 / 74%);
   box-shadow: 0 6px 18px rgb(41 38 31 / 8%);

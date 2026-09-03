@@ -146,11 +146,19 @@ describe('map LOD scene', () => {
     expect(focused.persons.map((person) => person.id)).toEqual(['person-marching']);
     expect(focused.personClusters).toHaveLength(1);
 
+    source.persons = [...people, {
+      ...people[2]!, id: 'person-follower', personName: '裴文昭', soldiers: 320,
+      isCommander: false,
+    }];
+
     const regional = buildMapLodScene(source, 'regional');
-    expect(regional.persons).toHaveLength(3);
+    expect(regional.persons).toHaveLength(4);
     expect(regional.persons.find((person) => person.id === 'person-leader')?.showLabel).toBe(true);
     expect(regional.persons.find((person) => person.id === 'person-member')?.showLabel).toBe(false);
     expect(regional.persons.find((person) => person.id === 'person-marching')?.showLabel).toBe(true);
+    expect(regional.persons.find((person) => person.id === 'person-follower')?.showLabel).toBe(false);
+    expect(buildMapLodScene(source, 'regional', { focusedArmyIds: ['a_b_tie_z'] })
+      .persons.find((person) => person.id === 'person-follower')?.showLabel).toBe(true);
 
     expect(buildMapLodScene(source, 'local').persons.every((person) => person.showLabel)).toBe(true);
     const selected = buildMapLodScene(source, 'overview', { selectedObject: { kind: 'person', id: 'person-member' } });

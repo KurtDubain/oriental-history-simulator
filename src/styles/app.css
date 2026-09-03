@@ -46,10 +46,10 @@
   align-items: stretch;
   overflow: hidden;
   border: 1px solid rgb(45 44 37 / 18%);
-  border-radius: 2px;
+  border-radius: 5px;
   color: #4c4b42;
   background: rgb(239 233 216 / 86%);
-  box-shadow: 0 9px 30px rgb(41 38 31 / 9%);
+  box-shadow: 0 10px 28px rgb(41 38 31 / 10%), 0 1px 0 rgb(255 255 255 / 50%) inset;
   backdrop-filter: blur(10px);
 }
 
@@ -90,9 +90,9 @@
   gap: 5px;
   padding: 4px;
   border: 1px solid rgb(45 44 37 / 18%);
-  border-radius: 2px;
+  border-radius: 6px;
   background: rgb(239 233 216 / 88%);
-  box-shadow: 0 9px 30px rgb(41 38 31 / 9%);
+  box-shadow: 0 10px 28px rgb(41 38 31 / 11%), 0 1px 0 rgb(255 255 255 / 52%) inset;
   backdrop-filter: blur(10px);
 }
 
@@ -104,7 +104,7 @@
   padding: 0;
   place-items: center;
   border: 0;
-  border-radius: 2px;
+  border-radius: 4px;
   color: #5f5c52;
   background: transparent;
   cursor: pointer;
@@ -113,6 +113,12 @@
 
 .observer-app button:active:not(:disabled) {
   filter: brightness(.93) saturate(.92);
+}
+
+.observer-world-tools button:active:not(:disabled),
+.observer-time-controls button:active:not(:disabled),
+.world-map__viewport-controls button:active:not(:disabled) {
+  transform: scale(.94);
 }
 
 .observer-world-tools button:hover,
@@ -441,7 +447,7 @@
     align-items: center;
     padding: 4px;
     border: 1px solid rgb(45 44 37 / 18%);
-    border-radius: 2px;
+    border-radius: 6px;
     background: rgb(239 233 216 / 96%);
     box-shadow: 0 12px 28px rgb(41 38 31 / 15%);
     backdrop-filter: blur(10px);
@@ -541,6 +547,12 @@
   .observer-app[data-map-gesture-active="true"] .observer-inspector[data-mobile-mode="quick"] .observer-inspector__mobile-quicklook dl,
   .observer-app[data-map-gesture-active="true"] .observer-inspector[data-mobile-mode="quick"] .observer-inspector__mobile-quicklook footer {
     opacity: 0;
+  }
+
+  .observer-app[data-war-focus-open="true"] .observer-world-summary,
+  .observer-app[data-war-focus-open="true"] .observer-map-primer-trigger,
+  .observer-app[data-war-focus-open="true"] .world-map__gesture-hint {
+    display: none;
   }
 }
 
