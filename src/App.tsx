@@ -114,6 +114,7 @@ import {
   toMapArmies,
   toMapFleets,
   toMapMarkers,
+  toMapPersonForces,
   toMapRegions,
   toMapRoutes,
   toMapSeaZones,
@@ -1082,6 +1083,7 @@ export function App() {
   const handleOverlayChange = useCallback((nextOverlay: MapOverlay) => {
     gameAudio.play('select', 0.46);
     setOverlay(nextOverlay);
+    if (nextOverlay !== 'war') setFocusedWarId(null);
     if (nextOverlay !== 'political') completeGuideStep('overlay-switched');
   }, [completeGuideStep]);
 
@@ -1235,6 +1237,7 @@ export function App() {
   }, [historicalView, world]);
   const mapRoutes = useMemo(() => world ? toMapRoutes(world) : [], [world]);
   const mapArmies = useMemo(() => world && !historicalView ? toMapArmies(world) : [], [historicalView, world]);
+  const mapPersons = useMemo(() => world && !historicalView ? toMapPersonForces(world) : [], [historicalView, world]);
   const mapSeaZones = useMemo(() => {
     if (!world) return [];
     const zones = toMapSeaZones(world);
@@ -1875,13 +1878,14 @@ export function App() {
               regions={mapRegions}
               routes={mapRoutes}
               armies={mapArmies}
+              persons={mapPersons}
               seaZones={mapSeaZones}
               fleets={mapFleets}
               markers={mapMarkers}
               highlightedRegionIds={quarterHighlightedRegionIds}
               highlightEpoch={world.lastTurn?.turn ?? -1}
               selectedRegionId={selection?.kind === 'region' ? selection.id : null}
-              selectedObject={selection && selection.kind !== 'region' && selection.kind !== 'family' && selection.kind !== 'person' ? selection : null}
+              selectedObject={selection && selection.kind !== 'region' && selection.kind !== 'family' ? selection : null}
               overlay={historicalView ? 'political' : overlay}
               cameraKey={mapCameraKey}
               onCameraChange={setMapCamera}
@@ -1918,7 +1922,7 @@ export function App() {
 
             {focusedWar && overlay === 'war' && !situationWorkbenchOpen ? <WarFocusSummary
               war={focusedWar} onClose={() => setFocusedWarId(null)}
-              onInspectArmy={(id) => { setFocusedArmyId(id); setSelection({ kind: 'army', id }); }}
+              onInspectPerson={(id) => { setFocusedArmyId(null); setSelection({ kind: 'person', id }); }}
               onInspectBattle={handleSelectScopedEvent}
             /> : null}
 

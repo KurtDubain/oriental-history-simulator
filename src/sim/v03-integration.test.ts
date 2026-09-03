@@ -17,7 +17,7 @@ import type { V03Emit, V03TurnContext } from './v03-context';
 
 function totalPopulation(world: WorldState): number {
   return world.regions.reduce((sum, region) => sum + region.population, 0)
-    + world.armies.reduce((sum, army) => sum + army.soldiers, 0)
+    + world.personalForces.reduce((sum, force) => sum + force.soldiers, 0)
     + world.fleets.reduce((sum, fleet) => sum + fleet.sailors, 0);
 }
 

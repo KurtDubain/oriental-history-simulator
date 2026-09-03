@@ -131,7 +131,7 @@ for (const seed of seeds) {
       serializationMs: Number(serializationMs.toFixed(3)),
     });
   };
-  if (world.schemaVersion !== 4) fail(seed, world.turn, `新世界不是 schema 4，而是${world.schemaVersion}`);
+  if (world.schemaVersion !== 5) fail(seed, world.turn, `新世界不是 schema 5，而是${world.schemaVersion}`);
   const openingValidation = measureFullValidation(world);
   fullValidationTimings.push(openingValidation.durationMs);
   if (openingValidation.violations.length) {
@@ -200,7 +200,7 @@ if (runtimeValidation.p95Ms > maximumRuntimeP95Ms) {
 
 console.log(JSON.stringify({
   phase: 'A',
-  schemaVersion: 4,
+  schemaVersion: 5,
   seeds: seeds.length,
   turnsPerSeed: turns,
   timings: {

@@ -16,7 +16,7 @@ interface LayerDefinition {
 
 const LAYERS: Readonly<Record<LayerPickerId, LayerDefinition>> = {
   political: { label: '疆界', description: '列国疆界、都城朝局与实权根基', icon: Layers3 },
-  war: { label: '军争', description: '战争、军团、舰队、军令与预计接敌', icon: Shield },
+  war: { label: '军争', description: '人物部曲、出征行营、舰队与预计接敌', icon: Shield },
   food: { label: '供养', description: '粮储余裕与支撑军民的主要压力', icon: Wheat },
   none: { label: '地势', description: '山川、海岸与通行地貌', icon: Mountain },
 };

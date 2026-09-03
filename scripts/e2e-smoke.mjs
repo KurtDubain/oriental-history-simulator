@@ -1015,9 +1015,11 @@ async function exerciseMapViewportTouch(context, page) {
   await dispatch('touchMove', [{ x: taiwan.x + 6, y: taiwan.y + 2 }]);
   await dispatch('touchEnd', []);
   await page.waitForTimeout(120);
-  const touchSelection = (await snapshot(page)).interface.selected;
-  assert.equal(touchSelection?.kind, 'army', `区域层轻微手抖仍应点中台湾驻军，实际为 ${touchSelection?.kind ?? 'none'}:${touchSelection?.id ?? 'none'}`);
-  assert.equal(touchSelection?.id, 'a_006', `台湾驻军应打开自身档案，而非地域或主帅，实际为 ${touchSelection?.kind ?? 'none'}:${touchSelection?.id ?? 'none'}`);
+  const touched = await snapshot(page);
+  const touchSelection = touched.interface.selected;
+  assert.equal(touchSelection?.kind, 'person', `区域层轻微手抖应优先点中带兵人物，实际为 ${touchSelection?.kind ?? 'none'}:${touchSelection?.id ?? 'none'}`);
+  assert.equal(touched.interface.selectedDetail?.kind, 'person', '人物点应直接打开人物档案');
+  assert.ok(touched.interface.selectedDetail?.militaryForce, '人物档案应说明其自有部曲和当前节制关系');
   assert.equal(await page.locator('.observer-world-tools').getAttribute('data-mobile-more-open'), null, '点选地图对象后应自动收起更多工具');
   const inspectorBounds = await page.locator('.observer-inspector').boundingBox();
   assert.ok(inspectorBounds && inspectorBounds.x >= 0 && inspectorBounds.x + inspectorBounds.width <= 391, '触摸点选后的档案不可横向溢出');
@@ -1304,7 +1306,7 @@ try {
   const initial = JSON.parse(initialText);
   assert.equal(initial.mode, 'observing');
   assert.equal(initial.productVersion, PACKAGE_VERSION);
-  assert.equal(initial.worldSchemaVersion, 4);
+  assert.equal(initial.worldSchemaVersion, 5);
   assert.match(initial.mapContentVersion, /^v03/);
   assert.equal(initial.totals.regions, 82);
   assert.equal(initial.totals.seaZones, 10);
@@ -1358,7 +1360,7 @@ try {
   const afterAutomaticPause = await exerciseAutomaticPause(page);
   assert.ok(afterAutomaticPause.time.turn >= 1);
   const pausedAutosave = await waitForLatestAutosave(page, afterAutomaticPause);
-  assert.equal(pausedAutosave.schemaVersion, 4, '暂停落盘必须写入 schema 4 世界');
+  assert.equal(pausedAutosave.schemaVersion, 5, '暂停落盘必须写入 schema 5 世界');
 
   await auditLayerDialog(page);
   await page.locator('button[data-mandate-trigger="true"]').click();
@@ -1473,7 +1475,7 @@ try {
   await selectLayer(page, 'food');
   assert.equal(await page.locator('.world-map').getAttribute('data-overlay'), 'food');
   await selectLayer(page, 'war');
-  await selectFirstMapObject(page, 'army', '军团档案');
+  await selectFirstMapObject(page, 'person', '人物档案');
 
   const references = await findThreeClickCausalPath(page);
   assert.ok(await references.locator('button').count());
@@ -1640,9 +1642,9 @@ try {
   await page.waitForSelector('.world-map__canvas');
   const reloaded = await snapshot(page);
   assert.equal(reloaded.productVersion, PACKAGE_VERSION);
-  assert.equal(reloaded.worldSchemaVersion, 4);
+  assert.equal(reloaded.worldSchemaVersion, 5);
   assert.equal(reloaded.observer.primerOpen, false, '续读不应重复弹出首次读图导览');
-  assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 4存档续读应恢复完全相同的世界');
+  assert.equal(reloaded.deterministicWorldHash, hashBeforeBrowsing, 'Schema 5存档续读应恢复完全相同的世界');
   assert.equal(Object.prototype.hasOwnProperty.call(reloaded.observer, 'agencyContinuity'), false, '续读不得恢复已删除的人物观察账');
   await page.click('button[data-observer-view="people"]');
   await page.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
@@ -2192,7 +2194,7 @@ try {
   assert.equal(await mobilePage.evaluate(() => document.activeElement?.getAttribute('data-mandate-trigger')), 'true');
   await auditLayerDialog(mobilePage, true);
   await selectLayer(mobilePage, 'war');
-  await selectFirstMapObject(mobilePage, 'army', '军团档案');
+  await selectFirstMapObject(mobilePage, 'person', '人物档案');
   await mobilePage.waitForFunction(() => {
     const inspector = document.querySelector('.observer-inspector');
     if (!inspector) return false;

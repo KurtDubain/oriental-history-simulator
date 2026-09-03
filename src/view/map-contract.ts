@@ -50,28 +50,13 @@ export interface MapArmyView {
   polityId?: string;
   polityColor?: string;
   strength: number;
-  morale?: number;
-  status?: string;
-  nominalPolityName?: string;
   lawfulCommanderName?: string;
-  deputyCommanderName?: string | null;
-  actualAllegianceName?: string;
-  allegianceStrength?: number;
-  commandDiverged?: boolean;
-  retinueSoldiers?: number;
-  retinueSummary?: string;
   orderKind?: 'hold' | 'advance' | 'intercept' | 'reinforce' | 'retreat';
-  orderLabel?: string;
-  orderTargetRegionId?: string | null;
-  orderIssuerName?: string;
   orderBlocked?: boolean;
   warId?: string | null;
-  factionId?: string | null;
-  factionName?: string;
   factionShortName?: string;
   orderPathRegionIds?: readonly string[];
   nextRegionId?: string | null;
-  nextRegionName?: string | null;
   recentMovement?: {
     fromRegionId: string;
     toRegionId: string;
@@ -89,6 +74,39 @@ export interface MapArmyView {
     commanderName?: string;
     factionName?: string;
   };
+}
+
+export interface MapPersonForceView {
+  id: string;
+  personName: string;
+  regionId: string;
+  position?: MapPoint;
+  polityId: string;
+  polityColor: string;
+  soldiers: number;
+  status: '驻留' | '集结' | '出征' | '交战' | '撤退';
+  formationId: string | null;
+  formationName: string | null;
+  commanderName: string | null;
+  factionShortName: string;
+  isCommander: boolean;
+  isFactionLeader: boolean;
+  warId: string | null;
+  targetRegionId: string | null;
+  commandDiverged: boolean;
+  showLabel?: boolean;
+}
+
+export interface MapPersonForceClusterView {
+  id: string;
+  regionId: string;
+  position: MapPoint;
+  leaderName: string;
+  personIds: readonly string[];
+  count: number;
+  soldiers: number;
+  polityId: string;
+  polityColor: string;
 }
 
 export interface MapSeaZoneView {
@@ -138,7 +156,7 @@ export type MapOverlay =
   | "war"
   | "none";
 
-export type MapObjectKind = "seaZone" | "fleet" | "army" | "country";
+export type MapObjectKind = "seaZone" | "fleet" | "army" | "person" | "country";
 
 export type MapMarkerTargetKind = MapObjectKind | "region";
 
@@ -163,6 +181,8 @@ export interface MapPresentationView {
   regions: MapRegionView[];
   routes: MapRouteView[];
   armies: MapArmyView[];
+  persons: MapPersonForceView[];
+  personClusters: MapPersonForceClusterView[];
   seaZones: MapSeaZoneView[];
   fleets: MapFleetView[];
   markers: MapMarkerView[];

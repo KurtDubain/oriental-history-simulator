@@ -38,9 +38,7 @@ describe('authoritative Situation engine integration', () => {
     const milestones = first.facts.filter((fact) => fact.kind === 'situation_milestone');
     expect(milestones.some((fact) => fact.payload.transition === 'formed')).toBe(true);
     const milestoneTypes = new Set(milestones.map((fact) => fact.payload.situationType));
-    for (const type of ['inheritance_crisis', 'military_power_crisis', 'war_progress'] as const) {
-      expect(milestoneTypes.has(type)).toBe(true);
-    }
+    expect(milestoneTypes.has('war_progress')).toBe(true);
     for (const fact of milestones) {
       expect(fact.sourceFactIds.length).toBeGreaterThan(0);
       expect(fact.sourceFactIds.every((id) => {

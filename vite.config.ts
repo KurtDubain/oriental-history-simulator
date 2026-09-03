@@ -164,15 +164,15 @@ export default defineConfig({
             || normalized.includes('/node_modules/react-dom/')
             || normalized.includes('/node_modules/scheduler/')
           ) return 'framework';
-          if (normalized.includes('/node_modules/fflate/')) return 'compression';
+          if (normalized.includes('/node_modules/fflate/')) return 'framework';
           if (normalized.includes('/src/maps/')) return 'maps';
           if (
             normalized.includes('/src/sim/archive/')
             || normalized.includes('/src/sim/facts/')
             || normalized.endsWith('/src/sim/random.ts')
             || normalized.endsWith('/src/sim/world-hash.ts')
-          ) return 'simulation-core';
-          if (normalized.includes('/src/sim/politics/')) return 'politics';
+          ) return 'simulation-support';
+          if (normalized.includes('/src/sim/politics/')) return 'simulation-support';
           if (normalized.includes('/src/sim/')) return 'simulation';
           return undefined;
         },

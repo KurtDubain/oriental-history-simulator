@@ -17,10 +17,10 @@ describe('world integrity module boundaries', () => {
     expect(getDateForTurn(7.9)).toEqual({ year: 2, season: '冬' });
   });
 
-  it('keeps the fixed-seed schema-4 hash and the engine compatibility export', () => {
+  it('keeps the fixed-seed schema-5 hash and the engine compatibility export', () => {
     expect(computeWorldHashFromEngine).toBe(computeWorldHash);
     const world = createWorld('架构边界-入世');
-    expect(world.hash).toBe('13e3f0b355fde4d6');
+    expect(world.hash).toBe('e0104f5df15f458d');
     expect(computeWorldHash(world)).toBe(world.hash);
   });
 });

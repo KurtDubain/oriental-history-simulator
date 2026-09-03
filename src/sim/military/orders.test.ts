@@ -18,6 +18,7 @@ import {
   validateWorldArchiveIntegrity,
 } from '../archive';
 import { markLawfulCommandTransfer, recordArmyMovement, syncArmyPersonnelLocations } from './authority';
+import { applyFormationLosses, distributeFormationGain } from './personal-forces';
 import { armyOrderIsExecutable, issueAmphibiousArmyOrder, planArmyOrders } from './orders';
 
 function factContext(world: WorldState): FactTurnBuffer {
@@ -27,6 +28,40 @@ function factContext(world: WorldState): FactTurnBuffer {
     season: world.season,
     facts: [],
   };
+}
+
+function schema4MilitaryFixture(source: WorldState): Record<string, unknown> {
+  const legacy = JSON.parse(serializeWorld(source)) as Record<string, unknown>;
+  legacy.schemaVersion = 4;
+  const forces = legacy.personalForces as Array<Record<string, unknown>>;
+  const regions = legacy.regions as Array<Record<string, unknown>>;
+  const returnedByRegion = new Map<string, number>();
+  for (const force of forces.filter((item) => item.formationId === null)) {
+    const region = regions.find((item) => item.id === force.homeRegionId);
+    if (region) {
+      const soldiers = Number(force.soldiers);
+      region.population = Number(region.population) + soldiers;
+      returnedByRegion.set(String(region.id), (returnedByRegion.get(String(region.id)) ?? 0) + soldiers);
+    }
+  }
+  for (const infection of legacy.infections as Array<Record<string, unknown>>) {
+    if (infection.hostKind !== 'region') continue;
+    const returned = returnedByRegion.get(String(infection.hostId)) ?? 0;
+    if (returned > 0) infection.susceptible = Number(infection.susceptible) + returned;
+  }
+  for (const army of legacy.armies as Array<Record<string, unknown>>) {
+    const participantIds = army.participantIds as string[];
+    army.retinues = forces.filter((force) => participantIds.includes(String(force.ownerId))).slice(0, 2).map((force) => ({
+      ownerId: force.ownerId,
+      soldiers: force.soldiers,
+      cohesion: force.cohesion,
+      attachedTurn: source.turn,
+      sourceFactId: null,
+    }));
+    delete army.participantIds;
+  }
+  delete legacy.personalForces;
+  return legacy;
 }
 
 function addReachableBorderWar(world: WorldState): WarState {
@@ -258,7 +293,7 @@ function stageInFlightLanding(
 }
 
 describe('military authority and persistent army orders', () => {
-  it('creates complete authority fields and keeps every retinue inside its parent army', () => {
+  it('creates complete authority fields and derives every formation from unique personal forces', () => {
     const world = createWorld('军权字段开局');
 
     expect(world.armies.length).toBeGreaterThan(0);
@@ -276,13 +311,11 @@ describe('military authority and persistent army orders', () => {
         provenance: 'opening',
         sourceFactId: null,
       });
-      expect(army.retinues.length).toBeLessThanOrEqual(2);
-      expect(new Set(army.retinues.map((retinue) => retinue.ownerId)).size).toBe(army.retinues.length);
-      expect(army.retinues.every((retinue) => (
-        retinue.ownerId === army.commanderId || retinue.ownerId === army.deputyCommanderId
-      ))).toBe(true);
-      expect(army.retinues.every((retinue) => retinue.soldiers > 0 && retinue.soldiers <= army.soldiers)).toBe(true);
-      expect(army.retinues.reduce((sum, retinue) => sum + retinue.soldiers, 0)).toBeLessThanOrEqual(army.soldiers);
+      const forces = world.personalForces.filter((force) => force.formationId === army.id);
+      expect([...army.participantIds].sort()).toEqual(forces.map((force) => force.ownerId).sort());
+      expect(new Set(army.participantIds).size).toBe(army.participantIds.length);
+      expect(army.participantIds).toContain(army.commanderId);
+      expect(forces.reduce((sum, force) => sum + force.soldiers, 0)).toBe(army.soldiers);
       expect(army.recentMovement).toBeNull();
     }
   });
@@ -484,8 +517,9 @@ describe('military authority and persistent army orders', () => {
       shipment.kind === '海军运输' && shipment.carrierArmyId === army.id
     ))).toBe(false);
     const loadedArmy = world.armies.find((candidate) => candidate.id === army.id);
+    const loadedOperation = world.navalOperations.find((candidate) => candidate.id === operation.id);
     expect(loadedArmy?.soldiers).toBeGreaterThanOrEqual(Math.max(1_000, Math.floor(originalSoldiers * 0.35)));
-    expect(loadedArmy?.soldiers).toBeLessThanOrEqual(originalSoldiers);
+    expect(loadedArmy?.soldiers).toBe(loadedOperation?.manifest?.soldiersDeparted);
     expect(['航行', '登陆']).toContain(world.navalOperations.find((candidate) => candidate.id === operation.id)?.stage);
     // This is the first finalized world after the navload reservation. The
     // capacity ledger must already be self-contained rather than relying on a
@@ -921,7 +955,7 @@ describe('military authority and persistent army orders', () => {
     }
     if (!landingDefender) throw new Error('expected a defending Yamato army');
     landingDefender.regionId = 'r_naniwa';
-    landingDefender.soldiers = Math.max(landingDefender.soldiers, 60_000);
+    distributeFormationGain(world, landingDefender, Math.max(0, 60_000 - landingDefender.soldiers));
     landingDefender.food = Math.max(landingDefender.food, landingDefender.soldiers * 2);
     landingDefender.morale = 5;
     syncArmyPersonnelLocations(world, landingDefender);
@@ -929,7 +963,7 @@ describe('military authority and persistent army orders', () => {
     const soldiersDeparted = operationBeforeLoss.manifest.soldiersDeparted;
     const transportEdgeIds = [...operationBeforeLoss.manifest.transportEdgeIds];
     const recordedTransitLoss = Math.min(173, Math.max(1, soldiersDeparted - 1_000));
-    armyBeforeLoss.soldiers -= recordedTransitLoss;
+    applyFormationLosses(world, [armyBeforeLoss], recordedTransitLoss);
 
     // This deterministic fixture represents disease/attrition already settled
     // during the voyage. Keep every pathogen host synchronized with the army
@@ -1058,6 +1092,10 @@ describe('military authority and persistent army orders', () => {
     fleet.portRegionId = origin.id;
     fleet.seaZoneId = null;
     fleet.transports = 0;
+    const polity = world.polities.find((item) => item.id === fleet.polityId);
+    if (polity) { polity.treasury = 0; polity.navalBudget = 0; }
+    world.shipbuildingProjects = [];
+    for (const port of world.ports.filter((item) => world.regions.find((region) => region.id === item.regionId)?.controllerId === fleet.polityId)) port.shipyard = 0;
     const foodLoaded = 2_000;
     origin.food = Math.max(origin.food, foodLoaded);
     origin.food -= foodLoaded;
@@ -1110,7 +1148,15 @@ describe('military authority and persistent army orders', () => {
 
   it('migrates schema-4 armies missing the new fields without fabricating facts or history', () => {
     const source = createWorld('旧档军权迁移');
-    const legacy = JSON.parse(serializeWorld(source)) as Record<string, unknown>;
+    const legacy = schema4MilitaryFixture(source);
+    const legacyPopulation = (legacy.regions as Array<{ population: number }>).reduce((sum, region) => sum + region.population, 0)
+      + (legacy.armies as Array<{ soldiers: number }>).reduce((sum, army) => sum + army.soldiers, 0)
+      + (legacy.fleets as Array<{ sailors: number }>).reduce((sum, fleet) => sum + fleet.sailors, 0);
+    const legacyFood = (legacy.regions as Array<{ food: number }>).reduce((sum, region) => sum + region.food, 0)
+      + (legacy.armies as Array<{ food: number }>).reduce((sum, army) => sum + army.food, 0)
+      + (legacy.fleets as Array<{ food: number }>).reduce((sum, fleet) => sum + fleet.food, 0);
+    const legacyWealth = (legacy.regions as Array<{ wealth: number }>).reduce((sum, region) => sum + region.wealth, 0)
+      + (legacy.polities as Array<{ treasury: number }>).reduce((sum, polity) => sum + polity.treasury, 0);
     const armies = legacy.armies as Array<Record<string, unknown>>;
     for (const army of armies) {
       delete army.allegiance;
@@ -1121,6 +1167,7 @@ describe('military authority and persistent army orders', () => {
     legacy.hash = computeWorldHash(legacy as unknown as WorldState);
 
     const restored = deserializeWorld(JSON.stringify(legacy));
+    const restoredAgain = deserializeWorld(JSON.stringify(legacy));
 
     expect(restored.facts).toEqual(source.facts);
     expect(restored.history).toEqual(source.history);
@@ -1131,9 +1178,22 @@ describe('military authority and persistent army orders', () => {
       army.allegiance.provenance === 'legacy'
       && army.order.provenance === 'legacy'
       && army.order.sourceFactId === null
-      && army.retinues.every((retinue) => retinue.sourceFactId === null)
+      && army.participantIds.length > 0
       && army.recentMovement === null
     ))).toBe(true);
+    expect(restored.schemaVersion).toBe(5);
+    expect(restored.personalForces.reduce((sum, force) => sum + force.soldiers, 0))
+      .toBe((legacy.armies as Array<{ soldiers: number }>).reduce((sum, army) => sum + army.soldiers, 0));
+    expect(serializeWorld(restoredAgain)).toBe(serializeWorld(restored));
+    expect(restored.regions.reduce((sum, region) => sum + region.population, 0)
+      + restored.personalForces.reduce((sum, force) => sum + force.soldiers, 0)
+      + restored.fleets.reduce((sum, fleet) => sum + fleet.sailors, 0)).toBe(legacyPopulation);
+    expect(restored.regions.reduce((sum, region) => sum + region.food, 0)
+      + restored.armies.reduce((sum, army) => sum + army.food, 0)
+      + restored.fleets.reduce((sum, fleet) => sum + fleet.food, 0)).toBe(legacyFood);
+    expect(restored.regions.reduce((sum, region) => sum + region.wealth, 0)
+      + restored.polities.reduce((sum, polity) => sum + polity.treasury, 0)).toBe(legacyWealth);
+    expect(validateWorld(restored)).toEqual([]);
   });
 
   it('keeps prior actual allegiance through repeated lawful commander swaps', () => {
@@ -1255,14 +1315,13 @@ describe('military authority and persistent army orders', () => {
     const sourceFacts = structuredClone(source.facts);
     const sourceHistory = structuredClone(source.history);
     const sourceCounters = { ...source.counters };
-    const legacy = JSON.parse(serializeWorld(source)) as Record<string, unknown>;
+    const legacy = schema4MilitaryFixture(source);
     const rawArmy = (legacy.armies as Array<Record<string, unknown>>)
       .find((candidate) => candidate.id === army.id);
     const rawOperation = (legacy.navalOperations as Array<Record<string, unknown>>)
       .find((candidate) => candidate.id === operationId);
     if (!rawArmy || !rawOperation) throw new Error('expected the embarked army and operation in the serialized fixture');
     delete rawArmy.allegiance;
-    delete rawArmy.retinues;
     delete rawArmy.order;
     delete rawOperation.manifest;
     legacy.hash = computeWorldHash(legacy as unknown as WorldState);
@@ -1271,7 +1330,7 @@ describe('military authority and persistent army orders', () => {
     const restoredArmy = restored.armies.find((candidate) => candidate.id === army.id);
 
     expect(restoredArmy?.allegiance.provenance).toBe('legacy');
-    expect(restoredArmy?.retinues.every((retinue) => retinue.sourceFactId === null)).toBe(true);
+    expect(restoredArmy?.participantIds.length).toBeGreaterThan(0);
     expect(restoredArmy?.order).toMatchObject({
       kind: 'advance',
       warId: war.id,

@@ -299,6 +299,17 @@ export interface PersonInspectorData {
   experiences?: InspectorRecord[];
   politicalFocus?: readonly PoliticalFocusLink[];
   summary?: string;
+  militaryForce?: {
+    soldiers: number;
+    cohesion: number;
+    readiness: number;
+    status: string;
+    location: string;
+    faction: string;
+    formation: string;
+    commander: string;
+    latestBattle: string | null;
+  };
 }
 
 export interface FamilyMemberView {
@@ -1061,6 +1072,7 @@ function PersonInspector({ data, onOpenMind, mobileMindRequest = 0, ...actions }
       </button>
       <InspectorTabs value={tab} onChange={setTab} idPrefix={tabsId} items={[{ id: 'life', label: '其人' }, { id: 'mind', label: '所图' }, { id: 'relations', label: '关系' }, { id: 'history', label: '生平' }]} />
       {tab === 'life' ? <div id={`${tabsId}-panel-life`} role="tabpanel" aria-labelledby={`${tabsId}-tab-life`}>
+        {data.militaryForce ? <section className="observer-inspector__section observer-inspector__section--military" aria-labelledby="person-force-heading"><h3 id="person-force-heading"><Swords size={14} aria-hidden="true" />自有军势</h3><p><strong>自有部曲 {display(data.militaryForce.soldiers)} 人</strong> · {data.militaryForce.status} · {data.militaryForce.formation}</p><dl className="observer-facts"><Fact label="所在" value={data.militaryForce.location} /><Fact label="所属集团" value={data.militaryForce.faction} /><Fact label="当前节制" value={data.militaryForce.commander} /><Fact label="凝聚 / 战备" value={`${Math.round(data.militaryForce.cohesion)} / ${Math.round(data.militaryForce.readiness)}`} /></dl>{data.militaryForce.latestBattle ? <small>{data.militaryForce.latestBattle}</small> : null}</section> : null}
         <section className="observer-inspector__section" aria-labelledby="person-origin-heading"><h3 id="person-origin-heading">身世与处境</h3><dl className="observer-facts"><Fact label="性别" value={data.gender} /><Fact label="出身" value={data.origin} /><Fact label="阶层" value={data.politicalClass} /><Fact label="家族" value={data.family} /><Fact label="影响" value={data.influence} /><Fact label="私产" value={data.personalWealth} /></dl>{data.family ? <p className="observer-inspector__jump"><Network size={13} aria-hidden="true" /><LinkedName kind="family" id={data.familyId} onSelect={actions.onSelectEntity}>{data.family}</LinkedName></p> : null}{data.health !== undefined ? <div className="observer-health"><HeartPulse size={14} aria-hidden="true" /><Meter label="健康" value={data.health} /></div> : null}</section>
         <section className="observer-inspector__section" aria-labelledby="person-ability-heading"><h3 id="person-ability-heading">才能</h3><div className="observer-ability-grid">{abilities.map(([label, value]) => <div className="observer-ability" key={label}><span>{label}</span><strong>{Math.round(value)}</strong></div>)}</div><dl className="observer-facts observer-facts--after-grid"><Fact label="功绩" value={data.merit} /><Fact label="副将历练" value={data.deputyExperience} /></dl></section>
       </div> : null}
@@ -1073,7 +1085,7 @@ function PersonInspector({ data, onOpenMind, mobileMindRequest = 0, ...actions }
 
 const SYSTEM_META = {
   seaZone: { label: '海域档案', icon: Anchor },
-  army: { label: '军团档案', icon: Swords },
+  army: { label: '行营档案', icon: Swords },
   fleet: { label: '舰队档案', icon: Anchor },
   tradeCorridor: { label: '商路档案', icon: Route },
   practice: { label: '知识档案', icon: Sparkles },

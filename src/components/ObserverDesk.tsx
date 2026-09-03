@@ -38,7 +38,7 @@ const WATCH_KIND_LABELS: Record<ObserverWatchKind, string> = {
   person: '人物',
   region: '地区',
   seaZone: '海域',
-  army: '军团',
+  army: '行营',
   fleet: '舰队',
   tradeCorridor: '商路',
   practice: '实践',

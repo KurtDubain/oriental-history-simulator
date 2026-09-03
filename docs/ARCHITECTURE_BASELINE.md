@@ -1,13 +1,13 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，v1.23.0 将领集团更新于 2026-09-03，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.24.0 人物军势更新于 2026-09-04，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
-- `src` 下生产 TypeScript / TSX：167 个文件，62,125 行（测试排除）；相对 v1.22.2 增加 2 个生产文件、769 行，分别是唯一的战争集团只读投影与复用现有地图层的紧凑战局摘要。
-- 相对模块依赖：643 条，其中 417 条 runtime、226 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环，正好落在 12/12 的不增长预算内。
-- 当前热点：`engine.ts` 3,120/3,120 行、`invariants.ts` 2,664/2,665 行、`App.tsx` 2,292/2,300 行（实际/门禁）。
-- 其次为 `v02.ts` 2,488 行、`v03-ocean.ts` 2,412 行、`agency/decision.ts` 2,029 行、`map-renderer.ts` 1,442 行与 `Inspector.tsx` 1,340 行。`observer-leads.ts` 为 388/400 行，`WorldMap.tsx` 为 1,088/1,100 行，`view/adapters.ts` 为 51/100 行。
+- `src` 下生产 TypeScript / TSX：169 个文件，61,879 行（测试排除）。新增代码集中在一个兵力权威模块、一个开局/战时编队模块、一个季度上下文模块和一个地图悬停读取模块；同时删除两套 Army-first 只读解释，净规模低于 v1.23.0 的 62,137 行。
+- 相对模块依赖：652 条，其中 422 条 runtime、230 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环，正好落在 12/12 的不增长预算内。
+- 当前热点：`engine.ts` 3,114/3,120 行、`invariants.ts` 2,665/2,665 行、`App.tsx` 2,296/2,300 行（实际/门禁）。
+- 其次为 `v02.ts` 2,488 行、`v03-ocean.ts` 2,460 行、`agency/decision.ts` 2,032 行、`Inspector.tsx` 1,352 行与 `map-renderer.ts` 1,105 行。`observer-leads.ts` 为 388/400 行，`WorldMap.tsx` 为 1,053/1,100 行，`view/adapters.ts` 为 52/100 行。
 
 行数是增长预警，不是机械拆文件指标。新增领域规则不得再默认进入四个最高热点；只有形成稳定输入、输出和所有权后才拆分。
 
@@ -42,7 +42,7 @@ v1.10.1 的扫描已从正则匹配改为 TypeScript AST 与 Tarjan SCC，能区
 
 - 旧 `canghai-agency-shadow-ledger-v1` 和 ObserverDesk 中的 `leadContinuity` 都直接忽略，不迁移到新 store 或 wrapper。
 - `App.tsx` 继续是唯一 `WorldState` React owner；世界打开、推进、天意、收藏与存读档不再同步观察账本。
-- `WorldState` 仍为 44 个顶层字段，季度流水线仍为 22 个阶段；本轮没有升级 schema，也没有改变领域结算顺序。
+- COMPACT01 完成时 `WorldState` 为 44 个顶层字段；v1.24.0 只新增唯一的 `personalForces` 兵力 owner，成为 45 个字段并升级至 schema 5。季度流水线仍为 22 个阶段，没有增加人物逐季军事 AI。
 - v1.22.2 的个人版 / 参赛版 JavaScript gzip 均为 411,080 bytes，CSS gzip 均为 38,777 bytes。v1.23.0 两种构建的 JavaScript gzip 均为 417,164 bytes，CSS gzip 均为 39,396 bytes，仍低于 410 KiB / 40 KiB 门禁；包体余量不用于恢复已删除概念。
 
 ### 周边压力进入军政阅读的边界
@@ -54,25 +54,26 @@ v1.10.1 的扫描已从正则匹配改为 TypeScript AST 与 Tarjan SCC，能区
 - 例行军粮 Shipment 即使指向具体军团，也不等于军政后果；只有低补给改令或 Battle Fact 明记的战前补给进入默认阅读。一般关税与国库支出无法证明资金同源，不描述成征兵、军饷或造舰原因。
 - 该模块是现有权威记录的只读 adapter，不是第二套事实账本；`WorldState` 顶层字段、季度阶段、schema 与四层舆图均未改变。
 
-## 军权纵切的所有权
+## 人物军势与军权纵切的所有权
 
 ```text
-ArmyState.allegiance / retinues / order
-  → military/authority-core.ts（无 WorldState 聚合依赖的换帅原子操作）
-  → military/authority.ts + military/orders.ts（权威刷新、迁移、派令与执行路径）
+PersonalForceState owner / soldiers / cohesion / readiness / formation
+  → military/personal-forces.ts（唯一兵力、战损、补员、解散与 schema-4 迁移 owner）
+  → ArmyState.participantIds + derived soldiers（临时行营，不重复拥有兵力）
+  → military/authority.ts + military/orders.ts（法定主将、实际拥戴、派令与执行路径）
   → Fact / runtime + full validation / archive pins
-  → military-authority-reading.ts（共享只读解释）
-  → 地图标记与箭线 / 军团速览 / 卷宗 / 名录 / 文本快照
+  → war-group / map / person-dossier 纯投影
+  → 人物点与行军箭线 / 人物与行营速览 / 卷宗 / 文本快照
 
 NavalOperationState.manifest
   → v03-ocean.ts（装载舱单 / 分段航行 / Shipment 守恒 / 返港命令）
   → runtime + full validation
 ```
 
-- `authority-core.ts` 以结构契约持有换帅时的拥戴、部曲与人物位置原子更新，不反向依赖总 `WorldState`；Agency 与军权领域共用它，新增模块没有扩大 12 模块 type-only 契约环。
-- `orders.ts` 是军令规划、目标、路径与“本季签发、下季执行”的唯一 owner；军团只保存当前令，旧令由 Fact/冷热档案持有，不在热状态串链。
+- `personal-forces.ts` 是陆军士兵唯一权威入口：人物一人至多一支，行营缓存必须等于有效参与者之和；招募从地区人口进入具体人物，伤亡按战前投入比例整数分配，退出、死亡和解散都回到具体个人或地区。
+- `orders.ts` 是军令规划、目标、路径与“本季签发、下季执行”的唯一 owner；行营只保存当前令，旧令由 Fact/冷热档案持有，不在热状态串链。
 - `validation/military-authority.ts` 同时服务完整校验和前缀有界的季度校验；运行时只读取本季新增 Fact 与上季已验真的当前来源，不扫描历史前缀。
-- UI 不复制兵权判断。地图、卷宗、名录和文本快照均从 `military-authority-reading.ts` 取得同一法定/实际听命与军令解释；观察投影不进入存档或 hash。
+- UI 不保存兵权副本。`war-group-projection.ts`、`map-adapter.ts`、`map-dossier-adapter.ts` 与 `person-dossier-adapter.ts` 都只读同一人物军势、行营、法定主将与实际拥戴；已删除的 Army-first 共享解释层不再作为兼容 wrapper 存在。
 - 跨海行动在实际装载时冻结 `loadedTurn / soldiersDeparted / transportEdgeIds`。舱单冻结后，成功登陆、航损返航与已装载行动中止按同一舱单写入 Shipment；撤回舰队保持返港使命，直到实际靠港后才恢复常规调度。
 
 ## 将领集团与战局投影的所有权
@@ -82,15 +83,16 @@ FactionState + Character.factionId
   → faction-lifecycle.ts（共军、支持、地方、家门与共事关系形成 2～4 个稳定集团）
   → 既有 power-ledger.ts（官职、军令、家门、支持与战绩）
 
-ArmyState commander / deputy / allegiance / retinues / order
-  → war-group-projection.ts（活动战争只读汇总，不保存第二份集团或兵力）
+PersonalForceState + ArmyState participantIds / commander / allegiance / order
+  → war-group-projection.ts（按人物部曲汇总活动战争，不保存第二份集团或兵力）
   → WarFocusSummary + 既有军争 Canvas（战线、路线、接敌、胜败与进退）
 ```
 
-- 军队只归实际拥戴者所属集团；无法解析时才回退法定主帅。一支军队只计一次，直属部曲不再加总。法定掌令与军中实际拥戴不同时，投影保留双方姓名与集团。
+- 每名参战人物按自身集团归入一处，行营和人物部曲不重复加总；法定掌令与军中实际拥戴不同时，投影保留双方姓名与集团。
 - 集团名称只在建立时从军团、地方、领袖旧部、家门或中枢根基取得；每季只更新成员层级，不随官职反复改名。旧 schema 4 派系保留原名，不补造旧史。
 - `ArmyState.recentMovement` 是每军一条、覆盖式的兼容记录，用来表现普通境内行军已经走过的真实一步；它不增加 `WorldState` 顶层字段、不形成历史数组，也不参与随机或领域结算。只有跨敌境、接敌、撤退、占领或登陆继续进入原有 Fact / Chronicle。
-- `war-group-projection.ts` 只读当前战争、军队、集团和 Battle Fact；观察、战争聚焦与打开战局摘要不会修改世界、RNG、Fact、Chronicle 或序列化正文。
+- `war-group-projection.ts` 只读当前战争、人物军势、行营、集团和 Battle Fact；观察、战争聚焦与打开战局摘要不会修改世界、RNG、Fact、Chronicle 或序列化正文。
+- v1.24.0 个人版与参赛版 JavaScript gzip 均为 419,815 bytes，CSS gzip 均为 39,425 bytes；仍在既有 410 KiB / 40 KiB 门内，没有提高预算。
 
 ## 后续收缩顺序
 

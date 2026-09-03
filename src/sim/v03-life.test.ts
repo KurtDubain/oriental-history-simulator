@@ -70,7 +70,7 @@ function testWorld(): WorldState {
   c.neighbors = [b.id]; c.routeIds = ['route_bc'];
 
   return {
-    schemaVersion: 4,
+    schemaVersion: 5,
     mapContentVersion: 'v03-82',
     seed: 'v03-life-test',
     turn: 0,
@@ -98,6 +98,7 @@ function testWorld(): WorldState {
       politicalClass: '官僚' as const, influence: 20, personalWealth: 10, merit: 0, deputyExperience: 0, insubordination: 0,
       biography: [], biographyDigest: '', tier: '核心' as const, sourceStubId: null, health: 100, activeDiseaseId: null, protectedUntilTurn: null, factionId: null,
     })),
+    personalForces: [],
     armies: [],
     fleets: [],
     wars: [],

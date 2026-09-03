@@ -416,13 +416,17 @@ export interface ArmyAllegianceState {
   sourceFactId: string | null;
 }
 
-/** A named, non-additive slice of the parent army rather than another army. */
-export interface ArmyRetinueState {
+export type PersonalForceStatus = '驻留' | '集结' | '出征' | '交战' | '撤退';
+
+/** The sole authoritative owner of land soldiers. Formations only aggregate these forces. */
+export interface PersonalForceState {
   ownerId: string;
   soldiers: number;
   cohesion: number;
-  attachedTurn: number;
-  sourceFactId: string | null;
+  readiness: number;
+  homeRegionId: string;
+  formationId: string | null;
+  status: PersonalForceStatus;
 }
 
 /** Bounded, observer-facing trace of the army's latest real map step. */
@@ -440,6 +444,8 @@ export interface ArmyState {
   polityId: string;
   commanderId: string;
   deputyCommanderId: string | null;
+  /** People currently marching together. Their personal forces own all soldiers. */
+  participantIds: string[];
   regionId: string;
   originRegionId: string;
   soldiers: number;
@@ -452,7 +458,6 @@ export interface ArmyState {
   recentMovement: ArmyRecentMovementState | null;
   embarkedOperationId: string | null;
   allegiance: ArmyAllegianceState;
-  retinues: ArmyRetinueState[];
   order: ArmyOrderState;
 }
 
@@ -860,7 +865,7 @@ export interface WorldCounters {
 }
 
 export interface WorldState {
-  schemaVersion: 4;
+  schemaVersion: 5;
   mapContentVersion: MapContentVersion;
   seed: string;
   turn: number;
@@ -874,6 +879,7 @@ export interface WorldState {
   ports: PortState[];
   polities: PolityState[];
   characters: CharacterState[];
+  personalForces: PersonalForceState[];
   armies: ArmyState[];
   fleets: FleetState[];
   wars: WarState[];

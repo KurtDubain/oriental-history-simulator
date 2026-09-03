@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { armyOrderPath } from '../sim/military/orders';
+import { syncFormationStrength } from '../sim/military/personal-forces';
 import { computeWorldHash, createWorld, serializeWorld, type WarState } from '../sim';
 import { toMapArmies } from './map-adapter';
 import { factionForArmy, projectWarGroups } from './war-group-projection';
@@ -35,20 +36,24 @@ function stageBorderWar() {
 }
 
 describe('war group projection', () => {
-  it('attributes every army once by actual allegiance and never adds retinues twice', () => {
+  it('counts every personal force once while assigning each formation to one actual command group', () => {
     const { world, war, attacker, defender } = stageBorderWar();
     const lawful = world.characters.find((character) => character.id === attacker.commanderId);
-    const actualFaction = world.factions.find((faction) => (
-      faction.active && faction.polityId === attacker.polityId && faction.id !== lawful?.factionId
+    const actual = world.characters.find((character) => (
+      character.factionId
+      && character.factionId !== lawful?.factionId
+      && character.polityId === attacker.polityId
+      && world.personalForces.some((force) => force.ownerId === character.id && force.formationId === null)
     ));
-    const actual = world.characters.find((character) => character.id === actualFaction?.leaderId);
-    if (!lawful || !actualFaction || !actual) throw new Error('expected two groups in the attacking polity');
+    const actualFaction = world.factions.find((faction) => faction.id === actual?.factionId);
+    const actualForce = world.personalForces.find((force) => force.ownerId === actual?.id);
+    if (!lawful || !actualFaction || !actual || !actualForce) throw new Error('expected two groups in the attacking polity');
     attacker.deputyCommanderId = actual.id;
     attacker.allegiance = { ...attacker.allegiance, characterId: actual.id, strength: 78 };
-    attacker.retinues = [{
-      ownerId: actual.id, soldiers: Math.floor(attacker.soldiers * 0.4),
-      cohesion: 80, attachedTurn: world.turn, sourceFactId: null,
-    }];
+    actualForce.formationId = attacker.id;
+    actualForce.status = '出征';
+    attacker.participantIds.push(actual.id);
+    syncFormationStrength(world, attacker);
     world.hash = computeWorldHash(world);
     const before = serializeWorld(world);
 
@@ -61,7 +66,9 @@ describe('war group projection', () => {
     expect(second).toEqual(first);
     expect(new Set(armyRows.map((army) => army.id)).size).toBe(armyRows.length);
     expect(armyRows.map((army) => army.id).sort()).toEqual([attacker.id, defender.id].sort());
-    expect(projected?.soldiers).toBe(attacker.soldiers);
+    expect(first.sides.flatMap((side) => side.groups).reduce((sum, group) => sum + group.soldiers, 0))
+      .toBe(attacker.soldiers + defender.soldiers);
+    expect(projected?.soldiers).toBe(actualForce.soldiers);
     expect(projected?.armies[0]).toMatchObject({ commandDiverged: true });
     expect(projected?.armies[0]?.authorityNote).toContain(`${lawful.name}掌令，但军中更听${actual.name}`);
     expect(factionForArmy(world, attacker)?.id).toBe(actualFaction.id);

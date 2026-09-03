@@ -7,6 +7,8 @@ import type {
   MapMarkerView,
   MapLodScene,
   MapPoint,
+  MapPersonForceClusterView,
+  MapPersonForceView,
   MapPresentationView,
   MapRegionView,
   MapSeaZoneView,
@@ -245,59 +247,54 @@ export function regionAtScreenPoint(
 export interface MapArmyIconLayout {
   army: MapArmyView;
   point: MapPoint;
+}
+
+export interface MapPersonForceLayout {
+  person: MapPersonForceView;
+  point: MapPoint;
   radius: number;
 }
 
-/** Exact screen-space positions shared by army drawing and hit testing. */
+export function layoutMapPersonForces(
+  persons: readonly MapPersonForceView[],
+  transform: MapViewportTransform,
+): MapPersonForceLayout[] {
+  return persons.flatMap((person) => person.position ? [{
+    person,
+    point: worldToScreenPoint(person.position, transform),
+    radius: Math.max(3.6, Math.min(8.5, 3.4 + Math.sqrt(Math.max(0, person.soldiers)) / 17)),
+  }] : []);
+}
+
+export interface MapPersonClusterLayout {
+  cluster: MapPersonForceClusterView;
+  point: MapPoint;
+  radius: number;
+}
+
+export function layoutMapPersonClusters(
+  clusters: readonly MapPersonForceClusterView[],
+  transform: MapViewportTransform,
+): MapPersonClusterLayout[] {
+  return clusters.map((cluster) => ({
+    cluster,
+    point: worldToScreenPoint(cluster.position, transform),
+    radius: Math.max(6, Math.min(11, 5 + Math.sqrt(cluster.count))),
+  }));
+}
+
+/** Formation anchors are retained only for their shared route and movement marks. */
 export function layoutMapArmyIcons(
   armies: readonly MapArmyView[],
   regions: readonly MapRegionView[],
   transform: MapViewportTransform,
 ): MapArmyIconLayout[] {
-  const compactMap = transform.scale < 0.42;
   const regionById = new Map(regions.map((region) => [region.id, region]));
-  const armyOffsets = new Map<string, number>();
   return armies.flatMap((army) => {
     const region = army.regionId ? regionById.get(army.regionId) : undefined;
     const anchor = army.position ?? region?.center;
-    if (!anchor) return [];
-    const slotKey = army.regionId ?? `${Math.round(anchor.x)}:${Math.round(anchor.y)}`;
-    const slot = armyOffsets.get(slotKey) ?? 0;
-    armyOffsets.set(slotKey, slot + 1);
-    const base = worldToScreenPoint(anchor, transform);
-    return [{
-      army,
-      point: {
-        x: base.x + (compactMap ? 6 : 14) + (slot % 3) * (compactMap ? 7 : 17),
-        y: base.y - (compactMap ? 5 : 12) - Math.floor(slot / 3) * (compactMap ? 8 : 19),
-      },
-      radius: compactMap ? 3.8 : 9,
-    }];
+    return anchor ? [{ army, point: worldToScreenPoint(anchor, transform) }] : [];
   });
-}
-
-export function armyAtScreenPoint(
-  armies: readonly MapArmyView[],
-  regions: readonly MapRegionView[],
-  point: MapPoint,
-  width: number,
-  height: number,
-  padding = MAP_PADDING,
-  camera: MapCamera = DEFAULT_MAP_CAMERA,
-  coarsePointer = false,
-): MapArmyView | null {
-  const transform = createMapViewportTransform(width, height, padding, camera);
-  const layouts = layoutMapArmyIcons(armies, regions, transform);
-  const maximumDistance = coarsePointer ? 22 : 12;
-  const nearest = layouts
-    .map((layout, index) => ({
-      layout,
-      index,
-      distance: Math.hypot(layout.point.x - point.x, layout.point.y - point.y),
-    }))
-    .filter(({ layout, distance }) => distance <= Math.max(maximumDistance, layout.radius + 3))
-    .sort((left, right) => left.distance - right.distance || right.index - left.index)[0];
-  return nearest?.layout.army ?? null;
 }
 
 export interface MapRegionNodeLayout {
@@ -377,8 +374,9 @@ export function regionNodeAtScreenPoint(
 }
 
 export type MapSceneHit =
+  | { kind: 'person'; person: MapPersonForceView }
+  | { kind: 'personCluster'; cluster: MapPersonForceClusterView }
   | { kind: 'fleet'; fleet: MapFleetView }
-  | { kind: 'army'; army: MapArmyView }
   | { kind: 'marker'; marker: MapMarkerView }
   | { kind: 'regionNode'; node: MapRegionNodeLayout }
   | { kind: 'region'; region: MapRegionView }
@@ -470,19 +468,26 @@ export function resolveMapSceneHit(
       return Math.hypot(fleetPoint.x - scenePoint.x, fleetPoint.y - scenePoint.y);
     },
   );
-  const nearestArmy = nearestByDistance(
-    layoutMapArmyIcons(presentation.armies, presentation.regions, transform),
+  const nearestPerson = nearestByDistance(
+    layoutMapPersonForces(presentation.persons ?? [], transform),
+    (layout) => Math.hypot(layout.point.x - scenePoint.x, layout.point.y - scenePoint.y),
+  );
+  const nearestPersonCluster = nearestByDistance(
+    layoutMapPersonClusters(presentation.personClusters ?? [], transform),
     (layout) => Math.hypot(layout.point.x - scenePoint.x, layout.point.y - scenePoint.y),
   );
   const foregroundHits: Array<{ distance: number; priority: number; hit: MapSceneHit }> = [];
-  if (nearestFleet && nearestFleet.distance <= (coarse ? 22 : 12)) {
-    foregroundHits.push({ distance: nearestFleet.distance, priority: 0, hit: { kind: 'fleet', fleet: nearestFleet.value } });
+  if (nearestPerson && nearestPerson.distance <= Math.max(coarse ? 23 : 12, nearestPerson.value.radius + 4)) {
+    foregroundHits.push({ distance: nearestPerson.distance, priority: 0, hit: { kind: 'person', person: nearestPerson.value.person } });
   }
-  if (nearestArmy && nearestArmy.distance <= Math.max(coarse ? 22 : 12, nearestArmy.value.radius + 3)) {
-    foregroundHits.push({ distance: nearestArmy.distance, priority: 1, hit: { kind: 'army', army: nearestArmy.value.army } });
+  if (nearestPersonCluster && nearestPersonCluster.distance <= Math.max(coarse ? 24 : 13, nearestPersonCluster.value.radius + 4)) {
+    foregroundHits.push({ distance: nearestPersonCluster.distance, priority: 1, hit: { kind: 'personCluster', cluster: nearestPersonCluster.value.cluster } });
+  }
+  if (nearestFleet && nearestFleet.distance <= (coarse ? 22 : 12)) {
+    foregroundHits.push({ distance: nearestFleet.distance, priority: 2, hit: { kind: 'fleet', fleet: nearestFleet.value } });
   }
   if (politicalMarkerHit && foregroundHits.length) {
-    foregroundHits.push({ distance: politicalMarkerHit.distance, priority: 2, hit: { kind: 'marker', marker: politicalMarkerHit.value.marker } });
+    foregroundHits.push({ distance: politicalMarkerHit.distance, priority: 3, hit: { kind: 'marker', marker: politicalMarkerHit.value.marker } });
   }
   const foregroundHit = foregroundHits
     .sort((left, right) => {
@@ -517,7 +522,7 @@ export function resolveMapSceneHit(
   );
   if (regionNode && (!directRegion || regionNode.region.id === directRegion.id)) {
     const nodeDistance = Math.hypot(regionNode.point.x - scenePoint.x, regionNode.point.y - scenePoint.y);
-    if (politicalMarkerHit && politicalMarkerHit.distance < nodeDistance) {
+    if (politicalMarkerHit && politicalMarkerHit.distance + 1e-6 < nodeDistance) {
       return { kind: 'marker', marker: politicalMarkerHit.value.marker };
     }
     return { kind: 'regionNode', node: regionNode };

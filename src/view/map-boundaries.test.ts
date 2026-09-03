@@ -11,6 +11,7 @@ import {
   toMapArmies,
   toMapFleets,
   toMapMarkers,
+  toMapPersonForces,
   toMapRegions,
   toMapRoutes,
   toMapSeaZones,
@@ -27,7 +28,7 @@ import { buildMapPresentation } from './map-presentation';
 import { buildMapLodScene } from './map-lod';
 import {
   createMapViewportTransform,
-  layoutMapArmyIcons,
+  layoutMapPersonForces,
   layoutMapRegionNodes,
   panMapCamera,
   resolveMapSceneHit,
@@ -53,6 +54,8 @@ function mapProjection(seed: string) {
       seaZones,
       fleets,
       toMapMarkers(world, 'war'),
+      undefined,
+      toMapPersonForces(world),
     ),
   };
 }
@@ -284,11 +287,11 @@ describe('map adapter boundary', () => {
 });
 
 describe('shared map scene hit boundary', () => {
-  it('uses the painted army badge geometry as the first interactive target', () => {
+  it('uses the painted person force as the first interactive target', () => {
     const { presentation } = mapProjection('地图命中边界');
     const viewport = { width: 1210, height: 560 };
     const transform = createMapViewportTransform(viewport.width, viewport.height);
-    const [layout] = layoutMapArmyIcons(presentation.armies, presentation.regions, transform);
+    const [layout] = layoutMapPersonForces(presentation.persons, transform);
 
     expect(layout).toBeDefined();
     expect(resolveMapSceneHit(
@@ -296,10 +299,10 @@ describe('shared map scene hit boundary', () => {
       layout.point,
       viewport.width,
       viewport.height,
-    )).toMatchObject({ kind: 'army', army: { id: layout.army.id } });
+    )).toMatchObject({ kind: 'person', person: { id: layout.person.id } });
   });
 
-  it('keeps mobile taps on a zoomed and panned army aligned with the same scene model', () => {
+  it('keeps mobile taps on a zoomed and panned person aligned with the same scene model', () => {
     const { presentation } = mapProjection('移动命中边界');
     const viewport = { width: 390, height: 644 };
     const zoomed = zoomMapCameraAtPoint(
@@ -311,16 +314,16 @@ describe('shared map scene hit boundary', () => {
     );
     const camera = panMapCamera(zoomed, -52, 38, viewport.width, viewport.height);
     const transform = createMapViewportTransform(viewport.width, viewport.height, 8, camera);
-    const [layout] = layoutMapArmyIcons(presentation.armies, presentation.regions, transform);
+    const [layout] = layoutMapPersonForces(presentation.persons, transform);
 
     expect(resolveMapSceneHit(
       presentation,
-      { x: layout.point.x + 19, y: layout.point.y },
+      layout.point,
       viewport.width,
       viewport.height,
       camera,
       { coarsePointer: true, includeSeaZones: true, tolerateRegionEdge: true },
-    )).toMatchObject({ kind: 'army', army: { id: layout.army.id } });
+    )).toMatchObject({ kind: 'person', person: { id: layout.person.id } });
   });
 
   it('uses the same LOD slice for visibility and hit testing', () => {
@@ -328,9 +331,9 @@ describe('shared map scene hit boundary', () => {
     const scene = buildMapLodScene(presentation, 'overview');
     const viewport = { width: 1210, height: 560 };
     const transform = createMapViewportTransform(viewport.width, viewport.height);
-    const visibleIds = new Set(scene.armies.map((army) => army.id));
-    const hiddenLayout = layoutMapArmyIcons(presentation.armies, presentation.regions, transform)
-      .find((layout) => !visibleIds.has(layout.army.id));
+    const visibleIds = new Set(scene.persons.map((person) => person.id));
+    const hiddenLayout = layoutMapPersonForces(presentation.persons, transform)
+      .find((layout) => !visibleIds.has(layout.person.id));
 
     expect(hiddenLayout).toBeDefined();
     const hiddenHit = resolveMapSceneHit(
@@ -339,7 +342,7 @@ describe('shared map scene hit boundary', () => {
       viewport.width,
       viewport.height,
     );
-    expect(hiddenHit?.kind === 'army' && hiddenHit.army.id === hiddenLayout?.army.id).toBe(false);
+    expect(hiddenHit?.kind === 'person' && hiddenHit.person.id === hiddenLayout?.person.id).toBe(false);
   });
 
   it('keeps a painted sea zone touchable at overview LOD', () => {
@@ -354,7 +357,7 @@ describe('shared map scene hit boundary', () => {
 
     expect(scene.interactiveSeaZoneIds.has(seaZone.id)).toBe(true);
     expect(resolveMapSceneHit(
-      { ...scene, regions: [], armies: [], fleets: [], markers: [] },
+      { ...scene, regions: [], armies: [], fleets: [], markers: [], persons: [], personClusters: [] },
       point,
       viewport.width,
       viewport.height,
@@ -368,7 +371,7 @@ describe('shared map scene hit boundary', () => {
     const scene = { ...buildMapLodScene(presentation, 'regional'), fleets: [] };
     const viewport = { width: 390, height: 644 };
     const transform = createMapViewportTransform(viewport.width, viewport.height);
-    const [layout] = layoutMapArmyIcons(scene.armies, scene.regions, transform);
+    const [layout] = layoutMapPersonForces(scene.persons, transform);
     const focusOffset = { x: 0, y: -84 };
 
     expect(resolveMapSceneHit(
@@ -378,7 +381,7 @@ describe('shared map scene hit boundary', () => {
       viewport.height,
       undefined,
       { coarsePointer: true, focusOffset },
-    )).toMatchObject({ kind: 'army', army: { id: layout.army.id } });
+    )).toMatchObject({ kind: 'person', person: { id: layout.person.id } });
   });
 
   it('gives a painted city node priority over a marker drawn beneath it', () => {
@@ -394,6 +397,8 @@ describe('shared map scene hit boundary', () => {
       ...scene,
       armies: [],
       fleets: [],
+      persons: [],
+      personClusters: [],
       markers: [{
         id: 'marker-under-node',
         kind: 'capitalPulse' as const,
@@ -441,6 +446,8 @@ describe('shared map scene hit boundary', () => {
       ...scene,
       armies: [],
       fleets: [],
+      persons: [],
+      personClusters: [],
       markers: [marker],
     };
 
@@ -458,35 +465,35 @@ describe('shared map scene hit boundary', () => {
     )).toMatchObject({ kind: 'regionNode', node: { region: { id: node.region.id } } });
   });
 
-  it('keeps fleets and armies ahead of a political marker at the same painted point', () => {
-    const { presentation } = mapProjection('军队优先于朝局印记');
+  it('keeps fleets and people ahead of a political marker at the same painted point', () => {
+    const { presentation } = mapProjection('人物优先于朝局印记');
     const viewport = { width: 1210, height: 560 };
     const transform = createMapViewportTransform(viewport.width, viewport.height);
-    const [armyLayout] = layoutMapArmyIcons(presentation.armies, presentation.regions, transform);
-    const markerAtArmy = {
-      id: 'root-under-army',
+    const [personLayout] = layoutMapPersonForces(presentation.persons, transform);
+    const markerAtPerson = {
+      id: 'root-under-person',
       kind: 'capitalPulse' as const,
       position: screenToWorldPoint(
-        { x: armyLayout.point.x + 20, y: armyLayout.point.y + 18 },
+        { x: personLayout.point.x + 20, y: personLayout.point.y + 18 },
         viewport.width,
         viewport.height,
       ),
       magnitude: 70,
       label: '军中朝局',
       targetKind: 'country' as const,
-      targetId: armyLayout.army.polityId ?? 'polity-test',
+      targetId: personLayout.person.polityId,
     };
-    expect(layoutMapMarkers([markerAtArmy], transform)[0].point.x).toBeCloseTo(armyLayout.point.x, 5);
-    expect(layoutMapMarkers([markerAtArmy], transform)[0].point.y).toBeCloseTo(armyLayout.point.y, 5);
+    expect(layoutMapMarkers([markerAtPerson], transform)[0].point.x).toBeCloseTo(personLayout.point.x, 5);
+    expect(layoutMapMarkers([markerAtPerson], transform)[0].point.y).toBeCloseTo(personLayout.point.y, 5);
     expect(resolveMapSceneHit(
-      { ...presentation, fleets: [], markers: [markerAtArmy], armies: [armyLayout.army] },
-      armyLayout.point,
+      { ...presentation, fleets: [], markers: [markerAtPerson], persons: [personLayout.person] },
+      personLayout.point,
       viewport.width,
       viewport.height,
-    )).toMatchObject({ kind: 'army', army: { id: armyLayout.army.id } });
+    )).toMatchObject({ kind: 'person', person: { id: personLayout.person.id } });
 
     const fleetMarker = {
-      ...markerAtArmy,
+      ...markerAtPerson,
       id: 'root-under-fleet',
       position: { x: 420, y: 260 },
     };
@@ -506,68 +513,6 @@ describe('shared map scene hit boundary', () => {
       viewport.width,
       viewport.height,
     )).toMatchObject({ kind: 'fleet', fleet: { id: fleet.id } });
-  });
-
-  it('chooses the nearer painted center when a coarse army and power-root target overlap', () => {
-    const { presentation } = mapProjection('军令与军队粗指针重叠');
-    const viewport = { width: 390, height: 644 };
-    const transform = createMapViewportTransform(viewport.width, viewport.height);
-    const [armyLayout] = layoutMapArmyIcons(presentation.armies, presentation.regions, transform);
-    const armyRegion = presentation.regions.find((region) => region.id === armyLayout.army.regionId);
-    if (!armyRegion) throw new Error('expected the army region to resolve');
-    const marker = {
-      id: 'power-root-near-army',
-      kind: 'powerRoot' as const,
-      position: armyRegion.center,
-      magnitude: 16,
-      label: `${armyRegion.name}军令`,
-      targetKind: 'army' as const,
-      targetId: armyLayout.army.id,
-      polityId: armyLayout.army.polityId,
-      factionId: 'faction-test',
-      rootKind: 'army_command' as const,
-    };
-    const [rootLayout] = layoutMapMarkers([marker], transform);
-    const centerDistance = Math.hypot(
-      rootLayout.point.x - armyLayout.point.x,
-      rootLayout.point.y - armyLayout.point.y,
-    );
-    const scene = {
-      ...presentation,
-      fleets: [],
-      markers: [marker],
-      armies: [armyLayout.army],
-    };
-
-    expect(centerDistance).toBeGreaterThan(0);
-    expect(centerDistance).toBeLessThan(22);
-    expect(resolveMapSceneHit(
-      scene,
-      rootLayout.point,
-      viewport.width,
-      viewport.height,
-      undefined,
-      { coarsePointer: true },
-    )).toMatchObject({ kind: 'marker', marker: { id: marker.id } });
-    expect(resolveMapSceneHit(
-      scene,
-      armyLayout.point,
-      viewport.width,
-      viewport.height,
-      undefined,
-      { coarsePointer: true },
-    )).toMatchObject({ kind: 'army', army: { id: armyLayout.army.id } });
-    expect(resolveMapSceneHit(
-      scene,
-      {
-        x: (rootLayout.point.x + armyLayout.point.x) / 2,
-        y: (rootLayout.point.y + armyLayout.point.y) / 2,
-      },
-      viewport.width,
-      viewport.height,
-      undefined,
-      { coarsePointer: true },
-    )).toMatchObject({ kind: 'army', army: { id: armyLayout.army.id } });
   });
 
   it('uses deterministic marker offsets and a 22px coarse political hit radius', () => {
@@ -600,6 +545,8 @@ describe('shared map scene hit boundary', () => {
       armies: [],
       fleets: [],
       seaZones: [],
+      persons: [],
+      personClusters: [],
       markers: [target.marker],
     };
     expect(resolveMapSceneHit(

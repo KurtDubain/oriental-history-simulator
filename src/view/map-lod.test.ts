@@ -5,6 +5,7 @@ import type {
   MapArmyView,
   MapFleetView,
   MapMarkerView,
+  MapPersonForceView,
   MapPresentationView,
   MapRegionView,
   MapSeaZoneView,
@@ -78,6 +79,8 @@ function fixture(): MapPresentationView {
     regions,
     routes: [],
     armies,
+    persons: [],
+    personClusters: [],
     seaZones,
     fleets,
     markers,
@@ -110,6 +113,50 @@ describe('map LOD hysteresis', () => {
 });
 
 describe('map LOD scene', () => {
+  it('clusters people at overview, reveals points regionally, and labels everyone locally', () => {
+    const source = fixture();
+    const people: MapPersonForceView[] = [{
+      id: 'person-leader', personName: '赵维谦', regionId: 'r_a_large', position: { x: 4, y: 5 },
+      polityId: 'p_a', polityColor: '#963b30', soldiers: 1_800,
+      status: '驻留', formationId: null, formationName: null, commanderName: null,
+      factionShortName: '赵系', isCommander: false, isFactionLeader: true,
+      warId: null, targetRegionId: null, commandDiverged: false,
+    }, {
+      id: 'person-member', personName: '谢德清', regionId: 'r_a_large', position: { x: 6, y: 5 },
+      polityId: 'p_a', polityColor: '#963b30', soldiers: 900,
+      status: '驻留', formationId: null, formationName: null, commanderName: null,
+      factionShortName: '赵系', isCommander: false, isFactionLeader: false,
+      warId: null, targetRegionId: null, commandDiverged: false,
+    }, {
+      id: 'person-marching', personName: '韩静川', regionId: 'r_b_key', position: { x: 5, y: 5 },
+      polityId: 'p_b', polityColor: '#315b72', soldiers: 600,
+      status: '出征', formationId: 'a_b_tie_z', formationName: '乙前营', commanderName: '韩静川',
+      factionShortName: '韩系', isCommander: true, isFactionLeader: false,
+      warId: 'war_1', targetRegionId: 'r_a_large', commandDiverged: false,
+    }];
+    source.persons = people;
+    source.personClusters = [];
+
+    const overview = buildMapLodScene(source, 'overview');
+    expect(overview.persons).toEqual([]);
+    expect(overview.personClusters.map((cluster) => ({ count: cluster.count, soldiers: cluster.soldiers })))
+      .toEqual([{ count: 2, soldiers: 2_700 }, { count: 1, soldiers: 600 }]);
+
+    const focused = buildMapLodScene(source, 'overview', { focusedArmyIds: ['a_b_tie_z'] });
+    expect(focused.persons.map((person) => person.id)).toEqual(['person-marching']);
+    expect(focused.personClusters).toHaveLength(1);
+
+    const regional = buildMapLodScene(source, 'regional');
+    expect(regional.persons).toHaveLength(3);
+    expect(regional.persons.find((person) => person.id === 'person-leader')?.showLabel).toBe(true);
+    expect(regional.persons.find((person) => person.id === 'person-member')?.showLabel).toBe(false);
+    expect(regional.persons.find((person) => person.id === 'person-marching')?.showLabel).toBe(true);
+
+    expect(buildMapLodScene(source, 'local').persons.every((person) => person.showLabel)).toBe(true);
+    const selected = buildMapLodScene(source, 'overview', { selectedObject: { kind: 'person', id: 'person-member' } });
+    expect(selected.persons.map((person) => person.id)).toEqual(['person-member']);
+  });
+
   it('keeps only capitals and the strongest military objects at overview', () => {
     const source = fixture();
     const scene = buildMapLodScene(source, 'overview');

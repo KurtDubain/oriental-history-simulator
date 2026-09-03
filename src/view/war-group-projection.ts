@@ -27,6 +27,17 @@ export interface WarGroupArmyView {
   authorityNote: string;
 }
 
+export interface WarGroupPersonView {
+  id: string;
+  name: string;
+  soldiers: number;
+  formationId: string;
+  formation: string;
+  commander: string;
+  region: string;
+  status: string;
+}
+
 export interface WarGroupForceView {
   id: string;
   factionId: string | null;
@@ -36,6 +47,7 @@ export interface WarGroupForceView {
   leader: string;
   generalIds: readonly string[];
   generals: readonly string[];
+  persons: readonly WarGroupPersonView[];
   armies: readonly WarGroupArmyView[];
   soldiers: number;
   lossesThisTurn: number;
@@ -159,38 +171,60 @@ function battleFacts(world: WorldState, warId: string): Extract<SimulationFact, 
     .sort((left, right) => right.turn - left.turn || stableCompare(right.id, left.id));
 }
 
-function lossForArmy(facts: readonly Extract<SimulationFact, { kind: 'battle' }>[], armyId: string, turn: number): number {
-  return facts.filter((fact) => fact.turn === turn).reduce((sum, fact) => {
-    if (fact.payload.attacker.armyId === armyId) return sum + fact.payload.attacker.losses;
-    return sum + fact.payload.defenders.filter((item) => item.armyId === armyId).reduce((total, item) => total + item.losses, 0);
-  }, 0);
-}
-
 function groupsForSide(
   world: WorldState,
   armies: readonly ArmyState[],
   facts: readonly Extract<SimulationFact, { kind: 'battle' }>[],
 ): WarGroupForceView[] {
   const latestTurn = world.lastTurn?.turn ?? world.turn;
-  const buckets = new Map<string, { faction: FactionState | null; armies: ArmyState[] }>();
+  const buckets = new Map<string, { faction: FactionState | null; persons: WarGroupPersonView[]; armies: ArmyState[] }>();
+  const armyById = new Map(armies.map((army) => [army.id, army]));
+  for (const force of world.personalForces) {
+    const army = force.formationId ? armyById.get(force.formationId) : undefined;
+    const character = world.characters.find((item) => item.id === force.ownerId);
+    if (!army || !character || force.soldiers <= 0) continue;
+    const faction = world.factions.find((item) => item.id === character.factionId && item.active && item.polityId === army.polityId) ?? null;
+    const key = faction?.id ?? `unaffiliated:${army.polityId}`;
+    const bucket = buckets.get(key) ?? { faction, persons: [], armies: [] };
+    bucket.persons.push({
+      id: character.id,
+      name: character.name,
+      soldiers: force.soldiers,
+      formationId: army.id,
+      formation: army.name,
+      commander: personName(world, army.commanderId),
+      region: regionName(world, army.regionId),
+      status: force.status,
+    });
+    buckets.set(key, bucket);
+  }
   for (const army of armies) {
     const faction = factionForArmy(world, army);
     const key = faction?.id ?? `unaffiliated:${army.polityId}`;
-    const bucket = buckets.get(key) ?? { faction, armies: [] };
+    const bucket = buckets.get(key) ?? { faction, persons: [], armies: [] };
     bucket.armies.push(army);
     buckets.set(key, bucket);
   }
   return [...buckets.entries()].map(([id, bucket]) => {
+    const formationIds = new Set(bucket.persons.map((person) => person.formationId));
     const views = bucket.armies.map((army) => armyView(world, army));
     const postureCounts = new Map<string, number>();
-    for (const army of views) postureCounts.set(army.posture, (postureCounts.get(army.posture) ?? 0) + army.soldiers);
+    for (const person of bucket.persons) {
+      const army = armyById.get(person.formationId);
+      const posture = army ? ORDER_LABEL[army.order.kind] : '留守';
+      postureCounts.set(posture, (postureCounts.get(posture) ?? 0) + person.soldiers);
+    }
     const posture = [...postureCounts].sort((left, right) => right[1] - left[1] || stableCompare(left[0], right[0]))[0]?.[0] ?? '留守';
-    const generalIds = [...new Set(bucket.armies.flatMap((army) => [
-      army.commanderId,
-      ...(army.deputyCommanderId ? [army.deputyCommanderId] : []),
-      army.allegiance.characterId,
-    ]))].sort(stableCompare);
-    const fronts = [...new Set(views.map((army) => army.nextRegion ?? army.region))].sort(stableCompare);
+    const generalIds = bucket.persons.map((person) => person.id).sort(stableCompare);
+    const fronts = [...new Set([...formationIds].map((armyId) => {
+      const view = armyView(world, armyById.get(armyId)!);
+      return view.nextRegion ?? view.region;
+    }))].sort(stableCompare);
+    const lossesThisTurn = facts.filter((fact) => fact.turn === latestTurn).reduce((sum, fact) => (
+      sum + [fact.payload.attacker, ...fact.payload.defenders].flatMap((side) => side.participants ?? [])
+        .filter((participant) => generalIds.includes(participant.characterId))
+        .reduce((subtotal, participant) => subtotal + participant.losses, 0)
+    ), 0);
     return {
       id,
       factionId: bucket.faction?.id ?? null,
@@ -200,13 +234,22 @@ function groupsForSide(
       leader: bucket.faction ? personName(world, bucket.faction.leaderId) : '暂无首领',
       generalIds,
       generals: generalIds.map((characterId) => personName(world, characterId)),
+      persons: bucket.persons.sort((left, right) => right.soldiers - left.soldiers || stableCompare(left.id, right.id)),
       armies: views.sort((left, right) => right.soldiers - left.soldiers || stableCompare(left.id, right.id)),
-      soldiers: views.reduce((sum, army) => sum + army.soldiers, 0),
-      lossesThisTurn: bucket.armies.reduce((sum, army) => sum + lossForArmy(facts, army.id, latestTurn), 0),
+      soldiers: bucket.persons.reduce((sum, person) => sum + person.soldiers, 0),
+      lossesThisTurn,
       fronts,
       posture,
     };
   }).sort((left, right) => right.soldiers - left.soldiers || stableCompare(left.id, right.id));
+}
+
+function factionNamesForFormation(world: WorldState, army: ArmyState): string[] {
+  return [...new Set(world.personalForces.flatMap((force) => {
+    if (force.formationId !== army.id || force.soldiers <= 0) return [];
+    const factionId = world.characters.find((person) => person.id === force.ownerId)?.factionId;
+    return [world.factions.find((faction) => faction.id === factionId && faction.active)?.name ?? '未归集团'];
+  }))].sort(stableCompare);
 }
 
 function warArmies(world: WorldState, war: WarState): ArmyState[] {
@@ -232,15 +275,15 @@ function contactsFor(world: WorldState, war: WarState, armies: readonly ArmyStat
     if (!defenders.length) continue;
     const regionId = defenders[0]?.regionId as string;
     const contactDefenders = defenders.filter((item) => item.regionId === regionId);
-    const attackerFaction = factionForArmy(world, army);
-    const defenderFactions = [...new Set(contactDefenders.map((item) => factionForArmy(world, item)?.name ?? '未归集团'))].sort(stableCompare);
+    const attackerFactions = factionNamesForFormation(world, army);
+    const defenderFactions = [...new Set(contactDefenders.flatMap((item) => factionNamesForFormation(world, item)))].sort(stableCompare);
     result.push({
       regionId,
       region: regionName(world, regionId),
       attackerArmyId: army.id,
       attacker: army.name,
       attackerCommander: personName(world, army.commanderId),
-      attackerGroup: attackerFaction?.name ?? '未归集团',
+      attackerGroup: attackerFactions.join('、') || '未归集团',
       defenderArmyIds: contactDefenders.map((item) => item.id),
       defenders: contactDefenders.map((item) => item.name).join('、'),
       defenderCommanders: contactDefenders.map((item) => personName(world, item.commanderId)).join('、'),
@@ -257,12 +300,11 @@ function latestBattleView(
 ): WarBattleView | null {
   if (!fact) return null;
   const attackerArmy = world.armies.find((item) => item.id === fact.payload.attacker.armyId);
-  const attackerFaction = attackerArmy ? factionForArmy(world, attackerArmy) : world.factions.find((item) => item.id === world.characters.find((person) => person.id === fact.payload.attacker.allegianceCharacterId)?.factionId);
+  const attackerFactionNames = [...new Set((fact.payload.attacker.participants ?? [])
+    .map((item) => world.factions.find((faction) => faction.id === item.factionId)?.name ?? '未归集团'))].sort(stableCompare);
   const defenderArmies = fact.payload.defenders.map((entry) => world.armies.find((item) => item.id === entry.armyId)).filter((item): item is ArmyState => Boolean(item));
-  const defenderFactionNames = [...new Set(fact.payload.defenders.map((entry) => {
-    const army = world.armies.find((item) => item.id === entry.armyId);
-    return (army ? factionForArmy(world, army) : world.factions.find((item) => item.id === world.characters.find((person) => person.id === entry.allegianceCharacterId)?.factionId))?.name ?? '未归集团';
-  }))].sort(stableCompare);
+  const defenderFactionNames = [...new Set(fact.payload.defenders.flatMap((entry) => entry.participants ?? [])
+    .map((item) => world.factions.find((faction) => faction.id === item.factionId)?.name ?? '未归集团'))].sort(stableCompare);
   const attackerName = attackerArmy?.name ?? fact.payload.attacker.armyId;
   const defenderNames = defenderArmies.length ? defenderArmies.map((item) => item.name).join('、') : '地方守军';
   const won = fact.payload.attackerWon;
@@ -283,7 +325,7 @@ function latestBattleView(
     region: regionName(world, fact.payload.targetRegionId),
     attacker: attackerName,
     attackerCommander: personName(world, fact.payload.attacker.commanderId),
-    attackerGroup: attackerFaction?.name ?? '未归集团',
+    attackerGroup: attackerFactionNames.join('、') || (attackerArmy ? factionNamesForFormation(world, attackerArmy).join('、') : '') || '未归集团',
     defender: defenderNames,
     defenderCommanders: fact.payload.defenders.map((item) => personName(world, item.commanderId)).join('、') || '地方守将',
     defenderGroups: defenderFactionNames.join('、'),

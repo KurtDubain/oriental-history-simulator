@@ -141,7 +141,7 @@ function numericIdSuffix(id: string): number {
 
 function runtimeTotalPopulation(world: WorldState): number {
   return world.regions.reduce((sum, region) => sum + region.population, 0)
-    + world.armies.reduce((sum, army) => sum + army.soldiers, 0)
+    + world.personalForces.reduce((sum, force) => sum + force.soldiers, 0)
     + world.fleets.reduce((sum, fleet) => sum + fleet.sailors, 0);
 }
 
@@ -1382,7 +1382,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   }
   const fullWorld = world.facts === facts && world.history === history ? world : { ...world, facts, history };
   violations.push(...validateMilitaryAuthority(fullWorld));
-  if (world.schemaVersion !== 4) push(violations, 'schema.version', `不支持的存档版本 ${String(world.schemaVersion)}`);
+  if (world.schemaVersion !== 5) push(violations, 'schema.version', `不支持的存档版本 ${String(world.schemaVersion)}`);
   if (!world.seed) push(violations, 'seed.empty', '世界种子不能为空');
   if (!isWholeNonNegative(world.turn)) push(violations, 'clock.turn', '世界回合必须为非负安全整数');
 
@@ -1396,6 +1396,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     ['route', world.routes.map((item) => item.id)],
     ['polity', world.polities.map((item) => item.id)],
     ['character', world.characters.map((item) => item.id)],
+    ['personal-force', world.personalForces.map((item) => item.ownerId)],
     ['army', world.armies.map((item) => item.id)],
     ['war', world.wars.map((item) => item.id)],
     ['event', history.map((item) => item.id)],
@@ -2496,7 +2497,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     const expectedWealth = wealth.start + wealth.produced - wealth.householdConsumed - wealth.warDestroyed;
     if (wealth.end !== expectedWealth) push(violations, 'ledger.wealth', `财富账本不平：应为${expectedWealth}，实为${wealth.end}`);
     const currentPopulation = world.regions.reduce((sum, region) => sum + region.population, 0)
-      + world.armies.reduce((sum, army) => sum + army.soldiers, 0)
+      + world.personalForces.reduce((sum, force) => sum + force.soldiers, 0)
       + world.fleets.reduce((sum, fleet) => sum + fleet.sailors, 0);
     const currentFood = world.regions.reduce((sum, region) => sum + region.food, 0)
       + world.armies.reduce((sum, army) => sum + army.food, 0)

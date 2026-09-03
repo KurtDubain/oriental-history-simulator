@@ -42,8 +42,7 @@ import type { SnapshotOptions } from './observer-shell-contract';
 import { projectSituationWorkbench } from './situation-detail';
 import { toSituationSnapshot } from './situation-snapshot';
 import { mapMarkerTarget } from './map-marker-layout';
-import { projectMilitaryAuthority } from './military-authority-reading';
-import { factionForArmy, projectWarGroups } from './war-group-projection';
+import { projectWarGroups } from './war-group-projection';
 
 const HISTORY_COLORS: Record<string, string> = {
   世界: '#777267',
@@ -193,16 +192,11 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       id: item.id,
       name: item.name,
       terrain: item.terrain,
-      climate: item.climate,
       controller: polityName(item.controllerId),
       population: item.population,
       food: item.food,
       foodSeasons: Number((item.food / Math.max(1, item.population)).toFixed(2)),
-      wealth: item.wealth,
-      cityLevel: item.cityLevel,
-      defense: item.defense,
       unrest: item.unrest,
-      devastation: item.devastation,
     };
   } else if (options.selection?.kind === 'country') {
     const item = world.polities.find((polity) => polity.id === options.selection?.id);
@@ -220,14 +214,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       treasury: item.treasury,
       legitimacy: item.legitimacy,
       authority: item.authority,
-      administration: item.administration,
-      warWeariness: item.warWeariness,
-      governmentForm: item.governmentForm,
-      rulingFamily: familyName(item.rulingFamilyId),
-      courtInfluence: item.courtInfluence,
       tradeRevenue: item.tradeRevenue,
-      navalBudget: item.navalBudget,
-      maritimeOrientation: item.maritimeOrientation,
       maritimeAssets: {
         fleets: world.fleets.filter((fleet) => fleet.polityId === item.id).map((fleet) => fleet.id),
         ports: world.ports
@@ -237,14 +224,9 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       factions: countryDossier.factions?.map((entry) => ({
         id: entry.id,
         name: entry.name,
-        kind: entry.kind,
-        leader: entry.leader,
         power: entry.power,
-        cohesion: entry.cohesion,
-        agenda: entry.agenda,
         categories: entry.categories,
         resources: entry.resources,
-        recentMovement: entry.recentMovement,
       })) ?? [],
       court: countryDossier.court ?? null,
       powerholders: countryDossier.powerholders ?? [],
@@ -291,26 +273,17 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         name: item.name,
         alive: item.alive,
         age: item.age,
-        sex: item.sex,
         polity: polityName(item.polityId),
         role: item.role,
         location: regionName(item.locationRegionId),
         governedRegion: regionName(item.governedRegionId),
         commandingArmyId: item.commandingArmyId,
         abilities: { leadership: item.leadership, governance: item.governance, cunning: item.cunning },
-        personality: { ambition: item.ambition, loyalty: item.loyalty, caution: item.caution },
         renown: item.renown,
-        lifeStage: item.lifeStage,
-        politicalClass: item.politicalClass,
-        tier: item.tier,
         family: familyName(item.familyId),
-        parents: (item.parentIds ?? []).map(characterName),
-        spouses: (item.spouseIds ?? []).map(characterName),
         influence: item.influence,
-        personalWealth: item.personalWealth,
         merit: item.merit,
-        deputyExperience: item.deputyExperience,
-        insubordination: item.insubordination,
+        militaryForce: personDossier.militaryForce,
         agency: personDossier.agency,
         biography: Array.isArray(item.biography) ? item.biography.slice(-20) : [],
         relationships: (personDossier.relationships ?? []).map((entry) => ({
@@ -390,17 +363,8 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         name: profile.name,
       })),
     } : null,
-    coordinates: `地图世界坐标以左上角为原点，横轴向右、纵轴向下，范围 ${mapProfile.presentation.width}×${mapProfile.presentation.height}`,
     time: { turn: world.turn, year: world.year, season: world.season },
     deterministicWorldHash: world.hash,
-    archive: {
-      coldThroughTurn: world.archiveSystem?.blocks.length
-        ? world.archiveSystem.archivedThroughTurn
-        : null,
-      blockCount: world.archiveSystem?.blocks.length ?? 0,
-      activeFactCount: world.facts.length,
-      activeEventCount: world.history.length,
-    },
     runtimePerformance: getRuntimePerformanceSnapshot(),
     seed: world.seed,
     playback: { running: options.running, speed: options.speed },
@@ -480,7 +444,6 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       commandCandidates: world.agencyDecisionSystem.actors.map((actor) => ({
         characterId: actor.characterId,
         name: characterName(actor.characterId),
-        status: actor.goal.status,
       })),
     },
     interface: {
@@ -596,49 +559,25 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       livingPolities: world.polities.filter((item) => item.alive).length,
       livingCharacters: world.characters.filter((item) => item.alive).length,
       families: families.length,
-      armies: world.armies.length,
       fleets: world.fleets.length,
       seaZones: world.seaZones.length,
       ports: world.ports.length,
       activeTradeCorridors: world.tradeCorridors.filter((item) => item.active).length,
       activeOutbreaks: world.infections.filter((item) => item.infectious > 0).length,
-      infectious: world.infections.reduce((sum, item) => sum + item.infectious, 0),
-      knownPractices: new Set(world.practiceStates.filter((item) => item.mastery > 0 && item.lostTurn === null).map((item) => item.practiceId)).size,
-      migrationsThisTurn: report?.trade.shipments.filter((item) => item.kind === '迁徙').length ?? 0,
-      activeWars: world.wars.filter((item) => item.active).length,
       population: worldPopulation(world),
     },
     recentHistory: world.history.filter(isDefaultVisibleHistoryEvent).slice(-8).map((event) => ({
-      id: event.id,
-      date: `${event.year}年${event.season}`,
       title: event.title,
-      importance: event.importance,
-      causes: event.causes.map((cause) => cause.evidence),
     })),
-    visibleFamilies: view === 'powers' && powerRosterSection === 'families' ? families.slice(0, 60).map((item) => ({
-      id: item.id,
-      name: item.name,
-      polity: polityName(item.polityId),
-      head: characterName(item.headId),
-      members: item.memberIds.length,
-      prestige: item.prestige,
-      influence: item.politicalInfluence,
-    })) : [],
+    visibleFamilies: view === 'powers' && powerRosterSection === 'families' ? families.slice(0, 60).map((item) => item.id) : [],
     lastTurnLedger: report ? {
       turn: report.turn,
-      year: report.year,
-      season: report.season,
       eventIds: report.eventIds,
       population: report.population,
-      food: report.food,
-      wealth: report.wealth,
       trade: {
         shipments: report.trade.shipments.length,
         deliveredValue: report.trade.valueTransferred,
         tariffs: report.trade.tariffsTransferred,
-        produced: report.trade.produced,
-        consumed: report.trade.consumed,
-        lost: report.trade.lost,
       },
       migration: report.migration,
       health: report.health,
@@ -671,31 +610,26 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       })),
       seaZones: world.seaZones.map((zone) => ({ id: zone.id, name: zone.name, center: [zone.x, zone.y], controllerId: zone.controllerId, contested: zone.contested, traffic: zone.traffic })),
       fleets: world.fleets.slice(0, 24).map((fleet) => ({ id: fleet.id, name: fleet.name, polityId: fleet.polityId, seaZoneId: fleet.seaZoneId, portRegionId: fleet.portRegionId, mission: fleet.mission, readiness: fleet.readiness })),
-      armies: world.armies.slice(0, 24).map((army) => {
-        const authority = projectMilitaryAuthority(world, army);
-        const faction = factionForArmy(world, army);
-        return {
+      armies: world.armies.slice(0, 24).map((army) => ({
           id: army.id,
           name: army.name,
           polityId: army.polityId,
           regionId: army.regionId,
           soldiers: army.soldiers,
-          morale: army.morale,
-          supply: army.supply,
-          lawfulCommander: authority.lawfulCommanderName,
-          deputyCommander: authority.deputyCommanderName,
-          faction: faction?.name ?? null,
-          actualAllegiance: authority.actualAllegianceName,
-          allegianceBasis: authority.allegianceBasis,
-          commandDiverged: authority.commandDiverged,
-          retinueSoldiers: authority.retinueSoldiers,
-          order: authority.orderLabel,
-          orderIssuer: authority.orderIssuerName,
-          orderTargetRegionId: authority.orderTargetRegionId,
+          commander: characterName(army.commanderId),
+          order: army.order.kind,
+          orderTargetRegionId: army.order.targetRegionId,
           recentMovement: army.recentMovement,
           orderPath: armyOrderPath(world, army),
-        };
-      }),
+        })),
+      personalForces: world.personalForces.slice(0, 240).map((force) => ({
+        ownerId: force.ownerId,
+        name: characterName(force.ownerId),
+        regionId: world.characters.find((item) => item.id === force.ownerId)?.locationRegionId ?? force.homeRegionId,
+        soldiers: force.soldiers,
+        status: force.status,
+        formationId: force.formationId,
+      })),
     },
   });
 }

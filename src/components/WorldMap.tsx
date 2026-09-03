@@ -24,6 +24,7 @@ import type {
   MapMarkerView,
   MapObjectKind,
   MapOverlay,
+  MapPersonForceView,
   MapPoint,
   MapSeason,
   MapRegionView,
@@ -40,15 +41,12 @@ import {
   type MapPointerContact,
 } from "../view/map-gestures";
 import { buildMapPresentation } from "../view/map-presentation";
-import { mapArmyHoverReading } from "../view/map-army-reading";
+import { mapHoverReading, type MapHoverState } from "../view/map-hover-reading";
 import { buildMapLodScene, resolveMapLodLevel } from "../view/map-lod";
 import { resolveMapFocusOffset, type MapFocusOcclusion } from "../view/map-focus-offset";
 import { layoutMapMarkers, mapMarkerMatchesSelection, mapMarkerTarget } from "../view/map-marker-layout";
 import {
   drawWorldMap,
-  foodDescription,
-  formatPopulation,
-  terrainLabel,
   type MapCanvasSize,
 } from "../view/map-renderer";
 import { useQuarterHighlightPulse } from "./useQuarterHighlightPulse";
@@ -58,7 +56,7 @@ import {
   MAP_MIN_ZOOM,
   clampMapCamera,
   createMapViewportTransform,
-  layoutMapArmyIcons,
+  layoutMapPersonForces,
   panMapCamera,
   reframeMapCamera,
   resolveMapSceneHit,
@@ -87,12 +85,12 @@ export {
   MAP_MIN_ZOOM,
   clampMapCamera,
   createMapViewportTransform,
-  layoutMapArmyIcons,
+  layoutMapPersonClusters,
+  layoutMapPersonForces,
   layoutMapRegionNodes,
   panMapCamera,
   reframeMapCamera,
   zoomMapCameraAtPoint,
-  armyAtScreenPoint,
   regionAtScreenPoint,
   regionNodeAtScreenPoint,
   screenToWorldPoint,
@@ -103,6 +101,7 @@ export interface WorldMapProps {
   regions: readonly MapRegionView[];
   routes: readonly MapRouteView[];
   armies: readonly MapArmyView[];
+  persons?: readonly MapPersonForceView[];
   seaZones?: readonly MapSeaZoneView[];
   fleets?: readonly MapFleetView[];
   markers?: readonly MapMarkerView[];
@@ -129,13 +128,6 @@ export interface WorldMapProps {
   focusedWarArmyIds?: readonly string[];
 }
 
-type HoverState =
-  | { kind: "region"; region: MapRegionView; x: number; y: number }
-  | { kind: "regionNode"; nodeKind: "city" | "port"; region: MapRegionView; x: number; y: number }
-  | { kind: "army"; army: MapArmyView; x: number; y: number }
-  | { kind: "fleet"; fleet: MapFleetView; x: number; y: number }
-  | { kind: "marker"; marker: MapMarkerView; x: number; y: number };
-
 interface TapFeedback {
   id: number;
   x: number;
@@ -158,9 +150,9 @@ function selectedSceneAnchor(
     return selectedRegion ? worldToScreenPoint(selectedRegion.center, transform) : null;
   }
   if (!selectedObject) return null;
-  if (selectedObject.kind === "army") {
-    return layoutMapArmyIcons(scene.armies, scene.regions, transform)
-      .find((layout) => layout.army.id === selectedObject.id)?.point ?? null;
+  if (selectedObject.kind === "person") {
+    return layoutMapPersonForces(scene.persons, transform)
+      .find((layout) => layout.person.id === selectedObject.id)?.point ?? null;
   }
   if (selectedObject.kind === "fleet") {
     const fleet = scene.fleets.find((item) => item.id === selectedObject.id);
@@ -191,6 +183,7 @@ export function WorldMap({
   regions,
   routes,
   armies,
+  persons = [],
   seaZones = [],
   fleets = [],
   markers = [],
@@ -219,7 +212,7 @@ export function WorldMap({
   const hostRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const [size, setSize] = useState<MapCanvasSize>({ width: 1, height: 1, dpr: 1 });
-  const [hover, setHover] = useState<HoverState | null>(null);
+  const [hover, setHover] = useState<MapHoverState | null>(null);
   const [camera, setCameraState] = useState<MapCamera>(() => ({ ...DEFAULT_MAP_CAMERA }));
   const [lodLevel, setLodLevel] = useState<MapLodLevel>("overview");
   const [dragging, setDragging] = useState(false);
@@ -250,12 +243,11 @@ export function WorldMap({
       fleets,
       markers,
       mapProfile.presentation,
+      persons,
     ),
-    [armies, fleets, mapProfile, markers, regions, routes, seaZones],
+    [armies, fleets, mapProfile, markers, persons, regions, routes, seaZones],
   );
-  const hoveredRegionId = hover?.kind === "region" || hover?.kind === "regionNode"
-    ? hover.region.id
-    : undefined;
+  const hoveredRegionId = hover?.kind === "region" ? hover.region.id : undefined;
   const scene = useMemo(
     () => buildMapLodScene(presentation, lodLevel, { selectedRegionId, selectedObject, focusedArmyIds: focusedWarArmyIds }),
     [focusedWarArmyIds, lodLevel, presentation, selectedObject, selectedRegionId],
@@ -550,8 +542,21 @@ export function WorldMap({
       showTapFeedback(point);
       return;
     }
-    if (hit.kind === 'army' && onSelectObject) {
-      onSelectObject('army', hit.army.id);
+    if (hit.kind === 'person' && onSelectObject) {
+      onSelectObject('person', hit.person.id);
+      showTapFeedback(point);
+      return;
+    }
+    if (hit.kind === 'personCluster') {
+      onSelectRegion(hit.cluster.regionId);
+      const next = applyCamera(zoomMapCameraAtPoint(
+        cameraRef.current,
+        Math.max(1.42, cameraRef.current.zoom),
+        point,
+        size.width,
+        size.height,
+      ));
+      commitCamera(next);
       showTapFeedback(point);
       return;
     }
@@ -576,7 +581,7 @@ export function WorldMap({
       onSelectObject('seaZone', hit.seaZone.id);
       showTapFeedback(point);
     }
-  }, [onSelectBlank, onSelectObject, onSelectRegion, overlay, scene, showTapFeedback, size.height, size.width]);
+  }, [applyCamera, commitCamera, onSelectBlank, onSelectObject, onSelectRegion, overlay, scene, showTapFeedback, size.height, size.width]);
 
   const handlePointerMove = useCallback(
     (event: ReactPointerEvent<HTMLCanvasElement>) => {
@@ -654,15 +659,10 @@ export function WorldMap({
         },
       );
       if (hit?.kind === 'fleet') setHover({ kind: 'fleet', fleet: hit.fleet, x: point.x, y: point.y });
-      else if (hit?.kind === 'army') setHover({ kind: 'army', army: hit.army, x: point.x, y: point.y });
+      else if (hit?.kind === 'person') setHover({ kind: 'person', person: hit.person, x: point.x, y: point.y });
+      else if (hit?.kind === 'personCluster') setHover({ kind: 'personCluster', cluster: hit.cluster, x: point.x, y: point.y });
       else if (hit?.kind === 'marker') setHover({ kind: 'marker', marker: hit.marker, x: point.x, y: point.y });
-      else if (hit?.kind === 'regionNode') setHover({
-        kind: 'regionNode',
-        nodeKind: hit.node.kind,
-        region: hit.node.region,
-        x: point.x,
-        y: point.y,
-      });
+      else if (hit?.kind === 'regionNode') setHover({ kind: 'region', region: hit.node.region, x: point.x, y: point.y });
       else if (hit?.kind === 'region') setHover({ kind: 'region', region: hit.region, x: point.x, y: point.y });
       else setHover(null);
     },
@@ -835,7 +835,7 @@ export function WorldMap({
       const visibleSeaZones = scene.seaZones.map((item) => ({ kind: "seaZone" as const, id: item.id }));
       const contextualObjects: Array<{ kind: MapObjectKind | 'region'; id: string; marker?: MapMarkerView }> = overlay === "war"
         ? [
-          ...scene.armies.map((item) => ({ kind: "army" as const, id: item.id })),
+          ...scene.persons.map((item) => ({ kind: "person" as const, id: item.id })),
           ...scene.fleets.map((item) => ({ kind: "fleet" as const, id: item.id })),
           ...visibleSeaZones,
         ]
@@ -843,8 +843,8 @@ export function WorldMap({
       if (scene.regions.length === 0 && contextualObjects.length === 0) return;
       if (event.key === "Enter" || event.key === " ") {
         event.preventDefault();
-        if (hover?.kind === "army") {
-          onSelectObject?.("army", hover.army.id);
+        if (hover?.kind === "person") {
+          onSelectObject?.("person", hover.person.id);
           return;
         }
         if (hover?.kind === "fleet") {
@@ -865,9 +865,7 @@ export function WorldMap({
           else onSelectObject?.(selectedContext.kind, selectedContext.id, selectedContext.marker);
           return;
         }
-        const targetId = hover?.kind === "region" || hover?.kind === "regionNode"
-          ? hover.region.id
-          : selectedRegionId ?? scene.regions[0]?.id;
+        const targetId = hover?.kind === "region" ? hover.region.id : selectedRegionId ?? scene.regions[0]?.id;
         if (targetId) onSelectRegion(targetId);
         return;
       }
@@ -902,43 +900,10 @@ export function WorldMap({
     ?? seaZones.find((item) => selectedObject?.kind === "seaZone" && item.id === selectedObject.id)?.name
     ?? fleets.find((item) => selectedObject?.kind === "fleet" && item.id === selectedObject.id)?.name
     ?? armies.find((item) => selectedObject?.kind === "army" && item.id === selectedObject.id)?.name
+    ?? persons.find((item) => selectedObject?.kind === "person" && item.id === selectedObject.id)?.personName
     ?? markers.find((item) => mapMarkerMatchesSelection(item, selectedObject))?.label;
 
-  const hoverTooltip = useMemo(() => {
-    if (!hover) return null;
-    if (hover.kind === "region") return {
-      name: hover.region.name,
-      type: hover.region.port ? `${terrainLabel(hover.region.terrain)} · 港区` : terrainLabel(hover.region.terrain),
-      rows: [
-        ["辖属", hover.region.polityName ?? (hover.region.polityId ? "地方政权" : "无主之地")],
-        ["人口", formatPopulation(hover.region.population)],
-        [overlay === "food" ? "供养" : "粮况", overlay === "food" ? hover.region.supplyNote : foodDescription(hover.region.foodRatio)],
-      ],
-    };
-    if (hover.kind === "regionNode") return {
-      name: hover.region.name,
-      type: hover.nodeKind === "port" ? "港口 · 可点击" : hover.region.capital ? "都城 · 可点击" : "城邑 · 可点击",
-      rows: [
-        ["辖属", hover.region.polityName ?? (hover.region.polityId ? "地方政权" : "无主之地")],
-        [hover.nodeKind === "port" ? "港级" : "城级", `${hover.nodeKind === "port" ? hover.region.portLevel ?? 1 : hover.region.cityLevel ?? 0}`],
-        ["人口", formatPopulation(hover.region.population)],
-      ],
-    };
-    if (hover.kind === "army") return mapArmyHoverReading(hover.army);
-    if (hover.kind === "fleet") return {
-      name: hover.fleet.name,
-      type: "水师 · 可点击",
-      rows: [["舰力", formatPopulation(hover.fleet.strength)], ["战备", `${Math.round(hover.fleet.readiness)}`], ["任务", hover.fleet.mission]],
-    };
-    if (hover.kind === "marker") {
-      return {
-        name: hover.marker.label,
-        type: `${hover.marker.categoryLabel ?? '朝局'} · 可点击`,
-        rows: [[hover.marker.kind === 'capitalPulse' ? '主导' : '派系', hover.marker.factionName ?? '尚未成形'], ['实据', hover.marker.detail ?? '当季权势记录']],
-      };
-    }
-    return null;
-  }, [hover, overlay]);
+  const hoverTooltip = useMemo(() => mapHoverReading(hover, overlay), [hover, overlay]);
 
   return (
     <div
@@ -1039,8 +1004,8 @@ export function WorldMap({
 
       {!hasInteracted && regions.length > 0 ? (
         <p className="world-map__gesture-hint" aria-hidden="true">
-          <span className="world-map__gesture-hint-desktop">点州域、军团或都城印记查看 · 滚轮缩放</span>
-          <span className="world-map__gesture-hint-touch">轻点州域、军团或都城印记速览 · 双指缩放</span>
+          <span className="world-map__gesture-hint-desktop">点州域、人物或都城印记查看 · 滚轮缩放</span>
+          <span className="world-map__gesture-hint-touch">轻点州域、人物或都城印记速览 · 双指缩放</span>
         </p>
       ) : null}
 

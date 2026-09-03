@@ -49,8 +49,8 @@ export const MAP_PRIMER_STEPS: readonly PrimerStepDefinition[] = [
     id: 'situation',
     eyebrow: '第二眼 · 人势',
     title: '再认谁控制这里',
-    description: '淡色疆域属于不同政权；方印是城邑，双框是都城，锚是港口，带兵数的圆章是军团。兵势层的箭线是已经下达的军令。',
-    reading: '点军团可看主帅、实际听命与去向；圆章红点表示法定主帅与军中拥戴并非一人。',
+    description: '淡色疆域属于不同政权；方印是城邑，双框是都城，锚是港口。人物点大小表示自有部曲，同行轮廓表示共同出征。',
+    reading: '远看人物簇，拉近后点人物可看自有部曲、当前节制与去向；朱砂记号表示军令分裂。',
     action: '带我看疆界',
   },
   {
@@ -108,7 +108,7 @@ function PrimerMapDiagram({ step }: { step: MapPrimerStep }) {
           <g className="map-primer__army" transform="translate(353 132)">
             <circle r="11" />
             <text x="-7" y="3">8千</text>
-            <text x="18" y="4">军团</text>
+            <text x="18" y="4">人物军势</text>
           </g>
         </g>
 

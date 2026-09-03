@@ -208,6 +208,19 @@ describe('POL04/POL05 political map projection', () => {
 
   it('projects each commanded fleet at its current position without merging or calling it a home port', () => {
     const world = advanceWorldBy(createWorld('舰令跟着舰队走'), 8);
+    const firstFleet = world.fleets[0];
+    const firstCommander = world.characters.find((candidate) => candidate.id === firstFleet?.commanderId);
+    const assignedFaction = world.factions.find((candidate) => (
+      candidate.active && candidate.polityId === firstFleet?.polityId
+    ));
+    if (!firstFleet || !firstCommander || !assignedFaction) throw new Error('expected a fleet commander and an active local group');
+    for (const faction of world.factions) {
+      faction.memberIds = faction.memberIds.filter((id) => id !== firstCommander.id);
+      faction.coreMemberIds = faction.coreMemberIds.filter((id) => id !== firstCommander.id);
+    }
+    firstCommander.factionId = assignedFaction.id;
+    assignedFaction.memberIds.push(firstCommander.id);
+    assignedFaction.coreMemberIds.push(firstCommander.id);
     const initialFleetRoot = projectFactionSpatialPowerRoots(world)
       .find((root) => root.kind === 'fleet_command');
     const fleetAsset = initialFleetRoot?.assets.find((asset) => asset.kind === 'fleet');

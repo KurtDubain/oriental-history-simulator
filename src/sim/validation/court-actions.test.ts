@@ -14,10 +14,10 @@ function actors(world: WorldState): {
   for (const polity of world.polities) {
     const ruler = world.characters.find((character) => character.id === polity.rulerId);
     const challenger = world.factions.find((faction) => (
-      faction.polityId === polity.id && faction.leaderId !== ruler?.id
+      faction.polityId === polity.id && faction.id !== ruler?.factionId
     ));
     const leader = world.characters.find((character) => character.id === challenger?.leaderId);
-    if (ruler && challenger && leader) return { polity, ruler, challenger, leader };
+    if (ruler?.factionId && challenger && leader) return { polity, ruler, challenger, leader };
   }
   throw new Error('court invariant fixture requires a ruler and challenger');
 }

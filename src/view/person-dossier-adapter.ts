@@ -67,6 +67,7 @@ function factNamesCharacter(fact: SimulationFact, characterId: string): boolean 
       return [fact.payload.attacker, ...fact.payload.defenders].some((force) => (
         force.commanderId === characterId || force.deputyCommanderId === characterId
         || force.allegianceCharacterId === characterId
+        || force.participants?.some((participant) => participant.characterId === characterId)
       ));
     case 'appointment_started':
     case 'appointment_ended':
@@ -906,6 +907,23 @@ export function toPersonInspector(
   const coreDesires = agency.desires.map((desire) => desire.label);
   const relationships = projectPersonRelationships(world, item);
   const experiences = toPersonExperienceRecords(world, item, 'active').slice(-12).reverse();
+  const personalForce = world.personalForces.find((force) => force.ownerId === item.id);
+  const formation = personalForce?.formationId
+    ? world.armies.find((army) => army.id === personalForce.formationId)
+    : undefined;
+  const forceFaction = item.factionId ? world.factions.find((faction) => faction.id === item.factionId) : undefined;
+  const latestBattle = [...world.facts].reverse().find((fact) => fact.kind === 'battle' && (
+    fact.payload.attacker.participants?.some((participant) => participant.characterId === item.id)
+    || fact.payload.defenders.some((defender) => defender.participants?.some((participant) => participant.characterId === item.id))
+    || [fact.payload.attacker, ...fact.payload.defenders].some((side) => (
+      side.commanderId === item.id || side.deputyCommanderId === item.id || side.allegianceCharacterId === item.id
+    ))
+  ));
+  const latestPersonalBattle = latestBattle?.kind === 'battle'
+    ? [latestBattle.payload.attacker, ...latestBattle.payload.defenders]
+      .flatMap((side) => side.participants ?? [])
+      .find((participant) => participant.characterId === item.id)
+    : undefined;
   return {
     id: item.id,
     name: item.name,
@@ -940,6 +958,23 @@ export function toPersonInspector(
     traits: characterTraits(item),
     relationships,
     experiences,
+    militaryForce: personalForce ? {
+      soldiers: personalForce.soldiers,
+      cohesion: personalForce.cohesion,
+      readiness: personalForce.readiness,
+      status: personalForce.status,
+      location: home?.name ?? '所在不详',
+      faction: forceFaction?.name ?? '未入主要集团',
+      formation: formation
+        ? item.id === formation.commanderId ? `自领${formation.name}` : `随${world.characters.find((character) => character.id === formation.commanderId)?.name ?? '主将'}出征${home ? home.name : ''}`
+        : '独立驻留',
+      commander: formation
+        ? item.id === formation.commanderId ? '自领' : world.characters.find((character) => character.id === formation.commanderId)?.name ?? '主将暂缺'
+        : '无',
+      latestBattle: latestBattle?.kind === 'battle'
+        ? `最近参战：${region(world, latestBattle.payload.targetRegionId)?.name ?? '无名战场'}，本部损失${latestPersonalBattle?.losses ?? 0}人。`
+        : null,
+    } : undefined,
     politicalFocus: projectPersonPoliticalFocus(world, item),
     summary: commandRequest
       ? `请令：${commandRequest.title}。${commandRequest.summary}`

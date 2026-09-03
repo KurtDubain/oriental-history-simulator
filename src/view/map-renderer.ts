@@ -18,6 +18,8 @@ import {
   MAP_PADDING,
   createMapViewportTransform,
   layoutMapArmyIcons,
+  layoutMapPersonClusters,
+  layoutMapPersonForces,
   layoutMapRegionNodes,
   worldToScreenPoint as worldToScreen,
   type MapArmyIconLayout,
@@ -70,24 +72,6 @@ const SEASON_PALETTE: Readonly<Record<MapVisualSettings['season'], {
     seaLight: 'rgba(127, 151, 153, 0.28)', seaMid: 'rgba(100, 133, 141, 0.37)', seaDeep: 'rgba(69, 105, 121, 0.46)',
   },
 };
-
-interface GeographicLink {
-  from: MapRegionView;
-  to: MapRegionView;
-}
-
-interface GeographyAreaView {
-  id: string;
-  label: string;
-  regions: MapRegionView[];
-  links: GeographicLink[];
-  tint: string;
-}
-
-interface GeographyView {
-  areas: GeographyAreaView[];
-  links: GeographicLink[];
-}
 
 const clamp = (value: number, min = 0, max = 1) =>
   Math.min(max, Math.max(min, value));
@@ -189,21 +173,6 @@ function overlayTitle(overlay: MapOverlay) {
   return "势力疆域 · 地势底图";
 }
 
-function isIslandTerrain(terrain: string) {
-  const value = terrain.toLowerCase();
-  return value.includes("岛") || value.includes("island");
-}
-
-function isMountainTerrain(terrain: string) {
-  const value = terrain.toLowerCase();
-  return value.includes("山")
-    || value.includes("丘")
-    || value.includes("高原")
-    || value.includes("mountain")
-    || value.includes("hill")
-    || value.includes("plateau");
-}
-
 function pairKey(left: string, right: string) {
   return left < right ? `${left}:${right}` : `${right}:${left}`;
 }
@@ -220,60 +189,6 @@ function shouldDrawRoute(
   if (overlay === "war") return type === "sea" || type === "river";
   if (overlay === "none") return true;
   return type === "river";
-}
-
-function deriveGeography(
-  regions: readonly MapRegionView[],
-  routes: readonly MapRouteView[],
-  profile: MapPresentationDefinition,
-): GeographyView {
-  const regionById = new Map(regions.map((region) => [region.id, region]));
-  const areaByRegionId = new Map(profile.geographyAreas.flatMap((area) => (
-    area.regionIds.map((regionId) => [regionId, area.id] as const)
-  )));
-  const shapeByRegionId = new Map(regions.map((region) => [region.id, profile.regionDisplaySites[region.id]?.shapeId]));
-  const linkByKey = new Map<string, GeographicLink>();
-  const addLink = (from: MapRegionView, to: MapRegionView) => {
-    const key = pairKey(from.id, to.id);
-    if (!linkByKey.has(key)) linkByKey.set(key, { from, to });
-  };
-
-  for (const route of routes) {
-    if (route.type.toLowerCase() === "sea") continue;
-    const from = regionById.get(route.from);
-    const to = regionById.get(route.to);
-    if (!from || !to) continue;
-    const fromShape = shapeByRegionId.get(from.id);
-    const toShape = shapeByRegionId.get(to.id);
-    const distance = Math.hypot(from.center.x - to.center.x, from.center.y - to.center.y);
-    if (fromShape && fromShape === toShape && distance <= 160) addLink(from, to);
-  }
-
-  for (let leftIndex = 0; leftIndex < regions.length; leftIndex += 1) {
-    const left = regions[leftIndex];
-    if (isIslandTerrain(left.terrain)) continue;
-    for (let rightIndex = leftIndex + 1; rightIndex < regions.length; rightIndex += 1) {
-      const right = regions[rightIndex];
-      if (isIslandTerrain(right.terrain)) continue;
-      const leftShape = shapeByRegionId.get(left.id);
-      const rightShape = shapeByRegionId.get(right.id);
-      if (!leftShape || leftShape !== rightShape) continue;
-      const distance = Math.hypot(left.center.x - right.center.x, left.center.y - right.center.y);
-      if (distance <= 108) addLink(left, right);
-    }
-  }
-
-  const links = [...linkByKey.values()];
-  const areas = profile.geographyAreas.map((area) => {
-    return {
-      id: area.id,
-      label: area.label,
-      tint: area.tint,
-      regions: regions.filter((region) => areaByRegionId.get(region.id) === area.id),
-      links: links.filter((link) => areaByRegionId.get(link.from.id) === area.id && areaByRegionId.get(link.to.id) === area.id),
-    };
-  }).filter((area) => area.regions.length > 0);
-  return { areas, links };
 }
 
 function applySmoothOpenPath(
@@ -362,34 +277,6 @@ function drawSeaField(
   easternDepth.addColorStop(1, "rgba(73, 111, 121, 0)");
   context.fillStyle = easternDepth;
   context.fillRect(0, 0, width, height);
-  context.restore();
-}
-
-function drawSeaMarks(
-  context: CanvasRenderingContext2D,
-  width: number,
-  height: number,
-  _transform: MapViewportTransform,
-) {
-  context.save();
-  context.lineWidth = 0.7;
-  const spacing = Math.max(51, Math.min(width, height) * 0.112);
-  let row = 0;
-  for (let y = spacing * 0.48; y < height; y += spacing, row += 1) {
-    let column = 0;
-    for (let x = spacing * 0.32; x < width; x += spacing, column += 1) {
-      const pattern = hashString(`${row}:${column}`);
-      if (pattern % 100 >= 58) continue;
-      const shift = ((pattern >>> 8) % 23) - 11;
-      const lift = ((pattern >>> 14) % 11) - 5;
-      const radius = 5.5 + ((pattern >>> 19) % 5);
-      context.strokeStyle = `rgba(235, 239, 224, ${0.12 + ((pattern >>> 23) % 8) / 100})`;
-      context.beginPath();
-      context.arc(x + shift, y + lift, radius, Math.PI * 1.08, Math.PI * 1.9);
-      context.arc(x + shift + radius * 1.72, y + lift, radius, Math.PI * 1.08, Math.PI * 1.9);
-      context.stroke();
-    }
-  }
   context.restore();
 }
 
@@ -515,73 +402,6 @@ function drawSeaZones(
     if (contextual || strait || ocean) context.fillText(zone.name, center.x, center.y + 3);
     context.restore();
   }
-}
-
-function drawSeaGeography(
-  context: CanvasRenderingContext2D,
-  zones: readonly MapSeaZoneView[],
-  routes: readonly MapRouteView[],
-  regions: readonly MapRegionView[],
-  transform: MapViewportTransform,
-  compactMap: boolean,
-) {
-  const regionById = new Map(regions.map((region) => [region.id, region]));
-  context.save();
-  for (const zone of zones) {
-    if (!zone.name.includes("海峡") && !zone.climate.includes("内海") && !zone.name.includes("外洋")) continue;
-    const center = worldToScreen(zone.center, transform);
-    if (zone.name.includes("外洋")) {
-      context.strokeStyle = "rgba(64, 96, 104, 0.34)";
-      context.lineWidth = 0.85;
-      for (let index = 0; index < 3; index += 1) {
-        context.beginPath();
-        context.arc(center.x + index * 5 - 5, center.y + 13 + index * 3, 8 + index * 5, Math.PI * 1.1, Math.PI * 1.84);
-        context.stroke();
-      }
-      continue;
-    }
-    context.strokeStyle = "rgba(68, 93, 97, 0.44)";
-    context.lineWidth = 0.8;
-    for (let index = -1; index <= 1; index += 1) {
-      context.beginPath();
-      context.moveTo(center.x - 7, center.y + 13 + index * 3);
-      context.quadraticCurveTo(center.x, center.y + 10 + index * 3, center.x + 7, center.y + 13 + index * 3);
-      context.stroke();
-    }
-  }
-
-  for (const route of routes) {
-    if (route.type.toLowerCase() !== "sea") continue;
-    const from = regionById.get(route.from);
-    const to = regionById.get(route.to);
-    if (!from || !to) continue;
-    const midpoint = worldToScreen({
-      x: (from.center.x + to.center.x) / 2,
-      y: (from.center.y + to.center.y) / 2,
-    }, transform);
-    context.strokeStyle = "rgba(56, 83, 88, 0.48)";
-    context.lineWidth = 0.8;
-    context.beginPath();
-    context.moveTo(midpoint.x - 6, midpoint.y - 3);
-    context.lineTo(midpoint.x + 6, midpoint.y - 3);
-    context.moveTo(midpoint.x - 6, midpoint.y + 1);
-    context.lineTo(midpoint.x + 6, midpoint.y + 1);
-    context.stroke();
-  }
-  context.restore();
-
-  if (compactMap || zones.length === 0) return;
-  const outer = zones
-    .filter((zone) => zone.name.includes("外洋") || zone.climate.includes("外洋"))
-    .sort((left, right) => right.center.x - left.center.x)[0];
-  if (!outer) return;
-  const label = worldToScreen({ x: outer.center.x - 4, y: outer.center.y + 72 }, transform);
-  context.save();
-  context.fillStyle = "rgba(54, 79, 84, 0.46)";
-  context.font = '500 9px "Noto Serif SC", serif';
-  context.textAlign = "center";
-  context.fillText("外洋潮路", label.x, label.y);
-  context.restore();
 }
 
 function drawFleets(
@@ -833,140 +653,6 @@ function drawArmyOrders(
   }
 }
 
-function clusterMountainRegions(regions: readonly MapRegionView[]) {
-  const mountainous = regions.filter((region) => isMountainTerrain(region.terrain) && !isIslandTerrain(region.terrain));
-  const visited = new Set<string>();
-  const clusters: MapRegionView[][] = [];
-  for (const region of mountainous) {
-    if (visited.has(region.id)) continue;
-    const pending = [region];
-    const cluster: MapRegionView[] = [];
-    visited.add(region.id);
-    while (pending.length > 0) {
-      const current = pending.pop();
-      if (!current) continue;
-      cluster.push(current);
-      mountainous.forEach((candidate) => {
-        if (visited.has(candidate.id)) return;
-        if (Math.hypot(current.center.x - candidate.center.x, current.center.y - candidate.center.y) > 148) return;
-        visited.add(candidate.id);
-        pending.push(candidate);
-      });
-    }
-    if (cluster.length >= 2) clusters.push(cluster);
-  }
-  return clusters;
-}
-
-function orderAlongPrincipalAxis(regions: readonly MapRegionView[]) {
-  const meanX = regions.reduce((sum, region) => sum + region.center.x, 0) / regions.length;
-  const meanY = regions.reduce((sum, region) => sum + region.center.y, 0) / regions.length;
-  let xx = 0;
-  let xy = 0;
-  let yy = 0;
-  regions.forEach((region) => {
-    const dx = region.center.x - meanX;
-    const dy = region.center.y - meanY;
-    xx += dx * dx;
-    xy += dx * dy;
-    yy += dy * dy;
-  });
-  const angle = 0.5 * Math.atan2(2 * xy, xx - yy);
-  const axis = { x: Math.cos(angle), y: Math.sin(angle) };
-  const ordered = [...regions]
-    .sort((left, right) => (
-      (left.center.x - meanX) * axis.x + (left.center.y - meanY) * axis.y
-      - ((right.center.x - meanX) * axis.x + (right.center.y - meanY) * axis.y)
-    ));
-  if (ordered.length <= 3) return ordered.map((region) => region.center);
-  const binCount = Math.min(5, Math.max(3, Math.ceil(ordered.length / 3)));
-  return Array.from({ length: binCount }, (_, binIndex) => {
-    const start = Math.floor(binIndex * ordered.length / binCount);
-    const end = Math.max(start + 1, Math.floor((binIndex + 1) * ordered.length / binCount));
-    const bin = ordered.slice(start, end);
-    return {
-      x: bin.reduce((sum, region) => sum + region.center.x, 0) / bin.length,
-      y: bin.reduce((sum, region) => sum + region.center.y, 0) / bin.length,
-    };
-  });
-}
-
-function drawMountainRanges(
-  context: CanvasRenderingContext2D,
-  geography: GeographyView,
-  transform: MapViewportTransform,
-  compactMap: boolean,
-) {
-  const ridges = geography.areas
-    .flatMap((area) => clusterMountainRegions(area.regions).sort((left, right) => right.length - left.length).slice(0, 2))
-    .filter((cluster) => cluster.length >= 2)
-    .slice(0, compactMap ? 4 : 8)
-    .map(orderAlongPrincipalAxis);
-
-  for (const ridge of ridges) {
-    context.save();
-    context.beginPath();
-    applySmoothOpenPath(context, ridge, transform);
-    context.strokeStyle = "rgba(239, 232, 213, 0.45)";
-    context.lineWidth = compactMap ? 1.5 : 2;
-    context.stroke();
-    context.beginPath();
-    applySmoothOpenPath(context, ridge, transform);
-    context.strokeStyle = "rgba(49, 51, 44, 0.31)";
-    context.lineWidth = compactMap ? 0.65 : 0.85;
-    context.stroke();
-
-    if (!compactMap) {
-      ridge.forEach((point, index) => {
-        if (index === 0 || index === ridge.length - 1) return;
-        const center = worldToScreen(point, transform);
-        context.beginPath();
-        context.moveTo(center.x - 4, center.y + 2);
-        context.lineTo(center.x, center.y - 5);
-        context.lineTo(center.x + 4, center.y + 2);
-        context.stroke();
-      });
-    }
-    context.restore();
-  }
-}
-
-function drawRegionTerrain(
-  context: CanvasRenderingContext2D,
-  region: MapRegionView,
-  center: MapPoint,
-) {
-  const terrain = region.terrain.toLowerCase();
-  if (terrain.includes("mountain") || terrain.includes("hill") || terrain.includes("山")) {
-    context.save();
-    context.strokeStyle = "rgba(41, 43, 39, 0.34)";
-    context.lineWidth = 0.85;
-    const peaks = terrain.includes("mountain") || terrain.includes("山地") ? 3 : 2;
-    for (let index = 0; index < peaks; index += 1) {
-      const x = center.x - (peaks - 1) * 4.5 + index * 9;
-      const y = center.y - 13 - (index % 2) * 2;
-      context.beginPath();
-      context.moveTo(x - 5, y + 5);
-      context.lineTo(x, y - 3.5);
-      context.lineTo(x + 5, y + 5);
-      context.stroke();
-    }
-    context.restore();
-  } else if (terrain.includes("高原") || terrain.includes("plateau")) {
-    context.save();
-    context.strokeStyle = "rgba(69, 66, 54, 0.26)";
-    context.lineWidth = 0.7;
-    for (let index = -1; index <= 1; index += 1) {
-      context.beginPath();
-      context.moveTo(center.x - 8, center.y - 11 + index * 4);
-      context.lineTo(center.x - 2, center.y - 13 + index * 4);
-      context.lineTo(center.x + 8, center.y - 11 + index * 4);
-      context.stroke();
-    }
-    context.restore();
-  }
-}
-
 function drawPort(context: CanvasRenderingContext2D, point: MapPoint, compact = false, selected = false) {
   context.save();
   context.translate(point.x, point.y);
@@ -1129,26 +815,6 @@ function drawLegend(
   context.restore();
 }
 
-function drawCompass(context: CanvasRenderingContext2D, width: number) {
-  const x = width - 28;
-  const y = 30;
-  context.save();
-  context.strokeStyle = "rgba(41, 43, 39, 0.55)";
-  context.fillStyle = INK;
-  context.lineWidth = 1;
-  context.font = '600 9px "Noto Serif SC", serif';
-  context.textAlign = "center";
-  context.fillText("北", x, y - 13);
-  context.beginPath();
-  context.moveTo(x, y - 8);
-  context.lineTo(x - 4, y + 4);
-  context.lineTo(x, y + 1);
-  context.lineTo(x + 4, y + 4);
-  context.closePath();
-  context.stroke();
-  context.restore();
-}
-
 export function drawWorldMap(
   context: CanvasRenderingContext2D,
   size: MapCanvasSize,
@@ -1197,11 +863,8 @@ export function drawWorldMap(
   }
   const highlightedRegions = new Set(highlightedRegionIds);
   const highlightStrength = clamp(visualSettings.highlightStrength ?? 1);
-  const geography = deriveGeography(regions, routes, profile);
-
   drawPaper(context, width, height, visualSettings);
   drawSeaField(context, width, height, transform, visualSettings);
-  drawSeaMarks(context, width, height, transform);
   drawSeaZones(context, renderedSeaZones, transform, overlay, selectedObject);
   drawLandFoundation(context, transform, profile);
 
@@ -1226,7 +889,6 @@ export function drawWorldMap(
   });
 
   drawGeographicContours(context, transform, compactMap, profile);
-  drawMountainRanges(context, geography, transform, compactMap);
 
   routes.forEach((route) => {
     if (scene.level !== "local") return;
@@ -1262,13 +924,9 @@ export function drawWorldMap(
   });
 
   drawMajorRiverSystems(context, transform, compactMap, profile);
-  drawSeaGeography(context, renderedSeaZones, routes, regions, transform, compactMap);
 
   regions.forEach((region) => {
     const center = worldToScreen(region.center, transform);
-    if (!compactMap && overlay === "none") {
-      drawRegionTerrain(context, region, center);
-    }
     const regionNodes = regionNodesByRegion.get(region.id) ?? [];
     const portNode = regionNodes.find((node) => node.kind === "port");
     if (portNode) drawPort(context, portNode.point, compactMap, region.id === selectedRegionId);
@@ -1327,7 +985,14 @@ export function drawWorldMap(
   drawPolityLabels(context, regions, transform, overlay, compactMap, scene.level);
   drawMarkers(context, markers, transform, selectedObject);
 
-  const staticArmyLayouts = layoutMapArmyIcons(armies, regions, transform);
+  const staticPersonLayouts = layoutMapPersonForces(scene.persons ?? [], transform);
+  const commanderPointByFormation = new Map(staticPersonLayouts
+    .filter((layout) => layout.person.isCommander && layout.person.formationId)
+    .map((layout) => [layout.person.formationId as string, layout.point]));
+  const staticArmyLayouts = layoutMapArmyIcons(armies, regions, transform).map((layout) => ({
+    ...layout,
+    point: commanderPointByFormation.get(layout.army.id) ?? layout.point,
+  }));
   const armyLayouts = movementProgress >= 1 ? staticArmyLayouts : staticArmyLayouts.map((layout) => {
     const movement = layout.army.recentMovement;
     const from = movement?.current ? regionById.get(movement.fromRegionId) : null;
@@ -1342,100 +1007,98 @@ export function drawWorldMap(
     } };
   });
   drawArmyOrders(context, armyLayouts, regions, transform, overlay, selectedObject, focusedWarId, movementProgress);
-  armyLayouts.forEach(({ army, point, radius }) => {
-    const { x, y } = point;
-    const color = army.polityColor ?? polityFallback(army.polityId ?? army.id);
-    const selected = selectedObject?.kind === "army" && selectedObject.id === army.id;
-    const relevant = !focusedWarId || army.warId === focusedWarId;
-    const compactStrength = army.strength >= 10_000
-      ? `${Math.round(army.strength / 10_000)}万`
-      : `${Math.max(1, Math.round(army.strength / 1000))}千`;
 
+  const personLayouts = staticPersonLayouts.map((layout) => {
+    const army = layout.person.formationId ? armies.find((item) => item.id === layout.person.formationId) : undefined;
+    const movement = army?.recentMovement;
+    const from = movement?.current ? regionById.get(movement.fromRegionId) : null;
+    const to = movement?.current ? regionById.get(movement.toRegionId) : null;
+    if (!from || !to || movementProgress >= 1) return layout;
+    const fromPoint = worldToScreen(from.center, transform);
+    const toPoint = worldToScreen(to.center, transform);
+    return { ...layout, point: {
+      x: fromPoint.x + (toPoint.x - fromPoint.x) * movementProgress + layout.point.x - toPoint.x,
+      y: fromPoint.y + (toPoint.y - fromPoint.y) * movementProgress + layout.point.y - toPoint.y,
+    } };
+  });
+  if (overlay === 'war') {
+    const byFormation = new Map<string, typeof personLayouts>();
+    for (const layout of personLayouts) {
+      if (!layout.person.formationId) continue;
+      const group = byFormation.get(layout.person.formationId) ?? [];
+      group.push(layout);
+      byFormation.set(layout.person.formationId, group);
+    }
     context.save();
-    if (!relevant) context.globalAlpha = 0.18;
-    if (selected) {
-      context.save();
-      context.translate(x, y);
-      drawSelectionHalo(context, radius + 2);
-      context.restore();
-    }
-    if (compactMap) {
-      context.fillStyle = PAPER_LIGHT;
-      context.beginPath();
-      context.arc(x, y, selected ? radius + 1.5 : radius, 0, Math.PI * 2);
-      context.fill();
-      context.strokeStyle = selected ? VERMILION : color;
-      context.lineWidth = selected ? 2.2 : 1.4;
-      if (selected) {
-        context.shadowColor = "rgba(163, 58, 46, 0.34)";
-        context.shadowBlur = 5;
-      }
-      context.stroke();
-      if (army.commandDiverged) {
-        context.fillStyle = VERMILION;
+    context.strokeStyle = 'rgba(67, 75, 64, 0.38)';
+    context.lineWidth = 1.2;
+    for (const group of byFormation.values()) {
+      const commander = group.find((layout) => layout.person.isCommander) ?? group[0];
+      if (!commander) continue;
+      for (const member of group) {
+        if (member === commander) continue;
         context.beginPath();
-        context.arc(x + radius * 0.58, y - radius * 0.58, selected ? 2.2 : 1.8, 0, Math.PI * 2);
-        context.fill();
+        context.moveTo(commander.point.x, commander.point.y);
+        context.lineTo(member.point.x, member.point.y);
+        context.stroke();
       }
-      if (overlay === 'war' && relevant && (focusedWarId || selected)) {
-        context.font = '650 8.5px "Noto Serif SC", serif';
-        context.textAlign = 'center'; context.lineWidth = 2.5;
-        context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
-        const label = `${army.lawfulCommanderName ?? '无帅'} · ${army.factionShortName ?? '无系'}`;
-        context.strokeText(label, x, y + radius + 8); context.fillText(label, x, y + radius + 8);
-        context.strokeText(`${army.name.replace(/中军$|行营$|新军$/, '')} · ${compactStrength}`, x, y + radius + 16);
-        context.fillText(`${army.name.replace(/中军$|行营$|新军$/, '')} · ${compactStrength}`, x, y + radius + 16);
-      }
-      context.restore();
-      return;
-    }
-    context.shadowColor = selected ? "rgba(163, 58, 46, 0.34)" : "rgba(41, 43, 39, 0.24)";
-    context.shadowBlur = selected ? 7 : 4;
-    context.fillStyle = PAPER_LIGHT;
-    context.beginPath();
-    context.arc(x, y, selected ? radius + 1.5 : radius, 0, Math.PI * 2);
-    context.fill();
-    context.shadowBlur = 0;
-    context.strokeStyle = selected ? VERMILION : color;
-    context.lineWidth = selected ? 2.6 : 2;
-    context.stroke();
-    if (army.commandDiverged) {
-      context.beginPath();
-      context.setLineDash([2, 2]);
-      context.strokeStyle = VERMILION;
-      context.lineWidth = 1;
-      context.arc(x, y, radius - 2.6, 0, Math.PI * 2);
-      context.stroke();
-      context.setLineDash([]);
-    }
-    if ((army.retinueSoldiers ?? 0) > 0) {
-      context.fillStyle = color;
-      context.beginPath();
-      context.moveTo(x + radius - 1, y - radius + 1);
-      context.lineTo(x + radius + 5, y - radius + 3.5);
-      context.lineTo(x + radius - 1, y - radius + 6);
-      context.closePath();
-      context.fill();
-    }
-    context.fillStyle = INK;
-    context.font = '700 7px Inter, "Noto Sans SC", sans-serif';
-    context.textAlign = "center";
-    context.textBaseline = "middle";
-    context.fillText(compactStrength, x, y + 0.5);
-    if (overlay === 'war' && relevant) {
-      context.font = '650 9px "Noto Serif SC", serif';
-      context.lineWidth = 3; context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
-      const command = `${army.lawfulCommanderName ?? '无帅'} · ${army.name.replace(/中军$|行营$|新军$/, '')}`;
-      const force = `${compactStrength} · ${army.factionShortName ?? '无系'}`;
-      context.strokeText(command, x, y + radius + 11); context.fillText(command, x, y + radius + 11);
-      context.strokeText(force, x, y + radius + 21); context.fillText(force, x, y + radius + 21);
     }
     context.restore();
-  });
+  }
+  for (const { person, point, radius } of personLayouts) {
+    const selected = selectedObject?.kind === 'person' && selectedObject.id === person.id;
+    const relevant = !focusedWarId || person.warId === focusedWarId;
+    const strength = person.soldiers >= 10_000 ? `${(person.soldiers / 10_000).toFixed(1)}万`
+      : person.soldiers >= 1_000 ? `${(person.soldiers / 1_000).toFixed(1)}千` : `${person.soldiers}`;
+    context.save();
+    if (!relevant) context.globalAlpha = 0.16;
+    if (selected) { context.translate(point.x, point.y); drawSelectionHalo(context, radius + 3); context.translate(-point.x, -point.y); }
+    context.fillStyle = person.isCommander ? INK : PAPER_LIGHT;
+    context.strokeStyle = selected ? VERMILION : person.polityColor;
+    context.lineWidth = selected ? 2.5 : person.isCommander ? 2.2 : 1.6;
+    context.beginPath(); context.arc(point.x, point.y, radius, 0, Math.PI * 2); context.fill(); context.stroke();
+    if (person.commandDiverged) {
+      context.fillStyle = VERMILION; context.beginPath(); context.arc(point.x + radius, point.y - radius, 2.3, 0, Math.PI * 2); context.fill();
+    }
+    if (person.status !== '驻留' && person.targetRegionId) {
+      const target = regionById.get(person.targetRegionId);
+      if (target) {
+        const targetPoint = worldToScreen(target.center, transform);
+        const angle = Math.atan2(targetPoint.y - point.y, targetPoint.x - point.x);
+        context.fillStyle = selected ? VERMILION : person.polityColor;
+        context.beginPath();
+        context.moveTo(point.x + Math.cos(angle) * (radius + 5), point.y + Math.sin(angle) * (radius + 5));
+        context.lineTo(point.x + Math.cos(angle + 2.5) * 4, point.y + Math.sin(angle + 2.5) * 4);
+        context.lineTo(point.x + Math.cos(angle - 2.5) * 4, point.y + Math.sin(angle - 2.5) * 4);
+        context.closePath(); context.fill();
+      }
+    }
+    if (person.showLabel && (relevant || selected)) {
+      context.font = `${person.isCommander ? 700 : 600} ${compactMap ? 8 : 9}px "Noto Serif SC", serif`;
+      context.textAlign = 'center'; context.textBaseline = 'top'; context.lineWidth = 3;
+      context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
+      const label = `${person.personName} · ${strength}`;
+      context.strokeText(label, point.x, point.y + radius + 3); context.fillText(label, point.x, point.y + radius + 3);
+    }
+    context.restore();
+  }
+  for (const { cluster, point, radius } of layoutMapPersonClusters(scene.personClusters ?? [], transform)) {
+    const strength = cluster.soldiers >= 10_000 ? `${(cluster.soldiers / 10_000).toFixed(1)}万`
+      : cluster.soldiers >= 1_000 ? `${(cluster.soldiers / 1_000).toFixed(1)}千` : `${cluster.soldiers}`;
+    context.save();
+    context.fillStyle = PAPER_LIGHT; context.strokeStyle = cluster.polityColor; context.lineWidth = 1.8;
+    context.beginPath(); context.arc(point.x, point.y, radius, 0, Math.PI * 2); context.fill(); context.stroke();
+    if (cluster.count > 1 || cluster.soldiers >= 2_000) {
+      context.font = '650 8px "Noto Serif SC", serif'; context.textAlign = 'center'; context.textBaseline = 'top';
+      context.lineWidth = 3; context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
+      const label = `${cluster.leaderName}等${cluster.count}人 · ${strength}`;
+      context.strokeText(label, point.x, point.y + radius + 3); context.fillText(label, point.x, point.y + radius + 3);
+    }
+    context.restore();
+  }
 
   drawFleets(context, fleets, transform, selectedObject, focusedWarId);
 
   context.restore();
   if (width >= 720) drawLegend(context, width, height, overlay, regions);
-  if (width >= 1080) drawCompass(context, width);
 }

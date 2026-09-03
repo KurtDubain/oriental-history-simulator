@@ -479,7 +479,7 @@ export function projectCapitalPoliticalPulses(
         : rulerConstrained
           ? `${rulerName}的君权受到牵制`
           : dominant
-            ? `${dominant.name}居朝中首位`
+            ? `${dominant.name}为本国最有分量的一系`
             : `${polity.shortName}廷派系未成形`;
       return {
         id: `capital-politics:${polity.id}`,

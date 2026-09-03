@@ -104,6 +104,7 @@ export function computeWorldHash(world: WorldState): string {
   const hasLegacyFactionFactBoundary = Number.isSafeInteger(world.legacyFactionFactBoundaryTurn);
   return stableHash({
     ...schema4Base,
+    ...(schemaVersion >= 5 ? { personalForces: world.personalForces } : {}),
     characters,
     counters,
     lastTurn,

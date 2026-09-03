@@ -4,12 +4,12 @@ import { readFileSync } from 'node:fs';
 
 import { REGION_DEFINITIONS } from '../sim/data';
 import { getRegionDisplaySite } from '../view/map-geography';
+import type { MapPersonForceView, MapRegionView } from '../view/map-contract';
 import {
-  armyAtScreenPoint,
   buildMapPresentation,
   clampMapCamera,
   createMapViewportTransform,
-  layoutMapArmyIcons,
+  layoutMapPersonForces,
   layoutMapRegionNodes,
   MAP_MAX_ZOOM,
   panMapCamera,
@@ -18,8 +18,6 @@ import {
   regionNodeAtScreenPoint,
   screenToWorldPoint,
   zoomMapCameraAtPoint,
-  type MapArmyView,
-  type MapRegionView,
 } from './WorldMap';
 
 function sourceRegions(): MapRegionView[] {
@@ -126,91 +124,28 @@ describe('WorldBox-style presentation atlas', () => {
     expect(presentation.fleets[0].position).toEqual({ x: 455, y: 240 });
   });
 
-  it('uses the same offset screen anchors to draw and hit stacked land armies', () => {
-    const armies: MapArmyView[] = [{
-      id: 'army-a',
-      name: '燕山军',
-      regionId: 'r_yanjing',
-      strength: 12_000,
-    }, {
-      id: 'army-b',
-      name: '神策军',
-      regionId: 'r_yanjing',
-      strength: 8_000,
+  it('places one stable person point inside its region without changing authoritative coordinates', () => {
+    const source = sourceRegions();
+    const persons: MapPersonForceView[] = [{
+      id: 'person-point', personName: '赵维谦', regionId: 'r_yanjing', polityId: 'p_yan', polityColor: '#8d382d',
+      soldiers: 1_800, status: '驻留', formationId: null, formationName: null,
+      commanderName: null, factionShortName: '赵系',
+      isCommander: false, isFactionLeader: true, warId: null, targetRegionId: null, commandDiverged: false,
     }];
-    const presentation = buildMapPresentation(sourceRegions(), [], armies, [], [], []);
-    const viewport = { width: 1210, height: 560 };
-    const transform = createMapViewportTransform(viewport.width, viewport.height);
-    const layouts = layoutMapArmyIcons(presentation.armies, presentation.regions, transform);
-    const region = presentation.regions.find((item) => item.id === 'r_yanjing') as MapRegionView;
-    const regionPoint = {
-      x: transform.offsetX + region.center.x * transform.scale,
-      y: transform.offsetY + region.center.y * transform.scale * transform.yScale,
-    };
+    const first = buildMapPresentation(source, [], [], [], [], [], undefined, persons);
+    const second = buildMapPresentation(source, [], [], [], [], [], undefined, persons);
+    const projected = first.persons[0];
+    const region = first.regions.find((item) => item.id === projected.regionId);
+    if (!projected.position || !region) throw new Error('expected a projected person point');
 
-    expect(layouts).toHaveLength(2);
-    expect(layouts[0].point).toEqual({ x: regionPoint.x + 14, y: regionPoint.y - 12 });
-    expect(layouts[1].point).toEqual({ x: regionPoint.x + 31, y: regionPoint.y - 12 });
-    expect(armyAtScreenPoint(
-      presentation.armies,
-      presentation.regions,
-      layouts[0].point,
-      viewport.width,
-      viewport.height,
-    )?.id).toBe('army-a');
-    expect(armyAtScreenPoint(
-      presentation.armies,
-      presentation.regions,
-      layouts[1].point,
-      viewport.width,
-      viewport.height,
-    )?.id).toBe('army-b');
-  });
-
-  it('keeps land-army taps aligned after mobile zoom and pan without mutating map inputs', () => {
-    const regions = sourceRegions();
-    const armies: MapArmyView[] = [{
-      id: 'army-touch',
-      name: '河朔军',
-      regionId: 'r_yanjing',
-      strength: 15_000,
-    }];
-    const presentation = buildMapPresentation(regions, [], armies, [], [], []);
-    const inputBefore = JSON.stringify({ regions, armies, presentation });
-    const viewport = { width: 390, height: 644 };
-    const zoomed = zoomMapCameraAtPoint(
-      { zoom: 1, panX: 0, panY: 0 },
-      2.6,
-      { x: 210, y: 280 },
-      viewport.width,
-      viewport.height,
-    );
-    const camera = panMapCamera(zoomed, -52, 38, viewport.width, viewport.height);
-    const transform = createMapViewportTransform(viewport.width, viewport.height, 8, camera);
-    const [layout] = layoutMapArmyIcons(presentation.armies, presentation.regions, transform);
-    const forgivingTouchPoint = { x: layout.point.x + 19, y: layout.point.y };
-
-    expect(armyAtScreenPoint(
-      presentation.armies,
-      presentation.regions,
-      forgivingTouchPoint,
-      viewport.width,
-      viewport.height,
-      8,
-      camera,
-      true,
-    )?.id).toBe('army-touch');
-    expect(armyAtScreenPoint(
-      presentation.armies,
-      presentation.regions,
-      forgivingTouchPoint,
-      viewport.width,
-      viewport.height,
-      8,
-      camera,
-      false,
-    )).toBeNull();
-    expect(JSON.stringify({ regions, armies, presentation })).toBe(inputBefore);
+    expect(second.persons[0].position).toEqual(projected.position);
+    expect(regionAtScreenPoint(
+      first.regions,
+      layoutMapPersonForces(first.persons, createMapViewportTransform(1210, 560))[0].point,
+      1210,
+      560,
+    )?.id).toBe(region.id);
+    expect(persons[0].position).toBeUndefined();
   });
 
   it('uses shared city and offshore port anchors as region click targets', () => {

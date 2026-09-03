@@ -197,19 +197,35 @@ function activeOfficeResources(
     && memberIds.has(item.allegiance.characterId)
   ))) {
     const actual = world.characters.find((item) => item.id === army.allegiance.characterId);
-    const retinue = army.retinues.find((item) => item.ownerId === actual?.id);
+    const force = world.personalForces.find((item) => item.ownerId === actual?.id && item.formationId === army.id);
     result.push({
       id: `allegiance:${army.id}`,
       category: 'military_command',
       label: `${army.name}军中拥戴`,
-      detail: `${actual?.name ?? '军中旧主'}虽非主帅，仍获拥戴${army.allegiance.strength}${retinue ? `并有${retinue.soldiers}名直属部曲` : ''}`,
-      value: 4 + army.allegiance.strength * 0.05 + Math.min(4, (retinue?.soldiers ?? 0) / 180),
+      detail: `${actual?.name ?? '军中旧主'}虽非主帅，仍获拥戴${army.allegiance.strength}${force ? `并有${force.soldiers}名自有部曲` : ''}`,
+      value: 4 + army.allegiance.strength * 0.05 + Math.min(4, (force?.soldiers ?? 0) / 180),
       characterIds: actual ? [actual.id] : [],
       regionIds: [army.regionId],
       evidence: [
         { entityType: 'army', entityId: army.id, field: 'allegiance.characterId' },
         { entityType: 'army', entityId: army.id, field: 'allegiance.strength' },
       ],
+    });
+  }
+  const memberForces = world.personalForces.filter((force) => memberIds.has(force.ownerId) && force.soldiers > 0);
+  const personalSoldiers = memberForces.reduce((sum, force) => sum + force.soldiers, 0);
+  if (personalSoldiers > 0) {
+    result.push({
+      id: `personal-forces:${faction.id}`,
+      category: 'military_command',
+      label: '成员自有部曲',
+      detail: `${memberForces.length}名成员共有${personalSoldiers}人，战损会直接削弱本系军政分量`,
+      value: Math.min(2, personalSoldiers / 6_000),
+      characterIds: memberForces.map((force) => force.ownerId),
+      regionIds: [...new Set(memberForces.map((force) => (
+        world.characters.find((character) => character.id === force.ownerId)?.locationRegionId
+      )).filter((id): id is string => Boolean(id)))],
+      evidence: memberForces.map((force) => ({ entityType: 'character' as const, entityId: force.ownerId, field: 'personalForce.soldiers' })),
     });
   }
   return result;

@@ -14,6 +14,7 @@ import {
   type WarState,
   type WorldState,
 } from '../sim';
+import { distributeFormationGain } from '../sim/military/personal-forces';
 import { toCountryInspector } from './country-dossier-adapter';
 import { projectCoreImpacts } from './core-impact-projection';
 
@@ -68,8 +69,8 @@ function stageBorderWar(world: WorldState): BorderWarFixture {
   defender.regionId = border.right.id;
   // Stay above the replenishment threshold while remaining too small to make
   // the order planner switch from the war goal to an immediate interception.
-  attacker.soldiers = 12_000;
-  defender.soldiers = 18_000;
+  distributeFormationGain(world, attacker, Math.max(0, 12_000 - attacker.soldiers));
+  distributeFormationGain(world, defender, Math.max(0, 18_000 - defender.soldiers));
   attacker.morale = 95;
   defender.morale = 95;
   attacker.training = 70;
@@ -305,6 +306,7 @@ describe('core military-political impact projection', () => {
     const army = staged.armies[0];
     const pathogen = staged.pathogens[0];
     if (!army || !pathogen) throw new Error('expected an army and pathogen');
+    distributeFormationGain(staged, army, Math.max(0, 10_000 - army.soldiers));
     army.food = army.soldiers * 2;
     const soldiersBefore = army.soldiers;
     pathogen.transmissibility = 0;

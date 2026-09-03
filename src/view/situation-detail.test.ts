@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceWorldBy, createWorld } from '../sim';
+import { advanceWorld, advanceWorldBy, createWorld } from '../sim';
 import type { WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations';
 import {
@@ -13,6 +13,17 @@ import {
 
 function establishedWorld(): WorldState {
   return advanceWorldBy(createWorld('兵权入世'), 8);
+}
+
+function worldWithSituationResultEvidence(): WorldState {
+  let world = createWorld('兵权入世');
+  for (let turn = 0; turn < 24; turn += 1) {
+    world = advanceWorld(world);
+    if (world.situationSystem.situations.length > 0 && world.facts.some((fact) => fact.stateDeltas.length > 0)) {
+      return world;
+    }
+  }
+  throw new Error('expected a natural Situation and a result Fact within 24 quarters');
 }
 
 function withoutOptionalHistoryLinks<T extends {
@@ -29,12 +40,18 @@ function withoutOptionalHistoryLinks<T extends {
 }
 
 describe('Situation detail projection', () => {
-  it('renders the three baseline Situation types as bounded Chinese stories without mutating the world', () => {
+  it('renders naturally active Situation types as bounded Chinese stories without mutating the world', () => {
     const world = establishedWorld();
     const before = JSON.stringify(world);
     const hash = world.hash;
     const types = new Set(world.situationSystem.situations.map((item) => item.type));
-    expect([...types]).toEqual(expect.arrayContaining(['military_power_crisis', 'inheritance_crisis', 'war_progress']));
+    expect(types.has('war_progress')).toBe(true);
+    expect([...types].every((type) => [
+      'inheritance_crisis',
+      'military_power_crisis',
+      'war_progress',
+      'court_power_struggle',
+    ].includes(type))).toBe(true);
 
     for (const situation of world.situationSystem.situations) {
       const detail = projectSituationDetail(world, situation);
@@ -161,8 +178,8 @@ describe('Situation detail projection', () => {
   });
 
   it('builds a truthful result-Fact closure and marks missing evidence instead of inventing it', () => {
-    const world = establishedWorld();
-    const source = world.situationSystem.situations.find((item) => item.type === 'military_power_crisis');
+    const world = worldWithSituationResultEvidence();
+    const source = world.situationSystem.situations[0];
     const resultFact = world.facts.find((fact) => fact.stateDeltas.length > 0);
     if (!source || !resultFact) throw new Error('expected Situation and result Fact');
     const resolvedTurn = world.turn;

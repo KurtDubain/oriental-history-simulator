@@ -3,8 +3,14 @@ import type { MapProfile } from '../maps/types';
 import { keyedInt, keyedRandom, stableCompare } from './random';
 import { emitSimulationFact, projectFactLinks, type BattleFact, type SimulationFact } from './facts';
 import { practiceEffect } from './v03-life';
-import { recordArmyMovement, refreshArmyMilitaryAuthority, syncArmyPersonnelLocations } from './military/authority';
+import {
+  creditBattleCommandStanding,
+  recordArmyMovement,
+  refreshArmyMilitaryAuthority,
+  syncArmyPersonnelLocations,
+} from './military/authority';
 import { armyOrderFactIds, issueAmphibiousArmyOrder } from './military/orders';
+import { applyFormationLosses, formationForces, setFormationStatus } from './military/personal-forces';
 import type { V03Emit, V03TurnContext } from './v03-context';
 import {
   COMMODITIES,
@@ -204,6 +210,7 @@ function selectFleetCommander(world: WorldState, polityId: string): WorldState['
     ...world.armies.map((army) => army.deputyCommanderId).filter((id): id is string => Boolean(id)),
     ...world.fleets.map((fleet) => fleet.deputyCommanderId).filter((id): id is string => Boolean(id)),
   ]);
+  const formationIds = new Set(world.armies.flatMap((army) => army.participantIds));
   return world.characters
     .filter((character) => (
       character.alive
@@ -214,6 +221,7 @@ function selectFleetCommander(world: WorldState, polityId: string): WorldState['
       && !character.commandingFleetId
       && !character.governedRegionId
       && !deputyIds.has(character.id)
+      && !formationIds.has(character.id)
     ))
     .sort((left, right) => (
       (right.leadership + right.cunning * 0.45 + right.loyalty * 0.2)
@@ -859,9 +867,9 @@ function loadPreparedLandingOperations(
     const demobilized = soldiersBefore - accepted;
     const foodRefund = Math.max(0, foodBefore - accepted);
     if (demobilized > 0) {
-      army.soldiers = accepted;
-      origin.population += demobilized;
-      context.population.demobilized += demobilized;
+      const actual = applyFormationLosses(world, [army], demobilized).reduce((sum, loss) => sum + loss.losses, 0);
+      origin.population += actual;
+      context.population.demobilized += actual;
       refreshArmyMilitaryAuthority(world, army);
     }
     if (foodRefund > 0) {
@@ -1400,7 +1408,7 @@ function fleetOfficerCandidate(
   excluded: ReadonlySet<string>,
   commander: boolean,
 ): WorldState['characters'][number] | null {
-  const armyOfficers = new Set(world.armies.flatMap((army) => [army.commanderId, ...(army.deputyCommanderId ? [army.deputyCommanderId] : [])]));
+  const armyOfficers = new Set(world.armies.flatMap((army) => army.participantIds));
   const fleetDeputies = new Set(world.fleets.map((fleet) => fleet.deputyCommanderId).filter((id): id is string => Boolean(id)));
   return world.characters
     .filter((character) => (
@@ -2000,7 +2008,7 @@ function failLandingVoyage(
   const foodBefore = operation.foodLoaded;
   const returnedFood = origin ? whole(foodBefore * 0.7) : 0;
   const destroyedFood = foodBefore - returnedFood;
-  army.soldiers -= losses;
+  applyFormationLosses(world, [army], losses);
   context.population.militaryDeaths += losses;
   if (origin) {
     recordArmyMovement(army, operation.targetRegionId, origin.id, context.turn, 'retreat', operation.warId);
@@ -2063,6 +2071,7 @@ function resolveLanding(
   const variance = 0.9 + keyedRandom(world.seed, world.turn, 'landing', operation.id) * 0.2;
   const won = attackPower * variance > defensePower;
   const soldiersBefore = army.soldiers;
+  const participantBefore = formationForces(world, army).map((force) => ({ ownerId: force.ownerId, soldiers: force.soldiers }));
   const moraleBefore = army.morale;
   recordLandingTransit(world, context, operation, army, operation.targetRegionId);
   const defenderSnapshots = defenders.map((defender) => ({
@@ -2079,10 +2088,38 @@ function resolveLanding(
     trainingBefore: defender.training,
     supplyBefore: defender.supply,
     losses: 0,
+    participants: formationForces(world, defender).map((force) => ({
+      characterId: force.ownerId,
+      soldiersBefore: force.soldiers,
+      soldiersAfter: force.soldiers,
+      losses: 0,
+      factionId: world.characters.find((character) => character.id === force.ownerId)?.factionId ?? null,
+      formationCommanderId: defender.commanderId,
+      role: force.ownerId === defender.commanderId ? 'commander' as const
+        : force.ownerId === defender.deputyCommanderId ? 'deputy' as const : 'member' as const,
+    })),
   }));
+  setFormationStatus(world, army, '交战');
+  for (const defender of defenders) setFormationStatus(world, defender, '交战');
   const losses = Math.min(army.soldiers - 1, whole(army.soldiers * (won ? 0.08 : 0.27)));
-  army.soldiers -= losses;
+  applyFormationLosses(world, [army], losses);
   context.population.militaryDeaths += losses;
+  creditBattleCommandStanding(world, army, won ? 5 : 1);
+  for (const participant of participantBefore) {
+    const character = world.characters.find((item) => item.id === participant.ownerId && item.alive);
+    if (!character) continue;
+    character.merit = clamp(character.merit + (won ? 2 : 1));
+    character.renown = clamp(character.renown + (won ? 1 : 0));
+  }
+  for (const defender of defenders) {
+    creditBattleCommandStanding(world, defender, won ? 1 : 4);
+    for (const participant of defenderSnapshots.find((item) => item.armyId === defender.id)?.participants ?? []) {
+      const character = world.characters.find((item) => item.id === participant.characterId && item.alive);
+      if (!character) continue;
+      character.merit = clamp(character.merit + (won ? 1 : 2));
+      character.renown = clamp(character.renown + (won ? 0 : 1));
+    }
+  }
   const militiaLoss = Math.min(target.population, whole(Math.min(7_000, target.population * 0.012) * (won ? 0.18 : 0.08)));
   target.population -= militiaLoss;
   context.population.civilianDeaths += militiaLoss;
@@ -2092,10 +2129,10 @@ function resolveLanding(
     category: '海洋',
     importance: 4,
     actorIds: [
-      army.commanderId,
-      army.allegiance.characterId,
-      ...(army.deputyCommanderId ? [army.deputyCommanderId] : []),
-      ...defenders.flatMap((defender) => [defender.commanderId, defender.allegiance.characterId, ...(defender.deputyCommanderId ? [defender.deputyCommanderId] : [])]),
+      ...new Set([
+        ...participantBefore.map((participant) => participant.ownerId),
+        ...defenders.flatMap((defender) => defender.participantIds),
+      ]),
     ],
     polityIds: [army.polityId, previousController],
     regionIds: [operation.originRegionId, target.id],
@@ -2129,6 +2166,15 @@ function resolveLanding(
         trainingBefore: army.training,
         supplyBefore: army.supply,
         losses,
+        participants: participantBefore.map(({ ownerId, soldiers }) => ({
+          characterId: ownerId,
+          soldiersBefore: soldiers,
+          soldiersAfter: world.personalForces.find((force) => force.ownerId === ownerId)?.soldiers ?? 0,
+          losses: soldiers - (world.personalForces.find((force) => force.ownerId === ownerId)?.soldiers ?? 0),
+          factionId: world.characters.find((character) => character.id === ownerId)?.factionId ?? null,
+          formationCommanderId: army.commanderId,
+          role: ownerId === army.commanderId ? 'commander' : ownerId === army.deputyCommanderId ? 'deputy' : 'member',
+        })),
       },
       defenders: defenderSnapshots,
     },
@@ -2165,6 +2211,8 @@ function resolveLanding(
     army.embarkedOperationId = null;
     orderLandingFleetsHome(world, operation);
   }
+  setFormationStatus(world, army, won ? '出征' : '撤退');
+  for (const defender of defenders) setFormationStatus(world, defender, won ? '撤退' : '出征');
   syncArmyPersonnelLocations(world, army);
   emit({
     category: '海洋',

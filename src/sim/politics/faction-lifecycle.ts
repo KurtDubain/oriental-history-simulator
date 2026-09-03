@@ -390,7 +390,7 @@ function sharedArmy(world: WorldState, leftId: string, rightId: string): boolean
       army.commanderId,
       army.deputyCommanderId,
       army.allegiance?.characterId,
-      ...(army.retinues ?? []).map((retinue) => retinue.ownerId),
+      ...army.participantIds,
     ].filter((id): id is string => Boolean(id)));
     return attached.has(leftId) && attached.has(rightId);
   });
@@ -431,7 +431,7 @@ function anchorScore(world: WorldState, character: CharacterState): number {
   const office = (world.offices ?? []).find((item) => item.active && item.holderId === character.id);
   return scoreLeader(character)
     + (character.role === '君主' ? 180 : 0)
-    + (army ? 145 + army.soldiers / 180 : 0)
+    + (army ? 545 + army.soldiers / 180 : 0)
     + (character.commandingFleetId ? 115 : 0)
     + (governed ? 75 + governed.strategicValue * 2 : 0)
     + (office && office.kind !== '廷臣' ? 70 - office.rank * 3 : 0);
@@ -456,7 +456,10 @@ function openingGroups(world: WorldState, polityId: string): OpeningFactionGroup
   const anchorIds = new Set(anchors.map((item) => item.id));
   for (const member of adults.filter((item) => !anchorIds.has(item.id)).sort((left, right) => stableCompare(left.id, right.id))) {
     const best = groups
-      .map((group) => ({ group, score: groupAffinity(world, member, group.leader) }))
+      .map((group) => ({
+        group,
+        score: Math.max(...group.members.map((candidate) => groupAffinity(world, member, candidate))),
+      }))
       .sort((left, right) => right.score - left.score || stableCompare(left.group.leader.id, right.group.leader.id))[0];
     if (best && best.score >= 35) best.group.members.push(member);
   }

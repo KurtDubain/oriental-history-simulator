@@ -43,6 +43,18 @@ export interface BattleForceFact {
   trainingBefore: number;
   supplyBefore: number;
   losses: number;
+  /** Immutable per-person ownership snapshot at the moment of battle. */
+  participants?: BattlePersonalForceFact[];
+}
+
+export interface BattlePersonalForceFact {
+  characterId: string;
+  soldiersBefore: number;
+  soldiersAfter: number;
+  losses: number;
+  factionId: string | null;
+  formationCommanderId: string;
+  role: 'commander' | 'deputy' | 'member';
 }
 
 export interface WarStartedFactPayload {

@@ -52,7 +52,7 @@ function fail(seed: string, turn: number, message: string): void {
 
 function totalPopulation(world: WorldState): number {
   return world.regions.reduce((sum, region) => sum + region.population, 0)
-    + world.armies.reduce((sum, army) => sum + army.soldiers, 0)
+    + world.personalForces.reduce((sum, force) => sum + force.soldiers, 0)
     + world.fleets.reduce((sum, fleet) => sum + fleet.sailors, 0);
 }
 
@@ -76,7 +76,7 @@ function totalCommodity(world: WorldState, commodity: CommodityKind): number {
 }
 
 function assertOpeningWorld(world: WorldState): void {
-  if (world.schemaVersion !== 4 || world.mapContentVersion !== 'v03-82') {
+  if (world.schemaVersion !== 5 || world.mapContentVersion !== 'v03-82') {
     fail(world.seed, world.turn, `新世界版本错误 ${world.schemaVersion}/${world.mapContentVersion}`);
   }
   if (world.regions.length !== 82 || world.seaZones.length !== 10

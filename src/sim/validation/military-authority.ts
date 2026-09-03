@@ -25,9 +25,6 @@ export function collectMilitarySourceFactIds(world: WorldState): Set<string> {
   for (const army of world.armies) {
     if (army.allegiance.sourceFactId) ids.add(army.allegiance.sourceFactId);
     if (army.order.sourceFactId) ids.add(army.order.sourceFactId);
-    for (const retinue of army.retinues) {
-      if (retinue.sourceFactId) ids.add(retinue.sourceFactId);
-    }
   }
   return ids;
 }
@@ -43,7 +40,30 @@ export function validateMilitaryAuthority(
   const wars = new Map(world.wars.map((war) => [war.id, war]));
   const facts = new Map((options.facts ?? world.facts).map((fact) => [fact.id, fact]));
   const trustedSourceFactIds = options.trustedSourceFactIds ?? new Set<string>();
-  const retinueArmyByOwner = new Map<string, string>();
+  const forceByOwner = new Map<string, typeof world.personalForces[number]>();
+  const formationByOwner = new Map<string, string>();
+  for (const force of world.personalForces) {
+    const owner = characters.get(force.ownerId);
+    if (forceByOwner.has(force.ownerId)) {
+      violations.push(issue('personal-force.duplicate', `${force.ownerId}拥有多支个人军势`, force.ownerId));
+    }
+    forceByOwner.set(force.ownerId, force);
+    if (!owner?.alive || (owner.age < 16 && !world.polities.some((polity) => polity.alive && polity.rulerId === owner.id))) {
+      violations.push(issue('personal-force.owner', `${force.ownerId}不具备持有个人军势的资格`, force.ownerId));
+    }
+    if (!Number.isSafeInteger(force.soldiers) || force.soldiers < 0
+      || !finiteRange(force.cohesion, 0, 100) || !finiteRange(force.readiness, 0, 100)
+      || !regions.has(force.homeRegionId)
+      || !['驻留', '集结', '出征', '交战', '撤退'].includes(force.status)) {
+      violations.push(issue('personal-force.state', `${force.ownerId}的个人军势状态无效`, force.ownerId));
+    }
+  }
+  for (const character of world.characters.filter((item) => item.alive && (item.age >= 16
+    || world.polities.some((polity) => polity.alive && polity.rulerId === item.id)))) {
+    if (!forceByOwner.has(character.id)) {
+      violations.push(issue('personal-force.missing', `${character.name}没有唯一个人军势`, character.id));
+    }
+  }
 
   for (const army of world.armies) {
     const movement = army.recentMovement;
@@ -56,11 +76,7 @@ export function validateMilitaryAuthority(
       || !ORDER_KINDS.has(movement.orderKind)
       || (movement.warId !== null && !wars.has(movement.warId))
     )) violations.push(issue('army.recent-movement', `${army.name}最近一步行军记录无效`, army.id));
-    const eligible = new Set([
-      army.commanderId,
-      army.deputyCommanderId,
-      ...army.retinues.map((retinue) => retinue.ownerId),
-    ].filter((id): id is string => Boolean(id)));
+    const eligible = new Set(army.participantIds);
     const allegiance = characters.get(army.allegiance.characterId);
     if (!allegiance?.alive || allegiance.polityId !== army.polityId || !eligible.has(allegiance.id)) {
       violations.push(issue('army.allegiance', `${army.name}实际拥戴者不在有效军令链中`, army.id));
@@ -77,36 +93,29 @@ export function validateMilitaryAuthority(
       violations.push(issue('army.allegiance-fact', `${army.name}军中拥戴引用未知事实`, army.id));
     }
 
-    if (army.retinues.length > 2) violations.push(issue('army.retinue-bound', `${army.name}直属部曲超过两支上限`, army.id));
-    const ownerIds = new Set<string>();
-    let retinueSoldiers = 0;
-    for (const retinue of army.retinues) {
-      const owner = characters.get(retinue.ownerId);
-      if (!owner?.alive || owner.polityId !== army.polityId
-        || (retinue.ownerId !== army.commanderId && retinue.ownerId !== army.deputyCommanderId)) {
-        violations.push(issue('army.retinue-owner', `${army.name}直属部曲所有者不在主副将军令链中`, army.id));
-      }
-      if (ownerIds.has(retinue.ownerId)) violations.push(issue('army.retinue-duplicate', `${army.name}重复记录同一人物部曲`, army.id));
-      ownerIds.add(retinue.ownerId);
-      const previousArmyId = retinueArmyByOwner.get(retinue.ownerId);
-      if (previousArmyId && previousArmyId !== army.id) {
-        violations.push(issue('army.retinue-multi-army', `${retinue.ownerId}同时在多支军团拥有直属部曲`, army.id));
-      }
-      retinueArmyByOwner.set(retinue.ownerId, army.id);
-      if (!Number.isSafeInteger(retinue.soldiers) || retinue.soldiers <= 0
-        || !finiteRange(retinue.cohesion, 0, 100)
-        || !Number.isSafeInteger(retinue.attachedTurn) || retinue.attachedTurn > world.turn) {
-        violations.push(issue('army.retinue-state', `${army.name}直属部曲规模、凝聚或入营时间无效`, army.id));
-      }
-      if (retinue.sourceFactId
-        && !facts.has(retinue.sourceFactId)
-        && !trustedSourceFactIds.has(retinue.sourceFactId)) {
-        violations.push(issue('army.retinue-fact', `${army.name}直属部曲引用未知事实`, army.id));
-      }
-      retinueSoldiers += retinue.soldiers;
+    if (new Set(army.participantIds).size !== army.participantIds.length || army.participantIds.length === 0) {
+      violations.push(issue('formation.participants', `${army.name}的出征成员重复或为空`, army.id));
     }
-    if (retinueSoldiers > army.soldiers || retinueSoldiers > Math.ceil(army.soldiers * 0.18)) {
-      violations.push(issue('army.retinue-subset', `${army.name}直属部曲不是军团兵力的有界子集`, army.id));
+    if (!eligible.has(army.commanderId) || (army.deputyCommanderId && !eligible.has(army.deputyCommanderId))) {
+      violations.push(issue('formation.command', `${army.name}的主副将不在出征成员中`, army.id));
+    }
+    let formationSoldiers = 0;
+    for (const ownerId of army.participantIds) {
+      const owner = characters.get(ownerId);
+      const force = forceByOwner.get(ownerId);
+      if (!owner?.alive || owner.polityId !== army.polityId || !force || force.formationId !== army.id) {
+        violations.push(issue('formation.member', `${army.name}包含无效或未归队的人物军势`, army.id));
+        continue;
+      }
+      const previousArmyId = formationByOwner.get(ownerId);
+      if (previousArmyId && previousArmyId !== army.id) {
+        violations.push(issue('formation.multi', `${ownerId}同时加入多支出征编队`, army.id));
+      }
+      formationByOwner.set(ownerId, army.id);
+      formationSoldiers += force.soldiers;
+    }
+    if (formationSoldiers !== army.soldiers) {
+      violations.push(issue('formation.soldiers-cache', `${army.name}汇总兵力与成员部曲不符`, army.id));
     }
 
     const order = army.order;
@@ -163,6 +172,33 @@ export function validateMilitaryAuthority(
     if (operation && (order.kind !== 'advance' || order.warId !== operation.warId
       || order.targetRegionId !== operation.targetRegionId || order.reasonCode !== 'amphibious_landing')) {
       violations.push(issue('army.order-landing', `${army.name}当前军令与跨海登陆行动不一致`, army.id));
+    }
+  }
+  for (const fact of facts.values()) {
+    if (fact.kind !== 'battle') continue;
+    const seenParticipants = new Set<string>();
+    for (const formation of [fact.payload.attacker, ...fact.payload.defenders]) {
+      if (!formation.participants) continue;
+      const totals = formation.participants.reduce((sum, participant) => ({
+        before: sum.before + participant.soldiersBefore,
+        after: sum.after + participant.soldiersAfter,
+        losses: sum.losses + participant.losses,
+      }), { before: 0, after: 0, losses: 0 });
+      if (totals.before !== formation.soldiersBefore || totals.after !== formation.soldiersAfter
+        || totals.losses !== formation.losses || totals.before - totals.after !== totals.losses) {
+        violations.push(issue('fact.battle-personal-force-total', `${fact.id}的人物部曲伤亡与编队战报不一致`, fact.id));
+      }
+      if (formation.participants.some((participant) => {
+        const invalid = seenParticipants.has(participant.characterId)
+          || participant.formationCommanderId !== formation.commanderId
+          || participant.soldiersBefore < 0
+          || participant.soldiersAfter < 0
+          || participant.losses < 0
+          || participant.soldiersBefore - participant.soldiersAfter !== participant.losses
+          || !fact.actorIds.includes(participant.characterId);
+        seenParticipants.add(participant.characterId);
+        return invalid;
+      })) violations.push(issue('fact.battle-personal-force', `${fact.id}的人物部曲快照无效`, fact.id));
     }
   }
   return violations;

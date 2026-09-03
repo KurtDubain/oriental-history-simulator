@@ -240,7 +240,7 @@ async function openCausalLayer(page, scenario, baseline, story) {
 }
 
 async function openRelatedPerson(page, scenario, baseline) {
-  const subject = page.locator('.observer-causal-subjects button').first();
+  const subject = page.locator('.observer-causal-subjects--next button').first();
   assert.equal(await subject.count(), 1, `${scenario.slug} 史事必须给出卷中人物`);
   await assertTouchTarget(subject, scenario, '卷中人物入口');
   await activate(subject, scenario);

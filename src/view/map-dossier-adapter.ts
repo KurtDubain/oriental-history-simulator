@@ -7,7 +7,6 @@ import type {
   RegionState,
   WorldState,
 } from '../sim/types';
-import { projectMilitaryAuthority } from './military-authority-reading';
 import { factionForArmy } from './war-group-projection';
 import { projectCoreImpacts } from './core-impact-projection';
 import { regionSupplyNote } from './map-adapter';
@@ -42,30 +41,29 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
     const owner = polity(world, item.polityId);
     const commander = character(world, item.commanderId);
     const deputy = character(world, item.deputyCommanderId);
+    const actual = character(world, item.allegiance.characterId);
     const stationed = region(world, item.regionId);
-    const authority = projectMilitaryAuthority(world, item);
     const faction = factionForArmy(world, item);
     const coreImpact = projectCoreImpacts(world, { target: { kind: 'army', id: item.id }, limit: 1 })[0];
-    const readiness = item.supply < 35
-      ? '粮道已很吃紧；继续行军或交战，减员会先于正面溃败到来。'
-      : item.morale < 40
-        ? '军心不稳；主帅威望、近期胜负和补给将决定这支军团能否维持建制。'
-        : item.training >= 70 && item.experience >= 60
-          ? '这是一支训练与战阵经验俱佳的常备军，真正的限制来自粮道、主帅和战场位置。'
-          : '军团的战力由兵力、训练、军心与补给共同决定，人数并不等同于胜算。';
-    const summary = `${faction?.name ?? '未归集团'}实际投入此军；${authority.authoritySummary}；${authority.retinueSummary}。当前军令：${authority.orderLabel}。${readiness}`;
-    const actual = character(world, authority.actualAllegianceId);
-    const orderTarget = authority.orderTargetKind === 'army'
-      ? { id: authority.orderTargetId as string, kind: 'army' as const, label: authority.orderTargetName, detail: '军令目标' }
-      : authority.orderTargetKind === 'region'
-        ? { id: authority.orderTargetId as string, kind: 'region' as const, label: authority.orderTargetName, detail: '军令目的地' }
-        : null;
+    const participants = item.participantIds.flatMap((personId) => {
+      const person = character(world, personId);
+      const force = world.personalForces.find((candidate) => candidate.ownerId === personId);
+      return person && force ? [{ person, force }] : [];
+    });
+    const orderTarget = region(world, item.order.targetRegionId)
+      ?? region(world, world.armies.find((candidate) => candidate.id === item.order.targetArmyId)?.regionId);
+    const orderName = ({ hold: '固守', advance: '进军', intercept: '截击', reinforce: '驰援', retreat: '撤退' } as const)[item.order.kind];
+    const command = commander?.id !== actual?.id
+      ? `${commander?.name ?? '无帅'}掌令，军中更听${actual?.name ?? '旧主'}`
+      : `${commander?.name ?? '无帅'}掌令`;
+    const summary = `${faction?.name ?? '未归集团'}投入${participants.map(({ person, force }) => `${person.name}${compact.format(force.soldiers)}人`).join('、') || '无人'}；${command}。`;
     const links = [
       commander ? { id: commander.id, kind: 'person' as const, label: commander.name, detail: '法定主帅' } : null,
-      deputy ? { id: deputy.id, kind: 'person' as const, label: deputy.name, detail: '军团副将' } : null,
+      deputy ? { id: deputy.id, kind: 'person' as const, label: deputy.name, detail: '行营副将' } : null,
       actual && actual.id !== commander?.id ? { id: actual.id, kind: 'person' as const, label: actual.name, detail: '军中实际拥戴' } : null,
+      ...participants.map(({ person }) => ({ id: person.id, kind: 'person' as const, label: person.name, detail: '同行部曲' })),
       stationed ? { id: stationed.id, kind: 'region' as const, label: stationed.name, detail: '当前驻地' } : null,
-      orderTarget,
+      orderTarget ? { id: orderTarget.id, kind: 'region' as const, label: orderTarget.name, detail: '军令目的地' } : null,
       owner ? { id: owner.id, kind: 'country' as const, label: owner.name, detail: '名义所属' } : null,
     ].filter((entry): entry is NonNullable<typeof entry> => Boolean(entry));
     return {
@@ -75,15 +73,12 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
       subtitle: `${owner?.name ?? '无属'} · ${stationed?.name ?? '驻地不详'}`,
       summary,
       facts: [
-        { label: '名义所属', value: authority.nominalPolityName },
+        { label: '名义所属', value: owner?.name ?? '无属' },
         { label: '军政集团', value: faction?.name ?? '未归集团' },
-        { label: '主帅', value: authority.lawfulCommanderName },
-        { label: '军中拥戴', value: `${authority.actualAllegianceName} · ${authority.allegianceStrength}` },
-        { label: '拥戴凭据', value: authority.allegianceBasis },
-        { label: '副署', value: authority.deputyCommanderName ?? '暂缺' },
-        { label: '直属部曲', value: authority.retinueSummary },
-        { label: '当前军令', value: authority.orderLabel },
-        { label: '下令者', value: authority.orderIssuerName },
+        { label: '主帅', value: commander?.name ?? '无帅' },
+        { label: '军中拥戴', value: `${actual?.name ?? commander?.name ?? '无人'} · ${item.allegiance.strength}` },
+        { label: '副署', value: deputy?.name ?? '暂缺' },
+        { label: '当前军令', value: `${orderName}${orderTarget?.name ?? '本营'}${item.order.status === 'blocked' ? '（受阻）' : ''}` },
         { label: '兵力', value: compact.format(item.soldiers) },
         { label: '军粮', value: compact.format(item.food) },
         { label: '本营', value: region(world, item.originRegionId)?.name ?? '不详' },

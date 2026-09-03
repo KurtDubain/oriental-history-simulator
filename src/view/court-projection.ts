@@ -426,7 +426,7 @@ export function projectCourt(
       : '尚无可核对的正式根基';
   const rulerSummary = ruler ? `${ruler.holder}居君位` : '君位空悬';
   const summary = dominant
-    ? `${rulerSummary}；${dominant.name}${root}，权势${Math.round(dominant.power)}，居朝中首位。`
+    ? `${rulerSummary}；${dominant.name}${root}，权势${Math.round(dominant.power)}，为本国最有分量的一系。`
     : `${rulerSummary}；朝中尚无明确军政集团。`;
   return {
     polityId,

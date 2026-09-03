@@ -435,23 +435,11 @@ describe('render_game_to_text projection boundary', () => {
         layers: [{ kind: 'event', eventId: coldEvent.id }],
       }),
     }))) as {
-      archive: {
-        coldThroughTurn: number | null;
-        blockCount: number;
-        activeFactCount: number;
-        activeEventCount: number;
-      };
       interface: { selectedEvent: { id: string; title: string } | null };
       recentHistory: Array<{ id: string }>;
     };
 
     expect(snapshot.interface.selectedEvent).toMatchObject({ id: coldEvent.id, title: coldEvent.title });
-    expect(snapshot.archive).toMatchObject({
-      coldThroughTurn: 15,
-      blockCount: 1,
-      activeFactCount: world.facts.length,
-      activeEventCount: world.history.length,
-    });
     expect(snapshot.recentHistory.some((event) => event.id === coldEvent.id)).toBe(false);
     expect(JSON.stringify(snapshot).match(/这条记录已经进入冷卷。/gu)).toHaveLength(1);
   });

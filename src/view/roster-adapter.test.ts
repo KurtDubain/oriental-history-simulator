@@ -193,7 +193,9 @@ describe('roster domain projection', () => {
     const expected = world.regions
       .filter((item) => item.controllerId === polity.id)
       .reduce((sum, item) => sum + item.population, 0)
-      + world.armies.filter((item) => item.polityId === polity.id).reduce((sum, item) => sum + item.soldiers, 0)
+      + world.personalForces
+        .filter((force) => world.characters.find((person) => person.id === force.ownerId)?.polityId === polity.id)
+        .reduce((sum, item) => sum + item.soldiers, 0)
       + world.fleets.filter((item) => item.polityId === polity.id).reduce((sum, item) => sum + item.sailors, 0);
 
     expect(polityPopulation(world, polity.id)).toBe(expected);
@@ -201,7 +203,7 @@ describe('roster domain projection', () => {
     expect(projectRosterCollection(world, 'polities').items.find((item) => item.id === polity.id)?.discovery?.sortValues.population).toBe(expected);
     expect(worldPopulation(world)).toBe(
       world.regions.reduce((sum, item) => sum + item.population, 0)
-      + world.armies.reduce((sum, item) => sum + item.soldiers, 0)
+      + world.personalForces.reduce((sum, item) => sum + item.soldiers, 0)
       + world.fleets.reduce((sum, item) => sum + item.sailors, 0),
     );
   });

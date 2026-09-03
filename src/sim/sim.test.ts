@@ -15,6 +15,30 @@ import {
   validateWorld,
   type WorldState,
 } from './index';
+import { applyFormationLosses, detachFormation } from './military/personal-forces';
+
+function stageFormationRebuild(world: WorldState, polityId: string): void {
+  const capital = world.regions.find((region) => region.id === world.polities.find((polity) => polity.id === polityId)?.capitalRegionId);
+  for (const army of world.armies.filter((item) => item.polityId === polityId)) {
+    detachFormation(world, army);
+    const commander = world.characters.find((person) => person.id === army.commanderId);
+    if (commander?.commandingArmyId === army.id) commander.commandingArmyId = null;
+  }
+  world.armies = world.armies.filter((item) => item.polityId !== polityId);
+  for (const force of world.personalForces.filter((item) => world.characters.find((person) => person.id === item.ownerId)?.polityId === polityId)) {
+    if (capital) capital.population += Math.max(0, force.soldiers - 1);
+    force.soldiers = Math.min(1, force.soldiers);
+    force.formationId = null;
+    force.status = '驻留';
+  }
+  const enemy = world.polities.find((polity) => polity.alive && polity.id !== polityId);
+  if (!enemy) throw new Error('expected another polity');
+  world.wars.push({
+    id: `war_rebuild_${polityId}`, kind: 'interstate', attackerId: polityId, defenderId: enemy.id,
+    startedTurn: world.turn, endedTurn: null, active: true, attackerScore: 0, defenderScore: 0,
+    reason: '测试集结', lastBattleTurn: -100, goal: '边境', targetRegionIds: [], exhaustion: 0,
+  });
+}
 
 function expectQuarterlyConservation(world: WorldState): void {
   const report = world.lastTurn;
@@ -349,14 +373,18 @@ function createSchema3Fixture(seed: string): string {
 describe('V0.3 deterministic history simulation', () => {
   it('creates the fixed 82-region, 10-sea, 8-polity and 192-character starting world', () => {
     const world = createWorld('沧海一粟');
-    expect(world.schemaVersion).toBe(4);
+    expect(world.schemaVersion).toBe(5);
     expect(world.mapContentVersion).toBe('v03-82');
     expect(world.regions).toHaveLength(82);
     expect(world.seaZones).toHaveLength(10);
     expect(world.polities).toHaveLength(8);
     expect(world.polities.filter((polity) => polity.alive)).toHaveLength(8);
     expect(world.characters).toHaveLength(192);
-    expect(world.armies).toHaveLength(16);
+    const formationCounts = world.polities.map((polity) => (
+      world.armies.filter((army) => army.polityId === polity.id).length
+    ));
+    expect(world.armies.length).toBeGreaterThan(world.polities.length);
+    expect(formationCounts.some((count) => count !== 2)).toBe(true);
     expect(world.fleets.length).toBeGreaterThan(0);
     expect(world.regions.every((region) => region.x >= 0 && region.x <= 1_000)).toBe(true);
     expect(world.regions.every((region) => region.y >= 0 && region.y <= 700)).toBe(true);
@@ -419,7 +447,7 @@ describe('V0.3 deterministic history simulation', () => {
   it('migrates a true schema-1 save without rewriting history or granting new land and fleets', () => {
     const schema1 = JSON.parse(createSchema1Fixture('旧档迁移一')) as JsonObject;
     const restored = deserializeWorld(JSON.stringify(schema1));
-    expect(restored.schemaVersion).toBe(4);
+    expect(restored.schemaVersion).toBe(5);
     expect(restored.mapContentVersion).toBe('legacy-v02-48');
     expect(restored.regions).toHaveLength(30);
     expect(restored.characters).toHaveLength(80);
@@ -454,7 +482,7 @@ describe('V0.3 deterministic history simulation', () => {
         'bg:r_hedong:1', 'bg:r_hedong:2', 'bg:r_hedong:3', 'bg:r_hedong:4',
       ]);
     const restoredV2 = deserializeWorld(JSON.stringify(schema2));
-    expect(restoredV2.schemaVersion).toBe(4);
+    expect(restoredV2.schemaVersion).toBe(5);
     expect(restoredV2.mapContentVersion).toBe('legacy-v02-48');
     expect(restoredV2.regions).toHaveLength(48);
     expect(restoredV2.characters).toHaveLength(120);
@@ -470,7 +498,7 @@ describe('V0.3 deterministic history simulation', () => {
   it('migrates a schema-3 archive without fabricating historical facts', () => {
     const schema3 = JSON.parse(createSchema3Fixture('旧档迁移三')) as JsonObject;
     const restored = deserializeWorld(JSON.stringify(schema3));
-    expect(restored.schemaVersion).toBe(4);
+    expect(restored.schemaVersion).toBe(5);
     expect(restored.facts).toEqual([]);
     expect(restored.counters.fact).toBe(0);
     expect(restored.legacyArchiveBoundary).toMatchObject({
@@ -519,7 +547,9 @@ describe('V0.3 deterministic history simulation', () => {
     capital.food = 100_000;
     for (const army of armies) {
       army.regionId = destination.id;
-      army.soldiers = 3_000;
+      const released = applyFormationLosses(world, [army], Math.max(0, army.soldiers - 3_000))
+        .reduce((sum, loss) => sum + loss.losses, 0);
+      destination.population += released;
       army.food = 0;
       army.supply = 0;
     }
@@ -560,17 +590,7 @@ describe('V0.3 deterministic history simulation', () => {
     if (!polity) return;
     polity.treasury = 0;
     polity.taxRate = 0;
-    const removed = world.armies.filter((army) => army.polityId === polity.id);
-    for (const army of removed) {
-      const region = world.regions.find((item) => item.id === army.regionId);
-      if (region) {
-        region.population += army.soldiers;
-        region.food += army.food;
-      }
-      const commander = world.characters.find((character) => character.id === army.commanderId);
-      if (commander) commander.commandingArmyId = null;
-    }
-    world.armies = world.armies.filter((army) => army.polityId !== polity.id);
+    stageFormationRebuild(world, polity.id);
 
     const next = advanceWorld(world);
     expect(next.polities.find((item) => item.id === polity.id)?.treasury).toBe(0);
@@ -585,16 +605,7 @@ describe('V0.3 deterministic history simulation', () => {
     if (!polity) return;
     polity.treasury = 500;
     polity.taxRate = 0;
-    for (const army of world.armies.filter((item) => item.polityId === polity.id)) {
-      const region = world.regions.find((item) => item.id === army.regionId);
-      if (region) {
-        region.population += army.soldiers;
-        region.food += army.food;
-      }
-      const commander = world.characters.find((character) => character.id === army.commanderId);
-      if (commander) commander.commandingArmyId = null;
-    }
-    world.armies = world.armies.filter((army) => army.polityId !== polity.id);
+    stageFormationRebuild(world, polity.id);
 
     const next = advanceWorld(world);
     const raised = next.history.find((event) => event.kind === 'army_raised' && event.polityIds.includes(polity.id));
@@ -656,6 +667,50 @@ describe('V0.3 deterministic history simulation', () => {
     }
     const poorNext = advanceWorld(poor);
     expect(poorNext.history.some((event) => event.kind === 'rebellion' && event.actorIds.includes(poorGovernor.id))).toBe(false);
+
+    const ready = createWorld('有地方根基方可起兵');
+    const readyPolity = ready.polities.find((item) => item.id === 'p_yan');
+    const readyGovernor = ready.characters.find((character) => (
+      character.polityId === readyPolity?.id
+      && Boolean(character.governedRegionId)
+      && character.governedRegionId !== readyPolity?.capitalRegionId
+    ));
+    expect(readyPolity).toBeDefined();
+    expect(readyGovernor).toBeDefined();
+    if (!readyPolity || !readyGovernor?.governedRegionId) return;
+    const readyRegion = ready.regions.find((region) => region.id === readyGovernor.governedRegionId);
+    expect(readyRegion).toBeDefined();
+    if (!readyRegion) return;
+    readyPolity.authority = 0;
+    readyPolity.legitimacy = 0;
+    readyPolity.administration = 0;
+    readyPolity.treasury = 50_000;
+    readyPolity.taxRate = 0;
+    readyGovernor.ambition = 100;
+    readyGovernor.loyalty = 0;
+    readyGovernor.caution = 0;
+    readyGovernor.rebellionReadiness = 100;
+    readyRegion.unrest = 100;
+    readyRegion.wealth = Math.max(readyRegion.wealth, 100_000);
+    for (const character of ready.characters.filter((item) => item.polityId === readyPolity.id && item.id !== readyGovernor.id)) {
+      character.ambition = 0;
+      character.loyalty = 100;
+      character.caution = 100;
+    }
+    const readyNext = advanceWorld(ready);
+    const rebellion = readyNext.history.find((event) => (
+      event.kind === 'rebellion' && event.actorIds.includes(readyGovernor.id)
+    ));
+    expect(rebellion).toBeDefined();
+    expect(rebellion?.causes.map((cause) => cause.label)).toEqual(expect.arrayContaining([
+      '地方权限',
+      '结构危机',
+      '军事与财政前置',
+    ]));
+    expect(rebellion?.stateDeltas.some((delta) => delta.entityType === 'war' && delta.field === 'active')).toBe(true);
+    expect(rebellion?.stateDeltas.some((delta) => delta.entityType === 'army')).toBe(true);
+    expect(rebellion?.stateDeltas.filter((delta) => delta.field === 'treasury').length).toBeGreaterThanOrEqual(2);
+    expect(validateWorld(readyNext)).toEqual([]);
   });
 
   it('assigns each deputy to at most one army and keeps civil and military offices separate', () => {
@@ -714,17 +769,7 @@ describe('V0.3 deterministic history simulation', () => {
     expect(eventKinds.battle).toBeGreaterThan(0);
     expect(eventKinds.region_captured).toBeGreaterThan(0);
     expect(eventKinds.succession).toBeGreaterThan(0);
-    expect(eventKinds.rebellion).toBeGreaterThan(0);
     expect(eventKinds.polity_eliminated).toBeGreaterThan(0);
-    const rebellion = history.find((event) => event.kind === 'rebellion');
-    expect(rebellion?.causes.map((cause) => cause.label)).toEqual(expect.arrayContaining([
-      '地方权限',
-      '结构危机',
-      '军事与财政前置',
-    ]));
-    expect(rebellion?.stateDeltas.some((delta) => delta.entityType === 'war' && delta.field === 'active')).toBe(true);
-    expect(rebellion?.stateDeltas.some((delta) => delta.entityType === 'army')).toBe(true);
-    expect(rebellion?.stateDeltas.filter((delta) => delta.field === 'treasury').length).toBeGreaterThanOrEqual(2);
     expect(world.polities
       .filter((polity) => polity.id.startsWith('p_rebel_') && polity.eliminatedTurn !== null)
       .every((polity) => Number(polity.eliminatedTurn) > polity.foundedTurn)).toBe(true);

@@ -2,6 +2,7 @@ export {
   toMapArmies,
   toMapFleets,
   toMapMarkers,
+  toMapPersonForces,
   toMapRegions,
   toMapRoutes,
   toMapSeaZones,

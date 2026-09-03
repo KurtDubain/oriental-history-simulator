@@ -379,13 +379,16 @@ function preparationSignals(
   const securedFamilyBacking = securedActions.some((action) => (
     action.action === 'request_backing' && action.targetKind === 'family_head'
   ));
+  const refusedPatrons = new Set(supportActions
+    .filter((action) => action.action === 'request_backing' && action.outcome === 'refused')
+    .map((action) => action.targetId));
   return {
     earnMerit: (character.deputyExperience >= 28 && character.merit >= 38)
       || character.deputyExperience >= 46
       || character.merit >= 58,
     patronage: securedPatronage || Math.max(
-      patronageValue(commanderRelation),
-      patronageValue(rulerRelation),
+      refusedPatrons.has(commanderId) ? 0 : patronageValue(commanderRelation),
+      refusedPatrons.has(polity?.rulerId ?? '') ? 0 : patronageValue(rulerRelation),
     ) >= AGENCY_SUPPORT_THRESHOLD,
     militarySupport: securedMilitarySupport || character.deputyExperience >= 38
       || character.merit >= 50

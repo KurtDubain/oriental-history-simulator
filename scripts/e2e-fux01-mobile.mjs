@@ -63,9 +63,25 @@ function assertObserverInvariant(current, baseline, message) {
 async function profileGeometry(page, contentVersion) {
   return page.evaluate(async (version) => {
     const maps = await import('/src/maps/index.ts');
+    const territories = await import('/src/view/map-territories.ts');
     const profile = maps.getMapProfileForContentVersion(version);
+    const sites = Object.values(profile.presentation.regionDisplaySites);
+    const regionTapPoints = Object.fromEntries(
+      territories.buildTerritoryCells(profile.presentation.territoryShapes, sites).map((cell) => {
+        const center = profile.presentation.regionDisplaySites[cell.siteId];
+        return [cell.siteId, cell.polygon
+          .map((point) => ({
+            x: center.x + (point.x - center.x) * 0.68,
+            y: center.y + (point.y - center.y) * 0.68,
+          }))
+          .sort((left, right) => Math.hypot(right.x - center.x, right.y - center.y)
+            - Math.hypot(left.x - center.x, left.y - center.y))
+          .slice(0, 4)];
+      }),
+    );
     return {
       regionSites: profile.presentation.regionDisplaySites,
+      regionTapPoints,
       seaCenters: profile.presentation.seaZoneDisplayCenters,
     };
   }, contentVersion);
@@ -298,40 +314,27 @@ async function swipeQuickLook(page, dispatch, direction, baseline, scenario) {
   return current;
 }
 
-function regionCandidates(snapshot, geometry, metrics, occupiedRegionIds) {
+function clusterCandidates(snapshot, geometry, metrics) {
   return snapshot.mapObjects.regions
-    .filter((region) => geometry.regionSites[region.id] && !occupiedRegionIds.has(region.id))
-    .map((region) => ({
-      id: region.id,
-      point: screenPoint(metrics, geometry.regionSites[region.id], false),
-    }))
+    .filter((region) => geometry.regionSites[region.id])
+    .map((region) => ({ id: region.id, point: screenPoint(metrics, geometry.regionSites[region.id], false) }))
     .filter(({ point }) => (
-      point.x >= metrics.canvas.x + 34
-      && point.x <= metrics.canvas.x + metrics.canvas.width - 34
-      && point.y >= metrics.canvas.y + 76
-      && point.y <= metrics.canvas.y + metrics.canvas.height - 90
+      point.x >= metrics.canvas.x + 28
+      && point.x <= metrics.canvas.x + metrics.canvas.width - 28
+      && point.y >= metrics.canvas.y + 72
+      && point.y <= metrics.canvas.y + metrics.canvas.height - 72
     ))
-    .sort((left, right) => left.point.y - right.point.y || left.id.localeCompare(right.id));
+    .sort((left, right) => right.point.y - left.point.y || left.id.localeCompare(right.id));
 }
 
-function armyCandidates(snapshot, geometry, metrics) {
-  const visible = new Set(metrics.visibleArmyIds);
-  const slots = new Map();
-  return snapshot.mapObjects.armies
-    .filter((army) => visible.has(army.id) && geometry.regionSites[army.regionId])
-    .map((army) => {
-      const slot = slots.get(army.regionId) ?? 0;
-      slots.set(army.regionId, slot + 1);
-      const anchor = screenPoint(metrics, geometry.regionSites[army.regionId], false);
-      const compact = anchor.scale < 0.42;
-      return {
-        id: army.id,
-        point: {
-          x: anchor.x + (compact ? 6 : 14) + (slot % 3) * (compact ? 7 : 17),
-          y: anchor.y - (compact ? 5 : 12) - Math.floor(slot / 3) * (compact ? 8 : 19),
-        },
-      };
-    })
+function personCandidates(snapshot, geometry, metrics) {
+  const regionIds = new Set(snapshot.mapObjects.personalForces.map((force) => force.regionId));
+  return snapshot.mapObjects.regions
+    .filter((region) => regionIds.has(region.id) && geometry.regionSites[region.id])
+    .flatMap((region) => [
+      geometry.regionSites[region.id],
+      ...(geometry.regionTapPoints[region.id] ?? []),
+    ].map((point) => ({ id: region.id, point: screenPoint(metrics, point, false) })))
     .filter(({ point }) => (
       point.x >= metrics.canvas.x + 28
       && point.x <= metrics.canvas.x + metrics.canvas.width - 28
@@ -375,6 +378,21 @@ async function touchFirstExact(page, candidates, kind, scenario) {
       && current.interface.selected.id === candidate.id
       && current.interface.mobileInspectorMode === 'quick'
     ) {
+      return current;
+    }
+    await closeQuickLook(page);
+  }
+  assert.fail(`${scenario.slug} 未能以真实触控命中 ${kind}：${JSON.stringify(attempts)}`);
+}
+
+async function touchFirstKind(page, candidates, kind, scenario) {
+  const attempts = [];
+  for (const candidate of candidates) {
+    await page.touchscreen.tap(candidate.point.x, candidate.point.y);
+    await page.waitForTimeout(70);
+    const current = await state(page);
+    attempts.push({ candidate, selected: current.interface.selected });
+    if (current.interface.selected?.kind === kind && current.interface.mobileInspectorMode === 'quick') {
       return current;
     }
     await closeQuickLook(page);
@@ -466,31 +484,30 @@ async function runScenario(browser, scenario) {
     const geometry = await profileGeometry(page, scenario.contentVersion);
     assert.ok(await page.evaluate(() => navigator.maxTouchPoints > 0), `${scenario.slug} 必须使用真实触控上下文`);
     await exerciseLodButtons(page, baseline, scenario);
-    await page.locator('[data-map-zoom-in="true"]').click();
-    await assertLod(page, 'regional', baseline, `${scenario.slug} 对象点选进入 regional`);
     let snapshot = await state(page);
     let metrics = await mapMetrics(page);
-    const occupiedRegions = new Set(snapshot.mapObjects.armies.map((army) => army.regionId));
-    const region = await touchFirstExact(page, regionCandidates(snapshot, geometry, metrics, occupiedRegions), 'region', scenario);
+    const region = await touchFirstExact(page, clusterCandidates(snapshot, geometry, metrics), 'region', scenario);
     const selectedRegionId = region.interface.selected.id;
     const regionQuick = await assertQuickLook(page, 'region', baseline, scenario);
     await swipeQuickLook(page, dispatch, 'up', baseline, scenario);
     await swipeQuickLook(page, dispatch, 'down', baseline, scenario);
     await tapBlankToClose(page, baseline, scenario);
+    await assertLod(page, 'regional', baseline, `${scenario.slug} 人物簇点选进入 regional`);
 
     snapshot = await state(page);
     metrics = await mapMetrics(page);
-    const army = await touchFirstExact(page, armyCandidates(snapshot, geometry, metrics), 'army', scenario);
-    const selectedArmyId = army.interface.selected.id;
-    const armyQuick = await assertQuickLook(page, 'army', baseline, scenario);
-    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-army-quick.png`, fullPage: true });
+    const person = await touchFirstKind(page, personCandidates(snapshot, geometry, metrics), 'person', scenario);
+    const selectedPersonId = person.interface.selected.id;
+    const personQuick = await assertQuickLook(page, 'person', baseline, scenario);
+    assert.ok(person.interface.selectedDetail?.militaryForce, `${scenario.slug} 人物速览必须包含个人军势`);
+    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-person-quick.png`, fullPage: true });
     await exerciseMapGestures(page, dispatch, baseline, scenario);
 
     await page.locator('[data-map-reset="true"]').click();
-    const overviewWithArmy = await assertLod(page, 'overview', baseline, `${scenario.slug} 选中军团缩回 overview`);
-    assert.equal(overviewWithArmy.interface.selected.id, selectedArmyId, `${scenario.slug} 缩回概览必须保持选中军团`);
+    const overviewWithPerson = await assertLod(page, 'overview', baseline, `${scenario.slug} 选中人物缩回 overview`);
+    assert.equal(overviewWithPerson.interface.selected.id, selectedPersonId, `${scenario.slug} 缩回概览必须保持选中人物`);
     const overviewMetrics = await mapMetrics(page);
-    assert.ok(overviewMetrics.visibleArmyIds.includes(selectedArmyId), `${scenario.slug} 选中军团必须作为 LOD 可见例外`);
+    assert.ok(overviewMetrics.selectedScreenX !== null && overviewMetrics.selectedScreenY !== null, `${scenario.slug} 选中人物必须作为 LOD 可见例外`);
     await tapBlankToClose(page, baseline, scenario);
 
     await page.locator('[data-map-zoom-in="true"]').click();
@@ -523,9 +540,9 @@ async function runScenario(browser, scenario) {
       profile: scenario.profileId,
       viewport: `${scenario.viewport.width}x${scenario.viewport.height}`,
       hash: baseline.deterministicWorldHash,
-      focusAvoided: regionQuick.avoided || armyQuick.avoided || fleetQuick.avoided,
+      focusAvoided: regionQuick.avoided || personQuick.avoided || fleetQuick.avoided,
       region: selectedRegionId,
-      army: selectedArmyId,
+      person: selectedPersonId,
       fleet: selectedFleetId,
     };
   } catch (error) {
@@ -553,7 +570,7 @@ try {
   const results = [];
   for (const scenario of SCENARIOS) results.push(await runScenario(browser, scenario));
   process.stdout.write(`FUX01 mobile E2E passed (${PACKAGE_VERSION}): ${results.map((result) => (
-    `${result.scenario} ${result.profile} ${result.viewport} ${result.hash.slice(0, 12)} region=${result.region} army=${result.army} fleet=${result.fleet} focus=${result.focusAvoided ? 'avoided' : 'clear'}`
+    `${result.scenario} ${result.profile} ${result.viewport} ${result.hash.slice(0, 12)} region=${result.region} person=${result.person} fleet=${result.fleet} focus=${result.focusAvoided ? 'avoided' : 'clear'}`
   )).join(' | ')}\n`);
 } finally {
   await browser?.close();

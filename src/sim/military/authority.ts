@@ -3,8 +3,6 @@ import {
   clampMilitaryValue as clamp,
   markLawfulCommandTransfer,
   militaryAllegianceStrength as allegianceStrength,
-  militaryRetinueFor as retinueFor,
-  refreshMilitaryRetinues as refreshRetinues,
   syncArmyPersonnelLocations,
 } from './authority-core';
 import type {
@@ -21,7 +19,7 @@ type ArmyMilitarySeed = Pick<
   'id' | 'polityId' | 'commanderId' | 'deputyCommanderId' | 'regionId' | 'soldiers' | 'morale'
 >;
 
-export type ArmyMilitaryFields = Pick<ArmyState, 'allegiance' | 'retinues' | 'order'>;
+export type ArmyMilitaryFields = Pick<ArmyState, 'allegiance' | 'order'>;
 
 function initialOrder(
   army: ArmyMilitarySeed,
@@ -48,7 +46,6 @@ export function createArmyMilitaryFields(
   army: ArmyMilitarySeed,
   provenance: MilitaryStateProvenance = 'opening',
 ): ArmyMilitaryFields {
-  const commanderRetinue = retinueFor(world, army, army.commanderId, 'commander', world.turn, null);
   return {
     allegiance: {
       characterId: army.commanderId,
@@ -57,7 +54,6 @@ export function createArmyMilitaryFields(
       provenance,
       sourceFactId: null,
     },
-    retinues: commanderRetinue ? [commanderRetinue] : [],
     order: initialOrder(army, world.turn, provenance),
   };
 }
@@ -71,12 +67,15 @@ export function selectOpeningArmyDeputy(
 ): CharacterState | null {
   return world.characters
     .filter((character) => (
-      character.polityId === polityId
+      character.alive
+      && character.age >= 16
+      && character.polityId === polityId
       && character.id !== world.polities.find((polity) => polity.id === polityId)?.rulerId
       && character.id !== commander.id
       && !character.governedRegionId
       && !commanders.some((candidate) => candidate.id === character.id)
       && !assignedIds.has(character.id)
+      && world.personalForces.some((force) => force.ownerId === character.id && force.formationId === null && force.soldiers > 0)
     ))
     .sort((left, right) => (
       right.leadership + right.loyalty * 0.45 - (left.leadership + left.loyalty * 0.45)
@@ -120,11 +119,8 @@ export function refreshArmyMilitaryAuthority(
   army: ArmyState,
   sourceFactId: string | null = null,
 ): void {
-  refreshRetinues(world, army, sourceFactId);
   const eligibleIds = new Set([
-    army.commanderId,
-    army.deputyCommanderId,
-    ...army.retinues.map((retinue) => retinue.ownerId),
+    ...army.participantIds,
   ].filter((id): id is string => Boolean(id)));
   const allegiance = world.characters.find((character) => (
     character.id === army.allegiance.characterId
@@ -161,16 +157,15 @@ export function refreshAllArmyMilitaryAuthority(
 export function migrateArmyMilitaryState(world: WorldState): boolean {
   let migrated = false;
   for (const army of world.armies) {
-    const raw = army as ArmyState & Partial<ArmyMilitaryFields & Pick<ArmyState, 'recentMovement'>>;
+    const raw = army as ArmyState & Partial<ArmyMilitaryFields & Pick<ArmyState, 'recentMovement' | 'participantIds'>>;
     if (!Object.prototype.hasOwnProperty.call(raw, 'recentMovement')) {
       raw.recentMovement = null;
       migrated = true;
     }
     const hadOrder = Boolean(raw.order);
-    if (!raw.allegiance || !Array.isArray(raw.retinues) || !raw.order) {
+    if (!raw.allegiance || !raw.order) {
       const fields = createArmyMilitaryFields(world, army, 'legacy');
       raw.allegiance ??= fields.allegiance;
-      raw.retinues = Array.isArray(raw.retinues) ? raw.retinues : fields.retinues;
       raw.order ??= fields.order;
       migrated = true;
     }
@@ -194,11 +189,11 @@ export function migrateArmyMilitaryState(world: WorldState): boolean {
       army.commanderId,
       army.deputyCommanderId,
       army.allegiance.characterId,
-      ...army.retinues.map((retinue) => retinue.ownerId),
+      ...(army.participantIds ?? []),
     ].filter((id): id is string => Boolean(id)));
     const snapshot = () => ({
       allegiance: army.allegiance,
-      retinues: army.retinues,
+      participantIds: army.participantIds,
       locations: world.characters
         .filter((character) => trackedCharacterIds.has(character.id))
         .map((character) => [character.id, character.locationRegionId] as const)

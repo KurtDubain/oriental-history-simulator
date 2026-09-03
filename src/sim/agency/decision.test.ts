@@ -368,6 +368,8 @@ describe('C10/C11 authoritative agency decision core', () => {
     const deputy = world.characters.find((character) => character.id === deputyId);
     if (!deputy) throw new Error('Expected deputy for patronage fixture');
     deputy.loyalty = 100;
+    deputy.influence = 0;
+    deputy.cunning = 0;
 
     processAgencyDecisionSystem(world, context, eventEmitter(world, context));
 
@@ -519,7 +521,7 @@ describe('C10/C11 authoritative agency decision core', () => {
   });
 
   it('reviews only the recent Fact suffix instead of traversing an old goal-wide archive', () => {
-    const { world, context, deputyId } = decisionFixture('agency-incremental-facts', 'rejected');
+    const { world, context, deputyId } = decisionFixture('agency-command-rejected', 'rejected');
     processAgencyDecisionSystem(world, context, eventEmitter(world, context));
     const actor = world.agencyDecisionSystem.actors.find((item) => item.characterId === deputyId);
     const template = context.facts.find((fact) => fact.kind === 'battle');

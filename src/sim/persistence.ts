@@ -13,6 +13,7 @@ import { findMapProfileForContentVersion } from '../maps';
 import { migrateFactionIdentityModel } from './politics/faction-lifecycle';
 import { refreshFactionPowerLedgers } from './politics/power-ledger';
 import { migrateArmyMilitaryState } from './military/authority';
+import { migrateSchema4PersonalForces } from './military/personal-forces';
 import {
   compactWorldArchive,
   createWorldArchiveState,
@@ -131,10 +132,10 @@ export function deserializeWorld(serialized: string): WorldState {
   if (!parsed || typeof parsed !== 'object') throw new Error('存档缺少世界对象');
   const rawWorld = parsed as Record<string, unknown>;
   const originalVersion = Number(rawWorld.schemaVersion);
-  if (originalVersion !== 1 && originalVersion !== 2 && originalVersion !== 3 && originalVersion !== 4) throw new Error(`不支持的存档版本 ${String(rawWorld.schemaVersion)}`);
+  if (originalVersion !== 1 && originalVersion !== 2 && originalVersion !== 3 && originalVersion !== 4 && originalVersion !== 5) throw new Error(`不支持的存档版本 ${String(rawWorld.schemaVersion)}`);
   const world = parsed as unknown as WorldState;
   if (world.hash !== computeWorldHash(world)) throw new Error('存档哈希校验失败，内容可能已损坏或被篡改');
-  if (originalVersion === 4) {
+  if (originalVersion >= 4) {
     if (!Array.isArray(world.facts)) {
       throw new Error('事实档案摘要校验失败，内容可能已损坏或被篡改');
     }
@@ -249,6 +250,11 @@ export function deserializeWorld(serialized: string): WorldState {
   if (legacyBoundary) {
     migrateLegacyFacts(world, legacyBoundary);
     world.archiveSystem = createWorldArchiveState(legacyBoundary);
+    migrated = true;
+  }
+  if (originalVersion < 5) {
+    migrateSchema4PersonalForces(world);
+    (world as unknown as { schemaVersion: number }).schemaVersion = 5;
     migrated = true;
   }
   if (migrateArmyMilitaryState(world)) migrated = true;

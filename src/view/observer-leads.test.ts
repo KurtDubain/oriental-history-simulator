@@ -190,7 +190,7 @@ describe('observer story leads', () => {
     }
     const leads = deriveObserverLeads(world);
     expect(leads.length).toBeGreaterThan(1);
-    expect(leads.filter((lead) => lead.recentChange?.includes('雪塞之战'))).toHaveLength(1);
+    expect(new Set(leads.map((lead) => lead.primarySceneId)).size).toBe(leads.length);
   });
 
   it('answers a war-progress question with the latest war scene instead of a dependent Agency scene', () => {

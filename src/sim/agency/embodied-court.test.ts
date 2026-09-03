@@ -252,7 +252,7 @@ function formedAlliance(
 }
 
 describe('v1.20 embodied court alliance', () => {
-  it('does not invent a court bargain merely because a fixed world reaches winter', () => {
+  it('keeps naturally available winter bargains as pure choices rather than invented results', () => {
     const world = advanceWorldBy(createWorld('v1.20-natural-court-0'), 3);
     const before = stableHash(world);
     const courtActions = world.characters.flatMap((character) => (
@@ -262,7 +262,12 @@ describe('v1.20 embodied court alliance', () => {
     ));
 
     expect(world.season).toBe('冬');
-    expect(courtActions).toEqual([]);
+    expect(courtActions).toEqual(world.characters.flatMap((character) => (
+      projectCharacterEmbodiedActions(world, character.id).filter((action) => (
+        action.command.kind === 'form_court_alliance' && action.available
+      ))
+    )));
+    expect(world.facts.some((fact) => fact.kind === 'faction_relation_changed' && fact.turn === world.turn)).toBe(false);
     expect(stableHash(world)).toBe(before);
   });
 
@@ -668,7 +673,17 @@ describe('v1.20 embodied court alliance', () => {
     const target = fixture.world.factions.find((item) => item.id === projected.command.targetId);
     if (!target) throw new Error('leader-change scenario requires the projected target faction');
     const oldLeaderId = target.leaderId;
-    const successorId = target.memberIds.find((id) => id !== oldLeaderId);
+    let successorId = target.memberIds.find((id) => id !== oldLeaderId);
+    if (!successorId) {
+      const successor = fixture.world.characters.find((item) => (
+        item.alive && item.age >= 16 && item.polityId === target.polityId && item.factionId === null
+      ));
+      if (successor) {
+        successor.factionId = target.id;
+        target.memberIds.push(successor.id);
+        successorId = successor.id;
+      }
+    }
     if (!successorId) throw new Error('leader-change scenario requires a successor');
     target.coreMemberIds = [oldLeaderId, successorId];
     const oldLeader = fixture.world.characters.find((item) => item.id === oldLeaderId);

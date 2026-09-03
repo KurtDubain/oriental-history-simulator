@@ -749,6 +749,11 @@ describe('POL02 stable faction identity and lifecycle', () => {
       trustStake: 18,
     });
     legacy.historyDigest = stableHash([stableHash(foundingEvent), legacyAllianceEvent]);
+    (legacy as unknown as Record<string, unknown>).schemaVersion = 4;
+    delete (legacy as unknown as Record<string, unknown>).personalForces;
+    for (const army of legacy.armies as Array<WorldState['armies'][number] & Record<string, unknown>>) {
+      delete (army as Record<string, unknown>).participantIds;
+    }
     legacy.hash = computeWorldHash(legacy);
 
     const oldSave = serializeWorld(legacy);

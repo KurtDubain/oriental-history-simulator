@@ -132,6 +132,8 @@ function scene(options: {
     regions,
     routes: [],
     armies: options.armies ?? [],
+    persons: [],
+    personClusters: [],
     seaZones,
     fleets: [],
     markers: options.markers ?? [],
@@ -199,7 +201,6 @@ describe('map renderer LOD contract', () => {
       regionId: origin.id,
       strength: 1_200,
       orderKind: 'advance',
-      orderTargetRegionId: destination.id,
       expectedContact: {
         armyId: 'army-east',
         armyName: '东丘军',

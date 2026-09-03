@@ -4,6 +4,7 @@ import type {
   MapFleetView,
   MapMarkerView,
   MapOverlay,
+  MapPersonForceView,
   MapRegionView,
   MapRouteView,
   MapSeaZoneView,
@@ -12,7 +13,6 @@ import {
   projectCapitalPoliticalPulses,
   projectFactionSpatialPowerRoots,
 } from './political-map-projection';
-import { projectMilitaryAuthority } from './military-authority-reading';
 import { armyOrderPath } from '../sim/military/orders';
 import { factionForArmy } from './war-group-projection';
 import { polity, region } from './dossier-adapter-shared';
@@ -159,9 +159,9 @@ export function toMapArmies(world: WorldState): MapArmyView[] {
   return world.armies
     .filter((army) => army.soldiers > 0)
     .map((army) => {
-      const reading = projectMilitaryAuthority(world, army);
       const faction = factionForArmy(world, army);
       const path = armyOrderPath(world, army);
+      const commander = world.characters.find((item) => item.id === army.commanderId);
       return {
         id: army.id,
         name: army.name,
@@ -169,28 +169,13 @@ export function toMapArmies(world: WorldState): MapArmyView[] {
         polityId: army.polityId,
         polityColor: polities.get(army.polityId)?.color,
         strength: army.soldiers,
-        morale: army.morale,
-        status: army.supply < 45 ? '补给吃紧' : reading.orderLabel,
-        nominalPolityName: reading.nominalPolityName,
-        lawfulCommanderName: reading.lawfulCommanderName,
-        deputyCommanderName: reading.deputyCommanderName,
-        actualAllegianceName: reading.actualAllegianceName,
-        allegianceStrength: reading.allegianceStrength,
-        commandDiverged: reading.commandDiverged,
-        retinueSoldiers: reading.retinueSoldiers,
-        retinueSummary: reading.retinueSummary,
-        orderKind: reading.orderKind,
-        orderLabel: reading.orderLabel,
-        orderTargetRegionId: reading.orderTargetRegionId,
-        orderIssuerName: reading.orderIssuerName,
-        orderBlocked: reading.orderBlocked,
+        lawfulCommanderName: commander?.name ?? '无帅',
+        orderKind: army.order.kind,
+        orderBlocked: army.order.status === 'blocked',
         warId: army.order.warId,
-        factionId: faction?.id ?? null,
-        factionName: faction?.name ?? '未归集团',
         factionShortName: (faction?.name ?? '无系').replace(/一系$|旧部$/, '').slice(0, 5),
         orderPathRegionIds: path ?? [],
         nextRegionId: path?.[1] ?? null,
-        nextRegionName: world.regions.find((region) => region.id === path?.[1])?.name ?? null,
         recentMovement: army.recentMovement ? {
           ...army.recentMovement,
           current: army.recentMovement.turn === (world.lastTurn?.turn ?? world.turn),
@@ -198,6 +183,38 @@ export function toMapArmies(world: WorldState): MapArmyView[] {
         expectedContact: expectedContact(world, army),
       };
     });
+}
+
+export function toMapPersonForces(world: WorldState): MapPersonForceView[] {
+  const polities = new Map(world.polities.map((item) => [item.id, item]));
+  const factions = new Map(world.factions.filter((item) => item.active).map((item) => [item.id, item]));
+  const armies = new Map(world.armies.map((item) => [item.id, item]));
+  return world.personalForces.flatMap((force) => {
+    const person = world.characters.find((item) => item.id === force.ownerId && item.alive);
+    const owner = person ? polities.get(person.polityId) : undefined;
+    if (!person || !owner) return [];
+    const army = force.formationId ? armies.get(force.formationId) : undefined;
+    const commander = army ? world.characters.find((item) => item.id === army.commanderId) : undefined;
+    const faction = person.factionId ? factions.get(person.factionId) : undefined;
+    return [{
+      id: person.id,
+      personName: person.name,
+      regionId: person.locationRegionId,
+      polityId: person.polityId,
+      polityColor: owner.color,
+      soldiers: force.soldiers,
+      status: force.status,
+      formationId: force.formationId,
+      formationName: army?.name ?? null,
+      commanderName: commander?.name ?? null,
+      factionShortName: (faction?.name ?? '无系').replace(/一系$|旧部$/, '').slice(0, 5),
+      isCommander: army?.commanderId === person.id,
+      isFactionLeader: faction?.leaderId === person.id,
+      warId: army?.order.warId ?? null,
+      targetRegionId: army?.order.targetRegionId ?? null,
+      commandDiverged: Boolean(army && army.allegiance.characterId !== army.commanderId),
+    }];
+  });
 }
 
 export function toMapSeaZones(world: WorldState): MapSeaZoneView[] {

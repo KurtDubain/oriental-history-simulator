@@ -26,7 +26,6 @@ import {
   type RosterScope,
 } from './roster-discovery';
 import { situationTypeLabel } from './situation-snapshot';
-import { projectMilitaryAuthority } from './military-authority-reading';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import type { ObserverWatchItem } from './v1-observer';
 import {
@@ -134,7 +133,7 @@ const COLLECTION_COPY: Readonly<Record<RosterScope, Omit<RosterCollectionDefinit
     scope: 'military',
     title: '天下军旅',
     eyebrow: '势力诸卷 · 兵力军需',
-    emptyMessage: '天下暂无宏观军团。',
+    emptyMessage: '天下暂无出征行营。',
     searchPlaceholder: '检索军号、主帅或驻地',
   },
 };
@@ -433,7 +432,7 @@ function personIdentity(
   }
   if (person.governedRegionId) return { id: 'governor', label: '地方长官', rank: 55 };
   const army = context.world.armies.find((item) => item.commanderId === person.id || item.deputyCommanderId === person.id);
-  if (army) return { id: 'military', label: army.commanderId === person.id ? '军团主帅' : '军团副将', rank: army.commanderId === person.id ? 65 : 45 };
+  if (army) return { id: 'military', label: army.commanderId === person.id ? '行营主帅' : '行营副将', rank: army.commanderId === person.id ? 65 : 45 };
   const fleet = context.world.fleets.find((item) => item.commanderId === person.id || item.deputyCommanderId === person.id);
   if (fleet) return { id: 'military', label: fleet.commanderId === person.id ? '水师提督' : '水师副将', rank: fleet.commanderId === person.id ? 65 : 45 };
   return { id: 'unassigned', label: '暂无实职', rank: 0 };
@@ -442,7 +441,7 @@ function personIdentity(
 function highOfficeAttentionLabel(identity: ReturnType<typeof personIdentity>): string {
   if (identity.id === 'ruler') return '君主在位';
   if (identity.label === '枢密使') return '执掌枢密';
-  if (identity.label === '军团主帅') return '统领一军';
+  if (identity.label === '行营主帅') return '统领一营';
   if (identity.label === '水师提督') return '统领水师';
   return `现任${identity.label}`;
 }
@@ -592,7 +591,8 @@ function militaryItem(
   const strained = coverage < 0.75;
   const army = isArmy ? item as WorldState['armies'][number] : null;
   const fleet = isArmy ? null : item as WorldState['fleets'][number];
-  const authority = army ? projectMilitaryAuthority(context.world, army) : null;
+  const commander = livingCharacter(context.world, item.commanderId);
+  const allegiance = army ? livingCharacter(context.world, army.allegiance.characterId) : null;
   const recent = militaryEvent(context, kind, item.id);
   const watchAlert = watchCandidate(context, kind, item.id);
   const situation = situationCandidate(context, 'military', item.id);
@@ -603,7 +603,7 @@ function militaryItem(
     ? candidate('urgent-status', `军粮仅余 ${coverage.toFixed(1)} 季`, { kind: 'item', id: item.id }, { value: 1 - coverage })
     : item.morale < 40
       ? candidate('urgent-status', '军心不稳', { kind: 'item', id: item.id }, { value: 40 - item.morale })
-      : candidate('command', isArmy ? '军团在列' : '水师在列', { kind: 'item', id: item.id }, { value: strength });
+      : candidate('command', isArmy ? '行营在列' : '水师在列', { kind: 'item', id: item.id }, { value: strength });
   const attention = chooseAttention([watched, situation, event, structural].filter((entry): entry is AttentionCandidate => Boolean(entry)));
   const location = army
     ? `驻${region(context.world, army.regionId)?.name ?? '途中'}`
@@ -613,11 +613,11 @@ function militaryItem(
   return {
     id: item.id,
     title: item.name,
-    subtitle: authority
-      ? `${authority.authoritySummary} · ${location}`
-      : `${livingCharacter(context.world, item.commanderId)?.name ?? '无帅'} · ${location}${fleet ? ` · ${fleet.mission}` : ''}`,
-    meta: authority
-      ? `${authority.orderLabel} · ${compact.format(strength)} 人 · 余粮 ${coverage.toFixed(1)} 季`
+    subtitle: army && allegiance?.id !== commander?.id
+      ? `${commander?.name ?? '无帅'}掌令、军中更听${allegiance?.name ?? '旧主'} · ${location}`
+      : `${commander?.name ?? '无帅'} · ${location}${fleet ? ` · ${fleet.mission}` : ''}`,
+    meta: army
+      ? `${({ hold: '固守', advance: '进军', intercept: '截击', reinforce: '驰援', retreat: '撤退' } as const)[army.order.kind]} · ${compact.format(strength)} 人 · 余粮 ${coverage.toFixed(1)} 季`
       : `${compact.format(strength)} 人 · 余粮 ${coverage.toFixed(1)} 季`,
     accent: polity(context.world, item.polityId)?.color,
     alert: Boolean(watched?.reason.kind === 'watched-alert') || strained || item.morale < 40,

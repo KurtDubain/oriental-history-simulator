@@ -76,6 +76,23 @@ describe('schema 4 authoritative fact layer', () => {
       fact.payload.attacker.soldiersBefore - fact.payload.attacker.soldiersAfter === fact.payload.attacker.losses
       && fact.payload.defenders.every((force) => force.soldiersBefore - force.soldiersAfter === force.losses)
     ))).toBe(true);
+    for (const battle of battles) {
+      for (const formation of [battle.payload.attacker, ...battle.payload.defenders]) {
+        expect(formation.participants?.reduce((sum, participant) => sum + participant.soldiersBefore, 0))
+          .toBe(formation.soldiersBefore);
+        expect(formation.participants?.reduce((sum, participant) => sum + participant.soldiersAfter, 0))
+          .toBe(formation.soldiersAfter);
+        expect(formation.participants?.reduce((sum, participant) => sum + participant.losses, 0))
+          .toBe(formation.losses);
+        expect(new Set(formation.participants?.map((participant) => participant.characterId)).size)
+          .toBe(formation.participants?.length);
+        expect(formation.participants?.every((participant) => (
+          battle.actorIds.includes(participant.characterId)
+          && participant.formationCommanderId === formation.commanderId
+          && participant.soldiersBefore - participant.soldiersAfter === participant.losses
+        ))).toBe(true);
+      }
+    }
     // Participant snapshots must remain self-contained even after the live
     // army record is retired. Do not depend on one balance seed happening to
     // annihilate a force within a fixed number of quarters.

@@ -3,6 +3,8 @@ import type {
   MapFleetView,
   MapLodLevel,
   MapLodScene,
+  MapPersonForceClusterView,
+  MapPersonForceView,
   MapPresentationView,
   MapRegionView,
   MapSelectedObject,
@@ -154,6 +156,62 @@ function visibleFleets(
     : [...fleets];
 }
 
+function visiblePersonForces(
+  presentation: MapPresentationView,
+  level: MapLodLevel,
+  selectedObject: MapSelectedObject,
+  focusedArmyIds: readonly string[],
+): { persons: MapPersonForceView[]; clusters: MapPersonForceClusterView[] } {
+  const source = presentation.persons ?? [];
+  const selectedId = selectedObject?.kind === 'person' ? selectedObject.id : null;
+  const focused = new Set(focusedArmyIds);
+  if (level !== 'overview') {
+    return {
+      persons: source.map((person) => ({
+        ...person,
+        showLabel: level === 'local' || person.id === selectedId || person.isFactionLeader || person.status !== '驻留',
+      })),
+      clusters: [],
+    };
+  }
+  const visibleIds = new Set(source
+    .filter((person) => person.id === selectedId || (person.formationId && focused.has(person.formationId)))
+    .map((person) => person.id));
+  const persons = source
+    .filter((person) => visibleIds.has(person.id))
+    .map((person) => ({ ...person, showLabel: true }));
+  const grouped = new Map<string, MapPersonForceView[]>();
+  for (const person of source.filter((item) => !visibleIds.has(item.id))) {
+    const key = `${person.regionId}:${person.polityId}`;
+    const values = grouped.get(key) ?? [];
+    values.push(person);
+    grouped.set(key, values);
+  }
+  const regionById = new Map(presentation.regions.map((region) => [region.id, region]));
+  const clusters = [...grouped.entries()].flatMap(([key, values]) => {
+    const region = regionById.get(values[0]!.regionId);
+    if (!region) return [];
+    const ordered = [...values].sort((left, right) => (
+      Number(right.isFactionLeader || right.isCommander) - Number(left.isFactionLeader || left.isCommander)
+      || right.soldiers - left.soldiers
+      || stableIdCompare(left.id, right.id)
+    ));
+    const leader = ordered[0]!;
+    return [{
+      id: `person-cluster:${key}`,
+      regionId: leader.regionId,
+      position: region.center,
+      leaderName: leader.personName,
+      personIds: ordered.map((person) => person.id),
+      count: ordered.length,
+      soldiers: ordered.reduce((sum, person) => sum + person.soldiers, 0),
+      polityId: leader.polityId,
+      polityColor: leader.polityColor,
+    }];
+  });
+  return { persons, clusters };
+}
+
 /**
  * Creates the deterministic, observer-only visibility slice for a map frame.
  * The input projection and its objects are never changed.
@@ -190,6 +248,7 @@ export function buildMapLodScene(
       presentation.regions.filter((region) => region.port).map((region) => region.id),
     );
   const interactiveSeaZoneIds = new Set(presentation.seaZones.map((zone) => zone.id));
+  const personForces = visiblePersonForces(presentation, level, selectedObject, options.focusedArmyIds ?? []);
 
   return {
     ...presentation,
@@ -199,6 +258,8 @@ export function buildMapLodScene(
     portRegionIds,
     interactiveSeaZoneIds,
     armies: visibleArmies(presentation.armies, level, selectedObject, options.focusedArmyIds ?? []),
+    persons: personForces.persons,
+    personClusters: personForces.clusters,
     fleets: visibleFleets(presentation.fleets, level, selectedObject),
     markers: [...presentation.markers],
   };

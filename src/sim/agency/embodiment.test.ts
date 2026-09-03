@@ -177,26 +177,28 @@ describe('EMB05-06 deputy identity action', () => {
 
   it('lets a player-held deputy carry support into a next-quarter request using the same intent resolver', () => {
     let world = createWorld('军权春秋');
-    while (world.turn < 14) world = advanceWorld(world);
-    const naturallyRequesting = world.characters
-      .map((character) => character.id)
-      .find((actorId) => projectCharacterEmbodiedActions(world, actorId).some((item) => (
-        item.available
-        && (item.command.kind === 'cultivate_military_support' || item.command.kind === 'request_backing')
-      )));
-    expect(naturallyRequesting).toBeTruthy();
-    if (!naturallyRequesting) throw new Error('fixture requires a deputy whose support unlocks a request');
-    const support = projectCharacterEmbodiedActions(world, naturallyRequesting).find((item) => (
-      item.available
-      && (item.command.kind === 'cultivate_military_support' || item.command.kind === 'request_backing')
-    ));
-    if (!support) throw new Error('missing player support action');
-
-    const afterSupport = advanceWorld(world, { embodiedAction: support.command });
-    const request = projectCharacterEmbodiedActions(afterSupport, naturallyRequesting)
-      .find((item) => item.command.kind === 'request_independent_command' && item.available);
-    expect(request?.label).toBe('请领独立军令');
-    if (!request) throw new Error('support should leave the formal request for the next player quarter');
+    let chain: { actorId: string; afterSupport: WorldState; request: ReturnType<typeof projectCharacterEmbodiedActions>[number] } | null = null;
+    for (let turn = 0; turn < 32 && !chain; turn += 1) {
+      for (const actor of world.agencyDecisionSystem.actors) {
+        const supports = projectCharacterEmbodiedActions(world, actor.characterId).filter((item) => (
+          item.available
+          && (item.command.kind === 'cultivate_military_support' || item.command.kind === 'request_backing')
+        ));
+        for (const support of supports) {
+          const afterSupport = advanceWorld(world, { embodiedAction: support.command });
+          const request = projectCharacterEmbodiedActions(afterSupport, actor.characterId)
+            .find((item) => item.command.kind === 'request_independent_command' && item.available);
+          if (request) { chain = { actorId: actor.characterId, afterSupport, request }; break; }
+        }
+        if (chain) break;
+      }
+      if (!chain) world = advanceWorld(world);
+    }
+    expect(chain?.request.label).toBe('请领独立军令');
+    if (!chain) throw new Error('fixture requires a successful support action that unlocks a command request');
+    const naturallyRequesting = chain.actorId;
+    const afterSupport = chain.afterSupport;
+    const request = chain.request;
 
     const aiResult = advanceWorld(afterSupport);
     const playerResult = advanceWorld(afterSupport, { embodiedAction: request.command });

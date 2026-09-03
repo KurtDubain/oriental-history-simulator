@@ -37,8 +37,8 @@ export function polityPopulation(world: WorldState, polityId: string): number {
   return world.regions
     .filter((item) => item.controllerId === polityId)
     .reduce((sum, item) => sum + item.population, 0)
-    + world.armies
-      .filter((item) => item.polityId === polityId)
+    + world.personalForces
+      .filter((force) => world.characters.find((person) => person.id === force.ownerId)?.polityId === polityId)
       .reduce((sum, item) => sum + item.soldiers, 0)
     + world.fleets
       .filter((item) => item.polityId === polityId)
@@ -47,7 +47,7 @@ export function polityPopulation(world: WorldState, polityId: string): number {
 
 export function worldPopulation(world: WorldState): number {
   return world.regions.reduce((sum, item) => sum + item.population, 0)
-    + world.armies.reduce((sum, item) => sum + item.soldiers, 0)
+    + world.personalForces.reduce((sum, item) => sum + item.soldiers, 0)
     + world.fleets.reduce((sum, item) => sum + item.sailors, 0);
 }
 

@@ -13,6 +13,7 @@ import type {
   WorldState,
 } from './types';
 import type { V03Emit, V03TurnContext } from './v03-context';
+import { applyFormationLosses } from './military/personal-forces';
 
 const PATHOGENS: readonly PathogenState[] = [
   {
@@ -598,8 +599,7 @@ function applyHostDeaths(world: WorldState, hostKey: string, deaths: number, con
   if (kind === 'army') {
     const army = world.armies.find((item) => item.id === id);
     if (!army) return 0;
-    const actual = Math.min(army.soldiers, deaths);
-    army.soldiers -= actual;
+    const actual = applyFormationLosses(world, [army], deaths).reduce((sum, loss) => sum + loss.losses, 0);
     context.population.militaryDeaths += actual;
     context.health.militaryDeaths += actual;
     return actual;
