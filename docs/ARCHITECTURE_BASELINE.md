@@ -1,6 +1,6 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，v1.24.1 舆图交互修订于 2026-09-04，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.24.2 Vercel 构建收口于 2026-09-04，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
@@ -92,7 +92,7 @@ PersonalForceState + ArmyState participantIds / commander / allegiance / order
 - 集团名称只在建立时从军团、地方、领袖旧部、家门或中枢根基取得；每季只更新成员层级，不随官职反复改名。旧 schema 4 派系保留原名，不补造旧史。
 - `ArmyState.recentMovement` 是每军一条、覆盖式的兼容记录，用来表现普通境内行军已经走过的真实一步；它不增加 `WorldState` 顶层字段、不形成历史数组，也不参与随机或领域结算。只有跨敌境、接敌、撤退、占领或登陆继续进入原有 Fact / Chronicle。
 - `war-group-projection.ts` 只读当前战争、人物军势、行营、集团和 Battle Fact；观察、战争聚焦与打开战局摘要不会修改世界、RNG、Fact、Chronicle 或序列化正文。
-- v1.24.1 个人版与参赛版 JavaScript gzip 均为 419,821 bytes，CSS gzip 均为 39,816 bytes；仍在既有 410 KiB / 40 KiB 门内，没有提高预算。
+- v1.24.2 个人版 JavaScript gzip 为 419,784 bytes，CSS gzip 为 39,816 bytes；Vercel Node 22 与本地构建继续共用既有 410 KiB / 40 KiB 门禁，没有提高预算。
 
 ## 后续收缩顺序
 

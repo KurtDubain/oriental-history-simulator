@@ -1080,26 +1080,25 @@ export function drawWorldMap(
         context.closePath(); context.fill();
       }
     }
-    const compactLabel = selected || person.isFactionLeader || scene.level === 'local'
-      || overlay === 'war' && (person.isCommander || focusedWarId && person.warId === focusedWarId);
+    const compactLabel = selected || person.isFactionLeader || scene.level === 'local' || overlay === 'war';
     if (person.showLabel && (relevant || selected) && (!compactMap || compactLabel)) personLabels.push({
       ...layout,
       label: `${person.personName} · ${strength}`,
-      priority: selected ? 100 : focusedWarId && person.warId === focusedWarId ? 60 : person.isCommander ? 40 : person.isFactionLeader ? 30 : 10,
+      priority: selected ? 3 : person.isCommander ? 2 : person.isFactionLeader ? 1 : 0,
       selected,
     });
     context.restore();
   }
-  const occupiedLabels = new Set<number>();
+  const occupiedLabels: Record<number, boolean> = {};
   for (const { person, point, radius, label, selected } of personLabels.sort((left, right) => (
     right.priority - left.priority || right.person.soldiers - left.person.soldiers
   ))) {
-    context.save();
-    context.font = `${person.isCommander ? 700 : 600} ${compactMap ? 8 : 9}px "Noto Serif SC", serif`;
     const labelY = point.y + radius + 3;
     const cell = Math.round(point.x / 112) + Math.round(labelY / 30) * 100;
-    if (occupiedLabels.has(cell) && !selected) { context.restore(); continue; }
-    occupiedLabels.add(cell);
+    if (occupiedLabels[cell] && !selected) continue;
+    occupiedLabels[cell] = true;
+    context.save();
+    context.font = `${person.isCommander ? 700 : 600} ${compactMap ? 8 : 9}px "Noto Serif SC", serif`;
     context.textAlign = 'center'; context.textBaseline = 'top'; context.lineWidth = 3.5;
     context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
     context.strokeText(label, point.x, labelY); context.fillText(label, point.x, labelY);
