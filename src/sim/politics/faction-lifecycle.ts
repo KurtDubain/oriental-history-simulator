@@ -1052,6 +1052,29 @@ export function settleFactionDepartures(
   }
 }
 
+/** Settles only factions touched by same-quarter deaths, without running another seasonal faction turn. */
+export function settleFactionDeaths(
+  world: WorldState,
+  context: FactTurnBuffer,
+  deathFactIds: readonly string[],
+  emit?: EmitFactionChronicle,
+): void {
+  const deathFacts = context.facts.filter((fact) => (
+    fact.kind === 'character_death' && deathFactIds.includes(fact.id)
+  ));
+  const deadIds = new Set(deathFacts.flatMap((fact) => (
+    fact.kind === 'character_death' ? [fact.payload.characterId] : []
+  )));
+  const affected = world.factions
+    .filter((faction) => faction.active && faction.memberIds.some((id) => deadIds.has(id)))
+    .map((faction) => faction.id);
+  syncMemberships(world);
+  for (const factionId of affected.sort(stableCompare)) {
+    const faction = world.factions.find((candidate) => candidate.id === factionId && candidate.active);
+    if (faction) repairLeadership(world, context, faction, emit);
+  }
+}
+
 export function endPolityFactions(
   world: WorldState,
   context: FactTurnBuffer,

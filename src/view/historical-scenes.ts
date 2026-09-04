@@ -1,6 +1,6 @@
 import type { SimulationFact, StateDelta, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations';
-import { readWorldFacts, readWorldHistory } from '../sim/archive';
+import { findWorldFact, readWorldFacts, readWorldHistory } from '../sim/archive';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import { historyTurnDate } from './v1-history';
 
@@ -164,10 +164,28 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact): F
       summary: `${entering ? '出任' : '卸下'}${army ? `${army}` : place}${fact.payload.officeKind}，政令出自${polityName(world, fact.payload.polityId)}。`,
     };
   }
-  if (fact.kind === 'character_death') {
+  if (fact.kind === 'expedition_response') {
     return {
-      title: `${characterName(world, fact.payload.characterId)}去世`,
-      summary: `终年${fact.payload.age}岁，身后身份记为${fact.payload.role}。`,
+      title: `${characterName(world, fact.payload.characterId)}拒绝随军`,
+      summary: `${characterName(world, fact.payload.commanderId)}召其加入${armyName(world, fact.payload.armyId)}，此人因${fact.payload.reason}公开留守，部曲没有交入行营。`,
+    };
+  }
+  if (fact.kind === 'character_wounded') {
+    return {
+      title: `${characterName(world, fact.payload.characterId)}负伤`,
+      summary: `在${regionName(world, fact.payload.regionId)}交战时，本部${fact.payload.soldiersBefore}人损失${fact.payload.losses}人，健康${fact.payload.healthBefore}→${fact.payload.healthAfter}。`,
+    };
+  }
+  if (fact.kind === 'character_death') {
+    const battle = fact.payload.battleFactId ? findWorldFact(world, fact.payload.battleFactId) : undefined;
+    const cause = fact.payload.cause === 'battle' && battle?.kind === 'battle'
+      ? `阵亡于${regionName(world, battle.payload.targetRegionId)}`
+      : fact.payload.cause === 'disease'
+        ? `染患${world.pathogens.find((item) => item.id === fact.payload.diseaseId)?.name ?? '疫病'}而卒`
+        : '去世';
+    return {
+      title: `${characterName(world, fact.payload.characterId)}${cause}`,
+      summary: `终年${fact.payload.age}岁，身后身份记为${fact.payload.role}${fact.payload.battleFactId ? '；此事可追溯至当季战报' : ''}。`,
     };
   }
   if (fact.kind === 'marriage') {

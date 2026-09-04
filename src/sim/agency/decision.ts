@@ -1188,6 +1188,8 @@ function resolveIntent(
     && army.polityId === polity.id
     && army.commanderId === commander.id
     && army.deputyCommanderId === actor.id
+    && army.participantIds.includes(commander.id)
+    && army.participantIds.includes(actor.id)
     && commander.commandingArmyId === army.id
     && actor.polityId === polity.id
     && polity.rulerId === intent.appointingAuthorityId

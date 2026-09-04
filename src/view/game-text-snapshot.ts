@@ -284,6 +284,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
         influence: item.influence,
         merit: item.merit,
         militaryForce: personDossier.militaryForce,
+        storyArc: personDossier.storyArc,
         agency: personDossier.agency,
         biography: Array.isArray(item.biography) ? item.biography.slice(-20) : [],
         relationships: (personDossier.relationships ?? []).map((entry) => ({

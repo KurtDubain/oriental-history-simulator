@@ -197,7 +197,8 @@ describe('person Agency dossier', () => {
     expect(inspector.agency?.primaryGoal).toBeNull();
     expect(inspector.agency?.currentPlanSteps).toEqual([]);
     expect(inspector.summary).toContain('眼下仍在权衡');
-    expect(archive.chapters.find((chapter) => chapter.id === 'mind')?.paragraphs.join('')).toContain('眼下尚未形成明确打算');
+    expect(archive.chapters).toHaveLength(inspector.storyArc?.length ?? 0);
+    expect(JSON.stringify(archive.chapters)).not.toContain('眼下尚未形成明确打算');
 
     const playerFacing = JSON.stringify(inspector.agency);
     expect(playerFacing).not.toMatch(/sourceWorldHash|authority|identityAnchorTurn|secondaryGoals|recentDecision|quarterChoice/);

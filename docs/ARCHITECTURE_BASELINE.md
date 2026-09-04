@@ -1,6 +1,6 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，v1.24.2 Vercel 构建收口于 2026-09-04，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.25.0 人物命途纵切收口于 2026-09-04，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
@@ -76,6 +76,28 @@ NavalOperationState.manifest
 - UI 不保存兵权副本。`war-group-projection.ts`、`map-adapter.ts`、`map-dossier-adapter.ts` 与 `person-dossier-adapter.ts` 都只读同一人物军势、行营、法定主将与实际拥戴；已删除的 Army-first 共享解释层不再作为兼容 wrapper 存在。
 - 跨海行动在实际装载时冻结 `loadedTurn / soldiersDeparted / transportEdgeIds`。舱单冻结后，成功登陆、航损返航与已装载行动中止按同一舱单写入 Shipment；撤回舰队保持返港使命，直到实际靠港后才恢复常规调度。
 
+## 人物命途纵切的所有权
+
+```text
+关系 / 集团 / 忠诚 / 既有职守 / PersonalForce
+  → military/expedition-response.ts（一次出征的确定性响应，不保存响应账本）
+  → ArmyState.participantIds（完整个人军势加入临时行营）
+
+Battle Fact 的个人参战与伤亡快照
+  → military/battle-fate.ts（无恙 / 负伤 / 战死的一次确定性裁决）
+  → character-death.ts（自然死亡、病死、战死共用的权威下线清理）
+  → 既有家产、家主、君位、官职、派系与军中接替链
+
+Fact + Chronicle 导航 ID
+  → view/person-story-arc.ts（只读章回压缩与四段生平）
+  → 人物档案 / 完整人物传 / render_game_to_text
+```
+
+- 出征响应只在组建行营时运行：主将与同行者共用一套可出征资格，同行人数固定有界；普通留守不生成事实，只有证据充分的公开拒绝才进入 Fact、生平与史册。
+- 战后命运只裁决 Battle Fact 中真实参战的人，并使用该人的战前兵力与实际损失。负伤沿用 `health`，战死沿用统一死亡入口；没有 `WoundState`、伤势分类、俘虏状态或第二套死亡清理。
+- 人物故事不进入 `WorldState`，不缓存阶段和分数。重复会战只在展示层按战争、地点、攻守与结果压成章回，原 Fact/Event 保持完整；Chronicle 只提供可点击导航，不成为另一份叙事真相。
+- v1.25.0 没有升级 schema 5、没有增加 `WorldState` 顶层字段，也没有增加季度阶段。固定 seed 的新历史会因战后裁决而改变，但同版本重放的 world hash、Fact digest 与 History digest 必须完全一致。
+
 ## 将领集团与战局投影的所有权
 
 ```text
@@ -92,7 +114,7 @@ PersonalForceState + ArmyState participantIds / commander / allegiance / order
 - 集团名称只在建立时从军团、地方、领袖旧部、家门或中枢根基取得；每季只更新成员层级，不随官职反复改名。旧 schema 4 派系保留原名，不补造旧史。
 - `ArmyState.recentMovement` 是每军一条、覆盖式的兼容记录，用来表现普通境内行军已经走过的真实一步；它不增加 `WorldState` 顶层字段、不形成历史数组，也不参与随机或领域结算。只有跨敌境、接敌、撤退、占领或登陆继续进入原有 Fact / Chronicle。
 - `war-group-projection.ts` 只读当前战争、人物军势、行营、集团和 Battle Fact；观察、战争聚焦与打开战局摘要不会修改世界、RNG、Fact、Chronicle 或序列化正文。
-- v1.24.2 个人版 JavaScript gzip 为 419,784 bytes，CSS gzip 为 39,816 bytes；Vercel Node 22 与本地构建继续共用既有 410 KiB / 40 KiB 门禁，没有提高预算。
+- v1.25.0 为人物出征响应、战后命运和可溯源生平纵切使用 415 KiB JavaScript gzip 门禁；单 JavaScript raw 仍为 585 KiB、CSS gzip 仍为 40 KiB。个人版与参赛版实测 JavaScript gzip 均为 423,991 bytes，CSS gzip 均为 40,040 bytes，最大 JavaScript 文件原始体积为 592,442 bytes。
 
 ## 后续收缩顺序
 
@@ -146,7 +168,7 @@ PersonalForceState + ArmyState participantIds / commander / allegiance / order
 - `App.tsx` 从 v1.10.0 的约 3,301 行降至约 2,525 行。对象标签/关注转换、Agency 跟踪/档案投影、`render_game_to_text` 快照和它们的 observer-only 合约已有独立 owner；纯投影回归同时核对输出和世界不变性。页面壳仍是权威世界唯一 React owner，拆分模块不保存第二份模拟状态。
 - `calendar.ts` 和 `world-hash.ts` 成为纪年/权威摘要的纯 owner，`engine.ts` 只保留兼容 re-export。`invariants.ts`、`v03-intervention.ts` 和 `persistence.ts` 改为直接依赖纯模块；运行时闭包分别从 33 降至 21、32 降至 4 与 34 降至 32。`engine.ts` 从 3,210 行降至约 3,098 行，哈希构造顺序、保留窗口、schema 和存档均未改变。
 - 架构门直接拒绝 runtime SCC、禁止的跨层依赖、type-only 债务增长和热点预算超标。当前预算为 `App.tsx` 2,300、`observer-leads.ts` 400、`engine.ts` 3,120、`invariants.ts` 2,665、`WorldMap.tsx` 1,100、`view/adapters.ts` 100 行；这些是防反弹上限，不是为了凑行数填满的目标。
-- Vite 将 framework、simulation、maps 和应用入口分为稳定产物边界。v1.21.1 曾达到约 429,904 bytes JavaScript gzip，COMPACT01 已通过真实删除回落到上方实测并把总 JavaScript gzip 门禁收紧为 410 KiB；单 JS raw 585 KiB 与 CSS gzip 40 KiB 门禁均未提高。
+- Vite 将 framework、simulation、maps 和应用入口分为稳定产物边界。v1.21.1 曾达到约 429,904 bytes JavaScript gzip，COMPACT01 先通过真实删除把总 JavaScript gzip 门禁收紧为 410 KiB；v1.25.0 仅为人物出征、战后命运与有来源的生平纵切把该总门禁有界调整为 415 KiB，单 JS raw 585 KiB 与 CSS gzip 40 KiB 门禁不变。
 - `.github/workflows/quality.yml` 在 Pull Request 和 `main` 推送上使用 `.nvmrc` 固定 Node 22，以 `npm ci` 从锁文件安装，依次执行单测、架构门、两种构建/产物预算、安全更新与关键浏览器链；失败时上传 `output/` 以便复现。发布检查同时约束 `package.json` / lockfile / 个人版更新记录 / 参赛版更新记录一致，并在生产变更时要求版本递增。
 
 ## v1.19.0 政治投影与地图载荷边界

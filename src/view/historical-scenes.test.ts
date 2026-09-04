@@ -57,6 +57,30 @@ describe('NAR01/NAR02 concrete historical scenes', () => {
     expect(withoutChronicle.historyEventIds).toEqual([]);
   });
 
+  it('names a real disease in an illness death and a real battlefield in a battle death', () => {
+    const world = advanceWorldBy(createWorld('人物死因文案'), 8);
+    const battle = world.facts.find((fact) => fact.kind === 'battle');
+    const person = world.characters[0]!;
+    const pathogen = world.pathogens[0]!;
+    if (!battle || battle.kind !== 'battle') throw new Error('expected a battle');
+    const base = {
+      id: 'fact_death_copy', turn: world.turn, year: world.year, season: world.season,
+      kind: 'character_death' as const, category: '政治' as const, importance: 3 as const,
+      actorIds: [person.id], polityIds: [person.polityId], regionIds: [], causes: [], stateDeltas: [], sourceFactIds: [],
+    };
+    const disease = projectFactNarrative(world, {
+      ...base,
+      payload: { characterId: person.id, age: person.age, role: person.role, health: 20, diseaseId: pathogen.id, cause: 'disease' },
+    });
+    const battlefield = projectFactNarrative(world, {
+      ...base, id: 'fact_battle_death_copy', sourceFactIds: [battle.id],
+      payload: { characterId: person.id, age: person.age, role: person.role, health: 70, diseaseId: null, cause: 'battle', battleFactId: battle.id },
+    });
+
+    expect(disease.title).toContain(pathogen.name);
+    expect(battlefield.title).toContain(world.regions.find((item) => item.id === battle.payload.targetRegionId)?.name);
+  });
+
   it('makes the latest concrete scene the readable face of a Situation', () => {
     const world = advanceWorldBy(createWorld('局势具体场面'), 8);
     const situation = world.situationSystem.situations.find((item) => item.type === 'war_progress');
@@ -64,7 +88,7 @@ describe('NAR01/NAR02 concrete historical scenes', () => {
     const scenes = projectSituationHistoricalScenes(world, situation, 3);
     expect(scenes.length).toBeGreaterThan(0);
     expect(scenes.length).toBeLessThanOrEqual(3);
-    expect(scenes[0].shortText).toMatch(/[㐀-鿿]+之战.*(取胜|守住)/u);
+    expect(scenes[0].shortText).toMatch(/([㐀-鿿]+之战.*(取胜|守住)|阵亡于[㐀-鿿]+)/u);
     expect(scenes[0].sourceFactIds.length).toBeGreaterThan(0);
   });
 

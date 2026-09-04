@@ -39,6 +39,7 @@ import {
   markPeaceDiplomacy,
   markWarDiplomacy,
   processV02Diplomacy,
+  processCharacterDeathConsequences,
   processV02MilitaryCareers,
   processV02PoliticalCommitments,
   processV02Politics,
@@ -58,6 +59,7 @@ import { refreshFactionPowerLedgers } from './politics/power-ledger';
 import {
   endPolityFactions,
   expelFactionMembers,
+  settleFactionDeaths,
 } from './politics/faction-lifecycle';
 import {
   creditBattleCommandStanding, createArmyMilitaryFields,
@@ -69,7 +71,6 @@ import {
   attachPersonalForces,
   createInitialPersonalForces,
   detachPersonalForce,
-  demobilizePersonalForce,
   detachFormation,
   distributeFormationGain,
   ensureEligiblePersonalForces,
@@ -84,6 +85,14 @@ import {
   desiredFieldFormationCount,
   formationStagingRegions,
 } from './military/formation-bootstrap';
+import {
+  isAvailableForExpedition,
+  expeditionAssemblyText,
+  recordPublicExpeditionRefusal,
+  selectExpeditionResponses,
+} from './military/expedition-response';
+import { resolveBattleFates } from './military/battle-fate';
+import { settleCharacterDeathState } from './character-death';
 import {
   createTurnContext,
   totalWorldFood,
@@ -1026,31 +1035,17 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
 
     const oldRole = character.role;
     const diseaseAtDeath = character.activeDiseaseId;
-    const forceBefore = personalForce(world, character.id)?.soldiers ?? 0;
-    const forceRegion = world.regions.find((region) => region.id === character.locationRegionId)
-      ?? world.regions.find((region) => region.id === personalForce(world, character.id)?.homeRegionId);
-    const forceRegionPopulationBefore = forceRegion?.population ?? null;
-    context.population.demobilized += demobilizePersonalForce(world, character.id);
-    character.alive = false;
-    character.deathTurn = context.turn;
-    character.lifeStage = '已故';
-    character.activeDiseaseId = null;
-    character.governedRegionId = null;
-    if (character.commandingArmyId) {
-      const army = world.armies.find((item) => item.id === character.commandingArmyId);
-      if (army) army.commanderId = '';
-      character.commandingArmyId = null;
-    }
-    if (character.commandingFleetId) {
-      const fleet = world.fleets.find((item) => item.id === character.commandingFleetId);
-      if (fleet) fleet.commanderId = '';
-      character.commandingFleetId = null;
-    }
-    for (const army of world.armies) {
-      if (army.deputyCommanderId === character.id) army.deputyCommanderId = null;
-    }
-    const polity = world.polities.find((item) => item.id === character.polityId);
-    if (polity?.rulerId === character.id) polity.rulerId = '';
+    const settlement = settleCharacterDeathState(world, character.id, context.turn);
+    if (!settlement) continue;
+    const forceBefore = settlement.forceBefore;
+    const forceRegion = settlement.forceRegionId
+      ? world.regions.find((region) => region.id === settlement.forceRegionId)
+      : undefined;
+    const forceRegionPopulationBefore = settlement.forceRegionPopulationBefore;
+    context.population.demobilized += settlement.demobilized;
+    const diseaseName = diseaseAtDeath
+      ? world.pathogens.find((pathogen) => pathogen.id === diseaseAtDeath)?.name ?? diseaseAtDeath
+      : null;
     const deathImportance = oldRole === '君主' ? 4 : oldRole === '将领' ? 2 : 1;
     const deathFact = emitSimulationFact(world, context, {
       kind: 'character_death',
@@ -1061,7 +1056,7 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
       regionIds: [character.locationRegionId],
       causes: [
         { label: '年龄风险', role: '结构', weight: 0.52, evidence: `年龄${character.age}岁，基础年度死亡风险${(baseDeathChance * 100).toFixed(1)}%` },
-        { label: '健康状态', role: '条件', weight: 0.3, evidence: `健康${character.health}将综合风险调整为${(deathChance * 100).toFixed(1)}%${diseaseAtDeath ? `，染患${diseaseAtDeath}` : ''}` },
+        { label: '健康状态', role: '条件', weight: 0.3, evidence: `健康${character.health}将综合风险调整为${(deathChance * 100).toFixed(1)}%${diseaseName ? `，染患${diseaseName}` : ''}` },
         { label: '死亡裁决', role: '结果', weight: 0.18, evidence: '人物生命状态与所任职位已同步结算' },
       ],
       stateDeltas: [
@@ -1076,20 +1071,21 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
         role: oldRole,
         health: character.health,
         diseaseId: diseaseAtDeath,
+        cause: diseaseAtDeath ? 'disease' : 'natural',
       },
     });
     pushEvent(world, context, {
       category: '政治',
       kind: 'character_death',
       title: `${character.name}逝世`,
-      summary: `${oldRole}${character.name}卒，享年${character.age}岁，其职位与权力来源随之空缺。`,
+      summary: `${oldRole}${character.name}${diseaseName ? `因${diseaseName}` : ''}卒，享年${character.age}岁，其职位与权力来源随之空缺。`,
       importance: deathImportance,
       actorIds: [character.id],
       polityIds: [character.polityId],
       regionIds: [character.locationRegionId],
       causes: [
         { label: '年龄风险', role: '结构', weight: 0.52, evidence: `年龄${character.age}岁，基础年度死亡风险${(baseDeathChance * 100).toFixed(1)}%` },
-        { label: '健康状态', role: '条件', weight: 0.3, evidence: `健康${character.health}将综合风险调整为${(deathChance * 100).toFixed(1)}%${diseaseAtDeath ? `，染患${diseaseAtDeath}` : ''}`, refs: [{ kind: 'entity', entityType: 'character', entityId: character.id, field: 'health', label: '死亡时健康' }] },
+        { label: '健康状态', role: '条件', weight: 0.3, evidence: `健康${character.health}将综合风险调整为${(deathChance * 100).toFixed(1)}%${diseaseName ? `，染患${diseaseName}` : ''}`, refs: [{ kind: 'entity', entityType: 'character', entityId: character.id, field: 'health', label: '死亡时健康' }] },
         { label: '年度裁决', role: '结果', weight: 0.18, evidence: `独立寻址的年度死亡裁决命中` },
       ],
       stateDeltas: [
@@ -1099,6 +1095,11 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
     });
   }
 
+  resolveVacantRulers(world, context);
+  repairAppointments(world, context);
+}
+
+export function resolveVacantRulers(world: WorldState, context: MutableTurnContext): void {
   for (const polity of world.polities.filter((item) => item.alive)) ensureRoster(world, polity);
   for (const polity of world.polities.filter((item) => item.alive && !item.rulerId)) {
     const previousDynasty = polity.dynastyName;
@@ -1234,7 +1235,6 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
       ],
     });
   }
-  repairAppointments(world, context);
 }
 
 function isAtWar(world: WorldState, polityId: string): boolean {
@@ -1327,7 +1327,7 @@ function routeBetween(world: WorldState, leftId: string, rightId: string): Route
 
 function selectArmyCommander(world: WorldState, polity: PolityState): CharacterState | null {
   let candidate: CharacterState | null | undefined = selectCandidate(
-    aliveCharacters(world, polity.id).filter((character) => !character.commandingArmyId && !character.commandingFleetId && !character.governedRegionId),
+    aliveCharacters(world, polity.id).filter((character) => isAvailableForExpedition(world, polity.id, character)),
     (character) => character.leadership * 0.52
       + character.cunning * 0.18
       + character.loyalty * 0.2
@@ -1345,22 +1345,9 @@ function createArmy(
   preferredCommander?: CharacterState,
 ): ArmyState | null {
   const commander = preferredCommander ?? selectArmyCommander(world, polity);
-  if (!commander) return null;
-  const available = world.characters
-    .filter((character) => character.alive && character.polityId === polity.id)
-    .filter((character) => {
-      const force = personalForce(world, character.id);
-      return force && force.formationId === null && force.soldiers > 0;
-    })
-    .sort((left, right) => (
-      Number(right.id === commander.id) - Number(left.id === commander.id)
-      || Number(right.locationRegionId === region.id) - Number(left.locationRegionId === region.id)
-      || right.leadership + right.loyalty - (left.leadership + left.loyalty)
-      || stableCompare(left.id, right.id)
-    ));
-  if (!available.some((character) => character.id === commander.id)) return null;
-  const participantIds = available.slice(0, Math.min(5, Math.max(2, Math.ceil(available.length / 5))))
-    .map((character) => character.id);
+  if (!commander || !isAvailableForExpedition(world, polity.id, commander)) return null;
+  const response = selectExpeditionResponses(world, polity, commander, region);
+  const participantIds = response.participantIds;
   const existingSoldiers = world.personalForces
     .filter((force) => participantIds.includes(force.ownerId))
     .reduce((sum, force) => sum + force.soldiers, 0);
@@ -1386,7 +1373,7 @@ function createArmy(
     name: `${region.name}新军`,
     polityId: polity.id,
     commanderId: commander.id,
-    deputyCommanderId: null,
+    deputyCommanderId: participantIds[1] ?? null,
     participantIds,
     regionId: region.id,
     originRegionId: region.id,
@@ -1400,22 +1387,24 @@ function createArmy(
     embarkedOperationId: null,
     ...createArmyMilitaryFields(world, {
       id: armyId,
-      polityId: polity.id, commanderId: commander.id, deputyCommanderId: null,
+      polityId: polity.id, commanderId: commander.id, deputyCommanderId: participantIds[1] ?? null,
       regionId: region.id, soldiers: existingSoldiers + recruitable, morale: 56,
     }, 'system'),
   };
   attachPersonalForces(world, army, participantIds, '集结');
   distributeFormationGain(world, army, recruitable);
   commander.commandingArmyId = army.id;
+  commander.governedRegionId = null;
   syncArmyPersonnelLocations(world, army);
   world.armies.push(army);
+  recordPublicExpeditionRefusal(world, context, response, army, commander, region, (input) => pushEvent(world, context, input));
   pushEvent(world, context, {
     category: '军事',
     kind: 'army_raised',
     title: `${polity.name}编成${army.name}`,
-    summary: `${commander.name}在${region.name}集结${participantIds.length}人部曲，共${army.soldiers}人。`,
+    summary: `${commander.name}在${region.name}集结${participantIds.length}人部曲，共${army.soldiers}人${expeditionAssemblyText(world, response)}。`,
     importance: 2,
-    actorIds: [commander.id],
+    actorIds: participantIds,
     polityIds: [polity.id],
     regionIds: [region.id],
     causes: [
@@ -1601,7 +1590,7 @@ function maintainArmies(world: WorldState, context: MutableTurnContext): void {
   repairAppointments(world, context);
 }
 
-function repairDepletedFormationCommands(world: WorldState, context: MutableTurnContext): void {
+export function repairDepletedFormationCommands(world: WorldState, context: MutableTurnContext): void {
   for (const army of world.armies) {
     if (army.deputyCommanderId && !army.participantIds.includes(army.deputyCommanderId)) army.deputyCommanderId = null;
     if (army.participantIds.includes(army.commanderId)) continue;
@@ -2332,7 +2321,7 @@ function captureRegion(
     kind: 'territory_control_changed',
     category: '军事',
     importance: region.strategicValue >= 9 ? 4 : 3,
-    actorIds: [army.commanderId, attacker.rulerId, defender.rulerId],
+    actorIds: [battleFact.payload.attacker.commanderId, attacker.rulerId, defender.rulerId],
     polityIds: [attacker.id, defender.id],
     regionIds: [region.id],
     causes: [
@@ -2406,7 +2395,7 @@ function captureRegion(
     title: `${attacker.name}夺取${region.name}`,
     summary: `${army.name}攻占${region.name}；战损、掠取与占领破坏均已计入人口、粮食和财富账本。`,
     importance: defender.alive ? (region.strategicValue >= 9 ? 4 : 3) : 5,
-    actorIds: [army.commanderId, attacker.rulerId, defender.rulerId],
+    actorIds: [battleFact.payload.attacker.commanderId, attacker.rulerId, defender.rulerId],
     polityIds: [attacker.id, defender.id],
     regionIds: [region.id],
     causes: [
@@ -2617,6 +2606,7 @@ function resolveBattle(
       })),
     },
   }) as BattleFact;
+  resolveBattleFates(world, context, battleFact, (input) => pushEvent(world, context, input));
 
   if (chronicleBattle) pushEvent(world, context, {
     category: '军事',
@@ -3054,7 +3044,20 @@ export function advanceWorldDetailed(
   runSystem('social_diplomacy', () => processV02Diplomacy(world, context, (input) => pushEvent(world, context, input)));
   runSystem('war_declarations', () => processWarDeclarations(world, context));
   runSystem('diplomacy', () => processV03Diplomacy(world, context, (input) => pushEvent(world, context, input)));
-  runSystem('military', () => processMilitary(world, context));
+  runSystem('military', () => {
+    const factStart = context.facts.length;
+    processMilitary(world, context);
+    const battleDeaths = context.facts.slice(factStart).filter(
+      (fact): fact is Extract<SimulationFact, { kind: 'character_death' }> => (
+        fact.kind === 'character_death' && fact.payload.cause === 'battle'
+      ),
+    );
+    if (battleDeaths.length > 0) {
+      processCharacterDeathConsequences(world, context, (input) => pushEvent(world, context, input), battleDeaths);
+      resolveVacantRulers(world, context);
+      settleFactionDeaths(world, context, battleDeaths.map((fact) => fact.id), (input) => pushEvent(world, context, input));
+    }
+  });
   runSystem('maritime', () => processV03Maritime(world, context, (input) => pushEvent(world, context, input),
     (war, army, target, previousControllerId, battleFact, defenders) => {
       settleDefendersAfterCapture(world, defenders, target, previousControllerId, context);

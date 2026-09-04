@@ -258,7 +258,8 @@ function diseaseOfficeImpacts(world: WorldState, facts: readonly SimulationFact[
   const endedFacts = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_ended' }> => fact.kind === 'appointment_ended');
   const startedFacts = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_started' }> => fact.kind === 'appointment_started');
   return facts.flatMap((fact) => {
-    if (fact.kind !== 'character_death' || !fact.payload.diseaseId) return [];
+    if (fact.kind !== 'character_death' || !fact.payload.diseaseId
+      || (fact.payload.cause !== undefined && fact.payload.cause !== 'disease')) return [];
     const ended = endedFacts
       .filter((item) => item.payload.holderId === fact.payload.characterId)
       .sort((left, right) => right.payload.rank - left.payload.rank || stableCompare(left.id, right.id))[0];

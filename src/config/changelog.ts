@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.24.2',
+  version: '1.25.0',
   date: '2026-09-04',
-  title: '舆图更清',
+  title: '命途成章',
   items: [
-    '舆图易读。',
+    '人物会响应出征、负伤或战死，生平也会从真实史事中整理出起势与转折。',
   ],
 };
 

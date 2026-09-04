@@ -165,7 +165,7 @@ function livingAdults(world: WorldState, polityId?: string): CharacterState[] {
     .sort((left, right) => stableCompare(left.id, right.id));
 }
 
-function addBiography(
+export function addBiography(
   character: CharacterState,
   event: HistoryEvent,
   kind: string,
@@ -989,8 +989,12 @@ function createChild(world: WorldState, parents: readonly [CharacterState, Chara
   return child;
 }
 
-function processDeathsAndAdulthood(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
-  const deathFacts = context.facts.filter((fact): fact is Extract<SimulationFact, { kind: 'character_death' }> => fact.kind === 'character_death');
+export function processCharacterDeathConsequences(
+  world: WorldState,
+  context: V02TurnContext,
+  emit: EmitEvent,
+  deathFacts: readonly Extract<SimulationFact, { kind: 'character_death' }>[],
+): void {
   for (const deathFact of deathFacts) {
     const deceased = world.characters.find((character) => character.id === deathFact.payload.characterId);
     if (!deceased) continue;
@@ -1084,7 +1088,10 @@ function processDeathsAndAdulthood(world: WorldState, context: V02TurnContext, e
     if (successor) addBiography(successor, inheritanceEvent, '继任家主');
     if (inheritor && inheritor.id !== successor?.id) addBiography(inheritor, inheritanceEvent, '承接遗产');
   }
+  if (deathFacts.length > 0) syncFamilyMembers(world);
+}
 
+function processAdulthood(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
   for (const character of world.characters.filter((item) => item.alive)) {
     const previousStage = character.lifeStage;
     character.lifeStage = lifeStage(character.age, true);
@@ -1364,7 +1371,13 @@ export function processV02Society(world: WorldState, context: V02TurnContext, em
   processDueCommitments(world, context, emit);
   if (context.season !== '冬') return;
   maintainBackgroundCohorts(world, context.turn);
-  processDeathsAndAdulthood(world, context, emit);
+  processCharacterDeathConsequences(
+    world,
+    context,
+    emit,
+    context.facts.filter((fact): fact is Extract<SimulationFact, { kind: 'character_death' }> => fact.kind === 'character_death'),
+  );
+  processAdulthood(world, context, emit);
   processLocalMarriages(world, context, emit);
   processBirths(world, context, emit);
   processFamilyBranches(world, context, emit);

@@ -137,6 +137,9 @@ function evidenceClusters(stories: readonly QuarterPulseStory[]): QuarterPulseSt
 function isMainFactEligible(fact: SimulationFact, coreImpactFactIds: ReadonlySet<string>): boolean {
   if (coreImpactFactIds.has(fact.id)) return true;
   if (MAIN_FACT_KINDS.has(fact.kind)) return true;
+  if (fact.kind === 'expedition_response') return fact.importance >= 2;
+  if (fact.kind === 'character_wounded') return fact.importance >= 3;
+  if (fact.kind === 'character_death') return fact.payload.cause === 'battle' || fact.payload.role === '君主' || fact.importance >= 3;
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
     return MAIN_APPOINTMENT_KINDS.has(fact.payload.officeKind);
   }

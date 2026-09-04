@@ -119,8 +119,9 @@ function closureFor(
   ));
   const deathEvent = deathFact
     ? [...world.history].reverse().find((event) => (
-        event.kind === 'character_death' && event.sourceFactIds.includes(deathFact.id)
-      ))
+        event.sourceFactIds.includes(deathFact.id)
+        && (event.kind === 'character_death' || event.kind === 'character_battle_death')
+      )) ?? [...world.history].reverse().find((event) => event.sourceFactIds.includes(deathFact.id))
     : null;
   const died = Boolean(character && !character.alive) || Boolean(deathFact);
   const age = deathFact?.kind === 'character_death' ? deathFact.payload.age : character?.age ?? null;

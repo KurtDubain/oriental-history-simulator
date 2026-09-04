@@ -91,7 +91,7 @@ describe('ARC03/EMB08 embodiment observer state', () => {
     expect(reconciled.closure?.summary).toContain('一生至此');
     expect(reconciled.closure?.sourceEventId).toBeTruthy();
     expect(transition.next.history.find((event) => event.id === reconciled.closure?.sourceEventId)?.kind)
-      .toBe('character_death');
+      .toMatch(/character_(?:battle_)?death/);
   });
 
   it('rejects malformed metadata without affecting play', () => {

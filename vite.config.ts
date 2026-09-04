@@ -147,7 +147,7 @@ export default defineConfig({
   build: {
     minify: 'terser',
     terserOptions: {
-      compress: { passes: 3 },
+      compress: { passes: 5, pure_getters: true },
       mangle: { toplevel: true },
       format: { comments: false },
     },
@@ -166,6 +166,9 @@ export default defineConfig({
           ) return 'framework';
           if (normalized.includes('/node_modules/fflate/')) return 'framework';
           if (normalized.includes('/src/maps/')) return 'maps';
+          if (normalized.endsWith('/src/sim/military/personal-forces.ts')) {
+            return 'simulation-support';
+          }
           if (
             normalized.includes('/src/sim/archive/')
             || normalized.includes('/src/sim/facts/')

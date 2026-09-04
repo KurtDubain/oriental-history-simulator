@@ -46,6 +46,7 @@ import {
   projectPersonPoliticalFocus,
   type PoliticalFocusLink,
 } from './political-focus';
+import { projectPersonStoryArc } from './person-story-arc';
 
 export type PersonInspectorProjection = PersonInspectorData & {
   politicalFocus: readonly PoliticalFocusLink[];
@@ -54,6 +55,14 @@ export type PersonInspectorProjection = PersonInspectorData & {
 export type PersonArchiveProjection = ArchiveDossier & {
   politicalFocus: readonly PoliticalFocusLink[];
 };
+
+function inspectorStoryArc(world: WorldState, item: CharacterState) {
+  try {
+    return projectPersonStoryArc(world, item, 'all');
+  } catch {
+    return projectPersonStoryArc(world, item, 'active');
+  }
+}
 
 interface PersonExperienceEntry {
   turn: number;
@@ -937,7 +946,7 @@ export function toPersonInspector(
     family: personFamily?.name ?? `${item.familyName}氏`,
     familyId: personFamily?.id ?? null,
     polity: owner?.name,
-    health: item.alive ? 100 : 0,
+    health: item.alive ? item.health : 0,
     influence: item.influence,
     personalWealth: item.personalWealth,
     merit: item.merit,
@@ -958,6 +967,7 @@ export function toPersonInspector(
     traits: characterTraits(item),
     relationships,
     experiences,
+    storyArc: inspectorStoryArc(world, item),
     militaryForce: personalForce ? {
       soldiers: personalForce.soldiers,
       cohesion: personalForce.cohesion,
@@ -997,42 +1007,27 @@ export function toPersonArchive(
   const personFamily = family(world, item.familyId);
   const records: ArchiveRecord[] = toPersonExperienceRecords(world, item);
   const relationships = inspector.relationships ?? [];
-  const agency = inspector.agency;
-  const desireSentence = agency?.desires.length
-    ? `${item.name}眼下最看重${agency.desires.map((desire) => desire.label).join('与')}`
-    : `${item.name}的心中轻重尚未显明`;
-  const goalSentence = agency?.primaryGoal
-    ? `目前正在盘算「${agency.primaryGoal.label}」；${agency.primaryGoal.reason}${agency.primaryGoal.barrier ? `，眼下难处在于${agency.primaryGoal.barrier}` : ''}。`
-    : agency?.availability === 'dormant'
-      ? '年岁尚轻，尚未形成可以付诸世事的打算。'
-      : agency?.availability === 'closed'
-        ? '生平已定，不再形成新的打算。'
-        : '眼下尚未形成明确打算。';
-  const agencyActionSentence = agency?.commandRequest
-    ? agency.commandRequest.stage === 'planned'
-      ? `${agency.commandRequest.title}，目前仍只是一个念头，尚未开始铺路。`
-      : agency.commandRequest.stage === 'preparing'
-        ? `${agency.commandRequest.title}，目前仍在筹备，尚未正式请令。`
-        : `${agency.commandRequest.title}；${agency.commandRequest.summary}`
-    : '这些只是当下盘算，不代表行动已经发生。';
+  const storyArc = projectPersonStoryArc(world, item, 'all');
   return {
     id: item.id,
     kind: 'person',
     eyebrow: '人物传 · 生平行状',
     title: `${item.name}传`,
     subtitle: `${owner?.name ?? '无属'} · ${item.role} · ${item.lifeStage ?? `${item.age}岁`}`,
-    lead: `${item.name}并非一组能力数字。出身决定最初的道路，性情与欲望塑造每次选择，而战争、任职、恩怨和挫折将这些选择写成人生。`,
+    lead: storyArc.length
+      ? `${item.name}留下${storyArc.length}段可追溯的关键经历；下列叙述均来自实际史事或结算事实。`
+      : `${item.name}尚未留下足以连成生平主线的史事。`,
     facts: [
       { label: '生年', value: turnLabel(item.birthTurn ?? Math.max(0, world.turn - item.age * 4)) },
       { label: '家族', value: inspector.family ?? '家世不详' }, { label: '阶层', value: item.politicalClass ?? '出身未详' },
       { label: '功绩', value: String(Math.round(item.merit ?? 0)) }, { label: '影响', value: String(Math.round(item.influence ?? item.renown)) },
       { label: '现职', value: item.alive ? item.role : '已故' },
     ],
-    chapters: [
-      { id: 'origin', title: '身世与起点', paragraphs: [`${item.name}出自${personFamily?.name ?? `${item.familyName}氏`}，被归入${item.politicalClass ?? '未详'}阶层，早年活动于${region(world, item.locationRegionId)?.name ?? '乡里失考'}。`, item.adultTurn === null ? '尚未成年，未来身份仍将受家族与时代局势塑造。' : `于${turnLabel(item.adultTurn)}步入成年，此后才真正进入任职、婚姻与政治选择的网络。`] },
-      { id: 'career', title: '仕途与功业', paragraphs: [`现任${item.role}，功绩${Math.round(item.merit ?? 0)}、个人影响${Math.round(item.influence ?? item.renown)}。${inspector.summary ?? ''}`, item.commandingArmyId ? `手握军令，且有${Math.round(item.deputyExperience ?? 0)}点副将历练；其抗命倾向为${Math.round(item.insubordination ?? 0)}。` : '此时未直接统率军团，政治与家族网络更能决定其下一步。'] },
-      { id: 'mind', title: '心志与关系', paragraphs: [`${desireSentence}。${goalSentence}${agencyActionSentence}`, relationships.length ? `与其关系最深者包括${relationships.slice(0, 4).map((relation) => `${relation.name}（${relation.sentiment}）`).join('、')}。` : '现存史料未留下足以构成长期记忆的人际关系。'] },
-    ],
+    chapters: storyArc.map((beat) => ({
+      id: beat.id.replace(/[^a-zA-Z0-9_-]/g, '-'),
+      title: `${beat.phaseLabel} · ${beat.dateLabel} · ${beat.title}`,
+      paragraphs: [beat.summary],
+    })),
     records,
     politicalFocus: inspector.politicalFocus,
     links: uniqueArchiveLinks([
