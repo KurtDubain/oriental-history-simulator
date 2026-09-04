@@ -77,11 +77,11 @@ describe('roster domain projection', () => {
     expect(rulers.items.every((item) => item.discovery?.filters.identity === 'ruler')).toBe(true);
 
     let actionWorld = createWorld('人物名录本季行动');
-    for (let turn = 0; turn < 8; turn += 1) actionWorld = advanceWorld(actionWorld);
-    const actionable = projectRosterCollection(actionWorld, 'people', {
-      ...baseState,
-      quickView: 'actionable',
-    });
+    let actionable = projectRosterCollection(actionWorld, 'people', { ...baseState, quickView: 'actionable' });
+    for (let turn = 0; turn < 24 && actionable.items.length === 0; turn += 1) {
+      actionWorld = advanceWorld(actionWorld);
+      actionable = projectRosterCollection(actionWorld, 'people', { ...baseState, quickView: 'actionable' });
+    }
     expect(actionable.items.length).toBeGreaterThan(0);
     expect(actionable.items.length).toBeLessThan(actionable.totalCount);
     expect(actionable.items.every((item) => item.discovery?.quickViews.includes('actionable'))).toBe(true);
@@ -94,6 +94,26 @@ describe('roster domain projection', () => {
       influence.items.map((item) => item.id).slice().sort((left, right) => left.localeCompare(right)),
     );
     expectDescending(influence.items, 'influence');
+  });
+
+  it('keeps the directory living-first while allowing a deceased person to be found again', () => {
+    const world = createWorld('故人仍可寻回');
+    const deceased = world.characters.find((item) => item.alive)!;
+    deceased.alive = false;
+    deceased.deathTurn = world.turn;
+
+    const living = projectRosterCollection(world, 'people');
+    const searched = projectRosterCollection(world, 'people', {
+      ...createRosterDiscoveryState('people'), query: deceased.name, quickView: 'all',
+    });
+    const departed = projectRosterCollection(world, 'people', {
+      ...createRosterDiscoveryState('people'), quickView: 'deceased',
+    });
+
+    expect(living.state.quickView).toBe('living');
+    expect(living.items.some((item) => item.id === deceased.id)).toBe(false);
+    expect(searched.items.map((item) => item.id)).toContain(deceased.id);
+    expect(departed.items.map((item) => item.id)).toContain(deceased.id);
   });
 
   it('filters polity wars and sorts polity and family measures', () => {

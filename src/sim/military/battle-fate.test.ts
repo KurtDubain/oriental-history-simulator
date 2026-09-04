@@ -10,6 +10,7 @@ import { syncOfficeAppointments } from '../v02';
 import { settleFactionDeaths } from '../politics/faction-lifecycle';
 import { refreshFactionPowerLedgers } from '../politics/power-ledger';
 import type { V03EventInput } from '../v03-context';
+import { battleRecoveryStatus } from './battle-readiness';
 import { syncFormationStrength } from './personal-forces';
 import { battleFateChances, resolveBattleFates } from './battle-fate';
 
@@ -119,7 +120,7 @@ function idForOutcome(
 }
 
 describe('battle participant fate', () => {
-  it('wounds only a real participant, lowers health and keeps the battle source', () => {
+  it('turns an exposed wound into immediate withdrawal and fact-derived recovery', () => {
     const world = createWorld('参战者负伤');
     const { fact, commanderId, otherId } = battleForCommander(world);
     fact.id = idForOutcome(world, fact, commanderId, 'wound');
@@ -129,16 +130,19 @@ describe('battle participant fate', () => {
     const soldiersBefore = world.personalForces.find((item) => item.ownerId === commanderId)!.soldiers;
     const populationBefore = totalWorldPopulation(world);
 
-    const result = resolveBattleFates(world, context, fact, emitEvent(world, context));
+    resolveBattleFates(world, context, fact, emitEvent(world, context));
     const wound = context.facts.find((item) => item.kind === 'character_wounded');
 
-    expect(result).toContainEqual(expect.objectContaining({ characterId: commanderId, outcome: 'wounded' }));
+    expect(wound?.payload.characterId).toBe(commanderId);
     expect(world.characters.find((item) => item.id === commanderId)!.health).toBeLessThan(healthBefore);
     expect(world.characters.find((item) => item.id === otherId)!.health).toBe(otherHealth);
     expect(world.personalForces.find((item) => item.ownerId === commanderId)!.soldiers).toBe(soldiersBefore);
+    expect(world.personalForces.find((item) => item.ownerId === commanderId)!.formationId).toBeNull();
+    expect(battleRecoveryStatus(world, commanderId).recovering).toBe(true);
     expect(totalWorldPopulation(world)).toBe(populationBefore);
     expect(wound?.sourceFactIds).toEqual([fact.id]);
     expect(wound?.stateDeltas).toContainEqual(expect.objectContaining({ entityId: commanderId, field: 'health' }));
+    expect(wound?.payload.recoveryUntilTurn).toBeGreaterThan(context.turn);
   });
 
   it('is deterministic and keeps high-loss defeats riskier than ordinary victories', () => {
@@ -148,18 +152,33 @@ describe('battle participant fate', () => {
     const copy = structuredClone(world);
     const firstContext = createTurnContext(world);
     const secondContext = createTurnContext(copy);
-    const first = resolveBattleFates(world, firstContext, fact, emitEvent(world, firstContext));
-    const second = resolveBattleFates(copy, secondContext, structuredClone(fact), emitEvent(copy, secondContext));
+    resolveBattleFates(world, firstContext, fact, emitEvent(world, firstContext));
+    resolveBattleFates(copy, secondContext, structuredClone(fact), emitEvent(copy, secondContext));
     const participant = fact.payload.attacker.participants![0]!;
     const safe = battleFateChances({ ...participant, losses: 10, soldiersAfter: participant.soldiersBefore - 10 }, true, 100, 90, 90);
     const dangerous = battleFateChances({ ...participant, losses: participant.soldiersBefore, soldiersAfter: 0 }, false, 30, 10, 20);
 
-    expect(first).toEqual(second);
     expect(firstContext.facts).toEqual(secondContext.facts);
     expect(dangerous.death).toBeGreaterThan(safe.death);
     expect(dangerous.wound).toBeGreaterThan(safe.wound);
-    expect(dangerous.death).toBeLessThanOrEqual(.055);
-    expect(dangerous.wound).toBeLessThanOrEqual(.42);
+    expect(safe).toMatchObject({ death: 0, wound: 0, exposure: 'ordinary' });
+    expect(dangerous.death).toBeLessThanOrEqual(.048);
+    expect(dangerous.wound).toBeLessThanOrEqual(.34);
+  });
+
+  it('does not draw another wound while the previous injury is still being rested', () => {
+    const world = createWorld('带伤不反复抽签');
+    const { fact, commanderId } = battleForCommander(world);
+    fact.id = idForOutcome(world, fact, commanderId, 'wound');
+    const firstContext = createTurnContext(world);
+    resolveBattleFates(world, firstContext, fact, emitEvent(world, firstContext));
+    const nextFact = structuredClone(fact);
+    nextFact.id = `${fact.id}-again`;
+    const nextContext = createTurnContext(world);
+
+    resolveBattleFates(world, nextContext, nextFact, emitEvent(world, nextContext));
+
+    expect(nextContext.facts.filter((item) => item.kind === 'character_wounded')).toHaveLength(0);
   });
 
   it('turns a protected battlefield death into one wound and consumes protection', () => {
@@ -170,9 +189,8 @@ describe('battle participant fate', () => {
     character.protectedUntilTurn = world.turn;
     const context = createTurnContext(world);
 
-    const result = resolveBattleFates(world, context, fact, emitEvent(world, context));
+    resolveBattleFates(world, context, fact, emitEvent(world, context));
 
-    expect(result[0]).toMatchObject({ outcome: 'wounded' });
     expect(character.alive).toBe(true);
     expect(character.protectedUntilTurn).toBeNull();
     expect(context.facts).toHaveLength(1);

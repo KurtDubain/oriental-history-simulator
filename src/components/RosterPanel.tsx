@@ -170,7 +170,7 @@ export function RosterPanel({
   };
 
   const clearConditions = () => {
-    onStateChange(createRosterDiscoveryState());
+    onStateChange(createRosterDiscoveryState(definition.scope));
   };
 
   return (
@@ -235,7 +235,11 @@ export function RosterPanel({
               <Search size={15} aria-hidden="true" />
               <input
                 value={result.state.query}
-                onChange={(event) => updateState({ query: event.target.value })}
+                onChange={(event) => updateState({
+                  query: event.target.value,
+                  ...(definition.scope === 'people' && result.state.quickView === 'living' && event.target.value.trim()
+                    ? { quickView: 'all' } : {}),
+                })}
                 placeholder={searchPlaceholder}
                 aria-label={`检索${title}`}
               />

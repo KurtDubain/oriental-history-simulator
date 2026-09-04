@@ -167,13 +167,13 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact): F
   if (fact.kind === 'expedition_response') {
     return {
       title: `${characterName(world, fact.payload.characterId)}拒绝随军`,
-      summary: `${characterName(world, fact.payload.commanderId)}召其加入${armyName(world, fact.payload.armyId)}，此人因${fact.payload.reason}公开留守，部曲没有交入行营。`,
+      summary: `${characterName(world, fact.payload.commanderId)}召其加入${armyName(world, fact.payload.armyId)}，此人因${fact.payload.reason}公开留守，拒令已经损伤双方信任。`,
     };
   }
   if (fact.kind === 'character_wounded') {
     return {
       title: `${characterName(world, fact.payload.characterId)}负伤`,
-      summary: `在${regionName(world, fact.payload.regionId)}交战时，本部${fact.payload.soldiersBefore}人损失${fact.payload.losses}人，健康${fact.payload.healthBefore}→${fact.payload.healthAfter}。`,
+      summary: `在${regionName(world, fact.payload.regionId)}交战时，本部${fact.payload.soldiersBefore}人损失${fact.payload.losses}人，健康${fact.payload.healthBefore}→${fact.payload.healthAfter}，已退营休养至第${fact.payload.recoveryUntilTurn ?? fact.turn + 2}季。`,
     };
   }
   if (fact.kind === 'character_death') {

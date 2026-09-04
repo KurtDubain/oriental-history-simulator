@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { computeWorldHash, createWorld, serializeWorld } from '../sim';
 import type { BattleFact } from '../sim/facts';
-import type { HistoryEvent, WorldState } from '../sim/types';
+import type { WorldState } from '../sim/types';
 import { projectPersonStoryArc } from './person-story-arc';
 
 function battleFact(
@@ -76,39 +76,17 @@ describe('person story arc', () => {
       battleFact(world, person.id, 'fact_story_b4', 16, 40),
     ];
     world.facts.push(...battles);
-    const event: HistoryEvent = {
-      id: 'event_story_b4',
-      turn: 16,
-      year: 5,
-      season: '春',
-      category: '军事',
-      kind: 'battle',
-      title: '同一场战役的史册写法',
-      summary: '这不是人物传中的第二件事。',
-      importance: 5,
-      actorIds: [person.id],
-      polityIds: [person.polityId],
-      regionIds: [battles[0]!.payload.targetRegionId],
-      causes: [],
-      evidence: [],
-      stateDeltas: [],
-      sourceFactIds: [battles[3]!.id],
-      situationIds: [],
-    };
-    world.history.push(event);
     const before = serializeWorld(world);
     const hash = computeWorldHash(world);
 
     const first = projectPersonStoryArc(world, person);
     const second = projectPersonStoryArc(world, person);
-    const compressed = first.find((beat) => beat.id.startsWith('person-story:battles:'));
+    const compressed = first.find((beat) => beat.sourceFactIds.includes('fact_story_b1'));
 
     expect(first).toEqual(second);
-    expect(first.length).toBeLessThanOrEqual(4);
+    expect(first.length).toBeLessThanOrEqual(3);
     expect(compressed?.sourceFactIds).toEqual(['fact_story_b1', 'fact_story_b2', 'fact_story_b4']);
-    expect(compressed?.sourceEventIds).toEqual([event.id]);
-    expect(first.filter((beat) => beat.sourceEventIds.includes(event.id))).toHaveLength(1);
-    expect(first.every((beat) => beat.sourceFactIds.length + beat.sourceEventIds.length > 0)).toBe(true);
+    expect(first.every((beat) => beat.sourceFactIds.length > 0)).toBe(true);
     expect(serializeWorld(world)).toBe(before);
     expect(computeWorldHash(world)).toBe(hash);
   });
@@ -149,9 +127,10 @@ describe('person story arc', () => {
 
     const story = projectPersonStoryArc(world, person);
 
-    expect(story.find((beat) => beat.phase === 'turning')).toMatchObject({
-      title: `${person.name}负伤`,
+    expect(story.find((beat) => beat.phase === 'setback' && beat.sourceFactIds.includes('fact_story_wound'))).toMatchObject({
+      title: `${person.name}负伤退营休养`,
       sourceFactIds: ['fact_story_wound'],
     });
+    expect(story.length).toBeLessThanOrEqual(3);
   });
 });

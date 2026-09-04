@@ -27,6 +27,7 @@ import {
   type RootDesire,
 } from '../sim/agency';
 import { calculateCharacterPowerPosition } from '../sim/politics/power-ledger';
+import { battleRecoveryStatus } from '../sim/military/battle-readiness';
 import { projectHistoricalScenes } from './historical-scenes';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import {
@@ -920,8 +921,10 @@ export function toPersonInspector(
   const formation = personalForce?.formationId
     ? world.armies.find((army) => army.id === personalForce.formationId)
     : undefined;
-  const forceFaction = item.factionId ? world.factions.find((faction) => faction.id === item.factionId) : undefined;
-  const latestBattle = [...world.facts].reverse().find((fact) => fact.kind === 'battle' && (
+  const inspectorFacts = item.alive ? world.facts : (() => {
+    try { return readWorldFacts(world); } catch { return world.facts; }
+  })();
+  const latestBattle = [...inspectorFacts].reverse().find((fact) => fact.kind === 'battle' && (
     fact.payload.attacker.participants?.some((participant) => participant.characterId === item.id)
     || fact.payload.defenders.some((defender) => defender.participants?.some((participant) => participant.characterId === item.id))
     || [fact.payload.attacker, ...fact.payload.defenders].some((side) => (
@@ -933,6 +936,13 @@ export function toPersonInspector(
       .flatMap((side) => side.participants ?? [])
       .find((participant) => participant.characterId === item.id)
     : undefined;
+  const forceFactionId = item.factionId ?? latestPersonalBattle?.factionId ?? null;
+  const forceFaction = forceFactionId ? world.factions.find((faction) => faction.id === forceFactionId) : undefined;
+  const recovery = item.alive ? battleRecoveryStatus(world, item.id) : null;
+  const resting = Boolean(item.alive && (recovery?.recovering || item.health < 55));
+  const lastCommander = latestPersonalBattle
+    ? world.characters.find((character) => character.id === latestPersonalBattle.formationCommanderId)?.name ?? '主将不详'
+    : '无';
   return {
     id: item.id,
     name: item.name,
@@ -968,21 +978,21 @@ export function toPersonInspector(
     relationships,
     experiences,
     storyArc: inspectorStoryArc(world, item),
-    militaryForce: personalForce ? {
-      soldiers: personalForce.soldiers,
-      cohesion: personalForce.cohesion,
-      readiness: personalForce.readiness,
-      status: personalForce.status,
+    militaryForce: personalForce || !item.alive && latestPersonalBattle ? {
+      soldiers: personalForce?.soldiers ?? latestPersonalBattle?.soldiersAfter ?? 0,
+      cohesion: personalForce?.cohesion,
+      readiness: personalForce?.readiness,
+      status: personalForce ? recovery?.recovering ? `休养至第${recovery.untilTurn}季` : resting ? '仍在养伤' : personalForce.status : '已解散',
       location: home?.name ?? '所在不详',
       faction: forceFaction?.name ?? '未入主要集团',
       formation: formation
         ? item.id === formation.commanderId ? `自领${formation.name}` : `随${world.characters.find((character) => character.id === formation.commanderId)?.name ?? '主将'}出征${home ? home.name : ''}`
-        : '独立驻留',
+        : personalForce ? resting ? '退离行营休养' : '独立驻留' : '最后一战后散归',
       commander: formation
         ? item.id === formation.commanderId ? '自领' : world.characters.find((character) => character.id === formation.commanderId)?.name ?? '主将暂缺'
-        : '无',
+        : personalForce ? '无' : lastCommander,
       latestBattle: latestBattle?.kind === 'battle'
-        ? `最近参战：${region(world, latestBattle.payload.targetRegionId)?.name ?? '无名战场'}，本部损失${latestPersonalBattle?.losses ?? 0}人。`
+        ? `最近参战：${region(world, latestBattle.payload.targetRegionId)?.name ?? '无名战场'}，本部${latestPersonalBattle?.soldiersBefore ?? 0}人损失${latestPersonalBattle?.losses ?? 0}人，战后余${latestPersonalBattle?.soldiersAfter ?? 0}人。`
         : null,
     } : undefined,
     politicalFocus: projectPersonPoliticalFocus(world, item),
@@ -1007,27 +1017,20 @@ export function toPersonArchive(
   const personFamily = family(world, item.familyId);
   const records: ArchiveRecord[] = toPersonExperienceRecords(world, item);
   const relationships = inspector.relationships ?? [];
-  const storyArc = projectPersonStoryArc(world, item, 'all');
   return {
     id: item.id,
     kind: 'person',
     eyebrow: '人物传 · 生平行状',
     title: `${item.name}传`,
     subtitle: `${owner?.name ?? '无属'} · ${item.role} · ${item.lifeStage ?? `${item.age}岁`}`,
-    lead: storyArc.length
-      ? `${item.name}留下${storyArc.length}段可追溯的关键经历；下列叙述均来自实际史事或结算事实。`
-      : `${item.name}尚未留下足以连成生平主线的史事。`,
+    lead: `${item.name}的完整纪年；只收录可由史事或结算事实核验的经历。`,
     facts: [
       { label: '生年', value: turnLabel(item.birthTurn ?? Math.max(0, world.turn - item.age * 4)) },
       { label: '家族', value: inspector.family ?? '家世不详' }, { label: '阶层', value: item.politicalClass ?? '出身未详' },
       { label: '功绩', value: String(Math.round(item.merit ?? 0)) }, { label: '影响', value: String(Math.round(item.influence ?? item.renown)) },
       { label: '现职', value: item.alive ? item.role : '已故' },
     ],
-    chapters: storyArc.map((beat) => ({
-      id: beat.id.replace(/[^a-zA-Z0-9_-]/g, '-'),
-      title: `${beat.phaseLabel} · ${beat.dateLabel} · ${beat.title}`,
-      paragraphs: [beat.summary],
-    })),
+    chapters: [],
     records,
     politicalFocus: inspector.politicalFocus,
     links: uniqueArchiveLinks([

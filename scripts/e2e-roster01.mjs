@@ -367,9 +367,10 @@ async function exercisePeopleDiscovery(page, panel, scenario, baseline) {
   if (scenario.viewport.width <= ROSTER_DOSSIER_MAX_WIDTH) await assertTouchTarget(clear, `${scenario.slug} 清除条件`);
   await activate(clear, scenario);
   const cleared = await waitForRosterState(page, {
-    scope: 'people', query: '', quickView: 'all', sort: 'attention', filters: { polity: 'all', identity: 'all' },
+    scope: 'people', query: '', quickView: 'living', sort: 'attention', filters: { polity: 'all', identity: 'all' },
   });
-  assert.equal(cleared.interface.rosterMatched, cleared.interface.rosterTotal, `${scenario.slug} 清除后应恢复人物全卷`);
+  assert.ok(cleared.interface.rosterMatched > 0, `${scenario.slug} 清除后应恢复在世人物`);
+  assert.ok(cleared.interface.visibleRoster.every((item) => !item.subtitle.includes('故人')), `${scenario.slug} 默认名录不应混入故人`);
   await assertRosterProjection(page, panel, scenario, baseline, '人物清除条件');
 }
 

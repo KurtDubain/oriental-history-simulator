@@ -269,15 +269,12 @@ export interface PersonAgencyView {
 }
 
 export interface PersonStoryBeatView {
-  id: string;
-  phase: 'origin' | 'rise' | 'turning' | 'current';
+  phase: 'command' | 'choice' | 'battle' | 'setback' | 'return' | 'ending';
   phaseLabel: string;
   dateLabel: string;
   title: string;
   summary: string;
   sourceFactIds: readonly string[];
-  sourceEventIds: readonly string[];
-  primaryEventId: string | null;
 }
 
 export interface PersonInspectorData {
@@ -314,8 +311,8 @@ export interface PersonInspectorData {
   summary?: string;
   militaryForce?: {
     soldiers: number;
-    cohesion: number;
-    readiness: number;
+    cohesion?: number;
+    readiness?: number;
     status: string;
     location: string;
     faction: string;
@@ -1040,9 +1037,8 @@ export function PersonEmbodimentClosureNotice({
 
 function PersonInspector({ data, onOpenMind, mobileMindRequest = 0, ...actions }: Extract<InspectorProps, { kind: 'person' }> & { onOpenMind?: () => void; mobileMindRequest?: number }) {
   const [tab, setTab] = useState<'life' | 'mind' | 'relations' | 'history'>('life');
-  const [storyExpanded, setStoryExpanded] = useState(false);
   const tabsId = useId();
-  useEffect(() => { setTab('life'); setStoryExpanded(false); }, [data.id]);
+  useEffect(() => { setTab('life'); }, [data.id]);
   useEffect(() => {
     if (mobileMindRequest > 0) setTab('mind');
   }, [mobileMindRequest]);
@@ -1086,8 +1082,8 @@ function PersonInspector({ data, onOpenMind, mobileMindRequest = 0, ...actions }
       </button>
       <InspectorTabs value={tab} onChange={setTab} idPrefix={tabsId} items={[{ id: 'life', label: '其人' }, { id: 'mind', label: '所图' }, { id: 'relations', label: '关系' }, { id: 'history', label: '生平' }]} />
       {tab === 'life' ? <div id={`${tabsId}-panel-life`} role="tabpanel" aria-labelledby={`${tabsId}-tab-life`}>
-        {data.storyArc?.length ? <section className="observer-inspector__section observer-person-story" aria-labelledby="person-story-heading" data-expanded={storyExpanded || undefined}><h3 id="person-story-heading"><ScrollText size={14} aria-hidden="true" />这一生如何走到这里</h3><ol>{data.storyArc.map((beat) => <li key={beat.id}><span>{beat.phaseLabel} · {beat.dateLabel}</span>{beat.primaryEventId && actions.onSelectEvent ? <button type="button" onClick={() => actions.onSelectEvent?.(beat.primaryEventId!)}><strong>{beat.title}</strong><small>{beat.summary}</small></button> : <div><strong>{beat.title}</strong><small>{beat.summary}</small></div>}</li>)}</ol>{data.storyArc.length > 3 ? <button type="button" className="observer-person-story__more" onClick={() => setStoryExpanded((value) => !value)}>{storyExpanded ? '收起一段' : '展开完整四段'}</button> : null}</section> : null}
-        {data.militaryForce ? <section className="observer-inspector__section observer-inspector__section--military" aria-labelledby="person-force-heading"><h3 id="person-force-heading"><Swords size={14} aria-hidden="true" />自有军势</h3><p><strong>自有部曲 {display(data.militaryForce.soldiers)} 人</strong> · {data.militaryForce.status} · {data.militaryForce.formation}</p><dl className="observer-facts"><Fact label="所在" value={data.militaryForce.location} /><Fact label="所属集团" value={data.militaryForce.faction} /><Fact label="当前节制" value={data.militaryForce.commander} /><Fact label="凝聚 / 战备" value={`${Math.round(data.militaryForce.cohesion)} / ${Math.round(data.militaryForce.readiness)}`} /></dl>{data.militaryForce.latestBattle ? <small>{data.militaryForce.latestBattle}</small> : null}</section> : null}
+        {data.storyArc?.length ? <section className="observer-inspector__section observer-person-story" aria-labelledby="person-story-heading"><h3 id="person-story-heading"><ScrollText size={14} aria-hidden="true" />这一生如何走到这里</h3><ol>{data.storyArc.map((beat) => <li key={beat.sourceFactIds.join(':')}><span>{beat.phaseLabel} · {beat.dateLabel}</span><div><strong>{beat.title}</strong><small>{beat.summary}</small></div></li>)}</ol></section> : null}
+        {data.militaryForce ? <section className="observer-inspector__section observer-inspector__section--military" aria-labelledby="person-force-heading"><h3 id="person-force-heading"><Swords size={14} aria-hidden="true" />{data.lifeStage === '已故' ? '最后军势' : '自有军势'}</h3><p><strong>{data.lifeStage === '已故' ? '最后所见部曲' : '自有部曲'} {display(data.militaryForce.soldiers)} 人</strong> · {data.militaryForce.status} · {data.militaryForce.formation}</p><dl className="observer-facts"><Fact label="所在" value={data.militaryForce.location} /><Fact label="所属集团" value={data.militaryForce.faction} /><Fact label="当前节制" value={data.militaryForce.commander} />{data.militaryForce.cohesion !== undefined && data.militaryForce.readiness !== undefined ? <Fact label="凝聚 / 战备" value={`${Math.round(data.militaryForce.cohesion)} / ${Math.round(data.militaryForce.readiness)}`} /> : null}</dl>{data.militaryForce.latestBattle ? <small>{data.militaryForce.latestBattle}</small> : null}</section> : null}
         <section className="observer-inspector__section" aria-labelledby="person-origin-heading"><h3 id="person-origin-heading">身世与处境</h3><dl className="observer-facts"><Fact label="性别" value={data.gender} /><Fact label="出身" value={data.origin} /><Fact label="阶层" value={data.politicalClass} /><Fact label="家族" value={data.family} /><Fact label="影响" value={data.influence} /><Fact label="私产" value={data.personalWealth} /></dl>{data.family ? <p className="observer-inspector__jump"><Network size={13} aria-hidden="true" /><LinkedName kind="family" id={data.familyId} onSelect={actions.onSelectEntity}>{data.family}</LinkedName></p> : null}{data.health !== undefined ? <div className="observer-health"><HeartPulse size={14} aria-hidden="true" /><Meter label="健康" value={data.health} /></div> : null}</section>
         <section className="observer-inspector__section" aria-labelledby="person-ability-heading"><h3 id="person-ability-heading">才能</h3><div className="observer-ability-grid">{abilities.map(([label, value]) => <div className="observer-ability" key={label}><span>{label}</span><strong>{Math.round(value)}</strong></div>)}</div><dl className="observer-facts observer-facts--after-grid"><Fact label="功绩" value={data.merit} /><Fact label="副将历练" value={data.deputyExperience} /></dl></section>
       </div> : null}

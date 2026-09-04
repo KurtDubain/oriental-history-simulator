@@ -30,6 +30,7 @@ import {
 } from './embodied-military';
 import { isEmbodiedCourtAction, projectEmbodiedCourtAction } from './embodied-court';
 import { markLawfulCommandTransfer } from '../military/authority-core';
+import { isBattleReadyCharacter } from '../military/battle-readiness';
 import {
   MAX_LOCAL_GOVERNANCE_ACTIONS_PER_TURN,
   compareLocalGovernanceCandidates,
@@ -345,7 +346,10 @@ function preparationSignals(
     && army.polityId === polity.id
     && army.commanderId === commander.id
     && army.deputyCommanderId === character.id
+    && army.participantIds.includes(commander.id)
+    && army.participantIds.includes(character.id)
     && commander.commandingArmyId === army.id
+    && isBattleReadyCharacter(world, character)
     && character.polityId === polity.id
     && character.age >= 16
     && !character.commandingArmyId
@@ -729,8 +733,12 @@ function supportActionFor(
   const character = world.characters.find((item) => item.id === actor.characterId && item.alive);
   const army = world.armies.find((item) => item.id === actor.goal.targetArmyId);
   const polity = world.polities.find((item) => item.id === actor.goal.targetPolityId && item.alive);
-  if (!character || !army || !polity || army.deputyCommanderId !== character.id) return null;
+  if (!character
+    || !army
+    || !polity
+    || army.deputyCommanderId !== character.id) return null;
   const signals = preparationSignals(world, character, army.commanderId, army.id, turn, actor.supportActions);
+  if (!signals.permissionReady) return null;
   const preparations = [signals.patronage, signals.militarySupport, signals.familyBacking]
     .filter(Boolean).length;
   // One concrete promise is enough evidence for a formal request, but it is

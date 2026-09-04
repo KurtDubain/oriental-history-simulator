@@ -147,9 +147,9 @@ export default defineConfig({
   build: {
     minify: 'terser',
     terserOptions: {
-      compress: { passes: 5, pure_getters: true },
+      compress: { ecma: 2020, passes: 5, pure_getters: true, booleans_as_integers: true, unsafe_arrows: true, unsafe_comps: true },
       mangle: { toplevel: true },
-      format: { comments: false },
+      format: { ecma: 2020, comments: false },
     },
     // Keep stable domain boundaries cacheable without changing when modules execute.
     // Archive/fact primitives form an acyclic base chunk; the rest of the simulation

@@ -164,6 +164,7 @@ export interface CharacterWoundedFactPayload {
   healthBefore: number;
   healthAfter: number;
   observerProtectionConsumed: boolean;
+  recoveryUntilTurn?: number;
 }
 
 export interface MarriageFactPayload {

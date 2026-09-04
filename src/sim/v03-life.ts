@@ -13,6 +13,7 @@ import type {
   WorldState,
 } from './types';
 import type { V03Emit, V03TurnContext } from './v03-context';
+import { battleRecoveryStatus } from './military/battle-readiness';
 import { applyFormationLosses } from './military/personal-forces';
 
 const PATHOGENS: readonly PathogenState[] = [
@@ -821,6 +822,9 @@ export function processV03Disease(world: WorldState, context: V03TurnContext, em
       } else {
         character.health = Math.round(clamp(character.health + 1));
       }
+    }
+    if (!character.activeDiseaseId && battleRecoveryStatus(world, character.id, context.turn).recovering) {
+      character.health = Math.round(clamp(character.health + 5));
     }
     if (previousHealth >= 45 && character.health < 45 && character.activeDiseaseId) {
       const pathogen = world.pathogens.find((item) => item.id === character.activeDiseaseId);

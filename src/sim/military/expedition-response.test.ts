@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
 
 import { advanceWorld, createWorld } from '../index';
-import type { CharacterState, RelationshipState, WarState, WorldState } from '../types';
-import { isAvailableForExpedition, selectExpeditionResponses } from './expedition-response';
+import type { CharacterState, HistoryEvent, RelationshipState, WarState, WorldState } from '../types';
+import { createTurnContext } from '../turn-context-state';
+import type { V03EventInput } from '../v03-context';
+import { isAvailableForExpedition, recordPublicExpeditionRefusals, selectExpeditionResponses } from './expedition-response';
 
 function availablePeople(world: WorldState, polityId: string): CharacterState[] {
   return world.characters.filter((character) => isAvailableForExpedition(world, polityId, character));
@@ -30,6 +32,19 @@ function setRelation(
   };
   Object.assign(relation, values);
   if (!current) world.relationships.push(relation);
+}
+
+function emitEvent(world: WorldState, context: ReturnType<typeof createTurnContext>) {
+  return (input: V03EventInput): HistoryEvent => {
+    world.counters.event += 1;
+    const event: HistoryEvent = { ...input, id: `event_test_${world.counters.event}`, turn: context.turn,
+      year: context.year, season: context.season, actorIds: input.actorIds ?? [], polityIds: input.polityIds ?? [],
+      regionIds: input.regionIds ?? [], evidence: input.causes.map((cause) => cause.evidence),
+      stateDeltas: input.stateDeltas ?? [], sourceFactIds: input.sourceFactIds ?? [], situationIds: [] };
+    world.history.push(event);
+    context.events.push(event);
+    return event;
+  };
 }
 
 describe('expedition responses', () => {
@@ -62,6 +77,9 @@ describe('expedition responses', () => {
     const polity = world.polities.find((item) => availablePeople(world, item.id).length >= 3)!;
     const [commander, refuser, officeHolder] = availablePeople(world, polity.id);
     const region = world.regions.find((item) => item.id === commander!.locationRegionId)!;
+    world.wars = [];
+    refuser!.locationRegionId = region.id;
+    refuser!.governedRegionId = null;
     refuser!.loyalty = 4;
     refuser!.insubordination = 92;
     refuser!.ambition = 90;
@@ -74,7 +92,6 @@ describe('expedition responses', () => {
 
     expect(result.decisions.find((item) => item.characterId === refuser!.id)).toMatchObject({
       outcome: 'refused',
-      publicRefusal: true,
     });
     expect(result.participantIds).not.toContain(refuser!.id);
     expect(result.participantIds).not.toContain(officeHolder!.id);
@@ -87,6 +104,7 @@ describe('expedition responses', () => {
     const region = world.regions.find((item) => item.id === commander!.locationRegionId)!;
     ally!.factionId = world.factions.find((item) => item.polityId === polity.id && item.id !== commander!.factionId)?.id ?? null;
     ally!.locationRegionId = region.id;
+    ally!.governedRegionId = null;
     ally!.loyalty = 100;
     world.personalForces.find((item) => item.ownerId === ally!.id)!.readiness = 100;
     setRelation(world, ally!.id, commander!.id, { trust: 100, affinity: 80, gratitude: 70 });
@@ -101,6 +119,31 @@ describe('expedition responses', () => {
     expect(result.participantIds).toContain(ally!.id);
     expect(result.participantIds).not.toContain(stayer!.id);
     expect({ character: stayer, force: world.personalForces.find((item) => item.ownerId === stayer!.id) }).toEqual(before);
+  });
+
+  it('turns a public refusal into bounded relationship consequences and an auditable fact', () => {
+    const world = createWorld('拒令必须留下后果');
+    const army = world.armies[0]!;
+    const commander = world.characters.find((item) => item.id === army.commanderId)!;
+    const refuser = world.characters.find((item) => item.polityId === army.polityId && item.id !== commander.id)!;
+    const region = world.regions.find((item) => item.id === army.regionId)!;
+    setRelation(world, commander.id, refuser.id, { trust: 45, grievance: 12 });
+    setRelation(world, refuser.id, commander.id, { trust: 35 });
+    const tie = world.relationships.find((item) => item.sourceId === commander.id && item.targetId === refuser.id)!;
+    const before = { trust: tie.trust, grievance: tie.grievance };
+    const context = createTurnContext(world);
+
+    recordPublicExpeditionRefusals(world, context, {
+      participantIds: [commander.id],
+      decisions: [{ characterId: refuser.id, outcome: 'refused',
+        reason: '与主将旧怨未解', priority: 1 }],
+    }, army, commander, region, emitEvent(world, context));
+
+    expect(tie.trust).toBeLessThan(before.trust);
+    expect(tie.grievance).toBeGreaterThan(before.grievance);
+    expect(tie.memories.at(-1)).toMatchObject({ kind: '背叛', eventId: context.events[0]?.id });
+    expect(context.facts[0]).toMatchObject({ kind: 'expedition_response', payload: { outcome: 'refused' } });
+    expect(context.facts[0]?.stateDeltas.filter((delta) => delta.entityType === 'relationship').length).toBeGreaterThan(0);
   });
 
   it('continues expanding wartime formations when the strongest non-commander is already attached elsewhere', () => {

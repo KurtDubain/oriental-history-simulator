@@ -447,7 +447,7 @@ function highOfficeAttentionLabel(identity: ReturnType<typeof personIdentity>): 
 }
 
 function personItems(context: ProjectionContext): RosterItem[] {
-  return context.world.characters.filter((item) => item.alive).map((item) => {
+  return context.world.characters.map((item) => {
     const identity = personIdentity(context, item);
     const recent = personEvent(context, item.id);
     const actualCommand = context.world.armies.some((army) => army.commanderId === item.id)
@@ -482,16 +482,17 @@ function personItems(context: ProjectionContext): RosterItem[] {
         : candidate('standing', '声望渐显', { kind: 'item', id: item.id }, { value: item.influence ?? item.renown });
     const attention = chooseAttention([watched, situation, event, structural].filter((entry): entry is AttentionCandidate => Boolean(entry)));
     const quickViews = [
-      recent ? 'recent' : null,
-      identity.rank >= 70 ? 'high-office' : null,
-      actualCommand ? 'command' : null,
-      actionable ? 'actionable' : null,
+      item.alive ? 'living' : 'deceased',
+      item.alive && recent ? 'recent' : null,
+      item.alive && identity.rank >= 70 ? 'high-office' : null,
+      item.alive && actualCommand ? 'command' : null,
+      item.alive && actionable ? 'actionable' : null,
     ].filter((entry): entry is string => Boolean(entry));
     return {
       id: item.id,
       title: item.name,
-      subtitle: `${polity(context.world, item.polityId)?.name ?? '无属'} · ${identity.label} · ${item.politicalClass ?? '出身未详'}`,
-      meta: `${item.age} 岁 · 影响 ${Math.round(item.influence ?? item.renown)}`,
+      subtitle: `${polity(context.world, item.polityId)?.name ?? '无属'} · ${item.alive ? identity.label : '故人'} · ${item.politicalClass ?? '出身未详'}`,
+      meta: `${item.age} 岁 · ${item.alive ? `影响 ${Math.round(item.influence ?? item.renown)}` : `卒于第${item.deathTurn ?? '?'}季`}`,
       accent: polity(context.world, item.polityId)?.color,
       alert: Boolean(watched?.reason.kind === 'watched-alert') || (item.ambition > 78 && item.loyalty < 40),
       reason: attention.reason,
@@ -646,6 +647,8 @@ function discoveryDefinition(world: WorldState, scope: RosterScope): RosterDisco
       unitLabel: '人',
       quickViews: [
         { id: 'all', label: '全部' },
+        { id: 'living', label: '在世' },
+        { id: 'deceased', label: '故人' },
         { id: 'recent', label: '近季有事' },
         { id: 'high-office', label: '身居高位' },
         { id: 'command', label: '实际掌军' },
@@ -764,7 +767,7 @@ function collection(
   context: ProjectionContext,
 ): RosterCollectionDefinition {
   const definition = discoveryDefinition(world, scope);
-  const items = applyRosterDiscovery(rawItems(context, scope), definition, createRosterDiscoveryState()).items;
+  const items = rawItems(context, scope);
   return { ...COLLECTION_COPY[scope], definition, items };
 }
 
@@ -801,12 +804,12 @@ export function projectRosterDirectory(
 export function projectRosterCollection(
   world: WorldState,
   scope: RosterScope,
-  state: RosterDiscoveryState = createRosterDiscoveryState(),
+  state?: RosterDiscoveryState,
   watchedRefs: readonly RosterWatchedRef[] = [],
 ): RosterCollectionProjection {
   const context = buildContext(world, watchedRefs);
   const definition = discoveryDefinition(world, scope);
-  const result: RosterDiscoveryResult = applyRosterDiscovery(rawItems(context, scope), definition, state);
+  const result: RosterDiscoveryResult = applyRosterDiscovery(rawItems(context, scope), definition, state ?? createRosterDiscoveryState(scope));
   return {
     ...COLLECTION_COPY[scope],
     definition,

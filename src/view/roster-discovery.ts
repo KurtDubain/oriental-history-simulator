@@ -111,13 +111,13 @@ const ATTENTION_PRIORITY: Readonly<Record<RosterAttentionKind, number>> = {
   standing: 9,
 };
 
-export function createRosterDiscoveryState(): RosterDiscoveryState {
-  return { query: '', quickView: 'all', filters: {}, sort: 'attention' };
+export function createRosterDiscoveryState(scope?: RosterScope): RosterDiscoveryState {
+  return { query: '', quickView: scope === 'people' ? 'living' : 'all', filters: {}, sort: 'attention' };
 }
 
 export function createRosterDiscoveryStates(): RosterDiscoveryStateMap {
   return {
-    people: createRosterDiscoveryState(),
+    people: createRosterDiscoveryState('people'),
     polities: createRosterDiscoveryState(),
     families: createRosterDiscoveryState(),
     military: createRosterDiscoveryState(),
@@ -141,7 +141,7 @@ export function normalizeRosterDiscoveryState(
   definition: RosterDiscoveryDefinition,
   state: RosterDiscoveryState,
 ): RosterDiscoveryState {
-  const quickView = optionExists(definition.quickViews, state.quickView) ? state.quickView : 'all';
+  const quickView = optionExists(definition.quickViews, state.quickView) ? state.quickView : createRosterDiscoveryState(definition.scope).quickView;
   const sort = optionExists(definition.sorts, state.sort) ? state.sort : 'attention';
   const filters = Object.fromEntries(definition.filters.map((filter) => {
     const selected = state.filters[filter.id] ?? 'all';

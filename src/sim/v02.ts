@@ -282,7 +282,7 @@ function syncFamilyMembers(world: WorldState): void {
   }
 }
 
-function ensureRelationship(world: WorldState, sourceId: string, targetId: string): RelationshipState {
+export function ensureRelationship(world: WorldState, sourceId: string, targetId: string): RelationshipState {
   if (sourceId === targetId) throw new Error(`Self relationship is forbidden: ${sourceId}`);
   let relation = world.relationships.find((item) => item.sourceId === sourceId && item.targetId === targetId);
   if (relation) return relation;
@@ -304,14 +304,14 @@ function ensureRelationship(world: WorldState, sourceId: string, targetId: strin
   return relation;
 }
 
-function remember(
+export function remember(
   world: WorldState,
   sourceId: string,
   targetId: string,
   kind: MemoryKind,
   impact: number,
   summary: string,
-  eventId: string,
+  eventId: string | null,
 ): void {
   if (sourceId === targetId) return;
   const relation = ensureRelationship(world, sourceId, targetId);

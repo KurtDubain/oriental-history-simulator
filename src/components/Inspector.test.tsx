@@ -301,32 +301,29 @@ describe('entity history gateways', () => {
     expect(markup).not.toContain('data-testid="entity-history-gateway"');
   });
 
-  it('shows at most four sourced story beats before the character statistics', () => {
+  it('shows one to three sourced turning points before the character statistics', () => {
     const markup = renderToStaticMarkup(createElement(Inspector, {
       kind: 'person',
       data: {
         id: 'person-story', name: '顾庭芳', age: 41, gender: '女', role: '将领',
         ambition: 72, loyalty: 61, caution: 55,
         abilities: { command: 68, martial: 57, governance: 49, strategy: 63, charisma: 58, scholarship: 52 },
-        storyArc: ['起点', '得势', '转折', '近况'].map((phaseLabel, index) => ({
-          id: `beat-${index}`,
-          phase: ['origin', 'rise', 'turning', 'current'][index] as 'origin' | 'rise' | 'turning' | 'current',
+        storyArc: ['掌事', '失势', '复出'].map((phaseLabel, index) => ({
+          phase: ['command', 'setback', 'return'][index] as 'command' | 'setback' | 'return',
           phaseLabel,
           dateLabel: `初元${index + 1}年`,
           title: `实事${index + 1}`,
           summary: `第${index + 1}段均有来源。`,
           sourceFactIds: [`fact-${index}`],
-          sourceEventIds: index === 2 ? ['event-wound'] : [],
-          primaryEventId: index === 2 ? 'event-wound' : null,
         })),
       },
       onSelectEvent: () => undefined,
     }));
 
     expect(markup).toContain('这一生如何走到这里');
-    expect(markup.match(/第[1-4]段均有来源/g)).toHaveLength(4);
-    expect(markup).toContain('展开完整四段');
-    expect(markup.indexOf('此人至今')).toBeLessThan(markup.indexOf('身世与处境'));
+    expect(markup.match(/第[1-3]段均有来源/g)).toHaveLength(3);
+    expect(markup).not.toContain('展开完整四段');
+    expect(markup.indexOf('这一生如何走到这里')).toBeLessThan(markup.indexOf('身世与处境'));
   });
 });
 

@@ -80,6 +80,7 @@ import {
   syncAllFormationStrengths,
   syncFormationStrength,
 } from './military/personal-forces';
+import { commandHealthFactor, isBattleReadyCharacter } from './military/battle-readiness';
 import {
   createInitialFormations,
   desiredFieldFormationCount,
@@ -88,10 +89,10 @@ import {
 import {
   isAvailableForExpedition,
   expeditionAssemblyText,
-  recordPublicExpeditionRefusal,
+  recordPublicExpeditionRefusals,
   selectExpeditionResponses,
 } from './military/expedition-response';
-import { resolveBattleFates } from './military/battle-fate';
+import { releaseUnavailableFormationMembers, resolveBattleFates } from './military/battle-fate';
 import { settleCharacterDeathState } from './character-death';
 import {
   createTurnContext,
@@ -909,10 +910,10 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
     const assignedDeputies = new Set<string>();
     for (const army of polityArmies) {
       const current = world.characters.find((character) => character.id === army.commanderId);
-      if (!current?.alive || current.polityId !== polity.id) {
+      if (!current?.alive || current.polityId !== polity.id || !isBattleReadyCharacter(world, current)) {
         if (current) current.commandingArmyId = null;
         const replacement = selectCandidate(
-          aliveCharacters(world, polity.id).filter((character) => !character.commandingArmyId && !character.commandingFleetId && !character.governedRegionId
+          aliveCharacters(world, polity.id).filter((character) => isBattleReadyCharacter(world, character) && !character.commandingArmyId && !character.commandingFleetId && !character.governedRegionId
             && personalForce(world, character.id)?.formationId === null),
           (character) => character.leadership * 0.55 + character.cunning * 0.2 + character.loyalty * 0.2 + character.renown * 0.05,
         ) ?? spawnCharacter(world, polity, 'emergency-commander');
@@ -934,6 +935,7 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
         : undefined;
       if (
         !deputy?.alive
+        || !isBattleReadyCharacter(world, deputy)
         || deputy.polityId !== polity.id
         || deputy.id === army.commanderId
         || Boolean(deputy.commandingArmyId)
@@ -945,7 +947,7 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
       ) {
         army.deputyCommanderId = selectCandidate(
           aliveCharacters(world, polity.id).filter((character) => (
-            !character.commandingArmyId
+            isBattleReadyCharacter(world, character) && !character.commandingArmyId
             && !character.commandingFleetId
             && !character.governedRegionId
             && character.id !== army.commanderId
@@ -1368,12 +1370,13 @@ function createArmy(
 
   world.counters.army += 1;
   const armyId = `a_${String(world.counters.army).padStart(3, '0')}`;
+  const deputyCommanderId = participantIds.slice(1).find((id) => !world.characters.find((person) => person.id === id)?.governedRegionId) ?? null;
   const army: ArmyState = {
     id: armyId,
     name: `${region.name}新军`,
     polityId: polity.id,
     commanderId: commander.id,
-    deputyCommanderId: participantIds[1] ?? null,
+    deputyCommanderId,
     participantIds,
     regionId: region.id,
     originRegionId: region.id,
@@ -1387,7 +1390,7 @@ function createArmy(
     embarkedOperationId: null,
     ...createArmyMilitaryFields(world, {
       id: armyId,
-      polityId: polity.id, commanderId: commander.id, deputyCommanderId: participantIds[1] ?? null,
+      polityId: polity.id, commanderId: commander.id, deputyCommanderId,
       regionId: region.id, soldiers: existingSoldiers + recruitable, morale: 56,
     }, 'system'),
   };
@@ -1397,7 +1400,7 @@ function createArmy(
   commander.governedRegionId = null;
   syncArmyPersonnelLocations(world, army);
   world.armies.push(army);
-  recordPublicExpeditionRefusal(world, context, response, army, commander, region, (input) => pushEvent(world, context, input));
+  recordPublicExpeditionRefusals(world, context, response, army, commander, region, (input) => pushEvent(world, context, input));
   pushEvent(world, context, {
     category: '军事',
     kind: 'army_raised',
@@ -1555,9 +1558,9 @@ function supplyArmy(
   if (paid < wage) army.morale = Math.round(clamp(army.morale - 3 * (1 - paid / Math.max(1, wage))));
   army.training = Math.round(clamp(army.training + (army.lastMovedTurn === context.turn - 1 ? 0 : 1)));
 }
-
 function maintainArmies(world: WorldState, context: MutableTurnContext): void {
   ensureEligiblePersonalForces(world);
+  if (releaseUnavailableFormationMembers(world)) repairDepletedFormationCommands(world, context);
   for (const polity of world.polities.filter((item) => item.alive).sort((left, right) => stableCompare(left.id, right.id))) {
     let armies = world.armies.filter((army) => army.polityId === polity.id);
     const activeWar = world.wars.some((war) => war.active && (war.attackerId === polity.id || war.defenderId === polity.id));
@@ -1887,7 +1890,7 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
       const divertedTaxes = authorityCrisis ? integer(polity.treasury * 0.06) : 0;
       const mobilizationBudget = localSeizure + divertedTaxes;
       const levySize = supportedNewArmySize(mobilizationBudget, region.population);
-      const resourceReady = Boolean(defectingArmy) || levySize >= MIN_NEW_ARMY_SIZE;
+      const resourceReady = Boolean(defectingArmy) || levySize >= MIN_NEW_ARMY_SIZE && isAvailableForExpedition(world, polity.id, character);
       const fragmentationPenalty = Math.max(0, livingPolityCount - 4) * 8;
       const recentRebellionPenalty = Math.max(0, 40 - turnsSinceGlobalRebellion) * 3;
       const parentCooldownReady = context.turn - polity.lastRebellionTurn >= 16;
@@ -2149,7 +2152,7 @@ function baseArmyPower(world: WorldState, army: ArmyState): number {
     + army.training / 360
     + army.experience / 650
     + army.supply / 300;
-  return army.soldiers * commandFactor * deputyFactor * readiness;
+  return army.soldiers * commandFactor * commandHealthFactor(actual?.health ?? lawful?.health ?? 50) * deputyFactor * readiness;
 }
 
 function applyCasualties(
