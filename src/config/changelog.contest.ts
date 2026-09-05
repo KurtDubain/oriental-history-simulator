@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.26.1',
+  version: '1.26.2',
   date: '2026-09-05',
-  title: '上线修复',
+  title: '上线',
   items: [
-    '部署修正，玩法不变。',
+    '构建修复。',
   ],
 };
 
