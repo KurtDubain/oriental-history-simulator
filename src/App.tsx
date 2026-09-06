@@ -8,8 +8,6 @@ import {
   Save,
   Settings2,
   Sparkles,
-  Volume2,
-  VolumeX,
 } from 'lucide-react';
 import {
   useCallback,
@@ -22,7 +20,6 @@ import {
   type ReactNode,
 } from 'react';
 import { CausalDrawer, type CausalFactor, type CausalReference } from './components/CausalDrawer';
-import { AudioInvitation } from './components/AudioInvitation';
 import { HistoryWorkbench } from './components/HistoryWorkbench';
 import { Inspector } from './components/Inspector';
 import { MandatePanel, type MandateMessage, type MandateTarget } from './components/MandatePanel';
@@ -53,7 +50,6 @@ import {
 import { WorldCollectionPanel } from './components/WorldCollectionPanel';
 import { WorldStart } from './components/WorldStart';
 import { WarFocusSummary } from './components/WarFocusSummary';
-import { gameAudio, type AudioCue } from './audio';
 import {
   checkForAppUpdate,
   getAppUpdateState,
@@ -92,6 +88,7 @@ import {
   availableMandate,
   createWorld,
   deserializeWorld,
+  findWorldFact,
   findWorldHistoryEvent,
   isV03InterventionEvent,
   serializeWorld,
@@ -107,6 +104,7 @@ import {
   projectRosterDirectory,
   rosterScopeFor,
   toCausalEvent,
+  toCausalFact,
   toCountryInspector,
   toCountryArchive,
   toFamilyArchive,
@@ -170,7 +168,6 @@ import {
   watchItemForSituation,
 } from './view/observer-selection';
 import type { Selection, SnapshotOptions } from './view/observer-shell-contract';
-import { shouldShowObserverSoundInvitation } from './view/observer-interface-settings';
 import { useObserverInterface } from './view/use-observer-interface';
 import { useObserverNavigation } from './view/use-observer-navigation';
 import {
@@ -205,19 +202,6 @@ function playerErrorMessage(error: unknown, fallback: string): string {
     : fallback;
 }
 
-function quarterHistoryCue(events: ReadonlyArray<WorldState['history'][number]>): AudioCue | null {
-  if (events.some((event) => (
-    event.kind === 'succession'
-    || event.kind === 'war_declared'
-    || event.kind === 'war_started'
-    || event.kind === 'war_ended'
-  ))) return 'turning_point';
-  if (events.some((event) => event.kind === 'battle_victory' || event.kind === 'battle')) return 'battle';
-  if (events.some((event) => event.kind === 'territory_control_changed')) return 'territory';
-  if (events.some((event) => event.kind === 'character_death' && event.importance >= 4)) return 'death';
-  if (events.some((event) => event.importance >= 5)) return 'turning_point';
-  return null;
-}
 function assertValidWorld(candidate: WorldState): WorldState {
   const violations = measureRuntimePhase(
     'validation.full',
@@ -315,23 +299,10 @@ export function App() {
   );
   const {
     settings: interfaceSettings,
-    audioState: settingsAudioState,
     fullscreen,
     commitSettings: commitInterfaceSettings,
-    enableSound,
-    dismissSoundInvitation,
-    previewSound,
     toggleFullscreen: handleFullscreen,
-  } = useObserverInterface({
-    seaFocused: selection?.kind === 'fleet' || selection?.kind === 'seaZone',
-    dangerFocused: overlay === 'war' || selection?.kind === 'army' || selection?.kind === 'outbreak',
-    worldWarAmbience: world?.wars.some((war) => war.active) ?? false,
-  });
-  const audioInvitationVisible = shouldShowObserverSoundInvitation(interfaceSettings, {
-    turn: world?.turn,
-    worldViewActive: activeView === 'world' && historicalView === null,
-    selectionOpen: selection !== null,
-  }) && !mobileToolsOpen;
+  } = useObserverInterface();
 
   const worldRef = useRef<WorldState | null>(null);
   const worldShellRef = useRef<HTMLElement>(null);
@@ -394,7 +365,6 @@ export function App() {
     overlay,
     selection,
     interfaceSettings,
-    audioState: settingsAudioState,
     fullscreen,
     observerLeadProjection: world ? deriveObserverLeadProjection(world) : null,
     historicalTurn: historicalView?.turn ?? null,
@@ -412,6 +382,7 @@ export function App() {
     mobileInspectorExpanded,
     mapGestureActive,
     focusedPoliticalFactionId,
+    focusedWarId,
     embodiedCharacterId,
     pendingEmbodiedAction,
     embodimentClosure: embodimentObserver.closure,
@@ -709,12 +680,10 @@ export function App() {
     playback.pause();
     setMandateMessage(null);
     navigation.openLayer({ kind: 'mandate' });
-    gameAudio.play('open', 0.58);
   }, [navigation, playback]);
 
   const handleCloseMandate = useCallback(() => {
     navigation.closeTopLayer();
-    gameAudio.play('close', 0.48);
   }, [navigation]);
 
   const handleApplyMandate = useCallback(async (action: V03InterventionAction): Promise<boolean> => {
@@ -770,7 +739,6 @@ export function App() {
       ? document.activeElement
       : null;
     navigation.openLayer({ kind: 'collection' }, startOpen);
-    gameAudio.play('open', 0.58);
     setCollectionBusy(true);
     try {
       await refreshWorldSaves();
@@ -784,7 +752,6 @@ export function App() {
   const handleCloseCollection = useCallback(() => {
     session.cancel('collection');
     navigation.closeTopLayer();
-    gameAudio.play('close', 0.48);
   }, [navigation, session]);
 
   const handleSaveCurrentToCollection = useCallback(async (label: string) => {
@@ -925,7 +892,6 @@ export function App() {
         next,
       );
       commitEmbodiedObserver(nextEmbodiment);
-      let embodiedActionResolved = false;
       if (queuedEmbodiedAction) {
         const resolution = [...next.facts].reverse().find((fact) => (
           fact.kind === 'embodied_action_resolved'
@@ -933,7 +899,6 @@ export function App() {
         ));
         if (resolution?.kind === 'embodied_action_resolved') {
           setToast(resolution.payload.resultSummary);
-          embodiedActionResolved = true;
         }
       }
       if (nextEmbodiment.closure && nextEmbodiment.closure !== embodimentBeforeAdvance.closure) {
@@ -944,12 +909,6 @@ export function App() {
         }
       }
       const newEvents = next.history.slice(oldHistoryLength);
-      const visibleNewEvents = newEvents.filter(isDefaultVisibleHistoryEvent);
-      const historyCue = quarterHistoryCue(visibleNewEvents);
-      const turnCue: AudioCue | null = embodiedActionResolved
-        ? 'action_resolve'
-        : historyCue ?? (source === 'manual' ? 'quarter' : null);
-      if (turnCue) gameAudio.play(turnCue, source === 'manual' ? 0.76 : 0.5);
       const pauseCandidates = [
         ...worldToSituationPauseCandidates(next),
         ...historyEventsToPauseCandidates(newEvents),
@@ -1035,12 +994,10 @@ export function App() {
       return;
     }
     setPauseMatch(null);
-    gameAudio.play('select', 0.42);
     playback.toggle();
   }, [fatalError, historicalView, navigation.blocking, playback]);
 
   const handleSpeedChange = useCallback((nextSpeed: PlaybackSpeed) => {
-    gameAudio.play('select', 0.38);
     playback.changeSpeed(nextSpeed);
   }, [playback]);
 
@@ -1067,7 +1024,7 @@ export function App() {
       : null,
   ): boolean => {
     const current = worldRef.current;
-    if (!current || !findWorldHistoryEvent(current, eventId)) {
+    if (!current || !findWorldHistoryEvent(current, eventId) && !findWorldFact(current, eventId)) {
       setToast('这条史事已经不在当前可读卷页中。');
       return false;
     }
@@ -1076,12 +1033,10 @@ export function App() {
     causalFocusRestoreAllowedRef.current = true;
     navigation.openEvent(eventId, preserveCurrent);
     completeGuideStep('cause-traced');
-    gameAudio.play('open', 0.58);
     return true;
   }, [completeGuideStep, navigation, playback]);
 
   const handleOverlayChange = useCallback((nextOverlay: MapOverlay) => {
-    gameAudio.play('select', 0.46);
     setOverlay(nextOverlay);
     if (nextOverlay !== 'war') setFocusedWarId(null);
     if (nextOverlay !== 'political') completeGuideStep('overlay-switched');
@@ -1102,7 +1057,6 @@ export function App() {
       powerRosterSection,
       layers: [{ kind: 'primer' }],
     });
-    gameAudio.play('open', 0.6);
   }, [clearRosterDossier, navigation, playback, powerRosterSection]);
 
   const handleCloseMapPrimer = useCallback((_reason: MapPrimerCloseReason) => {
@@ -1112,7 +1066,6 @@ export function App() {
       // Primer completion is a preference only; storage failures must not block the world.
     }
     navigation.closeTopLayer();
-    gameAudio.play('close', 0.46);
   }, [navigation]);
 
   const handlePrimerAdvance = useCallback((): boolean => {
@@ -1154,9 +1107,7 @@ export function App() {
   const handleViewChange = useCallback((nextView: ObserverView) => {
     if (nextView === 'chronicle') {
       playback.pause();
-      gameAudio.play('open', 0.64);
     } else {
-      gameAudio.play('select', 0.44);
     }
     clearRosterDossier(); navigation.goToView(nextView);
   }, [clearRosterDossier, navigation, playback]);
@@ -1168,31 +1119,21 @@ export function App() {
   const handleOpenObserverDesk = useCallback(() => {
     playback.pause();
     navigation.openLayer({ kind: 'observer-desk' });
-    gameAudio.play('open', 0.58);
   }, [navigation, playback]);
 
   const handleCloseObserverDesk = useCallback(() => {
     navigation.closeTopLayer();
-    gameAudio.play('close', 0.48);
   }, [navigation]);
 
   const handleOpenSettings = useCallback(() => {
     playback.pause();
     setMobileToolsOpen(false);
     navigation.openLayer({ kind: 'settings' });
-    gameAudio.play('open', 0.58);
   }, [navigation, playback]);
 
   const handleCloseSettings = useCallback(() => {
     navigation.closeTopLayer();
-    gameAudio.play('close', 0.48);
   }, [navigation]);
-
-  const handlePreviewSound = useCallback(() => {
-    void previewSound().then((ready) => {
-      if (!ready) setToast('浏览器尚未允许声音，请再轻触一次试听。');
-    });
-  }, [previewSound]);
 
   const handleApplyAppUpdate = useCallback(async () => {
     playback.pause();
@@ -1276,9 +1217,13 @@ export function App() {
   const quarterHighlightedRegionIds = historicalView
     ? []
     : quarterPulseProjection.highlightedRegionIds;
-  const selectedHistoryEvent = useMemo(() => (
-    world && selectedEventId ? findWorldHistoryEvent(world, selectedEventId) ?? null : null
-  ), [selectedEventId, world]);
+  const selectedCausalEvent = useMemo(() => {
+    if (!world || !selectedEventId) return null;
+    const event = findWorldHistoryEvent(world, selectedEventId);
+    if (event) return toCausalEvent(world, event);
+    const fact = findWorldFact(world, selectedEventId);
+    return fact ? toCausalFact(world, fact) : null;
+  }, [selectedEventId, world]);
   const archiveDossier = useMemo<ArchiveDossier | null>(() => {
     const subject = navigation.topLayer?.kind === 'archive' ? navigation.topLayer.subject : null;
     if (!archiveOpen || !world || !subject) return null;
@@ -1299,7 +1244,6 @@ export function App() {
 
   const handlePowerRosterSectionChange = useCallback((id: string) => {
     if (id !== 'polities' && id !== 'families' && id !== 'military') return;
-    gameAudio.play('select', 0.42);
     navigation.setPowerRosterSection(id);
   }, [navigation]);
 
@@ -1310,14 +1254,12 @@ export function App() {
         ? peopleTriggerRef.current
         : null;
     clearRosterDossier(); navigation.goToView('world');
-    gameAudio.play('close', 0.4);
     window.setTimeout(() => returnTarget?.focus(), 0);
   }, [activeView, clearRosterDossier, navigation]);
 
   const handleRosterSelect = useCallback((id: string) => {
     const current = worldRef.current;
     if (!current) return;
-    gameAudio.play('select', 0.48);
     setMobileInspectorExpanded(Boolean(beginRosterDossier(id)));
     if (activeView === 'powers' && powerRosterSection === 'polities') {
       setSelection({ kind: 'country', id });
@@ -1342,7 +1284,6 @@ export function App() {
   }, [activeView, beginRosterDossier, powerRosterSection]);
 
   const handleSelectArchiveEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
-    gameAudio.play('select', 0.44);
     setSelection({ kind, id });
     navigation.closeAllLayers();
     if (rosterDossierReturn) return; clearRosterDossier();
@@ -1371,12 +1312,10 @@ export function App() {
     setSelection({ kind, id });
     setMobileInspectorExpanded(true);
     navigation.reset({ view: 'world', powerRosterSection, layers: [] });
-    gameAudio.play('select', 0.44);
     window.setTimeout(() => document.querySelector<HTMLElement>('.observer-inspector')?.focus({ preventScroll: true }), 0);
   }, [clearRosterDossier, navigation, powerRosterSection]);
 
   const handleSelectScopedEvent = useCallback((eventId: string) => {
-    gameAudio.play('open', 0.58);
     archiveFocusRestoreAllowedRef.current = false;
     openCausalEvent(eventId, archiveOpen || situationWorkbenchOpen);
   }, [archiveOpen, openCausalEvent, situationWorkbenchOpen]);
@@ -1397,7 +1336,6 @@ export function App() {
     if (projection.selected.type === 'war_progress') { setOverlay('war'); setFocusedWarId(projection.selected.audit.scopeKey); }
     playback.pause();
     navigation.openLayer({ kind: 'situations', situationId: projection.selectedId });
-    gameAudio.play('open', 0.64);
   }, [navigation, playback]);
 
   const handleRosterReasonSelect = useCallback((reason: RosterReason) => {
@@ -1415,7 +1353,6 @@ export function App() {
   const handleCloseSituationWorkbench = useCallback(() => {
     situationFocusRestoreAllowedRef.current = true;
     navigation.closeTopLayer();
-    gameAudio.play('close', 0.48);
   }, [navigation]);
 
   const handleSelectSituationEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
@@ -1442,7 +1379,6 @@ export function App() {
       return;
     }
     commitEmbodiedObserver(nextState);
-    gameAudio.play('open', 0.48);
   }, [commitEmbodiedObserver, playback]);
 
   const handleLeaveEmbodiment = useCallback(() => {
@@ -1469,7 +1405,6 @@ export function App() {
       return;
     }
     commitEmbodiedObserver(nextState);
-    gameAudio.play('action_submit', 0.72);
   }, [commitEmbodiedObserver, playback]);
 
   const handleCancelEmbodiedAction = useCallback(() => {
@@ -1490,7 +1425,6 @@ export function App() {
     commitObserverSettings(watched
       ? removeObserverWatch(observerSettingsRef.current, item.kind, item.id)
       : upsertObserverWatch(observerSettingsRef.current, item));
-    gameAudio.play('select', 0.5);
     setToast(watched
       ? `已取消关注：${item.label}`
       : item.kind === 'situation'
@@ -1500,7 +1434,6 @@ export function App() {
 
   const closeInspectorToMap = useCallback(() => {
     const rosterTarget = returnToRoster();
-    gameAudio.play('close', 0.38);
     setSelection(null);
     setMobileInspectorExpanded(false);
     if (rosterTarget) {
@@ -1529,7 +1462,6 @@ export function App() {
     setToast(rootCount
       ? `舆图已标出${faction.name}的 ${rootCount} 处实权根基。`
       : `${faction.name}本季只有中枢影响，没有可落在舆图上的州治或军令。`);
-    gameAudio.play('open', 0.48);
     window.setTimeout(() => document.querySelector<HTMLCanvasElement>('.world-map__canvas')?.focus({ preventScroll: true }), 0);
   }, [clearRosterDossier, navigation]);
 
@@ -1546,7 +1478,6 @@ export function App() {
     clearRosterDossier(); setMobileInspectorExpanded(expand);
     setSelection({ kind: 'country', id: target.polityId, initialTab: 'court', tabRequestKey: courtFocus.requestKey, courtFocus });
     navigation.reset({ view: 'world', powerRosterSection, layers: [] });
-    gameAudio.play('open', 0.48);
   }, [clearRosterDossier, navigation, powerRosterSection]);
 
   const inspector = useMemo<ReactNode>(() => {
@@ -1568,7 +1499,6 @@ export function App() {
         archiveFocusRestoreAllowedRef.current = true;
         playback.pause();
         navigation.openLayer({ kind: 'archive', subject: selection });
-        gameAudio.play('open', 0.62);
       } : undefined,
       onSelectEntity: handleSelectArchiveEntity,
       onSelectEvent: handleSelectScopedEvent,
@@ -1704,7 +1634,6 @@ export function App() {
     }
     setSelection(lead.target);
     navigation.goToView('world');
-    gameAudio.play('select', 0.52);
   }, [clearRosterDossier, handleOpenSituationWorkbench, navigation]);
 
   const handleToggleObserverLead = useCallback((lead: ObserverLead) => {
@@ -1834,7 +1763,6 @@ export function App() {
           className="observer-app"
           data-inspector-open={Boolean(inspector)}
           data-mobile-inspector-mode={inspector ? mobileInspectorExpanded ? 'full' : 'quick' : 'closed'}
-          data-audio-invitation-open={audioInvitationVisible || undefined}
           data-map-gesture-active={mapGestureActive || undefined}
           data-war-focus-open={Boolean(focusedWar && overlay === 'war') || undefined}
           data-focus-open={activeView === 'world' && !historicalView && !inspector || undefined}
@@ -1900,14 +1828,12 @@ export function App() {
               focusedWarId={focusedWar?.warId ?? null} focusedWarArmyIds={focusedWar?.armyIds ?? []}
               onSelectBlank={closeInspectorToMap}
               onSelectRegion={(id) => {
-                gameAudio.play('select', 0.46);
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
                 clearRosterDossier(); setSelection({ kind: 'region', id });
                 navigation.goToView('world');
               }}
               onSelectObject={(kind, id, marker) => {
-                gameAudio.play('select', 0.52);
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
                 if (kind === 'army' || kind === 'fleet') setFocusedArmyId(id);
@@ -1985,20 +1911,11 @@ export function App() {
                 ref={settingsTriggerRef}
                 type="button"
                 data-settings-trigger="true"
-                data-audio-state={settingsAudioState}
-                data-audio-unset={!interfaceSettings.sound.promptDismissed || undefined}
                 onClick={handleOpenSettings}
-                aria-label={`打开设置，${interfaceSettings.sound.enabled
-                  ? settingsAudioState === 'ready' ? '声音已开启' : '声音等待轻触'
-                  : '声音尚未开启'}`}
-                title={interfaceSettings.sound.enabled ? '设置 · 声音已开启' : '设置 · 声音尚未开启'}
+                aria-label="打开设置"
+                title="设置"
               >
                 <Settings2 size={16} aria-hidden="true" />
-                <span className="observer-world-tools__audio-state" aria-hidden="true">
-                  {interfaceSettings.sound.enabled
-                    ? <Volume2 size={9} />
-                    : <VolumeX size={9} />}
-                </span>
               </button>
               <button
                 ref={mobileToolsTriggerRef}
@@ -2051,12 +1968,6 @@ export function App() {
                 </button>
               </div>
             </div>
-
-            <AudioInvitation
-              open={audioInvitationVisible}
-              onEnable={enableSound}
-              onDismiss={dismissSoundInvitation}
-            />
 
             <div className="observer-world-signature" aria-label="确定性世界签名">
               <span>种子 {world.seed}</span>
@@ -2137,8 +2048,8 @@ export function App() {
       )}
 
       <CausalDrawer
-        open={Boolean(selectedHistoryEvent)}
-        event={world && selectedHistoryEvent ? toCausalEvent(world, selectedHistoryEvent) : null}
+        open={Boolean(selectedCausalEvent)}
+        event={selectedCausalEvent}
         onClose={handleCloseCausalEvent}
         returnFocusTo={causalReturnFocusRef.current}
         shouldRestoreFocus={shouldRestoreCausalFocus}
@@ -2246,10 +2157,8 @@ export function App() {
       <SettingsPanel
         open={settingsOpen && Boolean(world)}
         settings={interfaceSettings}
-        audioState={settingsAudioState}
         fullscreen={fullscreen}
         onSettingsChange={commitInterfaceSettings}
-        onPreviewSound={handlePreviewSound}
         onToggleFullscreen={handleFullscreen}
         onClose={handleCloseSettings}
         returnFocusTo={settingsTriggerRef.current}

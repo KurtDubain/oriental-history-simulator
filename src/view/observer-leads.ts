@@ -54,13 +54,13 @@ const WAR_SITUATION_TYPES = new Set(['war_progress', 'military_power_crisis']);
 const STORY_FACT_KINDS = new Set<SimulationFact['kind']>([
   'war_started', 'war_ended', 'battle', 'territory_control_changed', 'army_order_changed',
   'appointment_started', 'appointment_ended', 'agency_support_resolved', 'agency_intent_resolved',
-  'expedition_response', 'character_wounded', 'character_death',
+  'character_wounded', 'character_death',
   'faction_lifecycle', 'faction_relation_changed', 'court_action_resolved', 'embodied_action_resolved',
 ]);
 const WAR_FACT_KINDS = new Set<SimulationFact['kind']>([
   'war_started', 'war_ended', 'battle', 'territory_control_changed', 'army_order_changed',
   'agency_support_resolved', 'agency_intent_resolved',
-  'expedition_response', 'character_wounded',
+  'character_wounded',
 ]);
 const HIGH_OFFICES = new Set(['君主', '宰辅', '枢密使', '军团主帅', '军团副将', '水师提督', '水师副将']);
 const MAJOR_APPOINTMENT_OFFICES = new Set(['君主', '宰辅', '枢密使', '军团主帅', '水师提督']);
@@ -76,7 +76,6 @@ const FACT_QUESTION_SUFFIX: Partial<Record<SimulationFact['kind'], string>> = {
   faction_relation_changed: '后，两派关系如何改变？',
   court_action_resolved: '怎样改变官职、兵权或君位？',
   embodied_action_resolved: '，人物行动实际改变了什么？',
-  expedition_response: '，为何不肯同行？',
   character_wounded: '，这次受伤怎样改变了他的处境？',
   character_death: '后，留下的兵权或官位由谁承接？',
 };
@@ -233,7 +232,6 @@ function isStoryFact(fact: SimulationFact, currentFacts: readonly SimulationFact
     ));
   }
   if (fact.kind === 'embodied_action_resolved' && fact.payload.domainFactId) return false;
-  if (fact.kind === 'expedition_response') return fact.importance >= 2;
   if (fact.kind === 'character_wounded') return fact.importance >= 3;
   if (fact.kind === 'character_death') {
     return fact.payload.cause === 'battle' || fact.payload.role === '君主' || fact.importance >= 3;

@@ -131,13 +131,6 @@ async function createWorld(page, scenario) {
     localStorage.setItem('canghai-map-primer-complete-v1', '1');
     localStorage.setItem('canghai-observer-interface-settings-v1', JSON.stringify({
       version: 2,
-      sound: {
-        enabled: false,
-        promptDismissed: false,
-        masterVolume: 0.72,
-        ambienceVolume: 0.42,
-        effectsVolume: 0.68,
-      },
       motion: 'reduced',
       mapAtmosphere: true,
       interfaceDensity: 'comfortable',
@@ -172,15 +165,6 @@ async function advanceAndReadPrimaryStory(page, scenario, initial) {
   );
   assert.ok(pulse.stories[0].title.length >= 4, `${scenario.slug} 首条变化必须说明具体发生了什么`);
   assert.ok(pulse.stories[0].summary.length >= 12, `${scenario.slug} 首条变化必须给出具体结果摘要`);
-
-  const invitation = page.getByTestId('audio-invitation');
-  await invitation.waitFor();
-  const enableSound = invitation.getByRole('button', { name: '开启声音', exact: true });
-  const dismissSound = invitation.getByRole('button', { name: '暂不开启声音' });
-  await assertTouchTarget(enableSound, scenario, '声音邀请开启入口');
-  await assertTouchTarget(dismissSound, scenario, '声音邀请暂缓入口');
-  await activate(dismissSound, scenario);
-  await invitation.waitFor({ state: 'detached' });
 
   const primary = page.locator(
     `[data-testid="quarter-pulse"] li[data-story-id="${pulse.stories[0].id}"]`,

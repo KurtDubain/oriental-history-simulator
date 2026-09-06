@@ -24,7 +24,6 @@ function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
     overlay: 'political',
     selection: null,
     interfaceSettings: createObserverInterfaceSettings(),
-    audioState: 'silent',
     fullscreen: false,
     observerLeadProjection: null,
     historicalTurn: null,
@@ -42,6 +41,7 @@ function options(overrides: Partial<SnapshotOptions> = {}): SnapshotOptions {
     mobileInspectorExpanded: false,
     mapGestureActive: false,
     focusedPoliticalFactionId: null,
+    focusedWarId: null,
     embodiedCharacterId: null,
     pendingEmbodiedAction: null,
     embodimentClosure: null,
@@ -220,7 +220,7 @@ describe('render_game_to_text projection boundary', () => {
     }))) as {
       mode: string;
       mapProfile: { id: string; revision: number };
-      settings: { soundEnabled: boolean; audioState: string };
+      settings: { motion: string; mapAtmosphere: boolean; density: string };
     };
 
     expect(snapshot.mode).toBe('start');
@@ -228,7 +228,7 @@ describe('render_game_to_text projection boundary', () => {
       id: DEFAULT_MAP_PROFILE_ID,
       revision: getMapProfile(DEFAULT_MAP_PROFILE_ID).revision,
     });
-    expect(snapshot.settings).toMatchObject({ soundEnabled: false, audioState: 'silent' });
+    expect(snapshot.settings).toMatchObject({ motion: 'system', mapAtmosphere: true, density: 'comfortable' });
   });
 
   it('publishes only the political markers that are actually visible on the map', () => {
@@ -320,27 +320,6 @@ describe('render_game_to_text projection boundary', () => {
       seaZones: world.seaZones.length,
     });
     expect(serializeWorld(world)).toBe(before);
-  });
-
-  it('keeps the sound invitation aligned with the unobstructed world surface', () => {
-    const world = advanceWorld(createWorld('架构-声音邀请', DEFAULT_MAP_PROFILE_ID));
-    const visible = JSON.parse(makeTextSnapshot(world, options())) as {
-      interface: { settings: { soundPromptVisible: boolean } };
-    };
-    const behindRoster = JSON.parse(makeTextSnapshot(world, options({
-      navigation: createObserverNavigationState({ view: 'powers', layers: [] }),
-    }))) as typeof visible;
-    const behindInspector = JSON.parse(makeTextSnapshot(world, options({
-      selection: { kind: 'region', id: world.regions[0].id },
-    }))) as typeof visible;
-    const behindHistoricalMap = JSON.parse(makeTextSnapshot(world, options({
-      historicalTurn: 0,
-    }))) as typeof visible;
-
-    expect(visible.interface.settings.soundPromptVisible).toBe(true);
-    expect(behindRoster.interface.settings.soundPromptVisible).toBe(false);
-    expect(behindInspector.interface.settings.soundPromptVisible).toBe(false);
-    expect(behindHistoricalMap.interface.settings.soundPromptVisible).toBe(false);
   });
 
   it('publishes the same bounded quarterly story projection without changing the world', () => {

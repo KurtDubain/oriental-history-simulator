@@ -4,16 +4,6 @@ export const MAX_OBSERVER_INTERFACE_SETTINGS_CHARS = 4_096;
 
 export type ObserverMotionPreference = 'system' | 'full' | 'reduced';
 export type ObserverInterfaceDensity = 'comfortable' | 'compact';
-export type ObserverAudioState = 'silent' | 'waiting' | 'ready' | 'suspended' | 'unsupported';
-
-export interface ObserverSoundSettings {
-  enabled: boolean;
-  /** True once the observer explicitly enables or declines the first sound invitation. */
-  promptDismissed: boolean;
-  masterVolume: number;
-  ambienceVolume: number;
-  effectsVolume: number;
-}
 
 /**
  * Local presentation preferences only. This object must never be embedded in
@@ -21,16 +11,9 @@ export interface ObserverSoundSettings {
  */
 export interface ObserverInterfaceSettings {
   version: typeof OBSERVER_INTERFACE_SETTINGS_VERSION;
-  sound: ObserverSoundSettings;
   motion: ObserverMotionPreference;
   mapAtmosphere: boolean;
   interfaceDensity: ObserverInterfaceDensity;
-}
-
-export interface ObserverSoundInvitationContext {
-  turn: number | null | undefined;
-  worldViewActive: boolean;
-  selectionOpen: boolean;
 }
 
 /** Minimal localStorage-compatible boundary, kept injectable for SSR and tests. */
@@ -46,12 +29,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function safeBoolean(value: unknown, fallback: boolean): boolean {
   return typeof value === 'boolean' ? value : fallback;
-}
-
-function safeVolume(value: unknown, fallback: number): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
-  const clamped = Math.max(0, Math.min(1, value));
-  return Math.round(clamped * 1_000) / 1_000;
 }
 
 function safeMotion(value: unknown, fallback: ObserverMotionPreference): ObserverMotionPreference {
@@ -80,53 +57,18 @@ function browserStorage(): ObserverInterfaceSettingsStorage | null {
 export function createObserverInterfaceSettings(): ObserverInterfaceSettings {
   return {
     version: OBSERVER_INTERFACE_SETTINGS_VERSION,
-    sound: {
-      enabled: false,
-      promptDismissed: false,
-      masterVolume: 0.72,
-      ambienceVolume: 0.42,
-      effectsVolume: 0.68,
-    },
     motion: 'system',
     mapAtmosphere: true,
     interfaceDensity: 'comfortable',
   };
 }
 
-/**
- * Keeps the one-time sound invitation on the unobstructed world map only.
- * Roster pages and object quick looks temporarily suppress it; returning to
- * the map restores the invitation until the observer makes a choice.
- */
-export function shouldShowObserverSoundInvitation(
-  settings: ObserverInterfaceSettings,
-  context: ObserverSoundInvitationContext,
-): boolean {
-  return Boolean(
-    context.turn !== null
-      && context.turn !== undefined
-      && context.turn > 0
-      && context.worldViewActive
-      && !context.selectionOpen
-      && !settings.sound.enabled
-      && !settings.sound.promptDismissed,
-  );
-}
-
 /** Safely upgrades/repairs unknown records and never retains caller-owned references. */
 export function normalizeObserverInterfaceSettings(value: unknown): ObserverInterfaceSettings {
   const defaults = createObserverInterfaceSettings();
   if (!isRecord(value)) return defaults;
-  const sound = isRecord(value.sound) ? value.sound : {};
   return {
     version: OBSERVER_INTERFACE_SETTINGS_VERSION,
-    sound: {
-      enabled: safeBoolean(sound.enabled, defaults.sound.enabled),
-      promptDismissed: safeBoolean(sound.promptDismissed, defaults.sound.promptDismissed),
-      masterVolume: safeVolume(sound.masterVolume, defaults.sound.masterVolume),
-      ambienceVolume: safeVolume(sound.ambienceVolume, defaults.sound.ambienceVolume),
-      effectsVolume: safeVolume(sound.effectsVolume, defaults.sound.effectsVolume),
-    },
     motion: safeMotion(value.motion, defaults.motion),
     mapAtmosphere: safeBoolean(value.mapAtmosphere, defaults.mapAtmosphere),
     interfaceDensity: safeDensity(value.interfaceDensity, defaults.interfaceDensity),

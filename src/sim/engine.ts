@@ -89,7 +89,6 @@ import {
 import {
   isAvailableForExpedition,
   expeditionAssemblyText,
-  recordPublicExpeditionRefusals,
   selectExpeditionResponses,
 } from './military/expedition-response';
 import { releaseUnavailableFormationMembers, resolveBattleFates } from './military/battle-fate';
@@ -1400,7 +1399,6 @@ function createArmy(
   commander.governedRegionId = null;
   syncArmyPersonnelLocations(world, army);
   world.armies.push(army);
-  recordPublicExpeditionRefusals(world, context, response, army, commander, region, (input) => pushEvent(world, context, input));
   pushEvent(world, context, {
     category: '军事',
     kind: 'army_raised',

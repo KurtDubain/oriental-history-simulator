@@ -15,6 +15,62 @@ import type {
 
 const pointKey = (point: MapPoint) => `${point.x.toFixed(3)}:${point.y.toFixed(3)}`;
 
+function contains(point: MapPoint, polygon: readonly MapPoint[]) {
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current++) {
+    const a = polygon[current]!;
+    const b = polygon[previous]!;
+    if ((a.y > point.y) !== (b.y > point.y)
+      && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
+function pointOutsideLand(point: MapPoint, profile: MapPresentationDefinition) {
+  return profile.landShapes.every((shape) => !contains(point, shape.polygon));
+}
+
+function insideRegion(point: MapPoint, region: MapRegionView) {
+  let candidate = point;
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    if (contains(candidate, region.polygon)) return candidate;
+    candidate = {
+      x: region.center.x + (candidate.x - region.center.x) * 0.48,
+      y: region.center.y + (candidate.y - region.center.y) * 0.48,
+    };
+  }
+  return { ...region.center };
+}
+
+function fleetBerth(
+  port: MapRegionView,
+  sea: MapPoint,
+  profile: MapPresentationDefinition,
+  slot: number,
+  count: number,
+) {
+  const dx = sea.x - port.center.x;
+  const dy = sea.y - port.center.y;
+  const length = Math.max(1, Math.hypot(dx, dy));
+  const ux = dx / length;
+  const uy = dy / length;
+  let coast = { ...sea };
+  for (let step = 1; step <= 40; step += 1) {
+    const ratio = step / 40;
+    const candidate = { x: port.center.x + dx * ratio, y: port.center.y + dy * ratio };
+    if (pointOutsideLand(candidate, profile)) { coast = candidate; break; }
+  }
+  const fan = (slot - (count - 1) / 2) * 14;
+  let position = {
+    x: coast.x + ux * 14 - uy * fan,
+    y: coast.y + uy * 14 + ux * fan,
+  };
+  for (let push = 0; push < 6 && !pointOutsideLand(position, profile); push += 1) {
+    position = { x: position.x + ux * 8, y: position.y + uy * 8 };
+  }
+  return position;
+}
+
 /**
  * Reprojects authoritative simulation objects onto the presentation-only atlas.
  * Simulation coordinates, save payloads, route distances and deterministic
@@ -65,21 +121,6 @@ export function buildMapPresentation(
     return { ...point };
   };
 
-  const contains = (point: MapPoint, polygon: readonly MapPoint[]) => {
-    let inside = false;
-    for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current++) {
-      const a = polygon[current]!;
-      const b = polygon[previous]!;
-      if ((a.y > point.y) !== (b.y > point.y)
-        && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
-    }
-    return inside;
-  };
-  const hash = (value: string) => {
-    let result = 2166136261;
-    for (const character of value) result = Math.imul(result ^ character.charCodeAt(0), 16777619);
-    return result >>> 0;
-  };
   const regionById = new Map(presentedRegions.map((region) => [region.id, region]));
   const personsByRegion = new Map<string, MapPersonForceView[]>();
   for (const person of persons) {
@@ -90,20 +131,58 @@ export function buildMapPresentation(
   const presentedPersons = [...personsByRegion.entries()].flatMap(([regionId, values]) => {
     const target = regionById.get(regionId);
     if (!target) return [];
-    return [...values].sort((left, right) => left.id.localeCompare(right.id)).map((person, index) => {
-      const angle = ((hash(person.id) % 360) / 180) * Math.PI;
-      const ring = 14 + Math.floor(index / 6) * 9;
-      let radius = ring;
-      let position = target.center;
-      while (radius >= 1) {
-        const candidate = {
-          x: target.center.x + Math.cos(angle + index * 1.7) * radius,
-          y: target.center.y + Math.sin(angle + index * 1.7) * radius,
+    const ordered = [...values].sort((left, right) => (
+      Number(Boolean(right.formationId)) - Number(Boolean(left.formationId))
+      || Number(right.isCommander) - Number(left.isCommander)
+      || Number(right.isFactionLeader) - Number(left.isFactionLeader)
+      || right.soldiers - left.soldiers
+      || left.id.localeCompare(right.id)
+    ));
+    const formationIds = [...new Set(ordered.flatMap((person) => person.formationId ? [person.formationId] : []))];
+    const formationSlot = new Map(formationIds.map((id, index) => [id, index]));
+    const formationMemberIndex = new Map<string, number>();
+    let parkedIndex = 0;
+    return ordered.map((person) => {
+      let offset: MapPoint;
+      if (person.formationId) {
+        const group = formationSlot.get(person.formationId) ?? 0;
+        const member = formationMemberIndex.get(person.formationId) ?? 0;
+        formationMemberIndex.set(person.formationId, member + 1);
+        offset = {
+          x: -18 + group * 17 + (member % 3) * 8,
+          y: -18 - Math.floor(member / 3) * 9,
         };
-        if (contains(candidate, target.polygon)) { position = candidate; break; }
-        radius *= 0.55;
+      } else {
+        const column = parkedIndex % 5;
+        const row = Math.floor(parkedIndex / 5);
+        parkedIndex += 1;
+        offset = { x: (column - 2) * 10, y: 17 + row * 9 };
       }
-      return { ...person, position: { ...position } };
+      const position = insideRegion({ x: target.center.x + offset.x, y: target.center.y + offset.y }, target);
+      return { ...person, position };
+    });
+  });
+
+  const seaById = new Map(presentedSeaZones.map((zone) => [zone.id, zone]));
+  const fleetGroups = new Map<string, MapFleetView[]>();
+  for (const fleet of fleets) {
+    const key = fleet.regionId ? `port:${fleet.regionId}` : `sea:${fleet.seaZoneId ?? fleet.anchorSeaZoneId ?? fleet.id}`;
+    const group = fleetGroups.get(key) ?? [];
+    group.push(fleet);
+    fleetGroups.set(key, group);
+  }
+  const presentedFleets = [...fleetGroups.values()].flatMap((group) => {
+    const ordered = [...group].sort((left, right) => left.id.localeCompare(right.id));
+    return ordered.map((fleet, index) => {
+      const sea = seaById.get(fleet.seaZoneId ?? fleet.anchorSeaZoneId ?? '');
+      const port = fleet.regionId ? regionById.get(fleet.regionId) : undefined;
+      if (port && sea) return { ...fleet, position: fleetBerth(port, sea.center, profile, index, ordered.length) };
+      if (sea) {
+        const fan = (index - (ordered.length - 1) / 2) * 15;
+        const row = index % 2 === 0 ? -7 : 7;
+        return { ...fleet, position: { x: sea.center.x + fan, y: sea.center.y + row } };
+      }
+      return { ...fleet, position: projectPoint(fleet.position) };
     });
   });
 
@@ -121,7 +200,7 @@ export function buildMapPresentation(
     persons: presentedPersons,
     personClusters: [],
     seaZones: presentedSeaZones,
-    fleets: fleets.map((fleet) => ({ ...fleet, position: projectPoint(fleet.position) })),
+    fleets: presentedFleets,
     markers: markers.map((marker) => ({ ...marker, position: projectPoint(marker.position) })),
   };
 }

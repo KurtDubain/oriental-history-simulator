@@ -38,6 +38,17 @@ function sourceRegions(): MapRegionView[] {
   }));
 }
 
+function pointInPolygon(point: { x: number; y: number }, polygon: readonly { x: number; y: number }[]) {
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current++) {
+    const a = polygon[current]!;
+    const b = polygon[previous]!;
+    if ((a.y > point.y) !== (b.y > point.y)
+      && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
+}
+
 describe('WorldBox-style presentation atlas', () => {
   it('reprojects all 82 authoritative regions without mutating simulation coordinates', () => {
     const source = sourceRegions();
@@ -122,6 +133,26 @@ describe('WorldBox-style presentation atlas', () => {
 
     expect(presentation.seaZones[0].center).toEqual({ x: 455, y: 240 });
     expect(presentation.fleets[0].position).toEqual({ x: 455, y: 240 });
+  });
+
+  it('berths fleets outside the port coast and fans shared berths deterministically', () => {
+    const source = sourceRegions();
+    const seaZones = [{
+      id: 'sea_shandong', name: '齐东外海', center: { x: 700, y: 250 },
+      climate: '内海', contested: false, powerShare: 0,
+    }];
+    const fleets = ['fleet-a', 'fleet-b'].map((id) => ({
+      id, name: id, regionId: 'r_qingzhou', seaZoneId: null, anchorSeaZoneId: 'sea_shandong',
+      position: { x: 680, y: 245 }, strength: 20, readiness: 80, mission: '驻泊',
+    }));
+    const first = buildMapPresentation(source, [], [], seaZones, fleets, []);
+    const second = buildMapPresentation(source, [], [], seaZones, fleets, []);
+
+    expect(first.fleets.map((fleet) => fleet.position)).toEqual(second.fleets.map((fleet) => fleet.position));
+    expect(new Set(first.fleets.map((fleet) => `${fleet.position.x}:${fleet.position.y}`)).size).toBe(2);
+    for (const fleet of first.fleets) {
+      expect(first.profile.landShapes.some((shape) => pointInPolygon(fleet.position, shape.polygon))).toBe(false);
+    }
   });
 
   it('places one stable person point inside its region without changing authoritative coordinates', () => {

@@ -30,5 +30,5 @@ export function isBattleReadyCharacter(
 }
 
 export function commandHealthFactor(health: number): number {
-  return health >= 75 ? 1 : health >= 60 ? .94 : health >= 45 ? .82 : .68;
+  return Math.max(.62, Math.min(1, .55 + health / 220));
 }

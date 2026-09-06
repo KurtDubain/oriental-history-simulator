@@ -8,10 +8,7 @@ import type { MapPrimerStep } from '../components/MapPrimer';
 import type { MapProfileId } from '../maps';
 import type { EmbodimentClosure } from './embodiment-observer';
 import type { RosterDiscoveryStateMap, RosterVisibleCountMap } from './roster-discovery';
-import type {
-  ObserverAudioState,
-  ObserverInterfaceSettings,
-} from './observer-interface-settings';
+import type { ObserverInterfaceSettings } from './observer-interface-settings';
 import type { ObserverLeadProjection } from './observer-leads';
 import type {
   ObserverPauseMatch,
@@ -39,7 +36,6 @@ export interface SnapshotOptions {
   overlay: MapOverlay;
   selection: Selection;
   interfaceSettings: ObserverInterfaceSettings;
-  audioState: ObserverAudioState;
   fullscreen: boolean;
   observerLeadProjection: ObserverLeadProjection | null;
   historicalTurn: number | null;
@@ -57,6 +53,7 @@ export interface SnapshotOptions {
   mobileInspectorExpanded: boolean;
   mapGestureActive: boolean;
   focusedPoliticalFactionId: string | null;
+  focusedWarId: string | null;
   embodiedCharacterId: string | null;
   pendingEmbodiedAction: EmbodiedActionCommand | null;
   embodimentClosure: EmbodimentClosure | null;

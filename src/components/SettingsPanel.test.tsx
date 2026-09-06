@@ -85,47 +85,18 @@ describe('SettingsPanel', () => {
     expect(renderPanel({ open: false })).toBeNull();
   });
 
-  it('keeps all volume sliders disabled until the observer enables sound', () => {
+  it('contains only the settings that still affect the interface', () => {
     const root = renderPanel();
     const rangeInputs = collectElements(root).filter((element) => (
       element.type === 'input' && element.props.type === 'range'
     ));
-
-    expect(createObserverInterfaceSettings().sound.enabled).toBe(false);
-    expect(rangeInputs).toHaveLength(3);
-    expect(rangeInputs.every((element) => element.props.disabled === true)).toBe(true);
-  });
-
-  it('offers an explicit preview once sound is enabled', () => {
-    const onPreviewSound = vi.fn();
-    const defaults = createObserverInterfaceSettings();
-    const root = renderPanel({
-      settings: {
-        ...defaults,
-        sound: { ...defaults.sound, enabled: true, promptDismissed: true },
-      },
-      audioState: 'ready',
-      onPreviewSound,
-    });
-    const preview = collectElements(root).find((element) => (
-      element.type === 'button' && nodeText(element).includes('试听季度落钟')
-    ));
-
-    expect(preview).toBeDefined();
-    preview?.props.onClick?.();
-    expect(onPreviewSound).toHaveBeenCalledOnce();
-    expect(nodeText(root)).toContain('声景已就绪');
+    expect(rangeInputs).toHaveLength(0);
+    expect(nodeText(root)).not.toContain('声音');
   });
 
   it('emits normalized settings for switches, motion, and density choices', () => {
     const onSettingsChange = vi.fn();
-    const malformed = {
-      ...createObserverInterfaceSettings(),
-      sound: {
-        ...createObserverInterfaceSettings().sound,
-        masterVolume: 9,
-      },
-    } as ObserverInterfaceSettings;
+    const malformed = createObserverInterfaceSettings() as ObserverInterfaceSettings;
     const root = renderPanel({ settings: malformed, onSettingsChange });
     const elements = collectElements(root);
     const checkboxes = elements.filter((element) => (
@@ -138,25 +109,20 @@ describe('SettingsPanel', () => {
       element.type === 'button' && nodeText(element).includes('紧凑')
     ));
 
-    expect(checkboxes).toHaveLength(2);
-    checkboxes[0].props.onChange?.({ target: { checked: true } });
-    checkboxes[1].props.onChange?.({ target: { checked: false } });
+    expect(checkboxes).toHaveLength(1);
+    checkboxes[0].props.onChange?.({ target: { checked: false } });
     reducedMotion?.props.onClick?.();
     compactDensity?.props.onClick?.();
 
     expect(onSettingsChange).toHaveBeenNthCalledWith(1, normalizeObserverInterfaceSettings({
       ...malformed,
-      sound: { ...malformed.sound, enabled: true, promptDismissed: true },
+      mapAtmosphere: false,
     }));
     expect(onSettingsChange).toHaveBeenNthCalledWith(2, normalizeObserverInterfaceSettings({
       ...malformed,
-      mapAtmosphere: false,
-    }));
-    expect(onSettingsChange).toHaveBeenNthCalledWith(3, normalizeObserverInterfaceSettings({
-      ...malformed,
       motion: 'reduced',
     }));
-    expect(onSettingsChange).toHaveBeenNthCalledWith(4, normalizeObserverInterfaceSettings({
+    expect(onSettingsChange).toHaveBeenNthCalledWith(3, normalizeObserverInterfaceSettings({
       ...malformed,
       interfaceDensity: 'compact',
     }));

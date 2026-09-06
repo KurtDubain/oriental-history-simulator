@@ -161,9 +161,30 @@ describe('battle participant fate', () => {
     expect(firstContext.facts).toEqual(secondContext.facts);
     expect(dangerous.death).toBeGreaterThan(safe.death);
     expect(dangerous.wound).toBeGreaterThan(safe.wound);
-    expect(safe).toMatchObject({ death: 0, wound: 0, exposure: 'ordinary' });
-    expect(dangerous.death).toBeLessThanOrEqual(.048);
-    expect(dangerous.wound).toBeLessThanOrEqual(.34);
+    expect(safe.exposure).toBe('ordinary');
+    expect(safe.death).toBeLessThan(0.000_001);
+    expect(safe.wound).toBeLessThan(0.000_001);
+    expect(dangerous.death).toBeLessThanOrEqual(.055);
+    expect(dangerous.wound).toBeLessThanOrEqual(.38);
+  });
+
+  it('keeps continuous risk monotonic across loss, defeat, health, and protection', () => {
+    const participant = {
+      characterId: 'person-risk', soldiersBefore: 1_000, soldiersAfter: 800, losses: 200,
+      factionId: null, formationCommanderId: 'person-risk', role: 'commander' as const,
+    };
+    const lowLoss = battleFateChances({ ...participant, soldiersAfter: 900, losses: 100 }, true, 80, 40, 50);
+    const highLoss = battleFateChances({ ...participant, soldiersAfter: 600, losses: 400 }, true, 80, 40, 50);
+    const defeated = battleFateChances(participant, false, 80, 40, 50);
+    const woundedHealth = battleFateChances(participant, false, 35, 40, 50);
+    const protectedRisk = battleFateChances(participant, false, 35, 90, 90);
+
+    expect(highLoss.severity).toBeGreaterThan(lowLoss.severity);
+    expect(defeated.severity).toBeGreaterThan(battleFateChances(participant, true, 80, 40, 50).severity);
+    expect(woundedHealth.severity).toBeGreaterThan(defeated.severity);
+    expect(protectedRisk.severity).toBeLessThan(woundedHealth.severity);
+    expect(highLoss.wound).toBeGreaterThan(lowLoss.wound);
+    expect(woundedHealth.death).toBeGreaterThan(defeated.death);
   });
 
   it('does not draw another wound while the previous injury is still being rested', () => {

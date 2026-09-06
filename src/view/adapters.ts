@@ -17,7 +17,7 @@ export {
 export { toCountryArchive, toCountryInspector } from './country-dossier-adapter';
 export { toFamilyArchive, toFamilyInspector } from './family-dossier-adapter';
 export { polityPopulation, worldPopulation } from './dossier-adapter-shared';
-export { toCausalEvent, toChronicleEvent } from './history-causal-adapter';
+export { toCausalEvent, toCausalFact, toChronicleEvent } from './history-causal-adapter';
 export {
   familyRoster,
   militaryRoster,

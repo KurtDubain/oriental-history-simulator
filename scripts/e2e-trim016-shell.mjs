@@ -223,13 +223,6 @@ async function createWorld(page, scenario) {
   await page.addInitScript(() => {
     localStorage.setItem('canghai-observer-interface-settings-v1', JSON.stringify({
       version: 2,
-      sound: {
-        enabled: false,
-        promptDismissed: true,
-        masterVolume: 0.72,
-        ambienceVolume: 0.42,
-        effectsVolume: 0.68,
-      },
       motion: 'reduced',
       mapAtmosphere: true,
       interfaceDensity: 'comfortable',

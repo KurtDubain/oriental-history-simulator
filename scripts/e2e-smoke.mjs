@@ -153,13 +153,6 @@ async function openFreshWorld(page, seed = null) {
   await page.waitForFunction((version) => JSON.parse(window.render_game_to_text()).productVersion === version, PACKAGE_VERSION);
 }
 
-async function dismissAudioInvitationIfVisible(page) {
-  const invitation = page.getByTestId('audio-invitation');
-  if (!(await invitation.count()) || !(await invitation.isVisible())) return;
-  await invitation.getByRole('button', { name: '暂不开启声音' }).click();
-  await invitation.waitFor({ state: 'detached' });
-}
-
 async function exerciseMapPrimer(page) {
   const before = await snapshot(page);
   assert.equal(before.observer.primerOpen, true, '首次新建世界应打开三步读图导览');
@@ -372,7 +365,6 @@ async function exerciseEmbodiedCourtMobile(browser) {
   try {
     await openFreshWorld(page, '朝臣议事');
     await page.locator('[data-map-primer-skip]').click();
-    await dismissAudioInvitationIfVisible(page);
     const winter = await advanceTo(page, 3);
     assert.equal(winter.time.season, '冬', '朝臣议事验收必须在自然推进到冬季后进行');
 
@@ -1005,14 +997,22 @@ async function exerciseMapViewportTouch(context, page) {
   const currentZoom = Number(await map.getAttribute('data-map-zoom'));
   const currentPanX = Number(await map.getAttribute('data-map-pan-x'));
   const currentPanY = Number(await map.getAttribute('data-map-pan-y'));
-  const taiwan = {
-    x: box.x + (box.width - 1000 * fitScale) / 2 + currentPanX + 416 * fitScale * currentZoom,
-    y: box.y + (box.height - 700 * fitScale) / 2 + currentPanY + 547 * fitScale * currentZoom,
+  const regional = await snapshot(page);
+  const touchTarget = regional.mapObjects.personalForces
+    .filter((person) => Array.isArray(person.position))
+    .sort((left, right) => (
+      Math.hypot(left.position[0] - 500, left.position[1] - 350)
+      - Math.hypot(right.position[0] - 500, right.position[1] - 350)
+    ))[0];
+  assert.ok(touchTarget, '区域层应至少绘制一名可点选的带兵人物');
+  const personPoint = {
+    x: box.x + (box.width - 1000 * fitScale) / 2 + currentPanX + touchTarget.position[0] * fitScale * currentZoom,
+    y: box.y + (box.height - 700 * fitScale) / 2 + currentPanY + touchTarget.position[1] * fitScale * currentZoom,
   };
   await page.locator('.observer-world-tools__more').click();
   assert.equal(await page.locator('.observer-world-tools').getAttribute('data-mobile-more-open'), 'true');
-  await dispatch('touchStart', [taiwan]);
-  await dispatch('touchMove', [{ x: taiwan.x + 6, y: taiwan.y + 2 }]);
+  await dispatch('touchStart', [personPoint]);
+  await dispatch('touchMove', [{ x: personPoint.x + 6, y: personPoint.y + 2 }]);
   await dispatch('touchEnd', []);
   await page.waitForTimeout(120);
   const touched = await snapshot(page);
@@ -1340,7 +1340,6 @@ try {
   }, '舆图必须使用北陆半岛体系、岭南陆与六岛形的参考拓扑');
 
   const afterPrimer = await exerciseMapPrimer(page);
-  await dismissAudioInvitationIfVisible(page);
   const situationSample = await exerciseSituationSnapshot(desktopContext, {
     seed: '春战副将',
     turn: 8,

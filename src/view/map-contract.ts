@@ -122,6 +122,8 @@ export interface MapFleetView {
   id: string;
   name: string;
   seaZoneId?: string | null;
+  /** Presentation-only sea anchor used to berth a fleet outside its port. */
+  anchorSeaZoneId?: string | null;
   regionId?: string | null;
   position: MapPoint;
   polityId?: string;

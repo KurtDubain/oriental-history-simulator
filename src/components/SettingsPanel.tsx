@@ -5,17 +5,13 @@ import {
   Image,
   RotateCcw,
   Settings2,
-  Volume2,
-  VolumeX,
   Waves,
   X,
 } from 'lucide-react';
 import { useId, useRef } from 'react';
-import settingsArtwork from '../assets/settings-mountains-v1.jpg';
 import {
   createObserverInterfaceSettings,
   normalizeObserverInterfaceSettings,
-  type ObserverAudioState,
   type ObserverInterfaceSettings,
   type ObserverMotionPreference,
 } from '../view/observer-interface-settings';
@@ -25,10 +21,8 @@ import '../styles/settings-panel.css';
 export interface SettingsPanelProps {
   open: boolean;
   settings: ObserverInterfaceSettings;
-  audioState?: ObserverAudioState;
   fullscreen?: boolean;
   onSettingsChange: (settings: ObserverInterfaceSettings) => void;
-  onPreviewSound?: () => void;
   onToggleFullscreen?: () => void;
   onClose: () => void;
   returnFocusTo?: HTMLElement | null;
@@ -44,25 +38,11 @@ const MOTION_OPTIONS: ReadonlyArray<{
   { id: 'reduced', label: '减少', detail: '停用非必要位移与呼吸效果' },
 ];
 
-const AUDIO_STATE_LABEL: Record<ObserverAudioState, string> = {
-  silent: '声音关闭',
-  waiting: '等待轻触',
-  ready: '声音已开启',
-  suspended: '已随页面暂停',
-  unsupported: '此浏览器不支持',
-};
-
-function percent(value: number): string {
-  return `${Math.round(value * 100)}%`;
-}
-
 export function SettingsPanel({
   open,
   settings,
-  audioState = settings.sound.enabled ? 'ready' : 'silent',
   fullscreen = false,
   onSettingsChange,
-  onPreviewSound,
   onToggleFullscreen,
   onClose,
   returnFocusTo,
@@ -86,17 +66,6 @@ export function SettingsPanel({
   const commit = (patch: Partial<ObserverInterfaceSettings>) => {
     onSettingsChange(normalizeObserverInterfaceSettings({ ...safeSettings, ...patch }));
   };
-  const commitSound = (patch: Partial<ObserverInterfaceSettings['sound']>) => {
-    commit({
-      sound: {
-        ...safeSettings.sound,
-        ...patch,
-        promptDismissed: patch.enabled === undefined
-          ? safeSettings.sound.promptDismissed
-          : true,
-      },
-    });
-  };
 
   return (
     <div className="settings-layer" data-motion={safeSettings.motion}>
@@ -117,12 +86,10 @@ export function SettingsPanel({
         data-testid="settings-panel"
       >
         <header className="settings-panel__hero">
-          <img src={settingsArtwork} alt="" aria-hidden="true" />
-          <div className="settings-panel__hero-shade" aria-hidden="true" />
           <div className="settings-panel__hero-copy">
-            <span><Settings2 size={14} aria-hidden="true" /> 观览 · 声音</span>
+            <span><Settings2 size={14} aria-hidden="true" /> 观览设置</span>
             <h2 id={titleId}>设置</h2>
-            <p id={descriptionId}>调整你看见和听见世界的方式。</p>
+            <p id={descriptionId}>只调整舆图与界面的观看方式。</p>
           </div>
           <button ref={closeRef} type="button" aria-label="关闭设置" onClick={onClose}>
             <X size={20} aria-hidden="true" />
@@ -130,80 +97,9 @@ export function SettingsPanel({
         </header>
 
         <div className="settings-panel__scroll">
-          <section className="settings-section" aria-labelledby="settings-audio-heading">
-            <div className="settings-section__heading">
-              <span className="settings-section__number">01</span>
-              <div>
-                <h3 id="settings-audio-heading">声音</h3>
-                <p>风、水、纸页与远钟共同组成低侵入声景。</p>
-              </div>
-              <span className="settings-section__status" data-active={safeSettings.sound.enabled || undefined}>
-                {AUDIO_STATE_LABEL[audioState]}
-              </span>
-            </div>
-
-            <label className="settings-switch-row" data-testid="settings-sound-toggle">
-              <span className="settings-switch-row__icon" aria-hidden="true">
-                {safeSettings.sound.enabled ? <Volume2 size={18} /> : <VolumeX size={18} />}
-              </span>
-              <span>
-                <strong>游戏声音</strong>
-                <small>{safeSettings.sound.enabled
-                  ? '风水声景与点选、展卷、史事提示已开启'
-                  : '默认静音；开启后切到后台会自动停下'}</small>
-              </span>
-              <input
-                type="checkbox"
-                checked={safeSettings.sound.enabled}
-                disabled={audioState === 'unsupported'}
-                onChange={(event) => commitSound({ enabled: event.target.checked })}
-              />
-              <i aria-hidden="true" />
-            </label>
-
-            {safeSettings.sound.enabled ? (
-              <div className="settings-audio-proof" data-state={audioState}>
-                <span>{audioState === 'ready'
-                  ? '声景已就绪；点选州域或推进季度都会回应。'
-                  : '浏览器还在等待一次轻触，可直接试听。'}</span>
-                <button
-                  type="button"
-                  onClick={onPreviewSound}
-                  disabled={audioState === 'unsupported'}
-                >
-                  <Volume2 size={14} aria-hidden="true" />
-                  试听季度落钟
-                </button>
-              </div>
-            ) : null}
-
-            <div className="settings-volume-list" aria-disabled={!safeSettings.sound.enabled}>
-              {([
-                ['masterVolume', '总音量', '所有声音的总闸'],
-                ['ambienceVolume', '环境声', '风、水、远钟与紧张气氛'],
-                ['effectsVolume', '操作音效', '点选、展卷、推进与重大史事'],
-              ] as const).map(([key, label, detail]) => (
-                <label key={key} className="settings-range-row">
-                  <span><strong>{label}</strong><small>{detail}</small></span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1"
-                    step="0.01"
-                    value={safeSettings.sound[key]}
-                    disabled={!safeSettings.sound.enabled}
-                    aria-label={label}
-                    onChange={(event) => commitSound({ [key]: Number(event.target.value) })}
-                  />
-                  <output>{percent(safeSettings.sound[key])}</output>
-                </label>
-              ))}
-            </div>
-          </section>
-
           <section className="settings-section" aria-labelledby="settings-visual-heading">
             <div className="settings-section__heading">
-              <span className="settings-section__number">02</span>
+              <span className="settings-section__number">01</span>
               <div>
                 <h3 id="settings-visual-heading">画面与动态</h3>
                 <p>地图仍以信息为先，气氛只改变纸色、雾度与水面。</p>
@@ -263,7 +159,7 @@ export function SettingsPanel({
 
           <section className="settings-section" aria-labelledby="settings-window-heading">
             <div className="settings-section__heading">
-              <span className="settings-section__number">03</span>
+              <span className="settings-section__number">02</span>
               <div><h3 id="settings-window-heading">窗口</h3><p>不离开当前世界，改变观看方式。</p></div>
             </div>
             {onToggleFullscreen ? (

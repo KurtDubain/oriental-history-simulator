@@ -255,6 +255,9 @@ export function toMapFleets(world: WorldState): MapFleetView[] {
       id: item.id,
       name: item.name,
       seaZoneId: item.seaZoneId,
+      anchorSeaZoneId: item.seaZoneId
+        ?? world.portLinks.find((link) => link.regionId === (item.portRegionId ?? item.homePortRegionId))?.seaZoneId
+        ?? null,
       regionId: item.portRegionId,
       position,
       polityId: item.polityId,

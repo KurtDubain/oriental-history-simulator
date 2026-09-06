@@ -14,20 +14,24 @@ import {
   type WorldState,
 } from '../sim';
 import { findWorldHistoryEvent } from '../sim/archive';
-import { armyOrderPath } from '../sim/military/orders';
 import { APP_VERSION } from '../version';
 import {
   projectRosterCollection,
   rosterScopeFor,
+  toMapArmies,
+  toMapFleets,
   toCountryInspector,
   toMapMarkers,
+  toMapPersonForces,
+  toMapRegions,
+  toMapRoutes,
+  toMapSeaZones,
   toPersonInspector,
   toSystemInspector,
   worldPopulation,
 } from './adapters';
 import { projectEmbodimentTextSnapshot } from './embodiment-view';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
-import { shouldShowObserverSoundInvitation } from './observer-interface-settings';
 import { deriveObserverLeadProjection } from './observer-leads';
 import {
   observerLayerIsOpen,
@@ -42,6 +46,8 @@ import type { SnapshotOptions } from './observer-shell-contract';
 import { projectSituationWorkbench } from './situation-detail';
 import { toSituationSnapshot } from './situation-snapshot';
 import { mapMarkerTarget } from './map-marker-layout';
+import { buildMapLodScene } from './map-lod';
+import { buildMapPresentation } from './map-presentation';
 import { projectWarGroups } from './war-group-projection';
 
 const HISTORY_COLORS: Record<string, string> = {
@@ -162,12 +168,9 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       navigationJourney: projectNavigationJourney(navigation),
       settings: {
         open: settingsOpen,
-        soundEnabled: options.interfaceSettings.sound.enabled,
-        soundPromptVisible: false,
         motion: options.interfaceSettings.motion,
         mapAtmosphere: options.interfaceSettings.mapAtmosphere,
         density: options.interfaceSettings.interfaceDensity,
-        audioState: options.audioState,
       },
       worldSaveCount: options.worldSaveCount,
       primerOpen,
@@ -329,6 +332,23 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     ? toMapMarkers(world, 'political', options.focusedPoliticalFactionId)
     : [];
   const focusedPoliticalFaction = world.factions.find((item) => item.id === options.focusedPoliticalFactionId);
+  const focusedArmyIds = options.focusedWarId
+    ? world.armies.filter((army) => army.order.warId === options.focusedWarId).map((army) => army.id)
+    : [];
+  const mapScene = buildMapLodScene(buildMapPresentation(
+    toMapRegions(world),
+    toMapRoutes(world),
+    toMapArmies(world),
+    toMapSeaZones(world),
+    toMapFleets(world),
+    toMapMarkers(world, options.overlay, options.focusedPoliticalFactionId),
+    mapProfile.presentation,
+    toMapPersonForces(world),
+  ), options.mapLod, {
+    selectedRegionId: options.selection?.kind === 'region' ? options.selection.id : null,
+    selectedObject: options.selection ? { kind: options.selection.kind, id: options.selection.id } : null,
+    focusedArmyIds,
+  });
   const importantRegions = world.regions
     .slice()
     .sort((left, right) => Number(left.id === options.selection?.id) - Number(right.id === options.selection?.id)
@@ -455,16 +475,9 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       overlay: options.overlay,
       settings: {
         open: settingsOpen,
-        soundEnabled: options.interfaceSettings.sound.enabled,
-        soundPromptVisible: shouldShowObserverSoundInvitation(options.interfaceSettings, {
-          turn: world.turn,
-          worldViewActive: view === 'world' && options.historicalTurn === null,
-          selectionOpen: options.selection !== null,
-        }),
         motion: options.interfaceSettings.motion,
         mapAtmosphere: options.interfaceSettings.mapAtmosphere,
         density: options.interfaceSettings.interfaceDensity,
-        audioState: options.audioState,
         fullscreen: options.fullscreen,
       },
       mapViewport: {
@@ -610,26 +623,38 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       unrest: region.unrest,
       })),
       seaZones: world.seaZones.map((zone) => ({ id: zone.id, name: zone.name, center: [zone.x, zone.y], controllerId: zone.controllerId, contested: zone.contested, traffic: zone.traffic })),
-      fleets: world.fleets.slice(0, 24).map((fleet) => ({ id: fleet.id, name: fleet.name, polityId: fleet.polityId, seaZoneId: fleet.seaZoneId, portRegionId: fleet.portRegionId, mission: fleet.mission, readiness: fleet.readiness })),
-      armies: world.armies.slice(0, 24).map((army) => ({
+      fleets: mapScene.fleets.map((fleet) => ({ id: fleet.id, name: fleet.name, polityId: fleet.polityId, seaZoneId: fleet.seaZoneId, portRegionId: fleet.regionId, position: [fleet.position.x, fleet.position.y], mission: fleet.mission, readiness: fleet.readiness })),
+      armies: mapScene.armies.map((army) => ({
+          participants: world.armies.find((item) => item.id === army.id)?.participantIds
+            .map((id) => ({ id, name: characterName(id) })) ?? [],
           id: army.id,
           name: army.name,
           polityId: army.polityId,
           regionId: army.regionId,
-          soldiers: army.soldiers,
-          commander: characterName(army.commanderId),
-          order: army.order.kind,
-          orderTargetRegionId: army.order.targetRegionId,
+          position: army.position ? [army.position.x, army.position.y] : null,
+          soldiers: army.strength,
+          commander: army.lawfulCommanderName,
+          order: army.orderKind,
+          orderTargetRegionId: army.orderPathRegionIds?.at(-1) ?? null,
           recentMovement: army.recentMovement,
-          orderPath: armyOrderPath(world, army),
+          orderPath: army.orderPathRegionIds,
         })),
-      personalForces: world.personalForces.slice(0, 240).map((force) => ({
-        ownerId: force.ownerId,
-        name: characterName(force.ownerId),
-        regionId: world.characters.find((item) => item.id === force.ownerId)?.locationRegionId ?? force.homeRegionId,
-        soldiers: force.soldiers,
-        status: force.status,
-        formationId: force.formationId,
+      personalForces: mapScene.persons.map((person) => ({
+        ownerId: person.id,
+        name: person.personName,
+        regionId: person.regionId,
+        position: person.position ? [person.position.x, person.position.y] : null,
+        soldiers: person.soldiers,
+        status: person.status,
+        formationId: person.formationId,
+      })),
+      personClusters: mapScene.personClusters.map((cluster) => ({
+        id: cluster.id,
+        regionId: cluster.regionId,
+        position: [cluster.position.x, cluster.position.y],
+        leaderName: cluster.leaderName,
+        count: cluster.count,
+        soldiers: cluster.soldiers,
       })),
     },
   });

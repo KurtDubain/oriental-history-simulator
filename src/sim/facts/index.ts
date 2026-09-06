@@ -38,8 +38,6 @@ export type {
   EmbodiedActionSubmittedFact,
   EmbodiedActionSubmittedFactPayload,
   EmbodiedActionTargetKind,
-  ExpeditionResponseFact,
-  ExpeditionResponseFactPayload,
   FactionLifecycleFact,
   FactionLifecycleFactPayload,
   FactionLifecycleSnapshot,

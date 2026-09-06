@@ -10,7 +10,6 @@ import {
   parseObserverInterfaceSettings,
   saveObserverInterfaceSettings,
   serializeObserverInterfaceSettings,
-  shouldShowObserverSoundInvitation,
   type ObserverInterfaceSettingsStorage,
 } from './observer-interface-settings';
 
@@ -41,50 +40,19 @@ describe('observer interface settings', () => {
     const first = createObserverInterfaceSettings();
     const second = createObserverInterfaceSettings();
 
-    first.sound.effectsVolume = 0;
+    first.motion = 'reduced';
 
     expect(second).toEqual({
       version: OBSERVER_INTERFACE_SETTINGS_VERSION,
-      sound: {
-        enabled: false,
-        promptDismissed: false,
-        masterVolume: 0.72,
-        ambienceVolume: 0.42,
-        effectsVolume: 0.68,
-      },
       motion: 'system',
       mapAtmosphere: true,
       interfaceDensity: 'comfortable',
     });
   });
 
-  it('shows the sound invitation only on an unobstructed world map', () => {
-    const settings = createObserverInterfaceSettings();
-    const context = { turn: 1, worldViewActive: true, selectionOpen: false };
-
-    expect(shouldShowObserverSoundInvitation(settings, context)).toBe(true);
-    expect(shouldShowObserverSoundInvitation(settings, { ...context, turn: 0 })).toBe(false);
-    expect(shouldShowObserverSoundInvitation(settings, { ...context, worldViewActive: false })).toBe(false);
-    expect(shouldShowObserverSoundInvitation(settings, { ...context, selectionOpen: true })).toBe(false);
-    expect(shouldShowObserverSoundInvitation({
-      ...settings,
-      sound: { ...settings.sound, enabled: true },
-    }, context)).toBe(false);
-    expect(shouldShowObserverSoundInvitation({
-      ...settings,
-      sound: { ...settings.sound, promptDismissed: true },
-    }, context)).toBe(false);
-  });
-
   it('normalizes malformed and older records into the current version', () => {
     const callerOwned = {
       version: 0,
-      sound: {
-        enabled: false,
-        masterVolume: 1.8,
-        ambienceVolume: -0.2,
-        effectsVolume: 0.333_49,
-      },
       motion: 'reduced',
       mapAtmosphere: false,
       interfaceDensity: 'compact',
@@ -93,22 +61,11 @@ describe('observer interface settings', () => {
 
     expect(normalized).toEqual({
       version: OBSERVER_INTERFACE_SETTINGS_VERSION,
-      sound: {
-        enabled: false,
-        promptDismissed: false,
-        masterVolume: 1,
-        ambienceVolume: 0,
-        effectsVolume: 0.333,
-      },
       motion: 'reduced',
       mapAtmosphere: false,
       interfaceDensity: 'compact',
     });
-    callerOwned.sound.enabled = true;
-    expect(normalized.sound.enabled).toBe(false);
-
     expect(normalizeObserverInterfaceSettings({
-      sound: { masterVolume: Number.NaN },
       motion: 'fast',
       interfaceDensity: 'tiny',
     })).toEqual(createObserverInterfaceSettings());
@@ -118,12 +75,6 @@ describe('observer interface settings', () => {
 
   it('round-trips canonical JSON and repairs malformed or oversized input', () => {
     const settings = normalizeObserverInterfaceSettings({
-      sound: {
-        enabled: false,
-        masterVolume: 0.4,
-        ambienceVolume: 0.1,
-        effectsVolume: 0.9,
-      },
       motion: 'reduced',
       mapAtmosphere: false,
       interfaceDensity: 'compact',
@@ -139,7 +90,6 @@ describe('observer interface settings', () => {
   it('loads, saves, and clears through the isolated storage key', () => {
     const storage = new MemorySettingsStorage();
     const settings = normalizeObserverInterfaceSettings({
-      sound: { enabled: false },
       motion: 'reduced',
       mapAtmosphere: false,
       interfaceDensity: 'compact',

@@ -315,12 +315,15 @@ describe('entity history gateways', () => {
           title: `实事${index + 1}`,
           summary: `第${index + 1}段均有来源。`,
           sourceFactIds: [`fact-${index}`],
+          sourceEventIds: [],
+          primaryEventId: null,
+          primaryFactId: `fact-${index}`,
         })),
       },
       onSelectEvent: () => undefined,
     }));
 
-    expect(markup).toContain('这一生如何走到这里');
+    expect(markup).toContain('关键经历');
     expect(markup.match(/第[1-3]段均有来源/g)).toHaveLength(3);
     expect(markup).not.toContain('展开完整四段');
     expect(markup.indexOf('这一生如何走到这里')).toBeLessThan(markup.indexOf('身世与处境'));

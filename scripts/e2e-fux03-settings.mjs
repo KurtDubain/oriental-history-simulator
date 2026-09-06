@@ -5,208 +5,79 @@ import { createServer } from 'vite';
 
 const PORT = Number(process.env.FUX03_E2E_PORT ?? 4187);
 const APP_URL = `http://127.0.0.1:${PORT}`;
-const PACKAGE_VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
-const ARTIFACT_DIR = `output/fux03-settings-e2e-v${PACKAGE_VERSION}`;
-const SETTINGS_KEY = 'canghai-observer-interface-settings-v1';
-
-const SCENARIOS = Object.freeze([
+const version = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
+const artifactDir = `output/settings-e2e-v${version}`;
+const settingsKey = 'canghai-observer-interface-settings-v1';
+const scenarios = [
   { slug: 'desktop', viewport: { width: 1280, height: 800 } },
   { slug: 'mobile', viewport: { width: 390, height: 844 } },
-]);
+];
 
-function collectBrowserErrors(page, target) {
-  page.on('console', (message) => {
-    if (message.type() === 'error') target.push({ type: 'console.error', text: message.text() });
-  });
-  page.on('pageerror', (error) => target.push({ type: 'pageerror', text: String(error) }));
-}
+const snapshot = (page) => page.evaluate(() => JSON.parse(window.render_game_to_text()));
 
-async function snapshot(page) {
-  return page.evaluate(() => JSON.parse(window.render_game_to_text()));
-}
-
-async function audioProbe(page) {
-  return page.evaluate(() => ({ ...window.__ohsAudioProbe }));
-}
-
-async function waitForSettings(page, open) {
-  await page.waitForFunction((expected) => {
-    if (typeof window.render_game_to_text !== 'function') return false;
-    return JSON.parse(window.render_game_to_text()).interface.settings.open === expected;
-  }, open);
-  return snapshot(page);
-}
-
-await rm(ARTIFACT_DIR, { recursive: true, force: true });
-await mkdir(ARTIFACT_DIR, { recursive: true });
-
-const server = await createServer({
-  logLevel: 'error',
-  server: { host: '127.0.0.1', port: PORT, strictPort: true },
-});
+await rm(artifactDir, { recursive: true, force: true });
+await mkdir(artifactDir, { recursive: true });
+const server = await createServer({ logLevel: 'error', server: { host: '127.0.0.1', port: PORT, strictPort: true } });
 await server.listen();
-
 const browser = await chromium.launch({ headless: true });
+
 try {
-  for (const scenario of SCENARIOS) {
+  for (const scenario of scenarios) {
     const context = await browser.newContext({ viewport: scenario.viewport });
     const page = await context.newPage();
-    const browserErrors = [];
-    collectBrowserErrors(page, browserErrors);
+    const errors = [];
+    page.on('console', (message) => { if (message.type() === 'error') errors.push(message.text()); });
+    page.on('pageerror', (error) => errors.push(String(error)));
     await page.addInitScript(() => {
-      window.__ohsAudioProbe = { oscillators: 0, bufferSources: 0 };
-      const patched = new Set();
-      for (const AudioContextType of [window.AudioContext, window.webkitAudioContext]) {
-        const prototype = AudioContextType?.prototype;
-        if (!prototype || patched.has(prototype)) continue;
-        patched.add(prototype);
-        const createOscillator = prototype.createOscillator;
-        const createBufferSource = prototype.createBufferSource;
-        prototype.createOscillator = function trackedOscillator(...args) {
-          window.__ohsAudioProbe.oscillators += 1;
-          return createOscillator.apply(this, args);
-        };
-        prototype.createBufferSource = function trackedBufferSource(...args) {
-          window.__ohsAudioProbe.bufferSources += 1;
-          return createBufferSource.apply(this, args);
-        };
-      }
-      if (location.protocol !== 'http:' && location.protocol !== 'https:') return;
       localStorage.setItem('canghai-map-primer-complete-v1', '1');
       localStorage.removeItem('canghai-observer-interface-settings-v1');
     });
     await page.goto(APP_URL, { waitUntil: 'networkidle' });
-    await page.getByLabel('世界种子').fill(`FUX03-${scenario.slug}`);
+    await page.getByLabel('世界种子').fill(`设置减法-${scenario.slug}`);
     await page.click('#start-world');
     await page.waitForSelector('.world-map__canvas');
-
     const baseline = await snapshot(page);
-    assert.equal(baseline.productVersion, PACKAGE_VERSION);
-    assert.equal(baseline.interface.settings.soundEnabled, false);
-    assert.equal(baseline.interface.settings.soundPromptVisible, false);
-    assert.equal(baseline.interface.settings.mapAtmosphere, true);
-    assert.deepEqual(await audioProbe(page), { oscillators: 0, bufferSources: 0 });
+    assert.equal(baseline.productVersion, version);
 
     const trigger = page.locator('[data-settings-trigger="true"]');
     await trigger.click();
-    const opened = await waitForSettings(page, true);
-    assert.equal(opened.time.turn, baseline.time.turn, '打开设置不得推进季度');
-    assert.equal(opened.deterministicWorldHash, baseline.deterministicWorldHash, '打开设置不得改变世界哈希');
-    assert.equal(await page.locator('.observer-app').evaluate((element) => element.inert), true);
-
+    await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.settings.open);
     const panel = page.getByTestId('settings-panel');
     await panel.waitFor();
-    assert.equal(await panel.getAttribute('role'), 'dialog');
-    assert.match(await panel.textContent(), /不改变人物选择、历史结果或世界种子/);
-    const heroLoaded = await panel.locator('.settings-panel__hero img').evaluate((image) => (
-      image.complete && image.naturalWidth >= 1_000 && image.naturalHeight >= 500
-    ));
-    assert.equal(heroLoaded, true, '设置题图应加载完整资源');
+    assert.match(await panel.textContent(), /只调整舆图与界面的观看方式/);
+    assert.doesNotMatch(await panel.textContent(), /声音|音量|声景|试听/);
+    assert.equal(await panel.locator('img, input[type="range"]').count(), 0);
 
-    const volumeInputs = panel.locator('input[type="range"]');
-    assert.equal(await volumeInputs.count(), 3);
-    for (let index = 0; index < 3; index += 1) {
-      assert.equal(await volumeInputs.nth(index).isDisabled(), true, '声音关闭时音量滑杆必须禁用');
-    }
-    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-settings-initial.png`, fullPage: true });
-
-    await panel.locator('.settings-panel__hero > button').click();
-    await waitForSettings(page, false);
-    await page.getByRole('button', { name: '推进至下一季' }).click();
-    await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).time.turn === 1);
-    const prompted = await snapshot(page);
-    assert.equal(prompted.interface.settings.soundPromptVisible, true, '首次手动推进后应明确提示声音');
-    const invitation = page.getByTestId('audio-invitation');
-    await invitation.waitFor();
-    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-audio-invitation.png`, fullPage: true });
-
-    await page.locator('[data-observer-view="powers"]').click();
-    await page.waitForFunction(() => {
-      const current = JSON.parse(window.render_game_to_text());
-      return current.interface.view === 'powers' && !current.interface.settings.soundPromptVisible;
-    });
-    assert.equal(await invitation.count(), 0, '势力名录后方不应保留声音邀请触点');
-    await page.locator('[data-roster-scope="powers"] .roster-panel__header > button').click();
-    await page.waitForFunction(() => {
-      const current = JSON.parse(window.render_game_to_text());
-      return current.interface.view === 'world' && current.interface.settings.soundPromptVisible;
-    });
-    await invitation.waitFor();
-
-    if (scenario.slug === 'desktop') {
-      await invitation.getByRole('button', { name: '开启声音', exact: true }).click();
-      await page.waitForFunction(() => {
-        const settings = JSON.parse(window.render_game_to_text()).interface.settings;
-        return settings.soundEnabled && settings.audioState === 'ready';
-      });
-    } else {
-      await invitation.getByRole('button', { name: '暂不开启声音' }).click();
-      await page.waitForFunction(() => !JSON.parse(window.render_game_to_text()).interface.settings.soundPromptVisible);
-      assert.equal((await snapshot(page)).interface.settings.soundEnabled, false);
-    }
-
-    await trigger.click();
-    await waitForSettings(page, true);
-    const soundToggle = panel.locator('[data-testid="settings-sound-toggle"] input');
-    if (!(await soundToggle.isChecked())) await soundToggle.check();
-    await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.settings.audioState === 'ready');
-    const unlockedProbe = await audioProbe(page);
-    assert.ok(unlockedProbe.oscillators >= 9, '开启声音后应真正创建程序化声景');
-
-    const beforePreview = await audioProbe(page);
-    await panel.getByRole('button', { name: '试听季度落钟' }).click();
-    await page.waitForTimeout(80);
-    const afterPreview = await audioProbe(page);
-    assert.ok(afterPreview.oscillators >= beforePreview.oscillators + 2, '试听必须真正播放季度落钟');
-    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-audio-ready.png`, fullPage: true });
-
-    await volumeInputs.nth(0).fill('0.55');
-    await panel.getByRole('button', { name: /^减少 / }).click();
-    await panel.getByRole('button', { name: /紧凑/ }).click();
-    const atmosphereToggle = panel.locator('.settings-switch-row input[type="checkbox"]').nth(1);
-    await atmosphereToggle.uncheck();
-
+    await panel.getByRole('button', { name: /^减少/ }).click();
+    await panel.getByRole('button', { name: /^紧凑/ }).click();
+    await panel.locator('.settings-switch-row input[type="checkbox"]').uncheck();
     const configured = await snapshot(page);
-    assert.equal(configured.interface.settings.soundEnabled, true);
     assert.equal(configured.interface.settings.motion, 'reduced');
     assert.equal(configured.interface.settings.density, 'compact');
     assert.equal(configured.interface.settings.mapAtmosphere, false);
-    assert.equal(configured.interface.settings.audioState, 'ready');
-    assert.equal(configured.time.turn, prompted.time.turn);
-    assert.equal(configured.deterministicWorldHash, prompted.deterministicWorldHash);
-    const stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), SETTINGS_KEY);
-    assert.equal(stored.sound.masterVolume, 0.55);
+    assert.equal(configured.time.turn, baseline.time.turn);
+    assert.equal(configured.deterministicWorldHash, baseline.deterministicWorldHash);
+    const stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey);
     assert.equal(stored.motion, 'reduced');
+    assert.equal('sound' in stored, false);
 
     const viewportFits = await page.evaluate(() => (
       document.documentElement.scrollWidth <= document.documentElement.clientWidth
       && document.documentElement.scrollHeight <= document.documentElement.clientHeight
     ));
-    assert.equal(viewportFits, true, `${scenario.slug} 设置页不得产生整页溢出`);
+    assert.equal(viewportFits, true);
     if (scenario.slug === 'mobile') {
-      const triggerBounds = await trigger.boundingBox();
-      const closeBounds = await panel.locator('.settings-panel__hero > button').boundingBox();
-      assert.ok(triggerBounds && triggerBounds.width >= 44 && triggerBounds.height >= 44, '移动端设置入口触控区至少 44px');
-      assert.ok(closeBounds && closeBounds.width >= 44 && closeBounds.height >= 44, '移动端关闭触控区至少 44px');
+      const close = panel.getByRole('button', { name: '关闭设置' });
+      for (const button of [trigger, close]) {
+        const box = await button.boundingBox();
+        assert.ok(box && box.width >= 44 && box.height >= 44, '移动触控区应至少44px');
+      }
     }
-
-    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-settings.png`, fullPage: true });
-    await panel.locator('.settings-panel__hero > button').click();
-    const closed = await waitForSettings(page, false);
-    assert.equal(closed.deterministicWorldHash, prompted.deterministicWorldHash);
-    assert.equal(await page.locator('.observer-app').getAttribute('data-motion'), 'reduced');
-    assert.equal(await page.locator('.observer-app').getAttribute('data-interface-density'), 'compact');
-    assert.equal(await page.locator('.world-map').getAttribute('data-atmosphere'), null);
-    assert.equal(await trigger.evaluate((element) => document.activeElement === element), true, '关闭设置后应归还焦点');
-    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-map.png`, fullPage: true });
-
-    const beforeNavigation = await audioProbe(page);
-    await page.locator('button[data-observer-view="powers"]').click();
-    await page.waitForTimeout(80);
-    const afterNavigation = await audioProbe(page);
-    assert.ok(afterNavigation.oscillators > beforeNavigation.oscillators, '主导航切换应有语义提示音');
-
-    assert.deepEqual(browserErrors, [], `${scenario.slug} 不应出现浏览器错误`);
+    await page.screenshot({ path: `${artifactDir}/${scenario.slug}-settings.png`, fullPage: true });
+    await panel.getByRole('button', { name: '关闭设置' }).click();
+    await page.waitForFunction(() => !JSON.parse(window.render_game_to_text()).interface.settings.open);
+    assert.equal(await trigger.evaluate((element) => document.activeElement === element), true);
+    assert.deepEqual(errors, []);
     await context.close();
   }
 } finally {
@@ -214,4 +85,4 @@ try {
   await server.close();
 }
 
-console.log(`FUX03 settings E2E passed for ${SCENARIOS.length} viewports (${PACKAGE_VERSION}).`);
+console.log(`Settings E2E passed for ${scenarios.length} viewports (${version}).`);

@@ -850,6 +850,7 @@ export function drawWorldMap(
     offsetY: baseTransform.offsetY + focusOffset.y,
   };
   const compactMap = transform.scale < 0.42;
+  const narrowMap = width < 720;
   const renderedSeaZones = seaZones;
   const regionById = new Map(regions.map((region) => [region.id, region]));
   const regionNodesByRegion = new Map<string, MapRegionNodeLayout[]>();
@@ -1080,8 +1081,8 @@ export function drawWorldMap(
         context.closePath(); context.fill();
       }
     }
-    const compactLabel = selected || person.isFactionLeader || scene.level === 'local' || overlay === 'war';
-    if (person.showLabel && (relevant || selected) && (!compactMap || compactLabel)) personLabels.push({
+    const compactLabel = selected || person.isCommander || scene.level === 'local' || overlay === 'war';
+    if (person.showLabel && (relevant || selected) && (!(compactMap || narrowMap) || compactLabel)) personLabels.push({
       ...layout,
       label: `${person.personName} · ${strength}`,
       priority: selected ? 3 : person.isCommander ? 2 : person.isFactionLeader ? 1 : 0,
@@ -1090,9 +1091,12 @@ export function drawWorldMap(
     context.restore();
   }
   const occupiedLabels: Record<number, boolean> = {};
+  const personLabelLimit = narrowMap ? (focusedWarId ? 6 : 5)
+    : compactMap ? (focusedWarId ? 12 : 8)
+      : scene.level === 'local' ? 24 : 16;
   for (const { person, point, radius, label, selected } of personLabels.sort((left, right) => (
     right.priority - left.priority || right.person.soldiers - left.person.soldiers
-  ))) {
+  )).slice(0, personLabelLimit)) {
     const labelY = point.y + radius + 3;
     const cell = Math.round(point.x / 112) + Math.round(labelY / 30) * 100;
     if (occupiedLabels[cell] && !selected) continue;
@@ -1110,11 +1114,16 @@ export function drawWorldMap(
     context.save();
     context.fillStyle = PAPER_LIGHT; context.strokeStyle = cluster.polityColor; context.lineWidth = 1.8;
     context.beginPath(); context.arc(point.x, point.y, radius, 0, Math.PI * 2); context.fill(); context.stroke();
-    if (cluster.count > 1 || cluster.soldiers >= 2_000) {
+    const labelY = point.y + radius + 3;
+    const cell = Math.round(point.x / 112) + Math.round(labelY / 30) * 100;
+    if ((scene.level === 'overview' || !(compactMap || narrowMap))
+      && !occupiedLabels[cell]
+      && (cluster.count > 1 || cluster.soldiers >= 2_000)) {
+      occupiedLabels[cell] = true;
       context.font = '650 8px "Noto Serif SC", serif'; context.textAlign = 'center'; context.textBaseline = 'top';
       context.lineWidth = 3; context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
       const label = `${cluster.leaderName}等${cluster.count}人 · ${strength}`;
-      context.strokeText(label, point.x, point.y + radius + 3); context.fillText(label, point.x, point.y + radius + 3);
+      context.strokeText(label, point.x, labelY); context.fillText(label, point.x, labelY);
     }
     context.restore();
   }

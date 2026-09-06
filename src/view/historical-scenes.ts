@@ -164,12 +164,6 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact): F
       summary: `${entering ? '出任' : '卸下'}${army ? `${army}` : place}${fact.payload.officeKind}，政令出自${polityName(world, fact.payload.polityId)}。`,
     };
   }
-  if (fact.kind === 'expedition_response') {
-    return {
-      title: `${characterName(world, fact.payload.characterId)}拒绝随军`,
-      summary: `${characterName(world, fact.payload.commanderId)}召其加入${armyName(world, fact.payload.armyId)}，此人因${fact.payload.reason}公开留守，拒令已经损伤双方信任。`,
-    };
-  }
   if (fact.kind === 'character_wounded') {
     return {
       title: `${characterName(world, fact.payload.characterId)}负伤`,

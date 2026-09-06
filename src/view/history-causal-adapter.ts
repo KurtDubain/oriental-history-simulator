@@ -1,6 +1,6 @@
 import type { CausalEvent, CausalFactor, CausalReference } from '../components/CausalDrawer';
 import type { ChronicleEvent, ChronicleTone } from '../components/Chronicle';
-import type { EventCategory, HistoryEvent, WorldState } from '../sim/types';
+import type { EventCategory, HistoryEvent, SimulationFact, WorldState } from '../sim/types';
 import {
   character,
   family,
@@ -9,6 +9,7 @@ import {
   uniqueArchiveLinks,
 } from './dossier-adapter-shared';
 import { projectHistoryEventPoliticalFocus } from './political-focus';
+import { projectFactNarrative } from './historical-scenes';
 
 function tone(category: EventCategory, kind: string): ChronicleTone {
   if (kind.includes('继承') || kind.includes('即位') || kind.includes('建国')) return 'succession';
@@ -166,4 +167,28 @@ export function toCausalEvent(world: WorldState, item: HistoryEvent): CausalEven
     ]).slice(0, 8),
     consequence: item.stateDeltas.slice(0, 2).map((delta) => `${delta.field}：${String(delta.before)} → ${String(delta.after)}`).join('；'),
   };
+}
+
+/** Opens a Fact through the existing evidence drawer without creating a second history record. */
+export function toCausalFact(world: WorldState, fact: SimulationFact): CausalEvent {
+  const narrative = projectFactNarrative(world, fact);
+  return toCausalEvent(world, {
+    id: fact.id,
+    turn: fact.turn,
+    year: fact.year,
+    season: fact.season,
+    category: fact.category,
+    kind: fact.kind,
+    title: narrative.title,
+    summary: narrative.summary,
+    importance: fact.importance,
+    actorIds: [...fact.actorIds],
+    polityIds: [...fact.polityIds],
+    regionIds: [...fact.regionIds],
+    causes: [...fact.causes],
+    evidence: fact.causes.map((cause) => cause.evidence),
+    stateDeltas: [...fact.stateDeltas],
+    sourceFactIds: [fact.id, ...fact.sourceFactIds],
+    situationIds: [],
+  });
 }

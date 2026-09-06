@@ -14,7 +14,6 @@ export type SimulationFactKind =
   | 'territory_control_changed'
   | 'appointment_started'
   | 'appointment_ended'
-  | 'expedition_response'
   | 'character_wounded'
   | 'character_death'
   | 'marriage'
@@ -140,15 +139,6 @@ export interface CharacterDeathFactPayload {
   /** Missing on old Facts; new records distinguish ordinary, epidemic and battle deaths. */
   cause?: 'natural' | 'disease' | 'battle';
   battleFactId?: string;
-}
-
-export interface ExpeditionResponseFactPayload {
-  characterId: string;
-  commanderId: string;
-  armyId: string;
-  polityId: string;
-  outcome: 'refused';
-  reason: string;
 }
 
 export interface CharacterWoundedFactPayload {
@@ -417,7 +407,6 @@ export type WarEndedFact = SimulationFactBase<'war_ended', WarEndedFactPayload>;
 export type TerritoryControlFact = SimulationFactBase<'territory_control_changed', TerritoryControlFactPayload>;
 export type AppointmentStartedFact = SimulationFactBase<'appointment_started', AppointmentFactPayload>;
 export type AppointmentEndedFact = SimulationFactBase<'appointment_ended', AppointmentFactPayload>;
-export type ExpeditionResponseFact = SimulationFactBase<'expedition_response', ExpeditionResponseFactPayload>;
 export type CharacterWoundedFact = SimulationFactBase<'character_wounded', CharacterWoundedFactPayload>;
 export type CharacterDeathFact = SimulationFactBase<'character_death', CharacterDeathFactPayload>;
 export type MarriageFact = SimulationFactBase<'marriage', MarriageFactPayload>;
@@ -440,7 +429,6 @@ export type SimulationFact =
   | TerritoryControlFact
   | AppointmentStartedFact
   | AppointmentEndedFact
-  | ExpeditionResponseFact
   | CharacterWoundedFact
   | CharacterDeathFact
   | MarriageFact

@@ -113,7 +113,7 @@ describe('map LOD hysteresis', () => {
 });
 
 describe('map LOD scene', () => {
-  it('clusters people at overview, reveals points regionally, and labels everyone locally', () => {
+  it('clusters ordinary people until a region, person, or war is focused', () => {
     const source = fixture();
     const people: MapPersonForceView[] = [{
       id: 'person-leader', personName: '赵维谦', regionId: 'r_a_large', position: { x: 4, y: 5 },
@@ -134,33 +134,35 @@ describe('map LOD scene', () => {
       factionShortName: '韩系', isCommander: true, isFactionLeader: false,
       warId: 'war_1', targetRegionId: 'r_a_large', commandDiverged: false,
     }];
-    source.persons = people;
+    source.persons = [...people, {
+      ...people[1]!, id: 'person-capital', personName: '陈守中', regionId: 'r_a_capital', soldiers: 300,
+    }];
     source.personClusters = [];
 
     const overview = buildMapLodScene(source, 'overview');
     expect(overview.persons).toEqual([]);
     expect(overview.personClusters.map((cluster) => ({ count: cluster.count, soldiers: cluster.soldiers })))
-      .toEqual([{ count: 2, soldiers: 2_700 }, { count: 1, soldiers: 600 }]);
+      .toEqual([{ count: 3, soldiers: 3_000 }, { count: 1, soldiers: 600 }]);
 
     const focused = buildMapLodScene(source, 'overview', { focusedArmyIds: ['a_b_tie_z'] });
     expect(focused.persons.map((person) => person.id)).toEqual(['person-marching']);
     expect(focused.personClusters).toHaveLength(1);
 
-    source.persons = [...people, {
+    source.persons = [...source.persons, {
       ...people[2]!, id: 'person-follower', personName: '裴文昭', soldiers: 320,
       isCommander: false,
     }];
 
     const regional = buildMapLodScene(source, 'regional');
-    expect(regional.persons).toHaveLength(4);
-    expect(regional.persons.find((person) => person.id === 'person-leader')?.showLabel).toBe(true);
-    expect(regional.persons.find((person) => person.id === 'person-member')?.showLabel).toBe(false);
+    expect(regional.persons.map((person) => person.id)).toEqual(['person-marching']);
+    expect(regional.personClusters.map((cluster) => cluster.count)).toEqual([3]);
     expect(regional.persons.find((person) => person.id === 'person-marching')?.showLabel).toBe(true);
-    expect(regional.persons.find((person) => person.id === 'person-follower')?.showLabel).toBe(false);
     expect(buildMapLodScene(source, 'regional', { focusedArmyIds: ['a_b_tie_z'] })
       .persons.find((person) => person.id === 'person-follower')?.showLabel).toBe(true);
 
-    expect(buildMapLodScene(source, 'local').persons.every((person) => person.showLabel)).toBe(true);
+    const local = buildMapLodScene(source, 'local', { selectedRegionId: 'r_a_large' });
+    expect(local.persons.filter((person) => person.regionId === 'r_a_large').every((person) => person.showLabel)).toBe(true);
+    expect(local.persons.some((person) => person.id === 'person-follower')).toBe(false);
     const selected = buildMapLodScene(source, 'overview', { selectedObject: { kind: 'person', id: 'person-member' } });
     expect(selected.persons.map((person) => person.id)).toEqual(['person-member']);
   });

@@ -178,15 +178,13 @@ function forbiddenRuntimeLayer(from: string, to: string): boolean {
       || to.startsWith('src/components/')
       || to.startsWith('src/styles/')
       || to.startsWith('src/view/')
-      || to.startsWith('src/audio/')
       || to.startsWith('src/infra/');
   }
   if (from.startsWith('src/maps/')) {
     return to === 'src/App.tsx'
       || to.startsWith('src/components/')
       || to.startsWith('src/styles/')
-      || to.startsWith('src/view/')
-      || to.startsWith('src/audio/');
+      || to.startsWith('src/view/');
   }
   return false;
 }

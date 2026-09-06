@@ -214,7 +214,6 @@ const FACT_KIND_LABELS: Record<SimulationFact['kind'], string> = {
   territory_control_changed: '领土事实',
   appointment_started: '任命事实',
   appointment_ended: '去职事实',
-  expedition_response: '出征响应',
   character_wounded: '人物负伤',
   character_death: '人物事实',
   marriage: '婚姻事实',

@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.26.2',
-  date: '2026-09-05',
-  title: '上线',
+  version: '1.27.0',
+  date: '2026-09-06',
+  title: '聚焦减法',
   items: [
-    '构建修复。',
+    '经历、舆图与设置收口。',
   ],
 };
 

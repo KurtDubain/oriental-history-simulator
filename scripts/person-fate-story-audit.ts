@@ -12,6 +12,7 @@ import {
 import { projectPersonStoryArc } from '../src/view/person-story-arc';
 import { createRosterDiscoveryState } from '../src/view/roster-discovery';
 import { projectRosterCollection } from '../src/view/roster-adapter';
+import { battleFateChances } from '../src/sim/military/battle-fate';
 
 const coreSeeds = ['乱世一将', '命途审计-甲', '命途审计-乙', '命途审计-丙', '命途审计-丁', '命途审计-戊'];
 const heldOutSeeds = ['命途留验-潮汐', '命途留验-山河', '命途留验-朔风', '命途留验-星火'];
@@ -19,10 +20,11 @@ const seeds = [...coreSeeds, ...heldOutSeeds];
 const turns = 64;
 const failures: string[] = [];
 const formationSizes: Record<string, number> = {};
-const exposure = {
-  wounded: { exposed: 0, severe: 0, catastrophic: 0 },
-  died: { exposed: 0, severe: 0, catastrophic: 0 },
+const severityBands = {
+  wounded: { low: 0, guarded: 0, grave: 0, extreme: 0 },
+  died: { low: 0, guarded: 0, grave: 0, extreme: 0 },
 };
+const recoveryDurations: Record<string, number> = {};
 const storyLengths = { one: 0, two: 0, three: 0 };
 const totals = {
   battles: 0, participantAppearances: 0, wounded: 0, battleDeaths: 0, diseaseDeaths: 0, naturalDeaths: 0,
@@ -30,6 +32,7 @@ const totals = {
   scheduledRecoveryQuarterSum: 0, recoveryQuarterSum: 0,
   publicRefusals: 0, refusalsWithConsequence: 0,
   formationsRaised: 0, formationParticipants: 0, partialFactionResponses: 0,
+  technicalCapHits: 0, availableStayers: 0, lowRiskAppearances: 0, lowRiskNamedFates: 0,
   discoverableDeceased: 0, deceased: 0,
 };
 const partialResponseExamples: Array<Record<string, unknown>> = [];
@@ -44,12 +47,11 @@ function participantRows(fact: BattleFact) {
   ];
 }
 
-function exposureKind(participant: ReturnType<typeof participantRows>[number]['participant'], won: boolean) {
-  const ratio = participant.losses / Math.max(1, participant.soldiersBefore);
-  if (participant.soldiersAfter === 0 || ratio >= .48 || (!won && ratio >= .38)) return 'catastrophic' as const;
-  if (ratio >= .32 || (!won && ratio >= .24)) return 'severe' as const;
-  if (ratio >= .2 && (!won || participant.role !== 'member')) return 'exposed' as const;
-  return 'ordinary' as const;
+function severityBand(value: number) {
+  if (value >= .68) return 'extreme' as const;
+  if (value >= .42) return 'grave' as const;
+  if (value >= .2) return 'guarded' as const;
+  return 'low' as const;
 }
 
 function fingerprint(world: WorldState): string {
@@ -61,6 +63,11 @@ function rememberNewFormations(previous: WorldState, next: WorldState, seed: str
   for (const army of next.armies.filter((item) => !existing.has(item.id))) {
     const size = army.participantIds.length;
     formationSizes[size] = (formationSizes[size] ?? 0) + 1;
+    if (size >= 18) totals.technicalCapHits += 1;
+    totals.availableStayers += next.personalForces.filter((force) => {
+      const person = next.characters.find((character) => character.id === force.ownerId);
+      return force.soldiers > 0 && force.formationId === null && person?.alive && person.polityId === army.polityId;
+    }).length;
     const commander = next.characters.find((person) => person.id === army.commanderId);
     if (!commander?.factionId) continue;
     const stayed = next.characters.filter((person) => person.alive && person.polityId === army.polityId
@@ -87,17 +94,26 @@ function auditWorld(world: WorldState, seed: string): void {
   totals.battles += battles.length;
   totals.participantAppearances += battles.reduce((sum, battle) => sum + participantRows(battle).length, 0);
   const battleRows = battles.flatMap((battle) => participantRows(battle).map((row) => ({ ...row, battle })));
+  totals.lowRiskAppearances += battleRows.filter((row) => (
+    row.won && row.participant.losses / Math.max(1, row.participant.soldiersBefore) < .12
+  )).length;
   const woundsByPerson = new Map<string, Extract<typeof facts[number], { kind: 'character_wounded' }>[]>()
   for (const fact of facts) {
     if (fact.kind === 'character_wounded') {
       totals.wounded += 1;
       totals.scheduledRecoveryQuarterSum += (fact.payload.recoveryUntilTurn ?? fact.turn + 2) - fact.turn;
+      const recoveryDuration = (fact.payload.recoveryUntilTurn ?? fact.turn + 2) - fact.turn;
+      recoveryDurations[recoveryDuration] = (recoveryDurations[recoveryDuration] ?? 0) + 1;
       woundsByPerson.set(fact.payload.characterId, [...(woundsByPerson.get(fact.payload.characterId) ?? []), fact]);
       const battle = battleById.get(fact.payload.battleFactId);
       const row = battle && participantRows(battle).find((item) => item.participant.characterId === fact.payload.characterId);
-      const kind = row && exposureKind(row.participant, row.won);
-      if (!row || kind === 'ordinary') failures.push(`${seed}: ${fact.id} 负伤没有可核验的高风险战场暴露`);
-      else exposure.wounded[kind] += 1;
+      if (!row) failures.push(`${seed}: ${fact.id} 负伤没有可核验的战场暴露`);
+      else {
+        const person = world.characters.find((item) => item.id === fact.payload.characterId);
+        const severity = battleFateChances(row.participant, row.won, fact.payload.healthBefore, person?.caution ?? 50, person?.leadership ?? 50).severity;
+        severityBands.wounded[severityBand(severity)] += 1;
+        if (row.won && row.participant.losses / Math.max(1, row.participant.soldiersBefore) < .12) totals.lowRiskNamedFates += 1;
+      }
       const nextQuarterBattle = battleRows.some((item) => item.battle.turn === fact.turn + 1
         && item.participant.characterId === fact.payload.characterId);
       if (nextQuarterBattle) {
@@ -121,20 +137,15 @@ function auditWorld(world: WorldState, seed: string): void {
         totals.battleDeaths += 1;
         const battle = fact.payload.battleFactId ? battleById.get(fact.payload.battleFactId) : undefined;
         const row = battle && participantRows(battle).find((item) => item.participant.characterId === fact.payload.characterId);
-        const kind = row && exposureKind(row.participant, row.won);
-        if (!row || kind === 'ordinary') failures.push(`${seed}: ${fact.id} 战死没有可核验的高风险战场暴露`);
-        else exposure.died[kind] += 1;
+        if (!row) failures.push(`${seed}: ${fact.id} 战死没有可核验的战场暴露`);
+        else {
+          const person = world.characters.find((item) => item.id === fact.payload.characterId);
+          const severity = battleFateChances(row.participant, row.won, fact.payload.health, person?.caution ?? 50, person?.leadership ?? 50).severity;
+          severityBands.died[severityBand(severity)] += 1;
+          if (row.won && row.participant.losses / Math.max(1, row.participant.soldiersBefore) < .12) totals.lowRiskNamedFates += 1;
+        }
       } else if (fact.payload.cause === 'disease' || (!fact.payload.cause && fact.payload.diseaseId)) totals.diseaseDeaths += 1;
       else totals.naturalDeaths += 1;
-    }
-    if (fact.kind === 'expedition_response') {
-      if (fact.payload.outcome === 'refused') {
-        totals.publicRefusals += 1;
-        const consequences = fact.stateDeltas.filter((delta) => delta.entityType === 'relationship' && delta.delta !== 0);
-        if (consequences.length) totals.refusalsWithConsequence += 1;
-        else failures.push(`${seed}: ${fact.id} 公开拒令没有关系后果`);
-        if (refusalExamples.length < 5) refusalExamples.push({ seed, turn: fact.turn, reason: fact.payload.reason, consequences });
-      }
     }
   }
   for (const wounds of woundsByPerson.values()) {
@@ -204,10 +215,14 @@ for (let turn = turns / 2; turn < turns; turn += 1) resumed = advanceWorld(resum
 const saveResumeExact = fingerprint(resumed) === fingerprints.get(resumeSeed);
 if (!saveResumeExact) failures.push(`${resumeSeed} 存读档后演化不一致`);
 if (!totals.battles) failures.push('长程样本没有产生战斗');
-if (totals.publicRefusals !== totals.refusalsWithConsequence) failures.push('仍有无关系后果的公开拒令');
+if (totals.publicRefusals) failures.push('已删除的公开拒令仍进入自然史');
+if (totals.technicalCapHits) failures.push(`仍有${totals.technicalCapHits}支编队触及18人技术上限`);
+if (totals.lowRiskAppearances && totals.lowRiskNamedFates / totals.lowRiskAppearances > .001) {
+  failures.push('低战损胜势中的具名伤亡仍然过密');
+}
 
 const output = {
-  sample: { coreSeeds, heldOutSeeds, turns }, totals, exposure, formationSizes, storyLengths,
+  sample: { coreSeeds, heldOutSeeds, turns }, totals, severityBands, recoveryDurations, formationSizes, storyLengths,
   rates: {
     woundPerAppearance: totals.participantAppearances ? totals.wounded / totals.participantAppearances : 0,
     battleDeathPerAppearance: totals.participantAppearances ? totals.battleDeaths / totals.participantAppearances : 0,
@@ -215,6 +230,8 @@ const output = {
     averageScheduledRecovery: totals.wounded ? totals.scheduledRecoveryQuarterSum / totals.wounded : 0,
     averageRestBeforeReturn: totals.recoveredAndReturned ? totals.recoveryQuarterSum / totals.recoveredAndReturned : 0,
     averageFormationSize: totals.formationsRaised ? totals.formationParticipants / totals.formationsRaised : 0,
+    technicalCapHitRate: totals.formationsRaised ? totals.technicalCapHits / totals.formationsRaised : 0,
+    lowRiskNamedFateRate: totals.lowRiskAppearances ? totals.lowRiskNamedFates / totals.lowRiskAppearances : 0,
   },
   partialResponseExamples, refusalExamples, storySamples: storySamples.slice(0, 3),
   deterministicReplayExact, saveResumeExact, failures,

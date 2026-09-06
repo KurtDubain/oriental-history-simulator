@@ -29,7 +29,6 @@ import {
   type PointerEvent as ReactPointerEvent,
 } from 'react';
 import type { ArchiveEntityKind } from './HistoricalArchive';
-import { gameAudio } from '../audio';
 import type { PersonEmbodimentView } from '../view/embodiment-view';
 import type { CourtProjectionView } from '../view/court-projection';
 import type { CourtFactionTarget, CourtFocusRequest } from '../view/observer-navigation';
@@ -275,6 +274,9 @@ export interface PersonStoryBeatView {
   title: string;
   summary: string;
   sourceFactIds: readonly string[];
+  sourceEventIds: readonly string[];
+  primaryEventId: string | null;
+  primaryFactId: string;
 }
 
 export interface PersonInspectorData {
@@ -507,14 +509,13 @@ function InspectorTabs<T extends string>({ value, items, onChange, idPrefix }: {
       : event.key === 'End'
         ? items.length - 1
         : (currentIndex + (event.key === 'ArrowRight' ? 1 : -1) + items.length) % items.length;
-    gameAudio.play('select', 0.4);
     onChange(items[nextIndex].id);
     requestAnimationFrame(() => tabsRef.current?.querySelectorAll<HTMLButtonElement>('[role="tab"]')[nextIndex]?.focus());
   };
   return (
     <div ref={tabsRef} className="observer-inspector-tabs" role="tablist" aria-label="档案分页" onKeyDown={moveFocus}>
       {items.map((item) => (
-        <button key={item.id} id={`${id}-tab-${item.id}`} type="button" role="tab" data-inspector-tab={item.id} aria-selected={value === item.id} aria-controls={idPrefix ? `${id}-panel-${item.id}` : undefined} tabIndex={value === item.id ? 0 : -1} onClick={() => { gameAudio.play('select', 0.4); onChange(item.id); }}>
+        <button key={item.id} id={`${id}-tab-${item.id}`} type="button" role="tab" data-inspector-tab={item.id} aria-selected={value === item.id} aria-controls={idPrefix ? `${id}-panel-${item.id}` : undefined} tabIndex={value === item.id ? 0 : -1} onClick={() => onChange(item.id)}>
           {item.label}
         </button>
       ))}
@@ -1082,7 +1083,7 @@ function PersonInspector({ data, onOpenMind, mobileMindRequest = 0, ...actions }
       </button>
       <InspectorTabs value={tab} onChange={setTab} idPrefix={tabsId} items={[{ id: 'life', label: '其人' }, { id: 'mind', label: '所图' }, { id: 'relations', label: '关系' }, { id: 'history', label: '生平' }]} />
       {tab === 'life' ? <div id={`${tabsId}-panel-life`} role="tabpanel" aria-labelledby={`${tabsId}-tab-life`}>
-        {data.storyArc?.length ? <section className="observer-inspector__section observer-person-story" aria-labelledby="person-story-heading"><h3 id="person-story-heading"><ScrollText size={14} aria-hidden="true" />这一生如何走到这里</h3><ol>{data.storyArc.map((beat) => <li key={beat.sourceFactIds.join(':')}><span>{beat.phaseLabel} · {beat.dateLabel}</span><div><strong>{beat.title}</strong><small>{beat.summary}</small></div></li>)}</ol></section> : null}
+        {data.storyArc?.length ? <section className="observer-inspector__section observer-person-story" aria-labelledby="person-story-heading"><h3 id="person-story-heading"><ScrollText size={14} aria-hidden="true" />关键经历</h3><ol>{data.storyArc.map((beat) => <li key={beat.sourceFactIds.join(':')}><span>{beat.phaseLabel} · {beat.dateLabel}</span>{actions.onSelectEvent ? <button type="button" onClick={() => actions.onSelectEvent?.(beat.primaryEventId ?? beat.primaryFactId)}><strong>{beat.title}</strong><small>{beat.summary}</small></button> : <div><strong>{beat.title}</strong><small>{beat.summary}</small></div>}</li>)}</ol></section> : null}
         {data.militaryForce ? <section className="observer-inspector__section observer-inspector__section--military" aria-labelledby="person-force-heading"><h3 id="person-force-heading"><Swords size={14} aria-hidden="true" />{data.lifeStage === '已故' ? '最后军势' : '自有军势'}</h3><p><strong>{data.lifeStage === '已故' ? '最后所见部曲' : '自有部曲'} {display(data.militaryForce.soldiers)} 人</strong> · {data.militaryForce.status} · {data.militaryForce.formation}</p><dl className="observer-facts"><Fact label="所在" value={data.militaryForce.location} /><Fact label="所属集团" value={data.militaryForce.faction} /><Fact label="当前节制" value={data.militaryForce.commander} />{data.militaryForce.cohesion !== undefined && data.militaryForce.readiness !== undefined ? <Fact label="凝聚 / 战备" value={`${Math.round(data.militaryForce.cohesion)} / ${Math.round(data.militaryForce.readiness)}`} /> : null}</dl>{data.militaryForce.latestBattle ? <small>{data.militaryForce.latestBattle}</small> : null}</section> : null}
         <section className="observer-inspector__section" aria-labelledby="person-origin-heading"><h3 id="person-origin-heading">身世与处境</h3><dl className="observer-facts"><Fact label="性别" value={data.gender} /><Fact label="出身" value={data.origin} /><Fact label="阶层" value={data.politicalClass} /><Fact label="家族" value={data.family} /><Fact label="影响" value={data.influence} /><Fact label="私产" value={data.personalWealth} /></dl>{data.family ? <p className="observer-inspector__jump"><Network size={13} aria-hidden="true" /><LinkedName kind="family" id={data.familyId} onSelect={actions.onSelectEntity}>{data.family}</LinkedName></p> : null}{data.health !== undefined ? <div className="observer-health"><HeartPulse size={14} aria-hidden="true" /><Meter label="健康" value={data.health} /></div> : null}</section>
         <section className="observer-inspector__section" aria-labelledby="person-ability-heading"><h3 id="person-ability-heading">才能</h3><div className="observer-ability-grid">{abilities.map(([label, value]) => <div className="observer-ability" key={label}><span>{label}</span><strong>{Math.round(value)}</strong></div>)}</div><dl className="observer-facts observer-facts--after-grid"><Fact label="功绩" value={data.merit} /><Fact label="副将历练" value={data.deputyExperience} /></dl></section>

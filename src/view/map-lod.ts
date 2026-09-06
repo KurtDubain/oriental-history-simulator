@@ -159,36 +159,39 @@ function visibleFleets(
 function visiblePersonForces(
   presentation: MapPresentationView,
   level: MapLodLevel,
+  selectedRegionId: string | null,
   selectedObject: MapSelectedObject,
   focusedArmyIds: readonly string[],
 ): { persons: MapPersonForceView[]; clusters: MapPersonForceClusterView[] } {
   const source = presentation.persons ?? [];
   const selectedId = selectedObject?.kind === 'person' ? selectedObject.id : null;
   const focused = new Set(focusedArmyIds);
-  if (level !== 'overview') {
-    return {
-      persons: source.map((person) => ({
-        ...person,
-        showLabel: level === 'local'
-          || person.id === selectedId
-          || person.isFactionLeader
-          || person.isCommander
-          || person.status === '交战'
-          || person.status === '撤退'
-          || Boolean(person.formationId && focused.has(person.formationId)),
-      })),
-      clusters: [],
-    };
-  }
-  const visibleIds = new Set(source
-    .filter((person) => person.id === selectedId || (person.formationId && focused.has(person.formationId)))
-    .map((person) => person.id));
+  const expandedRegionId = selectedId
+    ? source.find((person) => person.id === selectedId)?.regionId ?? selectedRegionId
+    : selectedRegionId;
+  const visibleIds = new Set(source.filter((person) => {
+    const focusedPerson = Boolean(person.formationId && focused.has(person.formationId));
+    if (person.id === selectedId || focusedPerson) return true;
+    if (level === 'overview') return false;
+    if (level === 'local' && expandedRegionId === person.regionId) return true;
+    return person.isCommander
+      || person.status === '交战'
+      || person.status === '撤退';
+  }).map((person) => person.id));
   const persons = source
     .filter((person) => visibleIds.has(person.id))
-    .map((person) => ({ ...person, showLabel: true }));
+    .map((person) => ({
+      ...person,
+      showLabel: person.id === selectedId
+        || Boolean(person.formationId && focused.has(person.formationId))
+        || (level === 'local' && expandedRegionId === person.regionId)
+        || person.isCommander
+        || person.status === '交战'
+        || person.status === '撤退',
+    }));
   const grouped = new Map<string, MapPersonForceView[]>();
   for (const person of source.filter((item) => !visibleIds.has(item.id))) {
-    const key = `${person.regionId}:${person.polityId}`;
+    const key = level === 'overview' ? person.polityId : `${person.polityId}:${person.factionShortName}`;
     const values = grouped.get(key) ?? [];
     values.push(person);
     grouped.set(key, values);
@@ -202,11 +205,12 @@ function visiblePersonForces(
       || right.soldiers - left.soldiers
       || stableIdCompare(left.id, right.id)
     ));
+    if (level !== 'overview' && ordered.length < 2) return [];
     const leader = ordered[0]!;
     return [{
       id: `person-cluster:${key}`,
       regionId: leader.regionId,
-      position: region.center,
+      position: leader.position ?? region.center,
       leaderName: leader.personName,
       personIds: ordered.map((person) => person.id),
       count: ordered.length,
@@ -254,7 +258,13 @@ export function buildMapLodScene(
       presentation.regions.filter((region) => region.port).map((region) => region.id),
     );
   const interactiveSeaZoneIds = new Set(presentation.seaZones.map((zone) => zone.id));
-  const personForces = visiblePersonForces(presentation, level, selectedObject, options.focusedArmyIds ?? []);
+  const personForces = visiblePersonForces(
+    presentation,
+    level,
+    options.selectedRegionId ?? null,
+    selectedObject,
+    options.focusedArmyIds ?? [],
+  );
 
   return {
     ...presentation,

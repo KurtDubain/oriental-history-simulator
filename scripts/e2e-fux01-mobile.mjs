@@ -243,10 +243,6 @@ async function assertQuickLook(page, expectedKind, baseline, scenario) {
   const current = await state(page);
   assert.equal(current.interface.selected.kind, expectedKind, `${scenario.slug} 应选中 ${expectedKind}`);
   assert.equal(current.interface.mobileInspectorMode, 'quick');
-  if (baseline.interface.settings.soundPromptVisible) {
-    assert.equal(current.interface.settings.soundPromptVisible, false, `${scenario.slug} 速览应让声音邀请暂时退场`);
-    assert.equal(await page.getByTestId('audio-invitation').count(), 0, `${scenario.slug} 速览期间不应保留声音邀请触点`);
-  }
   assertObserverInvariant(current, baseline, `${scenario.slug} ${expectedKind}速览`);
 
   const quick = page.getByTestId('map-quick-look');
@@ -419,10 +415,6 @@ async function tapBlankToClose(page, baseline, scenario) {
     const current = await state(page);
     if (current.interface.selected === null) {
       assert.equal(current.interface.mobileInspectorMode, 'closed');
-      if (baseline.interface.settings.soundPromptVisible) {
-        assert.equal(current.interface.settings.soundPromptVisible, true, `${scenario.slug} 收起速览后应恢复声音邀请`);
-        await page.getByTestId('audio-invitation').waitFor();
-      }
       assertObserverInvariant(current, baseline, `${scenario.slug} 空白关闭`);
       return;
     }

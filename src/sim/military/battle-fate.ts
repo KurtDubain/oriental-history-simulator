@@ -12,14 +12,13 @@ type Participant = NonNullable<BattleFact['payload']['attacker']['participants']
 type Row = { participant: Participant; sideWon: boolean; polityId: string };
 type Emit = (input: V03EventInput) => HistoryEvent;
 type Exposure = 'ordinary' | 'exposed' | 'severe' | 'catastrophic';
-export interface BattleFateChances { death: number; wound: number; exposure: Exposure }
+export interface BattleFateChances { death: number; wound: number; severity: number; exposure: Exposure }
 const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, value));
 
-function exposureOf(participant: Participant, sideWon: boolean): Exposure {
-  const loss = participant.losses / Math.max(1, participant.soldiersBefore);
-  if (participant.soldiersAfter === 0 || loss >= .48 || (!sideWon && loss >= .38)) return 'catastrophic';
-  if (loss >= .32 || (!sideWon && loss >= .24)) return 'severe';
-  if (loss >= .2 && (!sideWon || participant.role !== 'member')) return 'exposed';
+function exposureLabel(severity: number): Exposure {
+  if (severity > .72) return 'catastrophic';
+  if (severity > .48) return 'severe';
+  if (severity > .24) return 'exposed';
   return 'ordinary';
 }
 
@@ -30,18 +29,21 @@ export function battleFateChances(
   caution: number,
   leadership = 50,
 ): BattleFateChances {
-  const exposure = exposureOf(participant, sideWon);
-  if (exposure === 'ordinary') return { death: 0, wound: 0, exposure };
-  const roleRisk = participant.role === 'commander' ? .012 : participant.role === 'deputy' ? .007 : 0;
-  const healthRisk = Math.max(0, 58 - health) * .00022;
-  const protection = caution * .00008 + leadership * .000045;
-  const base = exposure === 'catastrophic' ? { death: .03, wound: .29 }
-    : exposure === 'severe' ? { death: .012, wound: .19 }
-      : { death: .003, wound: .1 };
+  const loss = clamp(participant.losses / Math.max(1, participant.soldiersBefore), 0, 1);
+  const role = participant.role === 'commander' ? 1 : participant.role === 'deputy' ? .6 : .25;
+  const protection = caution / 100 * .11 + leadership / 100 * .08;
+  const severity = clamp(Math.pow(loss, 1.45) * .82
+    + (sideWon ? 0 : .07 + loss * .2)
+    + (participant.soldiersAfter === 0 ? .24 : 0)
+    + role * loss * .08
+    + (1 - health / 100) * loss * .16
+    - protection * loss, 0, 1);
+  const danger = severity * severity;
   return {
-    death: clamp(base.death + roleRisk + healthRisk - protection, 0, .048),
-    wound: clamp(base.wound + roleRisk * 2 + healthRisk * 3 - protection * 2, .025, .34),
-    exposure,
+    death: clamp(Math.pow(danger, 1.65) * (.038 + role * .012 + (1 - health / 100) * .02), 0, .055),
+    wound: clamp(Math.pow(danger, .82) * (.31 + role * .04 + (1 - health / 100) * .06), 0, .38),
+    severity,
+    exposure: exposureLabel(severity),
   };
 }
 
@@ -75,18 +77,19 @@ function wound(
   context: MutableTurnContext,
   battle: BattleFact,
   row: Row,
-  exposure: Exclude<Exposure, 'ordinary'>,
+  severity: number,
   emit: Emit,
   protectedDeath: boolean,
 ): void {
   const person = world.characters.find((item) => item.id === row.participant.characterId)!;
   const before = person.health;
   const loss = row.participant.losses / Math.max(1, row.participant.soldiersBefore);
-  const recoveryQuarters = exposure === 'catastrophic' ? 4 : exposure === 'severe' ? 3 : 2;
+  const variation = keyedRandom(world.seed, context.turn, 'battle-recovery', battle.id, person.id);
+  const recoveryQuarters = Math.max(1, Math.ceil(.4 + severity * 4.2 + variation * 3.2));
   const recoveryUntilTurn = context.turn + recoveryQuarters;
   const formationId = personalForce(world, person.id)?.formationId ?? null;
-  person.health = Math.max(5, before - Math.round((exposure === 'catastrophic' ? 24 : exposure === 'severe' ? 16 : 10)
-    + loss * 14 + (row.sideWon ? 0 : 3) + keyedRandom(world.seed, context.turn, 'battle-wound', battle.id, person.id) * 5));
+  person.health = Math.max(5, before - Math.round(7 + severity * 28 + loss * 8
+    + (row.sideWon ? 0 : 2) + keyedRandom(world.seed, context.turn, 'battle-wound', battle.id, person.id) * 4));
   if (protectedDeath) person.protectedUntilTurn = null;
   detachPersonalForce(world, person.id, '撤退');
   if (person.commandingArmyId === formationId) person.commandingArmyId = null;
@@ -97,7 +100,7 @@ function wound(
     ...(protectedDeath ? [{ entityType: 'character' as const, entityId: person.id, field: 'protectedUntilTurn', before: context.turn, after: null }] : []),
   ];
   const causes = [
-    { label: '战场暴露', role: '结构' as const, weight: .6, evidence: `本部${row.participant.soldiersBefore}损失${row.participant.losses}，${exposure === 'catastrophic' ? '溃散' : exposure === 'severe' ? '重创' : '遇险'}` },
+    { label: '战场暴露', role: '结构' as const, weight: .6, evidence: `本部${row.participant.soldiersBefore}损失${row.participant.losses}，${row.participant.soldiersAfter === 0 ? '余部溃散' : row.sideWon ? '胜势中遇险' : '败退中遇险'}` },
     { label: protectedDeath ? '避过死劫' : '退营休养', role: '结果' as const, weight: .4, evidence: `健康${before}→${person.health}，休养至第${recoveryUntilTurn}季` },
   ];
   const fact = emitSimulationFact(world, context, {
@@ -155,11 +158,11 @@ export function resolveBattleFates(world: WorldState, context: MutableTurnContex
     const person = world.characters.find((item) => item.id === row.participant.characterId);
     if (!person?.alive || battleRecoveryStatus(world, person.id, context.turn).recovering) continue;
     const chances = battleFateChances(row.participant, row.sideWon, person.health, person.caution, person.leadership);
-    if (chances.exposure === 'ordinary') continue;
+    if (chances.death + chances.wound === 0) continue;
     const roll = keyedRandom(world.seed, context.turn, 'battle-fate', battle.id, person.id);
     const protectedDeath = roll < chances.death && person.protectedUntilTurn !== null && person.protectedUntilTurn >= context.turn;
     const outcome = roll < chances.death ? protectedDeath ? 'wounded' : 'died' : roll < chances.death + chances.wound ? 'wounded' : 'none';
     if (outcome === 'died') die(world, context, battle, row, emit);
-    else if (outcome === 'wounded') wound(world, context, battle, row, chances.exposure as Exclude<Exposure, 'ordinary'>, emit, protectedDeath);
+    else if (outcome === 'wounded') wound(world, context, battle, row, chances.severity, emit, protectedDeath);
   }
 }

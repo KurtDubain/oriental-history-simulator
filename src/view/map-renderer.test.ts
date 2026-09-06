@@ -5,6 +5,7 @@ import type {
   MapArmyView,
   MapLodScene,
   MapMarkerView,
+  MapPersonForceView,
   MapRegionView,
   MapSeaZoneView,
 } from './map-contract';
@@ -306,5 +307,45 @@ describe('map renderer LOD contract', () => {
       viewport.width,
       viewport.height,
     )).toMatchObject({ kind: 'marker', marker: { id: marker.id } });
+  });
+
+  it('caps unfocused regional person labels on a narrow map without removing the person points', () => {
+    const persons: MapPersonForceView[] = Array.from({ length: 12 }, (_, index) => ({
+      id: `person-${index}`,
+      personName: `将领${index}`,
+      regionId: 'front',
+      position: { x: 180 + index * 54, y: 280 + index % 2 * 50 },
+      polityId: 'polity-front',
+      polityColor: '#7f3028',
+      soldiers: 2_000 - index,
+      status: '出征',
+      formationId: `army-${index}`,
+      formationName: `第${index}行营`,
+      commanderName: `将领${index}`,
+      factionShortName: '前军',
+      isCommander: true,
+      isFactionLeader: false,
+      warId: null,
+      targetRegionId: null,
+      commandDiverged: false,
+      showLabel: true,
+    }));
+    const context = recordingContext();
+
+    drawWorldMap(
+      context,
+      { width: 390, height: 644, dpr: 1 },
+      { ...scene(), level: 'regional', persons },
+      'war',
+      [],
+      null,
+      null,
+      undefined,
+      { zoom: 1.35, panX: 0, panY: 0 },
+    );
+
+    const personLabels = context.fillTexts.filter((call) => call.text.startsWith('将领'));
+    expect(personLabels.length).toBeGreaterThan(0);
+    expect(personLabels.length).toBeLessThanOrEqual(5);
   });
 });
