@@ -22,13 +22,13 @@ describe('SituationWorkbench', () => {
 
     expect(markup).toContain('role="dialog"');
     expect(markup).toContain('data-history-layer="situation"');
-    expect(markup).toContain('持续局势');
-    expect(markup).toContain('最近实事');
-    expect(markup).toContain('此前实事');
-    expect(markup).toContain('相关各方');
+    expect(markup).toContain('战事与朝局');
+    expect(markup).toContain('最近进展');
+    expect(markup).toContain('此前进展');
+    expect(markup).toContain('相关人物与势力');
     expect(markup).toContain('data-testid="situation-current-action"');
     expect(markup).toContain('data-testid="situation-participants-disclosure"');
-    expect(markup).toContain('所据史实');
+    expect(markup).toContain('详细依据');
     expect(markup).toContain('为何如此');
     expect(markup).not.toContain('查明因果');
     expect(markup).not.toContain('推演底账');

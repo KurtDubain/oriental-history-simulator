@@ -620,6 +620,7 @@ function drawArmyOrders(
   }
   if (overlay !== 'war') return;
   const shownContacts = new Set<string>();
+  const contactLabels: Array<{ left: number; right: number; top: number; bottom: number }> = [];
   for (const { army } of layouts) {
     const contact = army.expectedContact;
     if (!contact) continue;
@@ -630,7 +631,13 @@ function drawArmyOrders(
     if (!contactRegion) continue;
     shownContacts.add(contactKey);
     const point = worldToScreen(contactRegion.center, transform);
-    const label = `${army.lawfulCommanderName ?? army.name}·${army.factionShortName ?? '无系'} → ${contact.commanderName ?? contact.armyName}·${(contact.factionName ?? '无系').replace(/一系$|旧部$/, '').slice(0, 5)} · ${contact.steps ?? 1}步`;
+    const label = `${army.lawfulCommanderName ?? army.name} ↔ ${contact.commanderName ?? contact.armyName} · ${contact.steps ?? 1}步`;
+    const labelWidth = Math.min(150, label.length * 7.2 + 8);
+    const labelY = [point.y - 15, point.y - 29, point.y - 43].find((candidate) => {
+      const box = { left: point.x - labelWidth / 2, right: point.x + labelWidth / 2, top: candidate - 11, bottom: candidate + 2 };
+      return !contactLabels.some((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top);
+    }) ?? point.y - 15;
+    contactLabels.push({ left: point.x - labelWidth / 2, right: point.x + labelWidth / 2, top: labelY - 11, bottom: labelY + 2 });
     context.save();
     context.strokeStyle = PAPER_LIGHT;
     context.fillStyle = VERMILION;
@@ -638,8 +645,8 @@ function drawArmyOrders(
     context.font = '600 9px "Noto Serif SC", "Songti SC", STSong, serif';
     context.textAlign = 'center';
     context.textBaseline = 'bottom';
-    context.strokeText(label, point.x, point.y - 15);
-    context.fillText(label, point.x, point.y - 15);
+    context.strokeText(label, point.x, labelY);
+    context.fillText(label, point.x, labelY);
     context.translate(point.x, point.y - 10);
     context.lineWidth = 1.4;
     context.strokeStyle = VERMILION;
@@ -650,6 +657,60 @@ function drawArmyOrders(
     context.lineTo(-4, 3);
     context.stroke();
     context.restore();
+  }
+}
+
+function shortStrength(value: number) {
+  return value >= 10_000 ? `${(value / 10_000).toFixed(1)}万`
+    : value >= 1_000 ? `${(value / 1_000).toFixed(1)}千` : `${value}`;
+}
+
+function drawArmyMarkers(
+  context: CanvasRenderingContext2D,
+  layouts: readonly MapArmyIconLayout[],
+  scene: MapLodScene,
+  overlay: MapOverlay,
+  selectedObject: MapSelectedObject,
+  narrow: boolean,
+) {
+  if (overlay !== 'war' && selectedObject?.kind !== 'army') return;
+  const labels: Array<{ point: MapPoint; text: string; selected: boolean }> = [];
+  for (const { army, point } of layouts) {
+    if (army.id === scene.expandedArmyId) continue;
+    const selected = selectedObject?.kind === 'army' && selectedObject.id === army.id;
+    const color = army.polityColor ?? polityFallback(army.polityId ?? army.id);
+    context.save();
+    if (selected) { context.translate(point.x, point.y); drawSelectionHalo(context, 8); context.translate(-point.x, -point.y); }
+    context.fillStyle = PAPER_LIGHT; context.strokeStyle = selected ? VERMILION : color; context.lineWidth = selected ? 2.4 : 1.8;
+    context.beginPath(); context.arc(point.x, point.y, 7, 0, Math.PI * 2); context.fill(); context.stroke();
+    context.strokeStyle = INK; context.lineWidth = 1.15;
+    context.beginPath(); context.moveTo(point.x - 3, point.y); context.lineTo(point.x + 3, point.y); context.moveTo(point.x, point.y - 3); context.lineTo(point.x, point.y + 3); context.stroke();
+    labels.push({
+      point,
+      text: narrow
+        ? `${army.lawfulCommanderName ?? army.name} · ${shortStrength(army.strength)}`
+        : `${army.lawfulCommanderName ?? '无帅'} · ${army.name} · ${shortStrength(army.strength)}`,
+      selected,
+    });
+    context.restore();
+  }
+  const occupied: Array<{ left: number; right: number; top: number; bottom: number }> = [];
+  const orderedLabels = labels.slice(0, narrow ? 6 : 12).sort((left, right) => Number(right.selected) - Number(left.selected));
+  for (const { point, text, selected } of orderedLabels) {
+    const fontSize = narrow ? 8 : 9;
+    const width = Math.min(narrow ? 118 : 170, text.length * fontSize * 0.82 + 8);
+    const candidates = [point.y + 10, point.y + 24, point.y + 38];
+    const y = candidates.find((candidate) => {
+      const box = { left: point.x - width / 2, right: point.x + width / 2, top: candidate, bottom: candidate + fontSize + 3 };
+      return !occupied.some((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top);
+    });
+    if (y === undefined && !selected) continue;
+    const labelY = y ?? point.y + 10;
+    occupied.push({ left: point.x - width / 2, right: point.x + width / 2, top: labelY, bottom: labelY + fontSize + 3 });
+    context.save(); context.font = `650 ${narrow ? 8 : 9}px "Noto Serif SC", serif`;
+    context.textAlign = 'center'; context.textBaseline = 'top'; context.lineWidth = 3.5;
+    context.strokeStyle = PAPER_LIGHT; context.fillStyle = selected ? VERMILION : INK;
+    context.strokeText(text, point.x, labelY); context.fillText(text, point.x, labelY); context.restore();
   }
 }
 
@@ -987,13 +1048,7 @@ export function drawWorldMap(
   drawMarkers(context, markers, transform, selectedObject);
 
   const staticPersonLayouts = layoutMapPersonForces(scene.persons ?? [], transform);
-  const commanderPointByFormation = new Map(staticPersonLayouts
-    .filter((layout) => layout.person.isCommander && layout.person.formationId)
-    .map((layout) => [layout.person.formationId as string, layout.point]));
-  const staticArmyLayouts = layoutMapArmyIcons(armies, regions, transform).map((layout) => ({
-    ...layout,
-    point: commanderPointByFormation.get(layout.army.id) ?? layout.point,
-  }));
+  const staticArmyLayouts = layoutMapArmyIcons(armies, regions, transform);
   const armyLayouts = movementProgress >= 1 ? staticArmyLayouts : staticArmyLayouts.map((layout) => {
     const movement = layout.army.recentMovement;
     const from = movement?.current ? regionById.get(movement.fromRegionId) : null;
@@ -1008,6 +1063,7 @@ export function drawWorldMap(
     } };
   });
   drawArmyOrders(context, armyLayouts, regions, transform, overlay, selectedObject, focusedWarId, movementProgress);
+  drawArmyMarkers(context, armyLayouts, scene, overlay, selectedObject, narrowMap);
 
   const personLayouts = staticPersonLayouts.map((layout) => {
     const army = layout.person.formationId ? armies.find((item) => item.id === layout.person.formationId) : undefined;
@@ -1022,30 +1078,6 @@ export function drawWorldMap(
       y: fromPoint.y + (toPoint.y - fromPoint.y) * movementProgress + layout.point.y - toPoint.y,
     } };
   });
-  if (overlay === 'war') {
-    const byFormation = new Map<string, typeof personLayouts>();
-    for (const layout of personLayouts) {
-      if (!layout.person.formationId) continue;
-      const group = byFormation.get(layout.person.formationId) ?? [];
-      group.push(layout);
-      byFormation.set(layout.person.formationId, group);
-    }
-    context.save();
-    context.strokeStyle = 'rgba(67, 75, 64, 0.38)';
-    context.lineWidth = 1.2;
-    for (const group of byFormation.values()) {
-      const commander = group.find((layout) => layout.person.isCommander) ?? group[0];
-      if (!commander) continue;
-      for (const member of group) {
-        if (member === commander) continue;
-        context.beginPath();
-        context.moveTo(commander.point.x, commander.point.y);
-        context.lineTo(member.point.x, member.point.y);
-        context.stroke();
-      }
-    }
-    context.restore();
-  }
   const personLabels: Array<(typeof personLayouts)[number] & {
     label: string;
     priority: number;
@@ -1056,8 +1088,7 @@ export function drawWorldMap(
     const selected = selectedObject?.kind === 'person' && selectedObject.id === person.id;
     const relevant = !focusedWarId || person.warId === focusedWarId;
     const quiet = !selected && !person.showLabel;
-    const strength = person.soldiers >= 10_000 ? `${(person.soldiers / 10_000).toFixed(1)}万`
-      : person.soldiers >= 1_000 ? `${(person.soldiers / 1_000).toFixed(1)}千` : `${person.soldiers}`;
+    const strength = shortStrength(person.soldiers);
     context.save();
     context.globalAlpha = !relevant ? 0.16 : quiet ? 0.52 : 1;
     if (selected) { context.translate(point.x, point.y); drawSelectionHalo(context, radius + 3); context.translate(-point.x, -point.y); }
@@ -1068,7 +1099,7 @@ export function drawWorldMap(
     if (person.commandDiverged) {
       context.fillStyle = VERMILION; context.beginPath(); context.arc(point.x + radius, point.y - radius, 2.3, 0, Math.PI * 2); context.fill();
     }
-    if (person.status !== '驻留' && person.targetRegionId) {
+    if (!person.formationId && person.status !== '驻留' && person.targetRegionId) {
       const target = regionById.get(person.targetRegionId);
       if (target) {
         const targetPoint = worldToScreen(target.center, transform);
@@ -1109,8 +1140,7 @@ export function drawWorldMap(
     context.restore();
   }
   for (const { cluster, point, radius } of layoutMapPersonClusters(scene.personClusters ?? [], transform)) {
-    const strength = cluster.soldiers >= 10_000 ? `${(cluster.soldiers / 10_000).toFixed(1)}万`
-      : cluster.soldiers >= 1_000 ? `${(cluster.soldiers / 1_000).toFixed(1)}千` : `${cluster.soldiers}`;
+    const strength = shortStrength(cluster.soldiers);
     context.save();
     context.fillStyle = PAPER_LIGHT; context.strokeStyle = cluster.polityColor; context.lineWidth = 1.8;
     context.beginPath(); context.arc(point.x, point.y, radius, 0, Math.PI * 2); context.fill(); context.stroke();

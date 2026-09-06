@@ -21,6 +21,7 @@ export interface BuildMapLodSceneOptions {
   selectedRegionId?: string | null;
   selectedObject?: MapSelectedObject;
   focusedArmyIds?: readonly string[];
+  formationMode?: boolean;
 }
 
 function safeZoom(zoom: number) {
@@ -134,12 +135,31 @@ function selectedFleetId(selectedObject: MapSelectedObject) {
   return selectedObject?.kind === 'fleet' ? selectedObject.id : undefined;
 }
 
+function expandedArmyIdFor(
+  persons: readonly MapPersonForceView[],
+  selectedObject: MapSelectedObject,
+  focusedArmyIds: readonly string[],
+  formationMode: boolean,
+) {
+  if (!formationMode || !selectedObject) return null;
+  const candidate = selectedObject.kind === 'army'
+    ? selectedObject.id
+    : selectedObject.kind === 'person'
+      ? persons.find((person) => person.id === selectedObject.id)?.formationId ?? null
+      : null;
+  return candidate && (!focusedArmyIds.length || focusedArmyIds.includes(candidate)) ? candidate : null;
+}
+
 function visibleArmies(
   armies: readonly MapArmyView[],
   level: MapLodLevel,
   selectedObject: MapSelectedObject,
   focusedArmyIds: readonly string[],
 ) {
+  if (focusedArmyIds.length) {
+    const focused = new Set(focusedArmyIds);
+    return armies.filter((item) => focused.has(item.id));
+  }
   if (level !== 'overview') return [...armies];
   const visible = visibleForOverview(armies, selectedArmyId(selectedObject));
   const ids = new Set([...visible.map((item) => item.id), ...focusedArmyIds]);
@@ -162,16 +182,19 @@ function visiblePersonForces(
   selectedRegionId: string | null,
   selectedObject: MapSelectedObject,
   focusedArmyIds: readonly string[],
+  formationMode: boolean,
 ): { persons: MapPersonForceView[]; clusters: MapPersonForceClusterView[] } {
   const source = presentation.persons ?? [];
   const selectedId = selectedObject?.kind === 'person' ? selectedObject.id : null;
   const focused = new Set(focusedArmyIds);
+  const expandedArmyId = expandedArmyIdFor(source, selectedObject, focusedArmyIds, formationMode);
   const expandedRegionId = selectedId
     ? source.find((person) => person.id === selectedId)?.regionId ?? selectedRegionId
     : selectedRegionId;
   const visibleIds = new Set(source.filter((person) => {
-    const focusedPerson = Boolean(person.formationId && focused.has(person.formationId));
-    if (person.id === selectedId || focusedPerson) return true;
+    if (formationMode) return expandedArmyId !== null && person.formationId === expandedArmyId;
+    if (person.id === selectedId) return true;
+    if (person.formationId && focused.has(person.formationId)) return true;
     if (level === 'overview') return false;
     if (level === 'local' && expandedRegionId === person.regionId) return true;
     return person.isCommander
@@ -183,6 +206,7 @@ function visiblePersonForces(
     .map((person) => ({
       ...person,
       showLabel: person.id === selectedId
+        || person.formationId === expandedArmyId
         || Boolean(person.formationId && focused.has(person.formationId))
         || (level === 'local' && expandedRegionId === person.regionId)
         || person.isCommander
@@ -190,7 +214,7 @@ function visiblePersonForces(
         || person.status === '撤退',
     }));
   const grouped = new Map<string, MapPersonForceView[]>();
-  for (const person of source.filter((item) => !visibleIds.has(item.id))) {
+  for (const person of formationMode ? [] : source.filter((item) => !visibleIds.has(item.id))) {
     const key = level === 'overview' ? person.polityId : `${person.polityId}:${person.factionShortName}`;
     const values = grouped.get(key) ?? [];
     values.push(person);
@@ -264,11 +288,16 @@ export function buildMapLodScene(
     options.selectedRegionId ?? null,
     selectedObject,
     options.focusedArmyIds ?? [],
+    options.formationMode ?? false,
+  );
+  const expandedArmyId = expandedArmyIdFor(
+    presentation.persons ?? [], selectedObject, options.focusedArmyIds ?? [], options.formationMode ?? false,
   );
 
   return {
     ...presentation,
     level,
+    expandedArmyId,
     regionLabelIds,
     cityRegionIds,
     portRegionIds,

@@ -98,15 +98,15 @@ export type SituationSnapshotLabelWorld = Pick<
 >;
 
 const TYPE_LABELS: Readonly<Record<string, string>> = {
-  military_power_crisis: '军权危机',
-  inheritance_crisis: '继承危机',
-  war_progress: '战争进程',
-  court_power_struggle: '朝堂权斗',
+  military_power_crisis: '军权归属',
+  inheritance_crisis: '君位承继',
+  war_progress: '战事',
+  court_power_struggle: '朝堂争权',
 };
 
 const STATUS_LABELS: Record<SituationStatus, string> = {
-  open: '发展中',
-  resolved: '已结案',
+  open: '进行中',
+  resolved: '已结束',
 };
 
 const PHASE_LABELS: Record<SituationPhase, string> = {
@@ -388,21 +388,21 @@ function situationTitle(
   const core = participants.find((group) => group.key === 'coreCharacterIds')?.entities[0]?.label;
   const polity = participants.find((group) => group.key === 'polityIds')?.entities[0]?.label;
   if (situation.type === 'military_power_crisis' && core && polity) {
-    return `${core}与${polity}的军权危机`;
+    return `${core}在${polity}的军权归属`;
   }
   if (situation.type === 'inheritance_crisis' && polity) {
-    return `${polity}的继承危机`;
+    return `${polity}的君位承继`;
   }
   if (situation.type === 'court_power_struggle' && polity) {
-    return `${polity}的朝堂权斗`;
+    return `${polity}的朝堂争权`;
   }
   if (situation.type === 'war_progress') {
     const war = world.wars.find((item) => item.id === situation.scopeKey);
-    if (!war) return '这场战争的进程';
+    if (!war) return '这场战事';
     const polityLabels = new Map(world.polities.map((item) => [item.id, item.shortName || item.name]));
     const attacker = polityLabels.get(war.attackerId) ?? '未载攻方';
     const defender = polityLabels.get(war.defenderId) ?? '未载守方';
-    return `${attacker}进攻${defender}的战争进程`;
+    return `${attacker}攻${defender}`;
   }
   return TYPE_LABELS[situation.type] ?? '未命名历史局势';
 }

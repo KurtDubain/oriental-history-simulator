@@ -199,6 +199,8 @@ export type MapLodLevel = "overview" | "regional" | "local";
  */
 export interface MapLodScene extends MapPresentationView {
   level: MapLodLevel;
+  /** Observer-only disclosure: this formation is represented by its members. */
+  expandedArmyId?: string | null;
   regionLabelIds: ReadonlySet<string>;
   cityRegionIds: ReadonlySet<string>;
   portRegionIds: ReadonlySet<string>;

@@ -31,15 +31,41 @@ function pointOutsideLand(point: MapPoint, profile: MapPresentationDefinition) {
 }
 
 function insideRegion(point: MapPoint, region: MapRegionView) {
+  const distanceToEdge = (candidate: MapPoint) => Math.min(...region.polygon.map((start, index) => {
+    const end = region.polygon[(index + 1) % region.polygon.length]!;
+    const dx = end.x - start.x;
+    const dy = end.y - start.y;
+    const t = Math.max(0, Math.min(1, ((candidate.x - start.x) * dx + (candidate.y - start.y) * dy) / Math.max(1, dx * dx + dy * dy)));
+    return Math.hypot(candidate.x - (start.x + dx * t), candidate.y - (start.y + dy * t));
+  }));
   let candidate = point;
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    if (contains(candidate, region.polygon)) return candidate;
+    if (contains(candidate, region.polygon) && distanceToEdge(candidate) >= 17) return candidate;
     candidate = {
       x: region.center.x + (candidate.x - region.center.x) * 0.48,
       y: region.center.y + (candidate.y - region.center.y) * 0.48,
     };
   }
-  return { ...region.center };
+  const xs = region.polygon.map((vertex) => vertex.x);
+  const ys = region.polygon.map((vertex) => vertex.y);
+  const bounds = {
+    left: Math.min(...xs), right: Math.max(...xs),
+    top: Math.min(...ys), bottom: Math.max(...ys),
+  };
+  let safest = contains(region.center, region.polygon) ? region.center : region.polygon[0]!;
+  let clearance = contains(safest, region.polygon) ? distanceToEdge(safest) : -1;
+  for (let row = 1; row < 10; row += 1) {
+    for (let column = 1; column < 10; column += 1) {
+      const sample = {
+        x: bounds.left + (bounds.right - bounds.left) * column / 10,
+        y: bounds.top + (bounds.bottom - bounds.top) * row / 10,
+      };
+      if (!contains(sample, region.polygon)) continue;
+      const distance = distanceToEdge(sample);
+      if (distance > clearance) { safest = sample; clearance = distance; }
+    }
+  }
+  return { ...safest };
 }
 
 function fleetBerth(
@@ -122,6 +148,23 @@ export function buildMapPresentation(
   };
 
   const regionById = new Map(presentedRegions.map((region) => [region.id, region]));
+  const armiesByRegion = new Map<string, MapArmyView[]>();
+  for (const army of armies) {
+    if (!army.regionId) continue;
+    const values = armiesByRegion.get(army.regionId) ?? [];
+    values.push(army);
+    armiesByRegion.set(army.regionId, values);
+  }
+  const armyOffsets = [{ x: -15, y: -16 }, { x: 15, y: -16 }, { x: -21, y: 10 }, { x: 21, y: 10 }, { x: 0, y: 21 }];
+  const presentedArmies = [...armiesByRegion.entries()].flatMap(([regionId, values]) => {
+    const target = regionById.get(regionId);
+    if (!target) return [];
+    return [...values].sort((left, right) => left.id.localeCompare(right.id)).map((army, index) => {
+      const offset = armyOffsets[index % armyOffsets.length]!;
+      return { ...army, position: insideRegion({ x: target.center.x + offset.x, y: target.center.y + offset.y }, target) };
+    });
+  });
+  const armyPosition = new Map(presentedArmies.map((army) => [army.id, army.position!]));
   const personsByRegion = new Map<string, MapPersonForceView[]>();
   for (const person of persons) {
     const values = personsByRegion.get(person.regionId) ?? [];
@@ -138,20 +181,18 @@ export function buildMapPresentation(
       || right.soldiers - left.soldiers
       || left.id.localeCompare(right.id)
     ));
-    const formationIds = [...new Set(ordered.flatMap((person) => person.formationId ? [person.formationId] : []))];
-    const formationSlot = new Map(formationIds.map((id, index) => [id, index]));
     const formationMemberIndex = new Map<string, number>();
     let parkedIndex = 0;
     return ordered.map((person) => {
       let offset: MapPoint;
       if (person.formationId) {
-        const group = formationSlot.get(person.formationId) ?? 0;
         const member = formationMemberIndex.get(person.formationId) ?? 0;
         formationMemberIndex.set(person.formationId, member + 1);
-        offset = {
-          x: -18 + group * 17 + (member % 3) * 8,
-          y: -18 - Math.floor(member / 3) * 9,
-        };
+        const camp = armyPosition.get(person.formationId) ?? target.center;
+        const angle = Math.max(0, member - 1) * 2.4;
+        const radius = member === 0 ? 0 : 11 + Math.floor((member - 1) / 3) * 5;
+        const position = insideRegion({ x: camp.x + Math.cos(angle) * radius, y: camp.y + Math.sin(angle) * radius }, target);
+        return { ...person, position };
       } else {
         const column = parkedIndex % 5;
         const row = Math.floor(parkedIndex / 5);
@@ -193,10 +234,7 @@ export function buildMapPresentation(
       ...route,
       points: route.points?.map(projectPoint),
     })),
-    armies: armies.map((army) => ({
-      ...army,
-      position: army.position ? projectPoint(army.position) : undefined,
-    })),
+    armies: presentedArmies,
     persons: presentedPersons,
     personClusters: [],
     seaZones: presentedSeaZones,

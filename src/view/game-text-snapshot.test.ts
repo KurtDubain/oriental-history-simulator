@@ -344,6 +344,26 @@ describe('render_game_to_text projection boundary', () => {
     expect(serializeWorld(world)).toBe(before);
   });
 
+  it('matches the closed and explicitly expanded formation states on the war map', () => {
+    let world = createWorld('春战副将');
+    for (let turn = 0; turn < 8 && !world.wars.some((war) => war.active); turn += 1) world = advanceWorld(world);
+    const war = world.wars.find((item) => item.active);
+    if (!war) throw new Error('expected an active war');
+    const focusedArmy = world.armies.find((army) => army.order.warId === war.id);
+    if (!focusedArmy) throw new Error('expected a formation in the active war');
+    const base = { overlay: 'war' as const, focusedWarId: war.id, mapLod: 'regional' as const };
+    const closed = JSON.parse(makeTextSnapshot(world, options(base))).mapObjects;
+    const expanded = JSON.parse(makeTextSnapshot(world, options({
+      ...base, selection: { kind: 'army', id: focusedArmy.id },
+    }))).mapObjects;
+
+    expect(closed.expandedFormationId).toBeNull();
+    expect(closed.personalForces).toEqual([]);
+    expect(expanded.expandedFormationId).toBe(focusedArmy.id);
+    expect(expanded.personalForces.length).toBeGreaterThan(0);
+    expect(expanded.personalForces.every((person: { formationId: string }) => person.formationId === focusedArmy.id)).toBe(true);
+  });
+
   it('keeps detector stages, pressure values, and predictions out of the player text snapshot', () => {
     let world = createWorld('TRIM02-玩家文本不见推演底账');
     for (let turn = 0; turn < 8; turn += 1) world = advanceWorld(world);

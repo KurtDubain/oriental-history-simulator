@@ -167,6 +167,58 @@ describe('map LOD scene', () => {
     expect(selected.persons.map((person) => person.id)).toEqual(['person-member']);
   });
 
+  it('keeps war formations closed until one formation is explicitly selected', () => {
+    const source = fixture();
+    source.persons = [{
+      id: 'person-commander', personName: '韩静川', regionId: 'r_b_key', position: { x: 5, y: 5 },
+      polityId: 'p_b', polityColor: '#315b72', soldiers: 1_400,
+      status: '出征', formationId: 'a_b_tie_z', formationName: '乙前营', commanderName: '韩静川',
+      factionShortName: '韩系', isCommander: true, isFactionLeader: true,
+      warId: 'war_1', targetRegionId: 'r_a_large', commandDiverged: false,
+    }, {
+      id: 'person-follower', personName: '裴文昭', regionId: 'r_b_key', position: { x: 6, y: 5 },
+      polityId: 'p_b', polityColor: '#315b72', soldiers: 700,
+      status: '出征', formationId: 'a_b_tie_z', formationName: '乙前营', commanderName: '韩静川',
+      factionShortName: '韩系', isCommander: false, isFactionLeader: false,
+      warId: 'war_1', targetRegionId: 'r_a_large', commandDiverged: false,
+    }];
+
+    const closed = buildMapLodScene(source, 'local', {
+      focusedArmyIds: ['a_b_tie_z'],
+      formationMode: true,
+    });
+    expect(closed.armies.map((army) => army.id)).toEqual(['a_b_tie_z']);
+    expect(closed.persons).toEqual([]);
+    expect(closed.personClusters).toEqual([]);
+    expect(closed.expandedArmyId).toBeNull();
+
+    const expanded = buildMapLodScene(source, 'regional', {
+      focusedArmyIds: ['a_b_tie_z'],
+      formationMode: true,
+      selectedObject: { kind: 'army', id: 'a_b_tie_z' },
+    });
+    expect(expanded.expandedArmyId).toBe('a_b_tie_z');
+    expect(expanded.persons.map((person) => person.id)).toEqual(['person-commander', 'person-follower']);
+    expect(expanded.personClusters).toEqual([]);
+
+    const memberSelected = buildMapLodScene(source, 'regional', {
+      focusedArmyIds: ['a_b_tie_z'],
+      formationMode: true,
+      selectedObject: { kind: 'person', id: 'person-follower' },
+    });
+    expect(memberSelected.expandedArmyId).toBe('a_b_tie_z');
+    expect(memberSelected.persons.map((person) => person.id)).toEqual(['person-commander', 'person-follower']);
+
+    const unrelatedSelected = buildMapLodScene({ ...source, persons: [...source.persons, {
+      ...source.persons[1]!, id: 'person-at-home', formationId: null, formationName: null,
+    }] }, 'regional', {
+      focusedArmyIds: ['a_b_tie_z'], formationMode: true,
+      selectedObject: { kind: 'person', id: 'person-at-home' },
+    });
+    expect(unrelatedSelected.expandedArmyId).toBeNull();
+    expect(unrelatedSelected.persons).toEqual([]);
+  });
+
   it('keeps only capitals and the strongest military objects at overview', () => {
     const source = fixture();
     const scene = buildMapLodScene(source, 'overview');
@@ -266,12 +318,7 @@ describe('map LOD scene', () => {
       focusedArmyIds: ['a_a_small', 'a_b_tie_z'],
     });
 
-    expect(focused.armies.map((army) => army.id)).toEqual([
-      'a_a_small',
-      'a_a_large',
-      'a_b_tie_z',
-      'a_b_tie_a',
-    ]);
+    expect(focused.armies.map((army) => army.id)).toEqual(['a_a_small', 'a_b_tie_z']);
     expect(focused.armies.some((army) => army.id === 'a_unowned')).toBe(false);
   });
 

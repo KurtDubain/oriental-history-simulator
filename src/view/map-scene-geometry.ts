@@ -259,10 +259,13 @@ export function layoutMapPersonForces(
   persons: readonly MapPersonForceView[],
   transform: MapViewportTransform,
 ): MapPersonForceLayout[] {
+  const compact = transform.scale < 0.7;
   return persons.flatMap((person) => person.position ? [{
     person,
     point: worldToScreenPoint(person.position, transform),
-    radius: Math.max(3.6, Math.min(8.5, 3.4 + Math.sqrt(Math.max(0, person.soldiers)) / 17)),
+    radius: compact
+      ? Math.max(3.4, Math.min(6.2, 3.1 + Math.sqrt(Math.max(0, person.soldiers)) / 22))
+      : Math.max(3.6, Math.min(8.5, 3.4 + Math.sqrt(Math.max(0, person.soldiers)) / 17)),
   }] : []);
 }
 
@@ -374,6 +377,7 @@ export function regionNodeAtScreenPoint(
 }
 
 export type MapSceneHit =
+  | { kind: 'army'; army: MapArmyView }
   | { kind: 'person'; person: MapPersonForceView }
   | { kind: 'personCluster'; cluster: MapPersonForceClusterView }
   | { kind: 'fleet'; fleet: MapFleetView }
@@ -384,6 +388,7 @@ export type MapSceneHit =
 
 export interface ResolveMapSceneHitOptions {
   coarsePointer?: boolean;
+  includeArmies?: boolean;
   includeSeaZones?: boolean;
   tolerateRegionEdge?: boolean;
   focusOffset?: MapPoint;
@@ -468,6 +473,14 @@ export function resolveMapSceneHit(
       return Math.hypot(fleetPoint.x - scenePoint.x, fleetPoint.y - scenePoint.y);
     },
   );
+  const nearestArmy = options.includeArmies ? nearestByDistance(
+    layoutMapArmyIcons(
+      presentation.armies.filter((army) => army.id !== lodScene?.expandedArmyId),
+      presentation.regions,
+      transform,
+    ),
+    (layout) => Math.hypot(layout.point.x - scenePoint.x, layout.point.y - scenePoint.y),
+  ) : null;
   const nearestPerson = nearestByDistance(
     layoutMapPersonForces(presentation.persons ?? [], transform),
     (layout) => Math.hypot(layout.point.x - scenePoint.x, layout.point.y - scenePoint.y),
@@ -485,6 +498,9 @@ export function resolveMapSceneHit(
   }
   if (nearestFleet && nearestFleet.distance <= (coarse ? 22 : 12)) {
     foregroundHits.push({ distance: nearestFleet.distance, priority: 2, hit: { kind: 'fleet', fleet: nearestFleet.value } });
+  }
+  if (nearestArmy && nearestArmy.distance <= (coarse ? 24 : 13)) {
+    foregroundHits.push({ distance: nearestArmy.distance, priority: 1, hit: { kind: 'army', army: nearestArmy.value.army } });
   }
   if (politicalMarkerHit && foregroundHits.length) {
     foregroundHits.push({ distance: politicalMarkerHit.distance, priority: 3, hit: { kind: 'marker', marker: politicalMarkerHit.value.marker } });

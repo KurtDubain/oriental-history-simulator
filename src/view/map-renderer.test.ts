@@ -229,7 +229,7 @@ describe('map renderer LOD contract', () => {
     );
 
     expect(context.fillTexts.map((call) => call.text))
-      .toContain('王行简·西营系 → 顾守山·东丘系 · 1步');
+      .toContain('王行简 ↔ 顾守山 · 1步');
   });
 
   it('keeps compact overview polity and capital hierarchy without restoring ordinary region names', () => {

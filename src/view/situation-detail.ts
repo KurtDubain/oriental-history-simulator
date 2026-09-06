@@ -16,6 +16,7 @@ import { readWorldFacts, readWorldHistory } from '../sim/archive';
 import { projectCoreImpacts } from './core-impact-projection';
 import { historyTurnDate } from './v1-history';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
+import { projectWarGroups } from './war-group-projection';
 import {
   projectFactNarrative,
   projectHistoricalScenes,
@@ -599,15 +600,16 @@ function evidenceFacts(
 }
 
 function outcomeSummary(situation: SituationState, label: string): string {
-  if (situation.type === 'war_progress') return `这场战争以“${label}”收束；胜负与停战理由只取自战争结案事实。`;
-  if (situation.type === 'inheritance_crisis') return `继承秩序以“${label}”收束；结果由同季任免、死亡或政权存续事实共同确认。`;
+  if (situation.type === 'war_progress') return `这场战争以“${label}”收束，双方已经停下交兵。`;
+  if (situation.type === 'inheritance_crisis') return `君位承继以“${label}”收束。`;
   if (situation.type === 'court_power_struggle') {
-    return `这场朝堂权斗以“${label}”收束；结果由同季派系变动与朝堂行动事实确认。`;
+    return `这场朝堂争权以“${label}”收束。`;
   }
-  return `军权矛盾以“${label}”收束；卷宗只陈述已发生的任免、死亡或结构消散，不推断人物谋反意图。`;
+  return `这场军权争执以“${label}”收束。`;
 }
 
 function playerSummary(
+  world: WorldState,
   situation: SituationState,
   item: SituationSnapshotItem,
   durationLabel: string,
@@ -622,32 +624,44 @@ function playerSummary(
     .filter(Boolean) ?? [];
   if (situation.status === 'resolved') {
     const resolvedSummary = situation.type === 'court_power_struggle'
-      ? `${courtParties.length > 0 ? courtParties.join('与') : core ?? '朝中各方'}在${polity ?? '该朝廷'}朝中的角力以“${outcomeLabel ?? '结构压力消散'}”收束；结果由同季派系变动与朝堂行动事实确认。`
-      : outcomeSummary(situation, outcomeLabel ?? '结构压力消散');
+      ? `${courtParties.length > 0 ? courtParties.join('与') : core ?? '朝中各方'}在${polity ?? '该朝廷'}的角力以“${outcomeLabel ?? '争执平息'}”收束。`
+      : outcomeSummary(situation, outcomeLabel ?? '争执平息');
     return [
       `${item.title}起于${dateLabel(situation.startedTurn)}，于${dateLabel(situation.resolvedTurn ?? situation.lastUpdatedTurn)}结案，历时${durationLabel}。`,
       resolvedSummary,
     ];
   }
+  if (situation.type === 'war_progress') {
+    const war = projectWarGroups(world, situation.scopeKey);
+    if (!war) return [`${item.title}仍在继续。`];
+    const contact = war.contacts[0];
+    const latest = war.latestBattle;
+    return [
+      `${war.sides[0].polity}${war.sides[0].armyCount}营、${war.sides[1].polity}${war.sides[1].armyCount}营正在${war.mainFront}一带交兵。`,
+      contact
+        ? `${contact.attackerCommander}正率${contact.attacker}接近${contact.region}，将迎上${contact.defenderCommanders}。`
+        : latest
+          ? `最近一战在${latest.region}，${latest.attackerCommander}${latest.result}；${latest.aftermath}`
+          : '双方尚未留下新的会战记录。',
+    ];
+  }
   if (situation.type === 'military_power_crisis') {
     return [
-      `${core ?? '这名将领'}与${polity ?? '朝廷'}的军权争执尚未结案；现有事实还没有确认召回、交兵、削权或起兵的结果。`,
+      `${core ?? '这名将领'}的军令与军中拥戴仍牵动${polity ?? '朝廷'}，目前尚未发生换帅或交兵。`,
     ];
   }
   if (situation.type === 'inheritance_crisis') {
     return [
-      `${polity ?? '该政权'}的继承问题尚未结案；现有事实还没有确认新君、摄政或争位结果。`,
+      `${polity ?? '该政权'}仍在排定君位承继，目前尚未发生新君即位或监国更替。`,
     ];
   }
   if (situation.type === 'court_power_struggle') {
     const parties = courtParties.length > 0 ? courtParties.join('与') : core ?? '朝中各方';
     return [
-      `${parties}正在${polity ?? '该朝廷'}朝中角力；这场朝堂争执尚未结案，截至本季还没有发生足以确认夺位、清洗、妥协或失势结果的行动。`,
+      `${parties}正在${polity ?? '该朝廷'}争夺任命与支持，目前尚未发生夺位或清洗。`,
     ];
   }
-  return [
-    `${item.title}尚未停战；现有事实还没有记录媾和、都城陷落或一方覆灭。`,
-  ];
+  return [`${item.title}仍在继续。`];
 }
 
 function directoryItem(situation: SituationState, world: WorldState): SituationDirectoryItem {
@@ -743,16 +757,16 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
     endDateLabel: dateLabel(endTurn ?? situation.lastUpdatedTurn),
     durationTurns,
     durationLabel,
-    playerSummary: playerSummary(situation, item, durationLabel, outcomeLabel),
+    playerSummary: playerSummary(world, situation, item, durationLabel, outcomeLabel),
     currentChange: latestScene && latestScene.turn === lastSettledTurn
       ? latestScene.shortText
       : latestScene
-        ? `本季无新动作；最近一件实事发生在${latestScene.dateLabel}：${latestScene.shortText}`
+        ? `本季暂无新进展；最近一次发生在${latestScene.dateLabel}：${latestScene.shortText}`
       : situation.status === 'resolved' && outcomeLabel
         ? `${dateLabel(situation.resolvedTurn ?? situation.lastUpdatedTurn)}，本案以“${outcomeLabel}”结案。`
-        : '本季无新动作；卷宗里还没有可确认的具名行动或明确结果。',
+        : '本季暂无新的交战、任免或权力变化。',
     coreImpact: coreImpact ? { summary: coreImpact.summary, sourceEventId: coreImpact.sourceEventIds[0] ?? null } : null,
-    recentDeltas,
+    recentDeltas: situation.type === 'war_progress' ? [] : recentDeltas,
     nextWatch: item.nextSignal.label,
     outcome: outcomeKey ? {
       key: outcomeKey,

@@ -26,10 +26,10 @@ describe('ObserverLeads', () => {
   it('keeps the story entrance visible without manufacturing empty questions', () => {
     const markup = render(deriveObserverLeads(createWorld('当世三问-空白开局')));
 
-    expect(markup).toContain('当世三问');
-    expect(markup).toContain('战争 · 人物 · 朝局');
+    expect(markup).toContain('眼下大事');
+    expect(markup).toContain('一条主线 · 两则侧闻');
     expect(markup).toContain('眼下暂无值得单列的战事或朝局');
-    expect(markup).toContain('不会用空泛题目凑满三条');
+    expect(markup).toContain('没有值得说的事，就不凑数');
     expect(markup).not.toContain('data-testid="observer-lead"');
   });
 
@@ -46,7 +46,7 @@ describe('ObserverLeads', () => {
     expect(markup).not.toMatch(/会不会|能否|还是/);
     expect(markup.match(/data-testid="observer-lead-fact"/g)).toHaveLength(leads.length);
     expect(markup).toContain('aria-pressed="true"');
-    expect(markup).toContain('查看持续局势');
+    expect(markup).toContain('查看战事与朝局');
     expect(markup.match(/data-situation-workbench-trigger/g)).toHaveLength(1);
   });
 
@@ -57,9 +57,9 @@ describe('ObserverLeads', () => {
 
     expect(observerLeadWatchKey(situationLead)).toBe(`situation:${situationLead.situationId}`);
     expect(observerLeadTargetKey(situationLead)).toBe(`${situationLead.target.kind}:${situationLead.target.id}`);
-    expect(situationMarkup).toContain('局势已关注');
+    expect(situationMarkup).toContain('已关注');
     expect(situationMarkup).toContain('data-watch-kind="situation"');
-    expect(situationMarkup).toContain('observer-leads__situation-age');
+    expect(situationMarkup).not.toContain('observer-leads__situation-age');
 
     const factWorld = leadsAt(3, '当世三问-fact').world;
     const factLead = deriveObserverLeads({
@@ -70,13 +70,13 @@ describe('ObserverLeads', () => {
     expect(observerLeadWatchKey(factLead)).toBe(`${factLead.target.kind}:${factLead.target.id}`);
   });
 
-  it('renders a Situation headline once while retaining both evidence lines', () => {
-    const lead = leadsAt(8, '春战副将').leads.find((item) => item.situationId && item.recentChange?.includes(' · '));
-    if (!lead?.recentChange) throw new Error('expected a Situation lead with a concrete scene');
+  it('renders one declarative headline with two concise evidence lines', () => {
+    const lead = leadsAt(8, '春战副将').leads.find((item) => item.situationId);
+    if (!lead) throw new Error('expected a Situation lead');
     const markup = render([lead]);
 
-    expect(lead.evidence).not.toContain(lead.recentChange);
-    expect(markup.split(lead.recentChange).length - 1).toBe(1);
+    expect(markup).toContain(`<strong data-testid="observer-lead-question">${lead.question}</strong>`);
+    expect(markup).toContain('data-story-rank="main"');
     for (const evidence of lead.evidence) expect(markup).toContain(evidence);
   });
 });

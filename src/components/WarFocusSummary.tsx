@@ -43,7 +43,9 @@ export function WarFocusSummary({ war, onInspectPerson, onInspectBattle, onClose
       </div>
       {war.contacts[0] ? (
         <p className="war-focus-summary__contact">
-          <strong>即将接敌</strong>{war.contacts[0].attackerCommander}（{war.contacts[0].attackerGroup}）将在{war.contacts[0].region}迎上{war.contacts[0].defenderCommanders}（{war.contacts[0].defenderGroups}），约{war.contacts[0].steps}步。
+          <strong>即将接敌</strong>
+          <span className="war-focus-summary__wide-copy">{war.contacts[0].attackerCommander}（{war.contacts[0].attackerGroup}）将在{war.contacts[0].region}迎上{war.contacts[0].defenderCommanders}（{war.contacts[0].defenderGroups}），约{war.contacts[0].steps}步。</span>
+          <span className="war-focus-summary__mobile-copy">{war.contacts[0].attackerCommander}将在{war.contacts[0].region}迎战{war.contacts[0].defenderCommanders} · {war.contacts[0].steps}步</span>
         </p>
       ) : null}
       {war.latestBattle ? (
@@ -51,7 +53,9 @@ export function WarFocusSummary({ war, onInspectPerson, onInspectBattle, onClose
           if (war.latestBattle?.eventId) onInspectBattle(war.latestBattle.eventId);
           else setOpenBattleFactId((current) => current === war.latestBattle?.factId ? null : war.latestBattle?.factId ?? null);
         }}>
-          <strong>最近交战</strong>{war.latestBattle.region}：{war.latestBattle.attackerCommander}（{war.latestBattle.attackerGroup}）{war.latestBattle.result}；战前{compact.format(war.latestBattle.attackerBefore)}对{compact.format(war.latestBattle.defenderBefore)}，攻损{compact.format(war.latestBattle.attackerLosses)}、守损{compact.format(war.latestBattle.defenderLosses)}。{war.latestBattle.aftermath}
+          <strong>最近交战</strong>
+          <span className="war-focus-summary__wide-copy">{war.latestBattle.region}：{war.latestBattle.attackerCommander}（{war.latestBattle.attackerGroup}）{war.latestBattle.result}；战前{compact.format(war.latestBattle.attackerBefore)}对{compact.format(war.latestBattle.defenderBefore)}，攻损{compact.format(war.latestBattle.attackerLosses)}、守损{compact.format(war.latestBattle.defenderLosses)}。{war.latestBattle.aftermath}</span>
+          <span className="war-focus-summary__mobile-copy">{war.latestBattle.region} · {war.latestBattle.attackerCommander}{war.latestBattle.result} · 攻损{compact.format(war.latestBattle.attackerLosses)}、守损{compact.format(war.latestBattle.defenderLosses)}</span>
           {openBattleFactId === war.latestBattle.factId ? <small>此役尚无独立史页，战前兵力与伤亡直接取自当季战报。</small> : null}
         </button>
       ) : null}

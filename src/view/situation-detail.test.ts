@@ -55,7 +55,7 @@ describe('Situation detail projection', () => {
 
     for (const situation of world.situationSystem.situations) {
       const detail = projectSituationDetail(world, situation);
-      expect(detail.title).toMatch(/危机|战争进程|朝堂权斗/);
+      expect(detail.title).toMatch(/军权|承继|攻|朝堂/);
       expect(detail.playerSummary.length).toBeGreaterThanOrEqual(1);
       expect(detail.playerSummary.length).toBeLessThanOrEqual(2);
       expect(`${detail.currentChange}${detail.playerSummary.join('')}`).not.toMatch(/military_power_crisis|inheritance_crisis|war_progress|court_power_struggle|situation_|持续张力|结构证据|推动因素|阶段转折/);
@@ -131,11 +131,11 @@ describe('Situation detail projection', () => {
     };
 
     const detail = projectSituationDetail(world, court);
-    expect(detail.typeLabel).toBe('朝堂权斗');
-    expect(detail.title).toBe(`${polity.shortName || polity.name}的朝堂权斗`);
+    expect(detail.typeLabel).toBe('朝堂争权');
+    expect(detail.title).toBe(`${polity.shortName || polity.name}的朝堂争权`);
     expect(detail.playerSummary.join('')).toContain(polity.shortName || polity.name);
     expect(detail.playerSummary.join('')).toContain(factions[0].name);
-    expect(detail.playerSummary.join('')).toContain('结案');
+    expect(detail.playerSummary.join('')).toMatch(/争夺任命与支持|争权|朝局/u);
     expect(detail.playerSummary.join('')).not.toContain(detail.publicDrivers[0]?.label);
     expect(detail.nextWatch).toContain('任免');
     expect(detail.publicDrivers[0]?.label).toBe('实掌中枢官席');

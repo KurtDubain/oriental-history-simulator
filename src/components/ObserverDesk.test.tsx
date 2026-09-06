@@ -75,7 +75,7 @@ describe('ObserverDesk Situation UI', () => {
       onSelectWatchItem: vi.fn(),
     }));
 
-    expect(markup).toContain('可在“当世三问”关注一条局势');
+    expect(markup).toContain('可在“眼下大事”关注一件事');
     expect(markup).toContain('局势关注、关键变化提醒与暂停仅属于观察者设置');
     expect(markup).not.toContain('data-testid="observer-pause-open"');
   });

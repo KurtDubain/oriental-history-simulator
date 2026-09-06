@@ -57,6 +57,7 @@ import {
   clampMapCamera,
   createMapViewportTransform,
   layoutMapPersonForces,
+  layoutMapArmyIcons,
   panMapCamera,
   reframeMapCamera,
   resolveMapSceneHit,
@@ -154,6 +155,10 @@ function selectedSceneAnchor(
     return layoutMapPersonForces(scene.persons, transform)
       .find((layout) => layout.person.id === selectedObject.id)?.point ?? null;
   }
+  if (selectedObject.kind === "army") {
+    return layoutMapArmyIcons(scene.armies, scene.regions, transform)
+      .find((layout) => layout.army.id === selectedObject.id)?.point ?? null;
+  }
   if (selectedObject.kind === "fleet") {
     const fleet = scene.fleets.find((item) => item.id === selectedObject.id);
     return fleet ? worldToScreenPoint(fleet.position, transform) : null;
@@ -249,8 +254,10 @@ export function WorldMap({
   );
   const hoveredRegionId = hover?.kind === "region" ? hover.region.id : undefined;
   const scene = useMemo(
-    () => buildMapLodScene(presentation, lodLevel, { selectedRegionId, selectedObject, focusedArmyIds: focusedWarArmyIds }),
-    [focusedWarArmyIds, lodLevel, presentation, selectedObject, selectedRegionId],
+    () => buildMapLodScene(presentation, lodLevel, {
+      selectedRegionId, selectedObject, focusedArmyIds: focusedWarArmyIds, formationMode: overlay === 'war',
+    }),
+    [focusedWarArmyIds, lodLevel, overlay, presentation, selectedObject, selectedRegionId],
   );
   const movementKey = armies.map((army) => army.recentMovement?.current
     ? `${army.id}:${army.recentMovement.fromRegionId}:${army.recentMovement.toRegionId}:${army.recentMovement.turn}` : '').join('|');
@@ -528,6 +535,7 @@ export function WorldMap({
       cameraRef.current,
       {
         coarsePointer: coarse,
+        includeArmies: overlay === "war",
         includeSeaZones: overlay === "war",
         tolerateRegionEdge: true,
         focusOffset: focusOffsetRef.current,
@@ -539,6 +547,11 @@ export function WorldMap({
     }
     if (hit.kind === 'fleet' && onSelectObject) {
       onSelectObject('fleet', hit.fleet.id);
+      showTapFeedback(point);
+      return;
+    }
+    if (hit.kind === 'army' && onSelectObject) {
+      onSelectObject('army', hit.army.id);
       showTapFeedback(point);
       return;
     }
@@ -653,12 +666,14 @@ export function WorldMap({
         size.height,
         cameraRef.current,
         {
+          includeArmies: overlay === "war",
           includeSeaZones: false,
           tolerateRegionEdge: false,
           focusOffset: focusOffsetRef.current,
         },
       );
-      if (hit?.kind === 'fleet') setHover({ kind: 'fleet', fleet: hit.fleet, x: point.x, y: point.y });
+      if (hit?.kind === 'army') setHover({ kind: 'army', army: hit.army, x: point.x, y: point.y });
+      else if (hit?.kind === 'fleet') setHover({ kind: 'fleet', fleet: hit.fleet, x: point.x, y: point.y });
       else if (hit?.kind === 'person') setHover({ kind: 'person', person: hit.person, x: point.x, y: point.y });
       else if (hit?.kind === 'personCluster') setHover({ kind: 'personCluster', cluster: hit.cluster, x: point.x, y: point.y });
       else if (hit?.kind === 'marker') setHover({ kind: 'marker', marker: hit.marker, x: point.x, y: point.y });
@@ -666,7 +681,7 @@ export function WorldMap({
       else if (hit?.kind === 'region') setHover({ kind: 'region', region: hit.region, x: point.x, y: point.y });
       else setHover(null);
     },
-    [applyCamera, localPoint, scene, size.height, size.width],
+    [applyCamera, localPoint, overlay, scene, size.height, size.width],
   );
 
   const handlePointerDown = useCallback(
@@ -835,6 +850,7 @@ export function WorldMap({
       const visibleSeaZones = scene.seaZones.map((item) => ({ kind: "seaZone" as const, id: item.id }));
       const contextualObjects: Array<{ kind: MapObjectKind | 'region'; id: string; marker?: MapMarkerView }> = overlay === "war"
         ? [
+          ...scene.armies.map((item) => ({ kind: "army" as const, id: item.id })),
           ...scene.persons.map((item) => ({ kind: "person" as const, id: item.id })),
           ...scene.fleets.map((item) => ({ kind: "fleet" as const, id: item.id })),
           ...visibleSeaZones,
@@ -845,6 +861,10 @@ export function WorldMap({
         event.preventDefault();
         if (hover?.kind === "person") {
           onSelectObject?.("person", hover.person.id);
+          return;
+        }
+        if (hover?.kind === "army") {
+          onSelectObject?.("army", hover.army.id);
           return;
         }
         if (hover?.kind === "fleet") {

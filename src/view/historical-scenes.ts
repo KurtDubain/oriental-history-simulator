@@ -562,15 +562,47 @@ export function projectHistoricalScenes(
     .slice(0, Math.max(0, maximum));
 }
 
-function factTouchesSituation(fact: SimulationFact, situation: SituationState): boolean {
-  const participantCharacters = new Set([
+function militaryFactTouchesSituation(fact: SimulationFact, situation: SituationState): boolean {
+  const characters = new Set([
     ...situation.participants.coreCharacterIds,
     ...situation.participants.supportingCharacterIds,
     ...situation.participants.opposingCharacterIds,
   ]);
-  const participantPolities = new Set(situation.participants.polityIds);
-  return fact.actorIds.some((id) => participantCharacters.has(id))
-    && fact.polityIds.some((id) => participantPolities.has(id));
+  const armies = new Set(situation.participants.armyIds);
+  if (fact.kind === 'army_order_changed') return armies.has(fact.payload.armyId);
+  if (fact.kind === 'battle') return [fact.payload.attacker, ...fact.payload.defenders].some((side) => (
+    armies.has(side.armyId) || characters.has(side.commanderId)
+      || (side.participants ?? []).some((person) => characters.has(person.characterId))
+  ));
+  if (fact.kind === 'agency_support_resolved' || fact.kind === 'agency_intent_submitted' || fact.kind === 'agency_intent_resolved') {
+    return characters.has(fact.payload.actorId) || armies.has(fact.payload.targetArmyId);
+  }
+  if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
+    return characters.has(fact.payload.holderId) || Boolean(fact.payload.armyId && armies.has(fact.payload.armyId));
+  }
+  return false;
+}
+
+function inheritanceFactTouchesSituation(fact: SimulationFact, situation: SituationState): boolean {
+  const characters = new Set([
+    ...situation.participants.coreCharacterIds,
+    ...situation.participants.supportingCharacterIds,
+    ...situation.participants.opposingCharacterIds,
+  ]);
+  const polities = new Set(situation.participants.polityIds);
+  if (fact.kind === 'character_death') return characters.has(fact.payload.characterId);
+  if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
+    return polities.has(fact.payload.polityId) && characters.has(fact.payload.holderId);
+  }
+  return fact.kind === 'court_action_resolved'
+    && polities.has(fact.payload.polityId)
+    && fact.payload.rulerBeforeId !== fact.payload.rulerAfterId;
+}
+
+function warFactTouchesSituation(fact: SimulationFact, warId: string): boolean {
+  if (warKey(fact) === warId) return true;
+  return fact.kind === 'army_order_changed'
+    && (fact.payload.previous.warId === warId || fact.payload.next.warId === warId);
 }
 
 function courtFactTouchesSituation(fact: SimulationFact, situation: SituationState): boolean {
@@ -623,11 +655,11 @@ export function projectSituationHistoricalScenes(
   const availableFacts = readScope === 'all' ? readWorldFacts(world) : world.facts;
   const selected = availableFacts.filter((fact) => {
     if (fact.turn < situation.startedTurn || fact.turn > lastTurn) return false;
-    if (directIds.has(fact.id) || fact.sourceFactIds.some((id) => directIds.has(id))) return true;
-    if (situation.type === 'war_progress') return warKey(fact) === situation.scopeKey;
+    const linked = directIds.has(fact.id) || fact.sourceFactIds.some((id) => directIds.has(id));
+    if (situation.type === 'war_progress') return warFactTouchesSituation(fact, situation.scopeKey);
     if (situation.type === 'military_power_crisis') {
-      return ['agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'appointment_started', 'appointment_ended']
-        .includes(fact.kind) && factTouchesSituation(fact, situation);
+      return ['army_order_changed', 'battle', 'agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'appointment_started', 'appointment_ended']
+        .includes(fact.kind) && militaryFactTouchesSituation(fact, situation);
     }
     if (situation.type === 'court_power_struggle') {
       const polityMatch = fact.polityIds.some((id) => situation.participants.polityIds.includes(id));
@@ -643,8 +675,7 @@ export function projectSituationHistoricalScenes(
       ].includes(fact.kind);
       return isCourtSceneFact && courtFactTouchesSituation(fact, situation);
     }
-    return ['character_death', 'appointment_started', 'appointment_ended']
-      .includes(fact.kind) && factTouchesSituation(fact, situation);
+    return linked && inheritanceFactTouchesSituation(fact, situation);
   });
   return projectHistoricalScenes(world, selected, maximum, readScope);
 }

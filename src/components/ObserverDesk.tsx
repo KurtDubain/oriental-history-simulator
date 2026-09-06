@@ -257,7 +257,7 @@ export function ObserverDesk({
             ) : (
               <div className="observer-desk__empty">
                 <Eye size={21} strokeWidth={1.3} aria-hidden="true" />
-                <p><strong>尚未留下目光</strong><span>可在“当世三问”关注一条局势，也可从人物、家族、政权或地区档案留下关注。</span></p>
+                <p><strong>尚未留下目光</strong><span>可在“眼下大事”关注一件事，也可从人物、家族、政权或地区档案留下关注。</span></p>
               </div>
             )}
           </section>

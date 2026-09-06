@@ -11,16 +11,14 @@ import {
   type SituationSnapshotItem,
 } from './situation-snapshot';
 import { historyTurnDate } from './v1-history';
-
+import { projectWarGroups } from './war-group-projection';
 export type ObserverLeadTargetKind = 'person' | 'country' | 'region';
 export type ObserverLeadSource = 'situation' | 'fact';
 export type ObserverLeadDisplayMode = 'tracking' | 'resolution_echo' | 'fact';
-
 export interface ObserverLeadTarget {
   kind: ObserverLeadTargetKind;
   id: string;
 }
-
 export interface ObserverLead {
   id: string;
   label: '军争' | '朝局';
@@ -39,12 +37,9 @@ export interface ObserverLead {
   primarySceneId: string;
   primarySourceFactIds: readonly string[];
 }
-
 export interface ObserverLeadProjection { leads: ObserverLead[] }
-
 export const OBSERVER_LEAD_VISIBILITY_THRESHOLD = 40;
 export const OBSERVER_LEAD_RESOLUTION_ECHO_TURNS = 1;
-
 const PHASE_ORDER: Readonly<Record<SituationPhase, number>> = {
   critical: 0,
   active: 1,
@@ -64,33 +59,15 @@ const WAR_FACT_KINDS = new Set<SimulationFact['kind']>([
 ]);
 const HIGH_OFFICES = new Set(['君主', '宰辅', '枢密使', '军团主帅', '军团副将', '水师提督', '水师副将']);
 const MAJOR_APPOINTMENT_OFFICES = new Set(['君主', '宰辅', '枢密使', '军团主帅', '水师提督']);
-const FACT_QUESTION_SUFFIX: Partial<Record<SimulationFact['kind'], string>> = {
-  war_started: '，战端从何而起？',
-  war_ended: '，双方怎样收兵？',
-  battle: '怎样改变战线？',
-  territory_control_changed: '后，战线归谁掌握？',
-  army_order_changed: '，军团为何这样行动？',
-  agency_support_resolved: '后，请令筹码怎样变化？',
-  agency_intent_resolved: '后，兵权怎样落定？',
-  faction_lifecycle: '后，朝中力量如何重排？',
-  faction_relation_changed: '后，两派关系如何改变？',
-  court_action_resolved: '怎样改变官职、兵权或君位？',
-  embodied_action_resolved: '，人物行动实际改变了什么？',
-  character_wounded: '，这次受伤怎样改变了他的处境？',
-  character_death: '后，留下的兵权或官位由谁承接？',
-};
-
 interface SituationLeadChoice {
   primarySceneId: string;
   primarySourceFactIds: readonly string[];
   evidence: readonly [string, string];
   recentChange: string;
 }
-
 function stableCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
 }
-
 function compareSituations(left: SituationState, right: SituationState): number {
   return PHASE_ORDER[left.phase] - PHASE_ORDER[right.phase]
     || right.importance - left.importance
@@ -98,11 +75,9 @@ function compareSituations(left: SituationState, right: SituationState): number 
     || left.startedTurn - right.startedTurn
     || stableCompare(left.id, right.id);
 }
-
 function participant(item: SituationSnapshotItem, key: SituationParticipantGroupKey): { id: string; label: string } | null {
   return item.participants.find((group) => group.key === key)?.entities[0] ?? null;
 }
-
 function targetForSituation(world: WorldState, situation: SituationState, item: SituationSnapshotItem): ObserverLeadTarget | null {
   if (situation.type === 'military_power_crisis') {
     const person = participant(item, 'coreCharacterIds')
@@ -121,19 +96,34 @@ function targetForSituation(world: WorldState, situation: SituationState, item: 
   const region = participant(item, 'regionIds');
   return region ? { kind: 'region', id: region.id } : null;
 }
-
-function questionForSituation(item: SituationSnapshotItem, situation: SituationState, resolvedEcho: boolean): string {
-  if (resolvedEcho) {
-    return `${item.title}如何以“${situationOutcomeLabel(situation.resolution?.outcomeKey ?? '')}”收束？`;
-  }
+function situationHeadline(world: WorldState, item: SituationSnapshotItem, situation: SituationState, resolvedEcho: boolean): string {
   const core = participant(item, 'coreCharacterIds')?.label ?? '这名将领';
   const polity = participant(item, 'polityIds')?.label ?? '该政权';
-  if (item.type === 'military_power_crisis') return `${core}为何成为军权焦点？`;
-  if (item.type === 'inheritance_crisis') return `${polity}的继承问题现在卡在哪里？`;
-  if (item.type === 'court_power_struggle') return `${polity}眼下由谁左右朝局？`;
-  return `${item.title.replace(/的战争进程$/u, '')}，目前打到哪里？`;
+  if (resolvedEcho) return `${item.title.replace(/的战争进程$/u, '')}以“${situationOutcomeLabel(situation.resolution?.outcomeKey ?? '')}”收束`;
+  if (item.type === 'war_progress') {
+    const war = projectWarGroups(world, situation.scopeKey);
+    const contact = war?.contacts[0];
+    if (contact) return `${contact.attackerCommander}率${contact.attacker}将在${contact.region}迎战${contact.defenderCommanders}`;
+    if (war?.latestBattle) return `${war.latestBattle.attackerCommander}在${war.latestBattle.region}${war.latestBattle.result}`;
+    const moving = war?.sides.flatMap((side) => side.groups.flatMap((group) => group.armies))
+      .filter((army) => army.nextRegion)
+      .sort((left, right) => (left.stepsToTarget ?? 99) - (right.stepsToTarget ?? 99) || stableCompare(left.id, right.id))[0];
+    return moving ? `${moving.commander}率${moving.name}${moving.posture}${moving.nextRegion}` : item.title.replace(/的战争进程$/u, '交兵未休');
+  }
+  if (item.type === 'military_power_crisis') {
+    const characterId = participant(item, 'coreCharacterIds')?.id;
+    const army = world.armies.find((entry) => entry.commanderId === characterId || entry.allegiance.characterId === characterId || entry.participantIds.includes(characterId ?? ''));
+    return army ? `${core}掌${army.name}，军中归属仍牵动${polity}` : `${core}的军权去留牵动${polity}`;
+  }
+  if (item.type === 'inheritance_crisis') {
+    const state = world.polities.find((entry) => entry.id === participant(item, 'polityIds')?.id);
+    const ruler = world.characters.find((entry) => entry.id === state?.rulerId)?.name;
+    const candidate = participant(item, 'supportingCharacterIds')?.label ?? participant(item, 'coreCharacterIds')?.label;
+    return ruler && candidate && ruler !== candidate ? `${ruler}仍在位，${candidate}列入${polity}继承人选` : `${polity}正在排定君位承继`;
+  }
+  const factions = item.participants.find((group) => group.key === 'factionIds')?.entities.slice(0, 2).map((entry) => entry.label) ?? [];
+  return factions.length > 1 ? `${factions[0]}与${factions[1]}争夺${polity}朝权` : `${core}正在影响${polity}朝局`;
 }
-
 function sceneEvidence(item: SituationSnapshotItem, scene: HistoricalScene): readonly [string, string] {
   const lines = [scene.summary.trim(), scene.result.trim()]
     .filter((line, index, all) => Boolean(line) && all.indexOf(line) === index);
@@ -144,7 +134,6 @@ function sceneEvidence(item: SituationSnapshotItem, scene: HistoricalScene): rea
   if (lines.length < 2) lines.push(names.length ? `相关各方 · ${names.join('、')}` : `始于${historyTurnDate(item.startedTurn).label}`);
   return [lines[0], lines[1]];
 }
-
 function primaryFactId(world: WorldState, scene: HistoricalScene): string | null {
   const priorities: Partial<Record<SimulationFact['kind'], number>> = scene.id.startsWith('scene:war:')
     ? { battle: 0, war_ended: 1, war_started: 2, territory_control_changed: 3 }
@@ -166,8 +155,8 @@ function structuralChoice(item: SituationSnapshotItem, evidence: SituationSnapsh
   return {
     primarySceneId: `structure:${evidence.key}:${refKey || 'unreferenced'}`,
     primarySourceFactIds: primaryFact?.kind === 'fact' ? [primaryFact.factId] : [],
-    evidence: [`结构依据 · ${evidence.label}`, names.length ? `牵涉人物与势力 · ${names.join('、')}` : `始于${historyTurnDate(item.startedTurn).label}`],
-    recentChange: `当前依据 · ${evidence.label}`,
+    evidence: [evidence.label, names.length ? `相关人物 · ${names.join('、')}` : `始于${historyTurnDate(item.startedTurn).label}`],
+    recentChange: `眼下 · ${evidence.label}`,
   };
 }
 
@@ -183,8 +172,21 @@ function situationChoices(world: WorldState, situation: SituationState, item: Si
   });
   const structural = item.evidence.filter((entry) => entry.role === 'structural').map((entry) => structuralChoice(item, entry));
   if (situation.type === 'war_progress') {
+    const war = projectWarGroups(world, situation.scopeKey);
+    const contact = war?.contacts[0];
+    const current: SituationLeadChoice | null = contact ? {
+      primarySceneId: `war-state:${situation.scopeKey}:${contact.attackerArmyId}:${contact.regionId}`,
+      primarySourceFactIds: war?.latestBattle ? [war.latestBattle.factId] : [],
+      evidence: [war?.latestBattle
+        ? `最近一战在${war.latestBattle.region}，${war.latestBattle.attackerCommander}${war.latestBattle.result}。`
+        : `${contact.attackerCommander}正率${contact.attacker}接近${contact.region}。`,
+      `${contact.attackerCommander}约${contact.steps}步后将迎上${contact.defenderCommanders}。`],
+      recentChange: `眼下 · ${contact.region}即将接敌`,
+    } : null;
     const warScenes = scenes.filter((scene) => scene.primarySceneId.startsWith('scene:war:') && scene.primarySourceFactIds.length > 0);
-    return warScenes.length ? [warScenes[0], ...structural, ...warScenes.slice(1)] : structural;
+    const otherScenes = scenes.filter((scene) => !scene.primarySceneId.startsWith('scene:war:'));
+    return current ? [current, ...warScenes, ...otherScenes, ...structural]
+      : warScenes.length ? [warScenes[0], ...otherScenes, ...structural, ...warScenes.slice(1)] : [...otherScenes, ...structural];
   }
   return scenes.length ? [scenes[0], ...structural, ...scenes.slice(1)] : structural;
 }
@@ -196,7 +198,7 @@ function projectSituationLead(world: WorldState, situation: SituationState, reso
   return {
     id: `lead-situation:${situation.id}`,
     label: WAR_SITUATION_TYPES.has(situation.type) ? '军争' : '朝局',
-    question: questionForSituation(item, situation, resolvedEcho),
+    question: situationHeadline(world, item, situation, resolvedEcho),
     evidence: choice.evidence,
     target,
     overlay: WAR_SITUATION_TYPES.has(situation.type) ? 'war' : 'political',
@@ -258,9 +260,9 @@ function projectFactLead(world: WorldState, fact: SimulationFact): ObserverLead 
     ...fact.regionIds.map((id) => world.regions.find((item) => item.id === id)?.name),
   ].filter((label, index, all): label is string => Boolean(label) && all.indexOf(label) === index).slice(0, 3);
   const war = WAR_FACT_KINDS.has(fact.kind) || (fact.kind === 'character_death' && fact.payload.cause === 'battle');
-  const question = fact.kind === 'appointment_started' ? `${narrative.title}后，兵权或朝局怎样变化？`
-    : fact.kind === 'appointment_ended' ? `${narrative.title}后，哪项官职或兵权暂时空缺？`
-      : `${narrative.title}${FACT_QUESTION_SUFFIX[fact.kind] ?? '带来了什么变化？'}`;
+  const question = fact.kind === 'battle'
+    ? `${world.characters.find((item) => item.id === fact.payload.attacker.commanderId)?.name ?? '攻方主将'}在${world.regions.find((item) => item.id === fact.payload.targetRegionId)?.name ?? '战地'}${fact.payload.attackerWon ? '击退守军' : '进攻受阻'}`
+    : narrative.title;
   return {
     id: `lead-fact:${fact.id}`,
     label: war ? '军争' : '朝局',
@@ -296,7 +298,7 @@ function projectAppointmentTransferLead(world: WorldState, left: AppointmentFact
   const sourceFactIds = [ended.id, started.id].sort(stableCompare);
   return {
     ...lead,
-    question: `${former}卸任${seat}、${successor}接任后，${authority}怎样变化？`,
+    question: `${former}卸任${seat}，${successor}接掌${authority}`,
     evidence: [`${former}下、${successor}上；${seat}的${authority}已完成交接。`, lead.evidence[1]],
     primarySceneId: `scene:fact:${sourceFactIds.join(':')}`, primarySourceFactIds: sourceFactIds,
   };

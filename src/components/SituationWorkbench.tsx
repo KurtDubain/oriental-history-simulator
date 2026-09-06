@@ -114,7 +114,7 @@ export function SituationWorkbench({
         type="button"
         className="situation-workbench-layer__backdrop observer-dialog-backdrop"
         tabIndex={-1}
-        aria-label="关闭持续局势"
+        aria-label="关闭战事与朝局"
         onClick={onClose}
       />
       <section
@@ -130,9 +130,9 @@ export function SituationWorkbench({
         <header className="situation-workbench__masthead">
           <span className="situation-workbench__seal" aria-hidden="true"><ScrollText size={20} /></span>
           <div>
-            <span>跨季追踪 · 事实卷宗</span>
-            <strong>持续局势</strong>
-            <small id={descriptionId}>先看发生过什么，再沿着人物与史实查清前因后果。</small>
+            <span>史家案卷 · 正在发生</span>
+            <strong>战事与朝局</strong>
+            <small id={descriptionId}>先看人物做了什么，再按需查阅详细依据。</small>
           </div>
           <button
             type="button"
@@ -140,17 +140,17 @@ export function SituationWorkbench({
             aria-expanded={mobileDirectoryOpen}
             onClick={() => setMobileDirectoryOpen((value) => !value)}
           >
-            <ListTree size={16} aria-hidden="true" />切换局势<ChevronDown size={14} aria-hidden="true" />
+            <ListTree size={16} aria-hidden="true" />切换案卷<ChevronDown size={14} aria-hidden="true" />
           </button>
-          <button type="button" className="situation-workbench__close" onClick={onClose} aria-label="关闭持续局势">
+          <button type="button" className="situation-workbench__close" onClick={onClose} aria-label="关闭战事与朝局">
             <X size={20} aria-hidden="true" />
           </button>
         </header>
 
         <div className="situation-workbench__body">
-          <aside className="situation-workbench__directory" aria-label="局势目录">
+          <aside className="situation-workbench__directory" aria-label="案卷目录">
             <div className="situation-workbench__directory-heading">
-              <span>未结案</span>
+              <span>正在发生</span>
               <strong>{projection.openCount}</strong>
             </div>
             <ol>
@@ -158,7 +158,7 @@ export function SituationWorkbench({
                 <li key={item.id} data-resolved={item.status === 'resolved' || undefined}>
                   {index === projection.open.length && projection.recentResolved.length ? (
                     <div className="situation-workbench__directory-break">
-                      <span>近来结案</span><strong>{projection.resolvedCount}</strong>
+                      <span>近来结束</span><strong>{projection.resolvedCount}</strong>
                     </div>
                   ) : null}
                   <button
@@ -168,7 +168,7 @@ export function SituationWorkbench({
                     aria-current={item.id === projection.selectedId ? 'true' : undefined}
                     onClick={() => onSelectSituation(item.id)}
                   >
-                    <span>{item.typeLabel} · {item.status === 'resolved' ? '已结案' : '未结案'}</span>
+                    <span>{item.typeLabel} · {item.status === 'resolved' ? '已结束' : '进行中'}</span>
                     <strong>{item.title}</strong>
                     <small>{item.dateLabel}</small>
                   </button>
@@ -176,7 +176,7 @@ export function SituationWorkbench({
               ))}
             </ol>
             {projection.archivedResolvedCount ? (
-              <p>另有 {projection.archivedResolvedCount} 条旧案已折入冷档摘要，不伪造详情。</p>
+              <p>另有 {projection.archivedResolvedCount} 条旧案已收入往年史册。</p>
             ) : null}
           </aside>
 
@@ -188,11 +188,11 @@ export function SituationWorkbench({
             <header className="situation-workbench__title-block">
               <div className="situation-workbench__kicker">
                 <span>{detail.typeLabel}</span>
-                <span>{detail.status === 'resolved' ? '已结案' : '未结案'}</span>
+                <span>{detail.status === 'resolved' ? '已结束' : '进行中'}</span>
                 <span>{detail.startDateLabel}起</span>
               </div>
               <h2 id={titleId} ref={titleRef} tabIndex={-1}>{detail.title}</h2>
-              {detail.status === 'resolved' ? <span className="situation-workbench__resolved-stamp" aria-label="已结案">结案</span> : null}
+              {detail.status === 'resolved' ? <span className="situation-workbench__resolved-stamp" aria-label="已结束">已毕</span> : null}
               <div className="situation-workbench__progress-row">
                 {detail.type === 'war_progress' && onShowWarMap ? (
                   <button type="button" className="situation-workbench__war-map" onClick={onShowWarMap}>
@@ -205,11 +205,11 @@ export function SituationWorkbench({
                     className="situation-workbench__watch"
                     data-watched={isWatched || undefined}
                     aria-pressed={isWatched}
-                    aria-label={isWatched ? `取消关注局势：${detail.title}` : `关注局势：${detail.title}`}
+                    aria-label={isWatched ? `取消关注：${detail.title}` : `关注：${detail.title}`}
                     onClick={onToggleWatch}
                   >
                     <Star size={14} fill={isWatched ? 'currentColor' : 'none'} aria-hidden="true" />
-                    {isWatched ? '已关注' : '关注局势'}
+                    {isWatched ? '已关注' : '关注此事'}
                   </button>
                 ) : null}
               </div>
@@ -218,7 +218,7 @@ export function SituationWorkbench({
             <section className="situation-workbench__reading" aria-labelledby={`${titleId}-reading`}>
               <div className="situation-workbench__section-heading">
                 <BookOpenText size={15} aria-hidden="true" />
-                <h3 id={`${titleId}-reading`}>最近实事</h3>
+                <h3 id={`${titleId}-reading`}>最近进展</h3>
               </div>
               <p
                 className="situation-workbench__current-action"
@@ -253,7 +253,7 @@ export function SituationWorkbench({
 
               {detail.outcome ? (
                 <div className="situation-workbench__outcome">
-                  <span>结案所见</span>
+                  <span>最终结果</span>
                   <strong>{detail.outcome.label}</strong>
                   <p>{detail.outcome.summary}</p>
                   <small>{detail.startDateLabel} — {detail.endDateLabel} · 历时 {detail.durationLabel}</small>
@@ -269,7 +269,7 @@ export function SituationWorkbench({
               >
                 <summary id={`${titleId}-participants`}>
                   <UsersRound size={15} aria-hidden="true" />
-                  <span>相关各方</span>
+                  <span>相关人物与势力</span>
                   <small>
                     <span className="situation-workbench__participants-collapsed">
                       {detail.participants.reduce((count, group) => count + group.entities.length, 0)} 项 · 点开查看
@@ -327,7 +327,7 @@ export function SituationWorkbench({
             <section className="situation-workbench__timeline" aria-labelledby={`${titleId}-timeline`}>
               <div className="situation-workbench__section-heading">
                 <FileClock size={15} aria-hidden="true" />
-                <h3 id={`${titleId}-timeline`}>此前实事</h3>
+                <h3 id={`${titleId}-timeline`}>此前进展</h3>
                 <span>{Math.max(0, detail.scenes.length - 1)} 件</span>
               </div>
               {detail.scenes.length > 1 ? (
@@ -348,7 +348,7 @@ export function SituationWorkbench({
                           <button type="button" data-event-id={scene.historyEventIds[0]} onClick={() => onSelectHistoryEvent(scene.historyEventIds[0])}>
                             <GitBranch size={13} aria-hidden="true" />为何如此
                           </button>
-                        ) : <small>事实已经入卷，尚无独立史册条目</small>}
+                        ) : <small>此事暂未另立史页</small>}
                       </div>
                     </li>
                   ))}
@@ -360,7 +360,7 @@ export function SituationWorkbench({
               <section className="situation-workbench__consequences" aria-labelledby={`${titleId}-consequences`}>
                 <div className="situation-workbench__section-heading">
                   <Landmark size={15} aria-hidden="true" />
-                  <h3 id={`${titleId}-consequences`}>结案后果</h3>
+                  <h3 id={`${titleId}-consequences`}>结果所及</h3>
                 </div>
                 {detail.consequences.length ? (
                   <dl>
@@ -371,13 +371,12 @@ export function SituationWorkbench({
                       </div>
                     ))}
                   </dl>
-                ) : <p>本案没有可展示的直接状态差量。</p>}
-                <small>{detail.consequenceCoverage}</small>
+                ) : <p>此事没有留下可单列的权位或疆域变化。</p>}
               </section>
             ) : null}
 
             <details className="situation-workbench__evidence">
-              <summary><GitBranch size={15} aria-hidden="true" /><span>所据史实</span><small>{detail.evidence.length} 条记录</small></summary>
+              <summary><GitBranch size={15} aria-hidden="true" /><span>详细依据</span><small>{detail.evidence.length} 条记录</small></summary>
               <ol className="situation-workbench__fact-list">
                 {detail.evidence.map((fact) => (
                   <li key={fact.id} data-history-entry-id={fact.id}>

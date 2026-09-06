@@ -1,4 +1,4 @@
-import { Bookmark, BookmarkCheck, ChevronDown, Clock3, ScrollText } from 'lucide-react';
+import { Bookmark, BookmarkCheck, ChevronDown, ScrollText } from 'lucide-react';
 import { useState } from 'react';
 import type { ObserverLead } from '../view/observer-leads';
 import '../styles/observer-leads.css';
@@ -45,9 +45,9 @@ export function ObserverLeads({
       <header className="observer-leads__header">
         <span className="observer-leads__seal" aria-hidden="true"><ScrollText size={16} strokeWidth={1.6} /></span>
         <div>
-          <span>观察线索 · 现在看什么</span>
-          <h2 id="observer-leads-title">当世三问</h2>
-          <small>战争 · 人物 · 朝局</small>
+          <span>观察线索 · 现在发生什么</span>
+          <h2 id="observer-leads-title">眼下大事</h2>
+          <small>一条主线 · 两则侧闻</small>
         </div>
         {onOpenSituations && situationCount > 0 ? (
           <button
@@ -55,10 +55,10 @@ export function ObserverLeads({
             className="observer-leads__situation-shortcut"
             data-situation-workbench-trigger="true"
             data-history-destination="situation"
-            aria-label={`查看持续局势，共${situationCount}条可阅局势`}
+            aria-label={`查看战事与朝局，共${situationCount}条`}
             onClick={() => onOpenSituations()}
           >
-            {situationCount} 条局势
+            {situationCount} 件在进行
           </button>
         ) : null}
         <button
@@ -92,7 +92,7 @@ export function ObserverLeads({
             眼下暂无值得单列的战事或朝局；推进一季，再看世事如何落笔。
           </li>
         ) : null}
-        {leads.map((lead) => {
+        {leads.map((lead, index) => {
           const targetKey = observerLeadTargetKey(lead);
           const watchKey = observerLeadWatchKey(lead);
           const watched = watchedKeys.has(watchKey);
@@ -107,11 +107,12 @@ export function ObserverLeads({
               data-selected={selected || undefined}
               data-watched={watched || undefined}
               data-testid="observer-lead"
+              data-story-rank={index === 0 ? 'main' : 'side'}
             >
               <button
                 type="button"
                 className="observer-leads__inspect"
-                aria-label={`${lead.label}：${lead.question}。${lead.evidence.join('；')}。${lead.situationId ? '打开局势卷宗' : '查看对象'}`}
+                aria-label={`${index === 0 ? '主线' : '侧闻'}，${lead.label}：${lead.question}。${lead.evidence.join('；')}。打开详情`}
                 onClick={() => {
                   setMobileExpanded(false);
                   setMobileOpen(false);
@@ -119,15 +120,9 @@ export function ObserverLeads({
                 }}
               >
                 <span className="observer-leads__meta">
-                  <span>{lead.label}</span>
+                  <span>{index === 0 ? '主线' : '侧闻'} · {lead.label}</span>
                 </span>
                 <strong data-testid="observer-lead-question">{lead.question}</strong>
-                {lead.situationId ? (
-                  <span className="observer-leads__situation-age" data-testid="observer-lead-change">
-                    <Clock3 size={10} aria-hidden="true" />
-                    始于{lead.startedLabel} · 延续{lead.trackingTurns ?? 1}季 · {lead.recentChange}
-                  </span>
-                ) : null}
                 <span className="observer-leads__evidence" data-testid="observer-lead-fact">{lead.evidence.join(' · ')}</span>
               </button>
               <button
@@ -140,16 +135,16 @@ export function ObserverLeads({
                 aria-pressed={watched}
                 aria-label={watched
                   ? lead.situationId
-                    ? `取消关注局势：${lead.question}`
+                    ? `取消关注此事：${lead.question}`
                     : `取消关注这条线：${lead.question}`
                   : lead.situationId
-                    ? `关注局势：${lead.question}`
+                    ? `关注此事：${lead.question}`
                     : `关注这条线：${lead.question}`}
-                title={watched ? lead.situationId ? '取消关注局势' : '取消关注' : lead.situationId ? '关注此局势' : '关注此线'}
+                title={watched ? '取消关注' : '关注此事'}
                 onClick={() => onToggleWatch(lead)}
               >
                 {watched ? <BookmarkCheck size={15} aria-hidden="true" /> : <Bookmark size={15} aria-hidden="true" />}
-                <span>{watched ? lead.situationId ? '局势已关注' : '已关注' : lead.situationId ? '关注局势' : '关注'}</span>
+                <span>{watched ? '已关注' : '关注'}</span>
               </button>
             </li>
           );
@@ -157,7 +152,7 @@ export function ObserverLeads({
       </ol>
 
       <footer className="observer-leads__footer">
-        <p>{leads.length ? '选一件关注，推进下一季；有动向时会提醒并停下。' : '这里不会用空泛题目凑满三条。'}</p>
+        <p>{leads.length ? '关注一件事，推进下一季；有新动向时会停下。' : '没有值得说的事，就不凑数。'}</p>
       </footer>
     </aside>
   );

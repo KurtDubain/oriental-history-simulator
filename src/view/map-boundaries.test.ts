@@ -28,6 +28,7 @@ import { buildMapPresentation } from './map-presentation';
 import { buildMapLodScene } from './map-lod';
 import {
   createMapViewportTransform,
+  layoutMapArmyIcons,
   layoutMapPersonForces,
   layoutMapRegionNodes,
   panMapCamera,
@@ -58,6 +59,17 @@ function mapProjection(seed: string) {
       toMapPersonForces(world),
     ),
   };
+}
+
+function pointInPolygon(point: { x: number; y: number }, polygon: readonly { x: number; y: number }[]) {
+  let inside = false;
+  for (let current = 0, previous = polygon.length - 1; current < polygon.length; previous = current++) {
+    const a = polygon[current]!;
+    const b = polygon[previous]!;
+    if ((a.y > point.y) !== (b.y > point.y)
+      && point.x < ((b.x - a.x) * (point.y - a.y)) / (b.y - a.y) + a.x) inside = !inside;
+  }
+  return inside;
 }
 
 function quietSupplyRegion(world: WorldState) {
@@ -287,6 +299,58 @@ describe('map adapter boundary', () => {
 });
 
 describe('shared map scene hit boundary', () => {
+  it('keeps the whole person marker on land in the narrow regional view', () => {
+    const { presentation } = mapProjection('人物不落海');
+    const viewport = { width: 390, height: 644 };
+    const camera = zoomMapCameraAtPoint(
+      { zoom: 1, panX: 0, panY: 0 },
+      1.5,
+      { x: viewport.width / 2, y: viewport.height / 2 },
+      viewport.width,
+      viewport.height,
+    );
+    const transform = createMapViewportTransform(viewport.width, viewport.height, 8, camera);
+    const regionById = new Map(presentation.regions.map((region) => [region.id, region]));
+
+    for (const layout of layoutMapPersonForces(presentation.persons, transform)) {
+      const region = regionById.get(layout.person.regionId);
+      if (!region) throw new Error(`missing region ${layout.person.regionId}`);
+      for (let step = 0; step < 8; step += 1) {
+        const angle = step * Math.PI / 4;
+        const edge = screenToWorldPoint({
+          x: layout.point.x + Math.cos(angle) * layout.radius,
+          y: layout.point.y + Math.sin(angle) * layout.radius,
+        }, viewport.width, viewport.height, 8, camera);
+        expect(pointInPolygon(edge, region.polygon), `${layout.person.personName} marker left ${region.name}`).toBe(true);
+      }
+    }
+  });
+
+  it('makes only painted, unexpanded war formations interactive', () => {
+    const { presentation } = mapProjection('战局编队命中');
+    const army = presentation.armies[0];
+    const viewport = { width: 1210, height: 560 };
+    const transform = createMapViewportTransform(viewport.width, viewport.height);
+    const point = layoutMapArmyIcons([army], presentation.regions, transform)[0].point;
+    const closed = { ...buildMapLodScene(presentation, 'regional', {
+      focusedArmyIds: [army.id], formationMode: true,
+    }), persons: [], personClusters: [], fleets: [], markers: [] };
+
+    const hidden = resolveMapSceneHit(closed, point, viewport.width, viewport.height);
+    expect(hidden?.kind).not.toBe('army');
+    expect(resolveMapSceneHit(closed, point, viewport.width, viewport.height, undefined, {
+      includeArmies: true,
+    })).toMatchObject({ kind: 'army', army: { id: army.id } });
+
+    const expanded = { ...buildMapLodScene(presentation, 'regional', {
+      focusedArmyIds: [army.id], formationMode: true,
+      selectedObject: { kind: 'army', id: army.id },
+    }), persons: [], personClusters: [], fleets: [], markers: [] };
+    expect(resolveMapSceneHit(expanded, point, viewport.width, viewport.height, undefined, {
+      includeArmies: true,
+    })?.kind).not.toBe('army');
+  });
+
   it('uses the painted person force as the first interactive target', () => {
     const { presentation } = mapProjection('地图命中边界');
     const viewport = { width: 1210, height: 560 };

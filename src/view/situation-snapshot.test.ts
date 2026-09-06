@@ -184,9 +184,9 @@ describe('Situation observer snapshot', () => {
     expect(item).toMatchObject({
       id: situation.id,
       type: 'military_power_crisis',
-      typeLabel: '军权危机',
+      typeLabel: '军权归属',
       status: 'open',
-      statusLabel: '发展中',
+      statusLabel: '进行中',
       phase: 'active',
       phaseLabel: '发展',
       tension: 72,
@@ -329,8 +329,8 @@ describe('Situation observer snapshot', () => {
 
     expect(item).toMatchObject({
       type: 'inheritance_crisis',
-      typeLabel: '继承危机',
-      title: `${polity.shortName || polity.name}的继承危机`,
+      typeLabel: '君位承继',
+      title: `${polity.shortName || polity.name}的君位承继`,
       nextSignal: {
         key: 'watch_heir_designation',
         label: '观察统治家族是否出现合法候选人',
@@ -405,8 +405,8 @@ describe('Situation observer snapshot', () => {
 
     expect(item).toMatchObject({
       type: 'war_progress',
-      typeLabel: '战争进程',
-      title: `${attackerLabel}进攻${defenderLabel}的战争进程`,
+      typeLabel: '战事',
+      title: `${attackerLabel}攻${defenderLabel}`,
       nextSignal: {
         key: 'watch_war_score_and_control',
         label: '观察下一场战役是否扩大战果差距并改变州域控制权',

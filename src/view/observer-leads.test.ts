@@ -193,13 +193,12 @@ describe('observer story leads', () => {
     expect(new Set(leads.map((lead) => lead.primarySceneId)).size).toBe(leads.length);
   });
 
-  it('answers a war-progress question with the latest war scene instead of a dependent Agency scene', () => {
+  it('leads with the latest scene from the same war, never an indirect Agency scene', () => {
     const base = contestWorldAt(12);
     const situation = base.situationSystem.situations.find((item) => {
       if (item.status !== 'open' || item.type !== 'war_progress') return false;
       const scenes = projectSituationHistoricalScenes(base, item, 24, null, 'active');
-      return scenes.some((scene) => scene.id.startsWith('scene:war:'))
-        && scenes.some((scene) => scene.id.startsWith('scene:agency:'));
+      return scenes.some((scene) => scene.id.startsWith('scene:war:'));
     });
     expect(situation).toBeDefined();
     const world = withSituations(base, [situation as SituationState]);
@@ -208,10 +207,49 @@ describe('observer story leads', () => {
       .filter((fact) => lead.primarySourceFactIds.includes(fact.id))
       .map((fact) => fact.kind));
 
-    expect(lead.question).toContain('目前打到哪里');
+    expect(lead.question).not.toMatch(/目前打到哪里|为何|进程|？/u);
     expect(lead.primarySceneId).toMatch(/^scene:war:/u);
     expect([...sourceKinds].every((kind) => ['battle', 'territory_control_changed', 'war_started', 'war_ended'].includes(kind))).toBe(true);
     expect(lead.evidence.join('')).not.toMatch(/请令|未准|未应允/u);
+  });
+
+  it('never uses an unrelated battle as inheritance evidence even when it is listed as causal', () => {
+    const base = contestWorldAt(12);
+    const battle = base.facts.find((fact) => fact.kind === 'battle');
+    const source = base.situationSystem.situations[0];
+    if (!battle || !source) throw new Error('expected a battle and a Situation');
+    const polityId = battle.polityIds[0] ?? base.polities[0].id;
+    const actorId = battle.actorIds[0] ?? base.polities.find((item) => item.id === polityId)?.rulerId ?? base.characters[0].id;
+    const inheritance: SituationState = {
+      ...source,
+      id: 'situation-test-inheritance-no-battle',
+      type: 'inheritance_crisis',
+      scopeKey: polityId,
+      titleKey: 'situation.inheritance_crisis',
+      participants: {
+        ...source.participants,
+        coreCharacterIds: [actorId],
+        polityIds: [polityId],
+        armyIds: [],
+        fleetIds: [],
+      },
+      causalFactIds: [battle.id],
+      milestoneFactIds: [battle.id],
+      recentChanges: [{
+        turn: battle.turn,
+        kind: 'phase_changed',
+        tension: source.tension,
+        fromPhase: 'emerging',
+        toPhase: source.phase,
+        sourceFactIds: [battle.id],
+      }],
+    };
+
+    const scenes = projectSituationHistoricalScenes(base, inheritance, 24, null, 'active');
+    expect(scenes.flatMap((scene) => scene.sourceFactIds)).not.toContain(battle.id);
+    const lead = deriveObserverLeads(withSituations(base, [inheritance]))[0];
+    expect(lead?.primarySourceFactIds).not.toContain(battle.id);
+    expect(lead?.evidence.join('')).not.toContain('之战');
   });
 
   it('uses a one-quarter resolved echo only to fill an open-story vacancy', () => {
@@ -275,7 +313,7 @@ describe('observer story leads', () => {
     ));
     const majorLeads = deriveObserverLeads(withCurrentFacts(base, majorAppointments));
     expect(majorLeads).toHaveLength(1);
-    expect(majorLeads[0].question).toContain('兵权或朝局怎样变化');
+    expect(majorLeads[0].question).toContain('受任');
 
     const ended = appointmentFact(base, 'fact-test-a-ended', 'appointment_ended', '军团副将', holders[0].id, armies[0].id);
     const isolated = deriveObserverLeads(withCurrentFacts(base, [ended]));
@@ -310,7 +348,8 @@ describe('observer story leads', () => {
     expect(shuffled).toEqual(first);
     expect(new Set(first.map((item) => item.id)).size).toBe(first.length);
     expect(new Set(first.map((item) => item.primarySceneId)).size).toBe(first.length);
-    expect(first.every((item) => item.evidence.length === 2 && item.question.endsWith('？'))).toBe(true);
+    expect(first.every((item) => item.evidence.length === 2 && !item.question.endsWith('？'))).toBe(true);
+    expect(first.every((item) => !/为何|进程|卡在哪里/u.test(item.question))).toBe(true);
     expect(first.every((item) => targetExists(world, item.target.kind, item.target.id))).toBe(true);
     for (const lead of first.filter((item) => item.situationId)) {
       const situation = world.situationSystem.situations.find((item) => item.id === lead.situationId);

@@ -96,6 +96,8 @@ try {
     assert.ok(war, `${scenario.slug} 战局摘要必须与活动战争一致`);
     assert.equal(current.interface.overlay, 'war', `${scenario.slug} 打开战争应转入军争层`);
     assert.equal(await page.locator('.world-map').getAttribute('data-focused-war-id'), warId, `${scenario.slug} 舆图应聚焦同一战线`);
+    assert.equal(current.mapObjects.expandedFormationId, null, `${scenario.slug} 战局默认不展开人物部曲`);
+    assert.equal(current.mapObjects.personalForces.length, 0, `${scenario.slug} 战局默认只显示参战编队`);
 
     const projectedArmyIds = armiesIn(war).map((army) => army.id);
     const projectedPersonIds = personsIn(war).map((person) => person.id);
@@ -109,7 +111,7 @@ try {
       }
     }
     for (const army of armiesIn(war)) {
-      const participantSoldiers = current.mapObjects.personalForces
+      const participantSoldiers = personsIn(war)
         .filter((force) => force.formationId === army.id)
         .reduce((sum, force) => sum + force.soldiers, 0);
       assert.equal(army.soldiers, participantSoldiers, `${scenario.slug} ${army.name}编队兵力应等于人物部曲之和`);
@@ -127,6 +129,33 @@ try {
     }
     assert.doesNotMatch((await summary.textContent()) ?? '', /胜率|概率/u, `${scenario.slug} 战局不得伪造胜率`);
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-war-focus.png` });
+
+    const formation = current.mapObjects.armies[0];
+    assert.ok(formation?.position, `${scenario.slug} 战局应有可点击的编队锚点`);
+    const clickPoint = await page.evaluate(({ position, camera }) => {
+      const canvas = document.querySelector('.world-map__canvas');
+      const map = document.querySelector('.world-map');
+      const width = canvas.clientWidth;
+      const height = canvas.clientHeight;
+      const padding = 8;
+      const baseScale = Math.min((width - padding * 2) / 1000, (height - padding * 2) / 700);
+      return {
+        x: (width - 1000 * baseScale) / 2 + camera.panX + Number(map.dataset.focusOffsetX ?? 0) + position[0] * baseScale * camera.zoom,
+        y: (height - 700 * baseScale) / 2 + camera.panY + Number(map.dataset.focusOffsetY ?? 0) + position[1] * baseScale * camera.zoom,
+      };
+    }, { position: formation.position, camera: current.interface.mapViewport });
+    await page.locator('.world-map__canvas').click({ position: clickPoint });
+    await page.waitForFunction((armyId) => JSON.parse(window.render_game_to_text()).mapObjects.expandedFormationId === armyId, formation.id);
+    current = await snapshot(page);
+    assert.ok(current.mapObjects.personalForces.length > 0, `${scenario.slug} 点开编队后应显示其人物部曲`);
+    assert.ok(current.mapObjects.personalForces.every((person) => person.formationId === formation.id), `${scenario.slug} 只能展开当前编队`);
+    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-formation-expanded.png` });
+    if (scenario.viewport.width <= 840) {
+      await page.getByTestId('map-quick-look-details').click();
+    }
+    await page.locator('[data-inspector-close]').click();
+    await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).mapObjects.expandedFormationId === null);
+    current = await snapshot(page);
 
     const observedArmyIds = new Set(projectedArmyIds);
     const movedArmyIds = new Set();

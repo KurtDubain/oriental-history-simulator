@@ -1,4 +1,5 @@
 import type {
+  MapArmyView,
   MapFleetView,
   MapLodScene,
   MapMarkerView,
@@ -10,6 +11,7 @@ import { foodDescription, formatPopulation, terrainLabel } from './map-renderer'
 
 export type MapHoverState =
   | { kind: 'region'; region: MapRegionView; x: number; y: number }
+  | { kind: 'army'; army: MapArmyView; x: number; y: number }
   | { kind: 'person'; person: MapPersonForceView; x: number; y: number }
   | { kind: 'personCluster'; cluster: MapLodScene['personClusters'][number]; x: number; y: number }
   | { kind: 'fleet'; fleet: MapFleetView; x: number; y: number }
@@ -39,6 +41,15 @@ export function mapHoverReading(hover: MapHoverState | null, overlay: MapOverlay
       ['部曲', formatPopulation(hover.person.soldiers)],
       ['归属', hover.person.formationName ?? '独立驻留'],
       ['节制', hover.person.isCommander ? '自领' : hover.person.commanderName ?? '无'],
+    ],
+  };
+  if (hover.kind === 'army') return {
+    name: hover.army.name,
+    type: '出征编队 · 点击展开',
+    rows: [
+      ['主将', hover.army.lawfulCommanderName ?? '暂缺'],
+      ['兵力', formatPopulation(hover.army.strength)],
+      ['军令', hover.army.orderKind === 'retreat' ? '撤退' : hover.army.orderKind === 'advance' ? '进军' : hover.army.orderKind === 'intercept' ? '截击' : hover.army.orderKind === 'reinforce' ? '驰援' : '驻守'],
     ],
   };
   if (hover.kind === 'personCluster') return {

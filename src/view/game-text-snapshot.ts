@@ -348,6 +348,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     selectedRegionId: options.selection?.kind === 'region' ? options.selection.id : null,
     selectedObject: options.selection ? { kind: options.selection.kind, id: options.selection.id } : null,
     focusedArmyIds,
+    formationMode: options.overlay === 'war',
   });
   const importantRegions = world.regions
     .slice()
@@ -639,6 +640,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
           recentMovement: army.recentMovement,
           orderPath: army.orderPathRegionIds,
         })),
+      expandedFormationId: mapScene.expandedArmyId,
       personalForces: mapScene.persons.map((person) => ({
         ownerId: person.id,
         name: person.personName,
