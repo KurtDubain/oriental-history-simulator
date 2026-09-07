@@ -410,12 +410,14 @@ function drawFleets(
   transform: MapViewportTransform,
   selectedObject: MapSelectedObject,
   focusedWarId: string | null,
+  overlay: MapOverlay,
 ) {
   for (const fleet of fleets) {
     const point = worldToScreen(fleet.position, transform);
     const selected = selectedObject?.kind === "fleet" && selectedObject.id === fleet.id;
     context.save();
-    if (focusedWarId && fleet.warId !== focusedWarId) context.globalAlpha = 0.2;
+    if (focusedWarId && fleet.warId !== focusedWarId) context.globalAlpha = 0.16;
+    else if (overlay === 'political' && !selected) context.globalAlpha = 0.42;
     context.translate(point.x, point.y);
     if (selected) drawSelectionHalo(context, 11);
     context.fillStyle = PAPER_LIGHT;
@@ -1142,6 +1144,7 @@ export function drawWorldMap(
   for (const { cluster, point, radius } of layoutMapPersonClusters(scene.personClusters ?? [], transform)) {
     const strength = shortStrength(cluster.soldiers);
     context.save();
+    context.globalAlpha = overlay === 'political' ? 0.78 : 1;
     context.fillStyle = PAPER_LIGHT; context.strokeStyle = cluster.polityColor; context.lineWidth = 1.8;
     context.beginPath(); context.arc(point.x, point.y, radius, 0, Math.PI * 2); context.fill(); context.stroke();
     const labelY = point.y + radius + 3;
@@ -1152,13 +1155,15 @@ export function drawWorldMap(
       occupiedLabels[cell] = true;
       context.font = '650 8px "Noto Serif SC", serif'; context.textAlign = 'center'; context.textBaseline = 'top';
       context.lineWidth = 3; context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
-      const label = `${cluster.leaderName}等${cluster.count}人 · ${strength}`;
+      const label = scene.level === 'overview'
+        ? `${cluster.count}将`
+        : `${cluster.leaderName}等${cluster.count}人 · ${strength}`;
       context.strokeText(label, point.x, labelY); context.fillText(label, point.x, labelY);
     }
     context.restore();
   }
 
-  drawFleets(context, fleets, transform, selectedObject, focusedWarId);
+  drawFleets(context, fleets, transform, selectedObject, focusedWarId, overlay);
 
   context.restore();
   if (width >= 720) drawLegend(context, width, height, overlay, regions);

@@ -1,5 +1,6 @@
 import {
   Archive,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Clock3,
@@ -109,6 +110,7 @@ export function HistoryWorkbench({
   const titleId = useId();
   const descriptionId = useId();
   const dialogRef = useRef<HTMLElement>(null);
+  const filterToggleRef = useRef<HTMLButtonElement>(null);
   const searchRef = useRef<HTMLInputElement>(null);
   const eventButtonRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const previousWorldTurnRef = useRef(world.turn);
@@ -121,6 +123,7 @@ export function HistoryWorkbench({
   );
   const [page, setPage] = useState(0);
   const [activeEventIndex, setActiveEventIndex] = useState(0);
+  const [filtersExpanded, setFiltersExpanded] = useState(false);
   const [scanState, setScanState] = useState<HistoryScanState>({
     identity: null,
     events: [],
@@ -244,7 +247,9 @@ export function HistoryWorkbench({
   useDialogLayer({
     open,
     containerRef: dialogRef,
-    initialFocusRef: searchRef,
+    initialFocusRef: typeof window !== 'undefined' && window.matchMedia('(max-width: 700px)').matches
+      ? filterToggleRef
+      : searchRef,
     onClose,
     returnFocusTo,
   });
@@ -265,7 +270,7 @@ export function HistoryWorkbench({
     setCategory('all');
     setMinimumImportance(1);
     setRelatedValue('');
-    requestAnimationFrame(() => searchRef.current?.focus());
+    setFiltersExpanded(false);
   }, []);
 
   const handleEventKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
@@ -283,6 +288,10 @@ export function HistoryWorkbench({
   if (!open || !snapshot) return null;
 
   const hasFilters = Boolean(query || category !== 'all' || minimumImportance > 1 || relatedValue);
+  const filterCount = Number(Boolean(query.trim()))
+    + Number(category !== 'all')
+    + Number(minimumImportance > 1)
+    + Number(Boolean(relatedValue));
   const isHistorical = selectedTurn !== world.turn;
 
   return (
@@ -346,8 +355,24 @@ export function HistoryWorkbench({
         </div>
 
         <div className="history-workbench__body">
-          <aside className="history-workbench__filters" aria-label="史事筛选">
-            <div className="history-workbench__section-title"><Filter size={13} aria-hidden="true" />筛选史册</div>
+          <aside
+            className="history-workbench__filters"
+            data-mobile-expanded={filtersExpanded || undefined}
+            aria-label="史事筛选"
+          >
+            <button
+              ref={filterToggleRef}
+              type="button"
+              className="history-workbench__filter-toggle"
+              aria-expanded={filtersExpanded}
+              onClick={() => setFiltersExpanded((current) => !current)}
+            >
+              <span><Filter size={14} aria-hidden="true" />筛选史册</span>
+              <small>{filterCount ? `已启用 ${filterCount} 项条件` : '全部记录'}</small>
+              <ChevronDown size={16} aria-hidden="true" />
+            </button>
+            <div className="history-workbench__filter-controls">
+              <div className="history-workbench__section-title"><Filter size={13} aria-hidden="true" />筛选史册</div>
             <label className="history-workbench__search">
               <span>全文检索</span>
               <span>
@@ -359,13 +384,19 @@ export function HistoryWorkbench({
                   placeholder="人名、地点、因由……"
                   autoComplete="off"
                   onChange={(event) => setQuery(event.currentTarget.value)}
+                  onKeyDown={(event) => {
+                    if (event.key === 'Enter') setFiltersExpanded(false);
+                  }}
                 />
               </span>
             </label>
 
             <label>
               <span>史事类别</span>
-              <select value={category} onChange={(event) => setCategory(event.currentTarget.value as EventCategory | 'all')}>
+              <select value={category} onChange={(event) => {
+                setCategory(event.currentTarget.value as EventCategory | 'all');
+                setFiltersExpanded(false);
+              }}>
                 <option value="all">全部类别</option>
                 {HISTORY_EVENT_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
               </select>
@@ -373,7 +404,10 @@ export function HistoryWorkbench({
 
             <label>
               <span>最低重要度</span>
-              <select value={minimumImportance} onChange={(event) => setMinimumImportance(Number(event.currentTarget.value))}>
+              <select value={minimumImportance} onChange={(event) => {
+                setMinimumImportance(Number(event.currentTarget.value));
+                setFiltersExpanded(false);
+              }}>
                 <option value={1}>全部记载</option>
                 <option value={2}>二等以上</option>
                 <option value={3}>三等以上</option>
@@ -384,7 +418,10 @@ export function HistoryWorkbench({
 
             <label>
               <span>相关对象</span>
-              <select value={relatedValue} onChange={(event) => setRelatedValue(event.currentTarget.value)}>
+              <select value={relatedValue} onChange={(event) => {
+                setRelatedValue(event.currentTarget.value);
+                setFiltersExpanded(false);
+              }}>
                 <option value="">全部人物与地域</option>
                 {ENTITY_GROUPS.map((group) => {
                   const options = relatedOptions.filter((option) => option.kind === group.kind);
@@ -404,6 +441,7 @@ export function HistoryWorkbench({
             <button type="button" className="history-workbench__clear" disabled={!hasFilters} onClick={clearFilters}>
               清除筛选
             </button>
+            </div>
           </aside>
 
           <main

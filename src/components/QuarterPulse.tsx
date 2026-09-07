@@ -54,14 +54,10 @@ export function QuarterPulse({
         data-compact={compact || undefined}
         data-presentation={compact ? 'condensed' : 'full'}
         data-testid="quarter-pulse"
-        aria-label="季报尚未生成"
+        aria-label="开始演变"
       >
-        <div className="quarter-pulse__date">
-          <span className="quarter-pulse__kicker">本季变化</span>
-          <strong>史页未启</strong>
-        </div>
         <p className="quarter-pulse__waiting" data-testid="quarter-pulse-waiting">
-          推进一季后，此处将留下人口、粮食、财富与史事的确切变化。
+          开始演变，看看第一季发生什么。
         </p>
       </section>
     );
@@ -88,6 +84,11 @@ export function QuarterPulse({
     },
   ];
   const visibleStories = stories.slice(0, MAX_QUARTER_PULSE_STORIES);
+  const strongestLedger = [...ledgers].sort((left, right) => (
+    Math.abs(right.delta) - Math.abs(left.delta)
+  ))[0];
+  const compactHeadline = visibleStories[0]?.title
+    ?? (strongestLedger ? `${strongestLedger.label} ${formatSigned(strongestLedger.delta)}` : '本季无大事');
 
   return (
     <section
@@ -104,6 +105,7 @@ export function QuarterPulse({
         <span className="quarter-pulse__kicker">本季变化</span>
         <strong id={`${tooltipId}-heading`}>第 {report.year} 年 · {report.season}季</strong>
         <small>第 {report.turn + 1} 季记</small>
+        <span className="quarter-pulse__compact-headline">{compactHeadline}</span>
       </header>
 
       <div className="quarter-pulse__ledgers" aria-label="本季总账净变化">

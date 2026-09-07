@@ -128,6 +128,11 @@ try {
       }
     }
     assert.doesNotMatch((await summary.textContent()) ?? '', /胜率|概率/u, `${scenario.slug} 战局不得伪造胜率`);
+    if (scenario.viewport.width <= 760) {
+      const pulseHeight = await page.getByTestId('quarter-pulse').evaluate((element) => element.getBoundingClientRect().height);
+      assert.ok(pulseHeight <= 52, `${scenario.slug} 展开战局时季报必须保持紧凑`);
+      assert.equal(await page.locator('.observer-leads:visible, .observer-inspector:visible').count(), 0, `${scenario.slug} 战局摘要不得叠加其他阅读面`);
+    }
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-war-focus.png` });
 
     const formation = current.mapObjects.armies[0];
@@ -149,6 +154,9 @@ try {
     current = await snapshot(page);
     assert.ok(current.mapObjects.personalForces.length > 0, `${scenario.slug} 点开编队后应显示其人物部曲`);
     assert.ok(current.mapObjects.personalForces.every((person) => person.formationId === formation.id), `${scenario.slug} 只能展开当前编队`);
+    if (scenario.viewport.width <= 760) {
+      assert.equal(await page.locator('.war-focus-summary:visible, .observer-leads:visible').count(), 0, `${scenario.slug} 编队速览不得叠加其他阅读面`);
+    }
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-formation-expanded.png` });
     if (scenario.viewport.width <= 840) {
       await page.getByTestId('map-quick-look-details').click();

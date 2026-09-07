@@ -339,6 +339,27 @@ async function openChronicleEventAndEscape(page, scenario) {
   await assertSingleModalAndShell(page, scenario, '天下史册', '.history-workbench');
   await page.screenshot({ path: artifactPath(scenario, 'chronicle'), fullPage: false });
 
+  if (scenario.viewport.width <= 700) {
+    const filterToggle = page.locator('.history-workbench__filter-toggle');
+    const filterControls = page.locator('.history-workbench__filter-controls');
+    assert.equal(
+      await filterToggle.evaluate((element) => document.activeElement === element),
+      true,
+      `${scenario.slug} 史册打开后应先聚焦可见的筛选摘要`,
+    );
+    assert.equal(await filterToggle.getAttribute('aria-expanded'), 'false', `${scenario.slug} 史册筛选默认收起`);
+    assert.equal(await filterControls.isVisible(), false, `${scenario.slug} 史册正文应先于完整筛选`);
+    await page.screenshot({ path: artifactPath(scenario, 'chronicle-filters-collapsed'), fullPage: false });
+    await activate(filterToggle, scenario);
+    assert.equal(await filterToggle.getAttribute('aria-expanded'), 'true', `${scenario.slug} 可展开史册筛选`);
+    assert.equal(await filterControls.isVisible(), true, `${scenario.slug} 展开后应显示完整筛选`);
+    await page.screenshot({ path: artifactPath(scenario, 'chronicle-filters-expanded'), fullPage: false });
+    await page.locator('.history-workbench__filters select').first().selectOption('军事');
+    assert.equal(await filterToggle.getAttribute('aria-expanded'), 'false', `${scenario.slug} 执行筛选后自动收起`);
+    await activate(filterToggle, scenario);
+    await page.locator('.history-workbench__filters select').first().selectOption('all');
+  }
+
   const eventEntry = page.locator('.history-workbench__event-list > li > button').first();
   assert.ok(await eventEntry.count(), `${scenario.slug} 天下史册必须有可追溯史事`);
   await assertTouchTarget(eventEntry, scenario, '天下史册史事入口');

@@ -1099,9 +1099,10 @@ export function App() {
   }, [openCausalEvent]);
 
   const handleViewChange = useCallback((nextView: ObserverView) => {
+    if (nextView === activeView) return;
     playback.pause();
     clearRosterDossier(); navigation.goToView(nextView);
-  }, [clearRosterDossier, navigation, playback]);
+  }, [activeView, clearRosterDossier, navigation, playback]);
 
   const handleCloseHistoryWorkbench = useCallback(() => {
     navigation.goToView('world');
@@ -1768,7 +1769,9 @@ export function App() {
           data-mobile-inspector-mode={inspector ? mobileInspectorExpanded ? 'full' : 'quick' : 'closed'}
           data-map-gesture-active={mapGestureActive || undefined}
           data-war-focus-open={Boolean(focusedWar && overlay === 'war') || undefined}
-          data-focus-open={activeView === 'world' && !historicalView && !inspector || undefined}
+          data-focus-open={activeView === 'world' && !historicalView && !inspector && observerLeads.length > 0 || undefined}
+          data-playback-running={running || undefined}
+          data-quarter-empty={!world.lastTurn || undefined}
           data-motion={interfaceSettings.motion}
           data-interface-density={interfaceSettings.interfaceDensity}
           data-map-atmosphere={interfaceSettings.mapAtmosphere || undefined}
@@ -2024,7 +2027,7 @@ export function App() {
             ) : null}
           </section>
 
-          {activeView === 'world' && !historicalView && !inspector ? (
+          {activeView === 'world' && !historicalView && !inspector && observerLeads.length > 0 ? (
             <ObserverLeads
               leads={observerLeads}
               watchedKeys={followed}
@@ -2041,7 +2044,8 @@ export function App() {
           <QuarterPulse
             key={world.lastTurn?.turn ?? 'unwritten'}
             report={world.lastTurn}
-            stories={quarterPulseProjection.stories} compact={Boolean(inspector) && mobileInspectorExpanded && compactRosterDossier}
+            stories={quarterPulseProjection.stories}
+            compact={running || (compactRosterDossier && Boolean(inspector || (focusedWar && overlay === 'war')))}
             onSelectEvent={selectQuarterEvent}
             onSelectSituation={handleOpenSituationWorkbench}
             onSelectLedger={selectQuarterLedger}

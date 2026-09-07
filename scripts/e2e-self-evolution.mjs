@@ -49,7 +49,11 @@ async function openAndCloseCurrentStory(page, mobile, artifactPrefix) {
   if (mobile) {
     const toggle = page.getByTestId('observer-leads-mobile-toggle');
     if (await toggle.isVisible()) await toggle.click();
+    const pulseHeight = await page.getByTestId('quarter-pulse').evaluate((element) => element.getBoundingClientRect().height);
+    assert.ok(pulseHeight <= 52, `${artifactPrefix} 展开眼下大事时季报必须保持紧凑`);
+    assert.equal(await page.locator('.war-focus-summary:visible, .observer-inspector:visible').count(), 0, `${artifactPrefix} 眼下大事不得叠加其他阅读面`);
   }
+  await page.screenshot({ path: `${ARTIFACT_DIR}/${artifactPrefix}-leads.png`, fullPage: false });
   await page.locator('[data-testid="observer-lead"] .observer-leads__inspect').first().click();
   const reading = await readState(page);
   assert.equal(reading.playback.running, false, `${artifactPrefix} 主动阅读必须先暂停`);
@@ -102,6 +106,8 @@ try {
     assert.equal(initial.time.turn, 0);
     assert.equal(initial.observer.primerOpen, false, `${scenario.slug} 不应强制打开读图`);
     assert.equal(initial.interface.selected, null, `${scenario.slug} 首屏不应抢开档案`);
+    assert.equal(await page.locator('.observer-leads').count(), 0, `${scenario.slug} T0 不应保留空线索栏`);
+    assert.equal(await page.getByTestId('quarter-pulse-waiting').textContent(), '开始演变，看看第一季发生什么。');
     await page.getByRole('button', { name: '开始演变' }).waitFor();
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-initial.png`, fullPage: false });
 
@@ -110,9 +116,18 @@ try {
     const firstRun = await advanceWhileRunning(page, 6);
     assert.equal(firstRun.unexpectedStops, 0, `${scenario.slug} T0→T6 不得自动停表`);
     assert.equal(firstRun.current.playback.running, true);
+    assert.equal(await page.getByTestId('quarter-pulse').getAttribute('data-presentation'), 'condensed', `${scenario.slug} 演变中季报应进入观看态`);
+    const beforeActiveWorldClick = await readState(page);
+    await page.locator('[data-observer-view="world"]').click();
+    const afterActiveWorldClick = await readState(page);
+    assert.equal(afterActiveWorldClick.playback.running, true, `${scenario.slug} 重复点击当前世界页不得暂停`);
+    assert.equal(afterActiveWorldClick.interface.view, 'world');
+    assert.deepEqual(afterActiveWorldClick.interface.mapViewport, beforeActiveWorldClick.interface.mapViewport);
+    assert.equal(afterActiveWorldClick.interface.selected, beforeActiveWorldClick.interface.selected);
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-running-t6.png`, fullPage: false });
 
     await openAndCloseCurrentStory(page, scenario.mobile, scenario.slug);
+    assert.equal(await page.getByTestId('quarter-pulse').getAttribute('data-presentation'), 'full', `${scenario.slug} 暂停阅读后季报应恢复完整`);
     await page.getByRole('button', { name: '继续演变' }).click();
     const secondRun = await advanceWhileRunning(page, 12);
     assert.equal(secondRun.unexpectedStops, 0, `${scenario.slug} T6→T12 不得自动停表`);

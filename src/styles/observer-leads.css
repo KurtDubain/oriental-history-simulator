@@ -67,9 +67,9 @@
 .observer-leads__header > div > span {
   grid-column: 1 / -1;
   color: var(--observer-vermilion-dark, #79271f);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 800;
-  letter-spacing: .16em;
+  letter-spacing: .08em;
 }
 
 .observer-leads__header h2 {
@@ -82,8 +82,8 @@
 
 .observer-leads__header small {
   overflow: hidden;
-  color: var(--observer-ink-faint, #858174);
-  font-size: 9px;
+  color: var(--observer-ink-faint, #716e63);
+  font-size: 11px;
   font-weight: 650;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -99,7 +99,7 @@
   border-radius: 2px;
   color: var(--observer-ink-soft, #656357);
   background: rgb(255 251 239 / 38%);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 700;
   cursor: pointer;
 }
@@ -115,8 +115,9 @@
   border: 1px solid rgb(126 42 34 / 24%);
   border-radius: 2px;
   color: var(--observer-vermilion-dark, #79271f);
-  font-size: 9px;
+  font-size: 11px;
   font-weight: 780;
+  white-space: nowrap;
   background: rgb(156 53 43 / 6%);
   cursor: pointer;
 }
@@ -208,10 +209,10 @@
   min-width: 0;
   align-items: center;
   gap: 6px;
-  color: var(--observer-ink-faint, #858174);
-  font-size: 8px;
+  color: var(--observer-ink-faint, #716e63);
+  font-size: 11px;
   font-weight: 760;
-  letter-spacing: .08em;
+  letter-spacing: .03em;
   white-space: nowrap;
 }
 
@@ -240,8 +241,8 @@
 .observer-leads__evidence,
 .observer-leads__situation-age {
   overflow: hidden;
-  color: var(--observer-ink-faint, #858174);
-  font-size: 9px;
+  color: var(--observer-ink-faint, #716e63);
+  font-size: 11px;
   line-height: 1.5;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -267,8 +268,8 @@
   justify-items: center;
   gap: 4px;
   border-left: 1px solid rgb(47 45 38 / 12%);
-  color: var(--observer-ink-faint, #858174);
-  font-size: 8px;
+  color: var(--observer-ink-faint, #716e63);
+  font-size: 11px;
   font-weight: 740;
   letter-spacing: .04em;
 }
@@ -285,8 +286,8 @@
 .observer-leads__footer {
   padding: 9px 12px 9px 16px;
   border-top: 1px solid rgb(47 45 38 / 13%);
-  color: var(--observer-ink-faint, #858174);
-  font-size: 8px;
+  color: var(--observer-ink-faint, #716e63);
+  font-size: 11px;
   line-height: 1.45;
   letter-spacing: .02em;
 }

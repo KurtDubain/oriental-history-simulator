@@ -4,7 +4,7 @@
   --observer-paper-deep: #d8ceb5;
   --observer-ink: #272822;
   --observer-ink-soft: #656357;
-  --observer-ink-faint: #8a8677;
+  --observer-ink-faint: #777368;
   --observer-line: rgb(48 47 40 / 16%);
   --observer-line-strong: rgb(48 47 40 / 28%);
   --observer-vermilion: #9c352b;
@@ -3537,7 +3537,7 @@ button.observer-causal-chain__evidence:hover {
 }
 
 .war-focus-summary header { display: grid; grid-template-columns: 1fr auto; gap: 2px 8px; }
-.war-focus-summary header > span { display: flex; align-items: center; gap: 5px; color: #8f342b; font-size: 10px; font-weight: 760; letter-spacing: .12em; }
+.war-focus-summary header > span { display: flex; align-items: center; gap: 5px; color: #8f342b; font-size: 11px; font-weight: 760; letter-spacing: .06em; }
 .war-focus-summary header > strong, .war-focus-summary header > small { grid-column: 1 / -1; }
 .war-focus-summary header > strong { font: 650 17px "Noto Serif SC", serif; }
 .war-focus-summary header > small { color: #696457; }
@@ -3547,11 +3547,11 @@ button.observer-causal-chain__evidence:hover {
 .war-focus-summary__sides > section { padding: 8px; border-top: 2px solid #a33a2e; background: rgba(255, 253, 245, 0.46); }
 .war-focus-summary__sides > section[data-role="守方"] { border-color: #586d68; }
 .war-focus-summary__sides > section > div:first-child { display: flex; justify-content: space-between; gap: 6px; font-size: 11px; }
-.war-focus-summary__groups > summary { min-height: 30px; padding-top: 7px; color: #756d60; cursor: pointer; font-size: 10px; }
+.war-focus-summary__groups > summary { min-height: 30px; padding-top: 7px; color: #676156; cursor: pointer; font-size: 11px; }
 .war-focus-summary__group { margin-top: 7px; padding-top: 6px; border-top: 1px solid rgba(77, 71, 61, 0.16); }
 .war-focus-summary__group > span { display: block; font-weight: 650; font-size: 12px; }
-.war-focus-summary__group > small { display: block; margin: 2px 0 4px; color: #6b6559; font-size: 10px; }
-.war-focus-summary__group button { min-height: 30px; padding: 3px 0; border: 0; background: transparent; color: #473f35; font-size: 10px; text-align: left; text-decoration: underline; text-decoration-color: rgba(71, 63, 53, 0.25); }
+.war-focus-summary__group > small { display: block; margin: 2px 0 4px; color: #5e594f; font-size: 11px; }
+.war-focus-summary__group button { min-height: 30px; padding: 3px 0; border: 0; background: transparent; color: #473f35; font-size: 11px; text-align: left; text-decoration: underline; text-decoration-color: rgba(71, 63, 53, 0.25); }
 .war-focus-summary__contact { margin: 8px 0 0; padding: 7px 8px 7px 10px; border-left: 2px solid rgba(163, 58, 46, .52); background: rgba(163, 58, 46, 0.065); font-size: 11px; line-height: 1.55; }
 .war-focus-summary__contact strong { margin-right: 6px; color: #96382e; }
 .war-focus-summary__mobile-copy { display: none; }
@@ -3571,7 +3571,7 @@ button.observer-causal-chain__evidence:hover {
   .war-focus-summary__sides { gap: 5px; }
   .war-focus-summary__sides > section { padding: 6px; }
   .war-focus-summary header > strong { font-size: 16px; }
-  .war-focus-summary__contact { margin-top: 5px; padding: 5px 6px 5px 8px; font-size: 10px; line-height: 1.4; }
+  .war-focus-summary__contact { margin-top: 5px; padding: 5px 6px 5px 8px; font-size: 11px; line-height: 1.4; }
   .war-focus-summary__battle { min-height: 44px; }
   .war-focus-summary__wide-copy { display: none; }
   .war-focus-summary__mobile-copy { display: inline; }

@@ -52,6 +52,9 @@ describe('HistoryWorkbench shell', () => {
     expect(openMarkup).toContain('type="search"');
     expect(openMarkup).toContain('type="range"');
     expect(openMarkup).toContain('历史事件检索结果');
+    expect(openMarkup).toContain('history-workbench__filter-toggle');
+    expect(openMarkup).toContain('aria-expanded="false"');
+    expect(openMarkup).toContain('全部记录');
     expect(openMarkup).toContain('为何如此');
     expect(openMarkup).not.toContain('查明因果');
 

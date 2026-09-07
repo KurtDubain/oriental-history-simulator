@@ -45,7 +45,7 @@ export function ObserverLeads({
       <header className="observer-leads__header">
         <span className="observer-leads__seal" aria-hidden="true"><ScrollText size={16} strokeWidth={1.6} /></span>
         <div>
-          <span>观察线索 · 现在发生什么</span>
+          <span>世事正在演变</span>
           <h2 id="observer-leads-title">眼下大事</h2>
           <small>一条主线 · 两则侧闻</small>
         </div>
@@ -58,7 +58,7 @@ export function ObserverLeads({
             aria-label={`查看战事与朝局，共${situationCount}条`}
             onClick={() => onOpenSituations()}
           >
-            {situationCount} 件在进行
+            {situationCount} 件
           </button>
         ) : null}
         <button

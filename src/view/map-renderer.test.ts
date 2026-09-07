@@ -5,6 +5,7 @@ import type {
   MapArmyView,
   MapLodScene,
   MapMarkerView,
+  MapPersonForceClusterView,
   MapPersonForceView,
   MapRegionView,
   MapSeaZoneView,
@@ -123,6 +124,7 @@ function scene(options: {
   seaZones?: MapSeaZoneView[];
   markers?: MapMarkerView[];
   armies?: MapArmyView[];
+  personClusters?: MapPersonForceClusterView[];
   interactiveSeaZoneIds?: ReadonlySet<string>;
 } = {}): MapLodScene {
   const regions = options.regions ?? [];
@@ -134,7 +136,7 @@ function scene(options: {
     routes: [],
     armies: options.armies ?? [],
     persons: [],
-    personClusters: [],
+    personClusters: options.personClusters ?? [],
     seaZones,
     fleets: [],
     markers: options.markers ?? [],
@@ -154,6 +156,40 @@ afterAll(() => {
 });
 
 describe('map renderer LOD contract', () => {
+  it('keeps overview person power visible without permanent names and force totals', () => {
+    const capital = region('capital', '云京', { x: 440, y: 230 }, {
+      polityId: 'polity_cloud', polityName: '云岚国', capital: true, cityLevel: 4,
+    });
+    const cluster: MapPersonForceClusterView = {
+      id: 'person-cluster:polity_cloud',
+      regionId: capital.id,
+      position: capital.center,
+      leaderName: '沈砚',
+      personIds: ['person-1', 'person-2'],
+      count: 24,
+      soldiers: 24_000,
+      polityId: 'polity_cloud',
+      polityColor: '#52694d',
+    };
+    const context = recordingContext();
+
+    drawWorldMap(
+      context,
+      { width: 390, height: 644, dpr: 1 },
+      scene({ regions: [capital], personClusters: [cluster] }),
+      'political',
+      [],
+      null,
+      null,
+      undefined,
+      { zoom: 1, panX: 0, panY: 0 },
+    );
+
+    const labels = context.fillTexts.map((call) => call.text);
+    expect(labels).toContain('24将');
+    expect(labels).not.toContain('沈砚等24人 · 2.4万');
+  });
+
   it('draws the full sea theatre inside the unified military overlay', () => {
     const seaZones: MapSeaZoneView[] = [
       {

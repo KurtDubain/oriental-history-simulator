@@ -88,6 +88,20 @@ function event(
 }
 
 describe('QuarterPulse Situation stream', () => {
+  it('uses one light T0 prompt instead of two empty histories', () => {
+    const markup = renderToStaticMarkup(createElement(QuarterPulse, {
+      report: null,
+      stories: [],
+      onSelectEvent: () => undefined,
+      onSelectSituation: () => undefined,
+      onSelectLedger: () => undefined,
+    }));
+
+    expect(markup).toContain('开始演变，看看第一季发生什么。');
+    expect(markup).not.toContain('史页未启');
+    expect(markup).not.toContain('推进一季后');
+  });
+
   it('puts bounded Situation changes before ordinary history and exposes a dossier action', () => {
     const markup = renderToStaticMarkup(createElement(QuarterPulse, {
       report,
@@ -158,6 +172,7 @@ describe('QuarterPulse Situation stream', () => {
     expect(markup).toContain('data-presentation="condensed"');
     expect(markup).toContain('data-compact="true"');
     expect(markup).toContain('data-story-count="1"');
+    expect(markup).toContain('quarter-pulse__compact-headline">燕京易主');
     expect(markup).toContain('第 2 年 · 冬季');
     expect(markup).toContain('data-event-id="event-major"');
   });

@@ -1,13 +1,13 @@
 # 《沧衡纪》架构增长基线
 
-> 建立于 2026-08-27，v1.28.0 自主演变收口于 2026-09-07，命令：`npm run test:audit:architecture`
+> 建立于 2026-08-27，v1.29.0 观察层级收口于 2026-09-07，命令：`npm run test:audit:architecture`
 
 ## 当前规模
 
-- `src` 下生产 TypeScript / TSX：171 个文件，61,784 行（测试排除）。v1.28.0 只调整首次进入、观察偏好、播放入口与主动阅读边界，没有新增状态 owner、页面或模拟阶段。
+- `src` 下生产 TypeScript / TSX：171 个文件，61,833 行（测试排除）。v1.29.0 只调整观察投影、响应式布局、展开状态和地图标注，没有新增状态 owner、页面、schema 或模拟阶段。
 - 相对模块依赖：678 条，其中 441 条 runtime、237 条 type-only；运行时环与跨层违例均为 0，类型总图仍只有既有的 12 模块契约环，正好落在 12/12 的不增长预算内。
-- 当前热点：`engine.ts` 3,118/3,120 行、`invariants.ts` 2,665/2,665 行、`App.tsx` 2,210/2,300 行（实际/门禁）。
-- 其次为 `v02.ts` 2,501 行、`v03-ocean.ts` 2,460 行、`agency/decision.ts` 2,042 行、`Inspector.tsx` 1,364 行与 `map-renderer.ts` 1,166 行。`observer-leads.ts` 为 398/400 行，`WorldMap.tsx` 为 1,073/1,100 行，`view/adapters.ts` 为 52/100 行。
+- 当前热点：`engine.ts` 3,118/3,120 行、`invariants.ts` 2,665/2,665 行、`App.tsx` 2,214/2,300 行（实际/门禁）。
+- 其次为 `v02.ts` 2,501 行、`v03-ocean.ts` 2,460 行、`agency/decision.ts` 2,042 行、`Inspector.tsx` 1,364 行与 `map-renderer.ts` 1,171 行。`observer-leads.ts` 为 398/400 行，`WorldMap.tsx` 为 1,073/1,100 行，`view/adapters.ts` 为 52/100 行。
 
 行数是增长预警，不是机械拆文件指标。新增领域规则不得再默认进入四个最高热点；只有形成稳定输入、输出和所有权后才拆分。
 
