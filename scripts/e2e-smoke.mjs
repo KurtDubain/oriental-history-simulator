@@ -10,10 +10,10 @@ const PACKAGE_VERSION = JSON.parse(await readFile(new URL('../package.json', imp
 const SNAPSHOT_LIMIT = 144 * 1024;
 const ARTIFACT_DIR = 'output/v1-release-visual';
 const SITUATION_TYPE_LABELS = Object.freeze({
-  military_power_crisis: '军权危机',
-  inheritance_crisis: '继承危机',
-  war_progress: '战争进程',
-  court_power_struggle: '朝堂权斗',
+  military_power_crisis: '军权归属',
+  inheritance_crisis: '君位承继',
+  war_progress: '战事',
+  court_power_struggle: '朝堂争权',
 });
 const SITUATION_OPEN_BUDGETS = Object.freeze({
   military_power_crisis: 5,
@@ -153,9 +153,16 @@ async function openFreshWorld(page, seed = null) {
   await page.waitForFunction((version) => JSON.parse(window.render_game_to_text()).productVersion === version, PACKAGE_VERSION);
 }
 
+async function dismissPrimerIfOpen(page) {
+  const skip = page.locator('[data-map-primer-skip]');
+  if (await skip.count()) await skip.click();
+}
+
 async function exerciseMapPrimer(page) {
   const before = await snapshot(page);
-  assert.equal(before.observer.primerOpen, true, '首次新建世界应打开三步读图导览');
+  assert.equal(before.observer.primerOpen, false, '首次新建世界应直接展示真实舆图');
+  await page.locator('[data-map-primer-trigger="true"]').click();
+  await waitForSnapshot(page, (current) => current.observer.primerOpen === true);
   assert.equal(before.observer.primerStep, 'terrain');
   const originalHash = before.deterministicWorldHash;
   const primer = page.locator('.map-primer');
@@ -193,11 +200,6 @@ async function exerciseMapPrimer(page) {
   assert.ok(traced.interface.selectedEventId, '导览应打开刚过去一季的可追溯史事');
   await page.locator('#observer-causal-drawer button[aria-label="关闭何故与证据"]').click();
   await page.waitForSelector('#observer-causal-drawer', { state: 'detached' });
-  assert.equal(
-    await page.evaluate(() => localStorage.getItem('canghai-map-primer-complete-v1')),
-    '1',
-    '完成导览应保存非权威偏好标记',
-  );
   return snapshot(page);
 }
 
@@ -364,7 +366,7 @@ async function exerciseEmbodiedCourtMobile(browser) {
   collectBrowserErrors(page, errors);
   try {
     await openFreshWorld(page, '朝臣议事');
-    await page.locator('[data-map-primer-skip]').click();
+    await dismissPrimerIfOpen(page);
     const winter = await advanceTo(page, 3);
     assert.equal(winter.time.season, '冬', '朝臣议事验收必须在自然推进到冬季后进行');
 
@@ -412,7 +414,6 @@ function auditSituationProjection(projection, requiredTypes) {
     openByType[situation.type] = (openByType[situation.type] ?? 0) + 1;
     assert.equal(situation.typeLabel, SITUATION_TYPE_LABELS[situation.type], `${situation.type}应公开中文类型名`);
     assertChineseSituationCopy(situation.title, `${situation.type}应公开中文标题`);
-    assert.match(situation.title, new RegExp(situation.typeLabel), `${situation.type}标题应明示局势类型`);
     assert.equal(situation.status, 'open');
     assert.ok(situation.startedTurn <= situation.lastUpdatedTurn, '局势目录应保留可核验的起止季度');
     for (const hidden of ['phase', 'tension', 'momentum', 'evidence', 'nextSignal', 'latestChange']) {
@@ -735,7 +736,7 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   assert.equal(await restoredWatchButton.getAttribute('aria-pressed'), 'true');
 
   await page.getByRole('button', { name: '8 倍速推演' }).click();
-  await page.getByRole('button', { name: '开始自动推演' }).click();
+  await page.getByRole('button', { name: /^(开始|继续)演变$/ }).click();
   let paused = null;
   let observedTurn = SITUATION_WATCH_TURN;
   for (let attempt = 0; attempt < 8 && !paused; attempt += 1) {
@@ -814,7 +815,7 @@ async function exerciseObserverLeads(page, initialHash) {
   assert.ok(initial.observer.focusLeads.length <= 3, '史家最多给出三件当前故事');
   const panel = page.locator('[data-observer-leads="true"]');
   await panel.waitFor();
-  assert.match(await panel.textContent(), /现在看什么/);
+  assert.match(await panel.textContent(), /眼下大事/);
   const rows = panel.locator('[data-testid="observer-lead"]');
   assert.equal(await rows.count(), initial.observer.focusLeads.length);
   if (initial.observer.focusLeads.length === 0) {
@@ -932,7 +933,7 @@ async function exerciseMapViewportTouch(context, page) {
   await page.keyboard.press('Escape');
   assert.equal(await page.locator('.observer-world-tools').getAttribute('data-mobile-more-open'), null, 'Escape 应收起移动端更多工具');
   assert.equal(await page.evaluate(() => document.activeElement?.classList.contains('observer-world-tools__more')), true, '收起更多工具后应把焦点还给省略号按钮');
-  for (const selector of ['.observer-speed-cycle', '.observer-time-controls__toggle', '.observer-advance-button']) {
+  for (const selector of ['.observer-speed-cycle', '.observer-playback-button', '.observer-advance-button']) {
     const bounds = await page.locator(selector).boundingBox();
     assert.ok(bounds && bounds.width >= 44 && bounds.height >= 44, `${selector} 应提供44px触控目标`);
   }
@@ -1115,10 +1116,11 @@ async function exerciseObserverDesk(page, initialHash) {
   await masterSwitch.uncheck();
   assert.equal(await desk.locator('.observer-desk__rules input:not(:disabled)').count(), 0, '总开关关闭后规则应不可编辑');
   await masterSwitch.check();
-  const threshold = desk.locator('select[aria-label="重大史事暂停阈值"]');
+  const threshold = desk.locator('select[aria-label="重大史事暂停范围"]');
+  await desk.locator('[data-pause-rule="majorHistory"] input').check();
   await threshold.selectOption('2');
   assert.equal(await threshold.inputValue(), '2');
-  assert.ok(await desk.locator('.observer-desk__rules label:has-text("战争") input:checked').count());
+  assert.equal(await desk.locator('.observer-desk__rules label:has-text("战争") input:checked').count(), 0);
   await assertFocusTrapped(page, '.observer-desk');
   await page.screenshot({ path: `${ARTIFACT_DIR}/observer-desk.png`, fullPage: true });
   await page.keyboard.press('Escape');
@@ -1142,7 +1144,7 @@ async function exerciseAutomaticPause(page) {
   assert.equal(await page.getByRole('button', { name: '8 倍速推演' }).getAttribute('aria-pressed'), 'true');
 
   const turnBefore = speedState.time.turn;
-  await page.getByRole('button', { name: '开始自动推演' }).click();
+  await page.getByRole('button', { name: /^(开始|继续)演变$/ }).click();
   for (let burst = 0; burst < 10; burst += 1) {
     await page.evaluate(() => window.advanceTime(300));
     await page.waitForTimeout(40);
@@ -1322,7 +1324,7 @@ try {
   assert.equal(initial.mandate.recentIntervention, null);
   assert.equal(initial.observer.guideCompleted, 1);
   assert.equal(initial.observer.watchedCount, 0);
-  assert.equal(initial.observer.primerOpen, true);
+  assert.equal(initial.observer.primerOpen, false);
   assert.equal(initial.interface.selected, null, '新建世界应先展示完整舆图，不抢先展开地区档案');
   assertRuntimePhase(initial, 'validation.full', '新建世界必须记录全量校验耗时');
   assertRuntimePhase(initial, 'react.commit', '新建世界必须记录 React 提交耗时');
@@ -1474,7 +1476,7 @@ try {
   await selectLayer(page, 'food');
   assert.equal(await page.locator('.world-map').getAttribute('data-overlay'), 'food');
   await selectLayer(page, 'war');
-  await selectFirstMapObject(page, 'person', '人物档案');
+  await selectFirstMapObject(page, 'army', '行营档案');
 
   const references = await findThreeClickCausalPath(page);
   assert.ok(await references.locator('button').count());
@@ -1666,7 +1668,7 @@ try {
   const embodimentErrors = [];
   collectBrowserErrors(embodimentPage, embodimentErrors);
   await openFreshWorld(embodimentPage, '入世验收');
-  await embodimentPage.locator('[data-map-primer-skip]').click();
+  await dismissPrimerIfOpen(embodimentPage);
   await embodimentPage.click('button[data-observer-view="people"]');
   const embodimentRows = embodimentPage.locator('.roster-panel button[data-roster-id]');
   await embodimentRows.first().click();
@@ -1728,7 +1730,7 @@ try {
   const closureErrors = [];
   collectBrowserErrors(closurePage, closureErrors);
   await openFreshWorld(closurePage, '入世生平收束');
-  await closurePage.locator('[data-map-primer-skip]').click();
+  await dismissPrimerIfOpen(closurePage);
   await advanceTo(closurePage, 3);
   await closurePage.click('button[data-observer-view="people"]');
   await closurePage.getByLabel('检索时人群像').fill('郑维安');
@@ -1769,7 +1771,7 @@ try {
   const identityErrors = [];
   collectBrowserErrors(identityPage, identityErrors);
   await openFreshWorld(identityPage, '军权春秋');
-  await identityPage.locator('[data-map-primer-skip]').click();
+  await dismissPrimerIfOpen(identityPage);
   let identityTurnState = await snapshot(identityPage);
   while (identityTurnState.time.turn < 8) identityTurnState = await advanceOneQuarter(identityPage);
   assert.ok(identityTurnState.observer.commandCandidates.length > 0, 'T8 应出现可观察的副将军令链');
@@ -1826,7 +1828,7 @@ try {
   const governanceErrors = [];
   collectBrowserErrors(governancePage, governanceErrors);
   await openFreshWorld(governancePage, '州县民生');
-  await governancePage.locator('[data-map-primer-skip]').click();
+  await dismissPrimerIfOpen(governancePage);
   await advanceTo(governancePage, 9);
   await governancePage.click('button[data-observer-view="people"]');
   await governancePage.waitForSelector('.roster-panel[data-roster-title="时人群像"]');
@@ -1898,7 +1900,8 @@ try {
   collectBrowserErrors(mobilePage, mobileErrors);
   await openFreshWorld(mobilePage, '春战副将');
   assert.equal((await snapshot(mobilePage)).productVersion, PACKAGE_VERSION);
-  assert.equal((await snapshot(mobilePage)).observer.primerOpen, true);
+  assert.equal((await snapshot(mobilePage)).observer.primerOpen, false);
+  await mobilePage.locator('[data-map-primer-trigger="true"]').click();
   const mobilePrimer = mobilePage.locator('.map-primer');
   await mobilePrimer.waitFor();
   await assertWithinViewport(mobilePage, '.map-primer', '移动端读图导览不可横向溢出');
@@ -2193,7 +2196,7 @@ try {
   assert.equal(await mobilePage.evaluate(() => document.activeElement?.getAttribute('data-mandate-trigger')), 'true');
   await auditLayerDialog(mobilePage, true);
   await selectLayer(mobilePage, 'war');
-  await selectFirstMapObject(mobilePage, 'person', '人物档案');
+  await selectFirstMapObject(mobilePage, 'army', '行营档案');
   await mobilePage.waitForFunction(() => {
     const inspector = document.querySelector('.observer-inspector');
     if (!inspector) return false;

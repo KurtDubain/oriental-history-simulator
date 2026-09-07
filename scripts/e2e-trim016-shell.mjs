@@ -207,7 +207,7 @@ async function ensureTurnStable(page, scenario, detail, expectedTurn, delayMs = 
 }
 
 async function startAutoplay(page, scenario, detail) {
-  const toggle = page.locator('.observer-time-controls__toggle');
+  const toggle = page.locator('.observer-playback-button');
   await activate(toggle, scenario);
   const running = await waitForState(
     page,
@@ -259,12 +259,13 @@ async function createWorld(page, scenario) {
   await activate(page.locator('#start-world'), scenario);
   const created = await waitForState(page, (snapshot) => snapshot.mode === 'observing');
   assert.equal(created.time.turn, 0, `${scenario.slug} 新世界应从 T0 开始`);
-  assert.equal(created.observer.primerOpen, true, `${scenario.slug} 新世界应先打开 primer`);
+  assert.equal(created.observer.primerOpen, false, `${scenario.slug} 新世界应直接展示舆图`);
   return created;
 }
 
 async function completePrimer(page, scenario) {
   const initial = await createWorld(page, scenario);
+  await activate(page.locator('[data-map-primer-trigger="true"]'), scenario);
   const primer = page.locator('.map-primer');
   await primer.waitFor();
   await assertSingleModalAndShell(page, scenario, '地图导览', '.map-primer');

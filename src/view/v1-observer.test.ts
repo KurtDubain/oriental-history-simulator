@@ -368,6 +368,27 @@ describe('V1 observer desk persistence', () => {
 });
 
 describe('V1 observer pause decisions', () => {
+  it('keeps fresh worlds running unless a watched subject changes', () => {
+    const settings = createObserverDeskSettings();
+    const war = historyEventToPauseCandidate(historyEvent({
+      id: 'event-war', kind: 'war_declared', category: '军事', title: '两国开战', importance: 5,
+    }));
+    const disease = historyEventToPauseCandidate(historyEvent({
+      id: 'event-plague', kind: 'outbreak_detected', category: '疾病', title: '疫病暴发', importance: 5,
+    }));
+
+    expect(settings.pauseRules).toMatchObject({
+      enabled: true,
+      majorHistory: false,
+      wars: false,
+      powerTransfers: false,
+      outbreaks: false,
+      watchlistHits: true,
+      situationChanges: true,
+    });
+    expect(evaluateObserverPause(settings, [war, disease])).toBeNull();
+  });
+
   it('keeps Situation bookkeeping out of generic watch and pause candidates', () => {
     const wrapper = historyEvent({ id: 'event-wrapper', kind: 'situation_phase_changed', title: '局势转入临界' });
     const concrete = historyEvent({ id: 'event-concrete', kind: 'appointment_started', title: '赵衡入朝任职' });
@@ -412,6 +433,8 @@ describe('V1 observer pause decisions', () => {
         ...createObserverDeskSettings().pauseRules,
         watchlistHits: false,
         majorHistory: false,
+        wars: true,
+        outbreaks: true,
       },
     });
     const war = historyEventToPauseCandidate(historyEvent({

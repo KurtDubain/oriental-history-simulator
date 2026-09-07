@@ -288,19 +288,19 @@ export function ObserverDesk({
                   onChange={(event) => changeRules({ majorHistory: event.target.checked })}
                 />
                 <span className="observer-desk__check" aria-hidden="true"><Check size={11} /></span>
-                <span><strong>重大史事</strong><small>重要度达到阈值即停下</small></span>
+                <span><strong>重大史事</strong><small>格外重大的新记录才停下</small></span>
                 <select
                   value={safeSettings.pauseRules.importanceThreshold}
                   disabled={!safeSettings.pauseRules.enabled || !safeSettings.pauseRules.majorHistory}
-                  aria-label="重大史事暂停阈值"
+                  aria-label="重大史事暂停范围"
                   onChange={(event) => changeRules({
                     importanceThreshold: Number(event.target.value) as ObserverPauseRules['importanceThreshold'],
                   })}
                 >
-                  <option value={2}>≥ 2</option>
-                  <option value={3}>≥ 3</option>
-                  <option value={4}>≥ 4</option>
-                  <option value={5}>= 5</option>
+                  <option value={2}>更多</option>
+                  <option value={3}>较重</option>
+                  <option value={4}>重大</option>
+                  <option value={5}>极重</option>
                 </select>
               </label>
               {PAUSE_RULES.map((rule) => (

@@ -256,10 +256,7 @@
   white-space: nowrap;
 }
 
-.observer-time-controls__toggle[aria-pressed="true"] {
-  color: var(--observer-vermilion-dark);
-}
-
+.observer-playback-button,
 .observer-advance-button {
   display: inline-flex;
   height: 36px;
@@ -267,23 +264,47 @@
   justify-content: center;
   gap: 8px;
   padding: 0 13px 0 15px;
-  border: 1px solid var(--observer-vermilion-dark);
   border-radius: var(--observer-control-radius);
-  color: #f4ead5;
   font-size: 12px;
   font-weight: 700;
   letter-spacing: 0.08em;
-  background: var(--observer-vermilion);
-  box-shadow: 0 1px 0 rgb(255 255 255 / 18%) inset;
   cursor: pointer;
-  transition: background 150ms ease, transform 150ms ease;
+  transition: color 150ms ease, border-color 150ms ease, background 150ms ease, transform 150ms ease;
 }
 
-.observer-advance-button:hover:not(:disabled) {
+.observer-playback-button {
+  border: 1px solid var(--observer-vermilion-dark);
+  color: #f4ead5;
+  background: var(--observer-vermilion);
+  box-shadow: 0 1px 0 rgb(255 255 255 / 18%) inset;
+}
+
+.observer-playback-button:hover:not(:disabled) {
   background: var(--observer-vermilion-dark);
   transform: translateY(-1px);
 }
 
+.observer-playback-button[aria-pressed="true"] {
+  border-color: var(--observer-line-strong);
+  color: var(--observer-ink);
+  background: var(--observer-paper-deep);
+  box-shadow: none;
+}
+
+.observer-advance-button {
+  border: 1px solid var(--observer-line-strong);
+  color: var(--observer-ink-soft);
+  background: transparent;
+}
+
+.observer-advance-button:hover:not(:disabled) {
+  border-color: rgb(156 53 43 / 45%);
+  color: var(--observer-vermilion-dark);
+  background: var(--observer-vermilion-wash);
+  transform: translateY(-1px);
+}
+
+.observer-playback-button:disabled,
 .observer-advance-button:disabled {
   opacity: 0.42;
   cursor: not-allowed;
@@ -2882,6 +2903,11 @@ button.observer-causal-chain__evidence:hover {
     padding: 0;
   }
 
+  .observer-playback-button {
+    height: 44px;
+    padding: 0 11px;
+  }
+
   .observer-advance-button span {
     position: absolute;
     width: 1px;
@@ -3368,6 +3394,14 @@ button.observer-causal-chain__evidence:hover {
   .observer-advance-button {
     width: 44px;
     height: 44px;
+  }
+
+
+  .observer-playback-button {
+    min-width: 92px;
+    height: 44px;
+    padding: 0 10px;
+    font-size: 11px;
   }
 
   .observer-date {

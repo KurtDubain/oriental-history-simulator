@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
-import { createWorld } from '../sim';
+import { advanceWorldBy, createWorld } from '../sim';
 import {
-  MAP_PRIMER_STORAGE_KEY,
+  observerStorageKey,
   restoreWorldSession,
   type WorldSessionStorageReader,
 } from './world-session-restore';
@@ -24,20 +24,42 @@ describe('restoreWorldSession', () => {
     expect(session.navigation).toEqual({
       view: 'world',
       powerRosterSection: 'polities',
-      layers: [{ kind: 'primer' }],
+      layers: [],
     });
   });
 
-  it('does not reopen completed first-run guidance', () => {
+  it('starts a recreated world with fresh observer defaults instead of stale broad pause rules', () => {
     const world = createWorld('session-restore-known');
+    const stale = JSON.stringify({
+      version: 3,
+      watchlist: [{ kind: 'person', id: 'c_old', label: '旧关注', detail: '', alert: false }],
+      pauseRules: {
+        enabled: true,
+        majorHistory: true,
+        importanceThreshold: 2,
+        wars: true,
+        powerTransfers: true,
+        outbreaks: true,
+        watchlistHits: true,
+        situationChanges: true,
+      },
+      guide: { completedSteps: ['world-opened'], dismissed: false },
+    });
     const session = restoreWorldSession(
       world,
       'create',
-      new MemoryReader(new Map([[MAP_PRIMER_STORAGE_KEY, '1']])),
+      new MemoryReader(new Map([[observerStorageKey(world.seed, world.mapContentVersion), stale]])),
       true,
     );
 
     expect(session.navigation.layers).toEqual([]);
+    expect(session.observerSettings.watchlist).toEqual([]);
+    expect(session.observerSettings.pauseRules).toMatchObject({
+      majorHistory: false,
+      wars: false,
+      powerTransfers: false,
+      outbreaks: false,
+    });
   });
 
   it('never carries a faction map focus across worlds with reused faction ids', () => {
@@ -47,5 +69,25 @@ describe('restoreWorldSession', () => {
 
     expect(restoreWorldSession(first, 'continue', new MemoryReader(), false).focusedPoliticalFactionId).toBeNull();
     expect(restoreWorldSession(second, 'collection', new MemoryReader(), false).focusedPoliticalFactionId).toBeNull();
+  });
+
+  it('retains the frozen 春战副将 T12 simulation identity across observer-only changes', () => {
+    const world = advanceWorldBy(createWorld('春战副将'), 12);
+
+    expect({
+      turn: world.turn,
+      hash: world.hash,
+      factDigest: world.factDigest,
+      historyDigest: world.historyDigest,
+      factCount: world.facts.length,
+      historyCount: world.history.length,
+    }).toEqual({
+      turn: 12,
+      hash: '8ac8f4521fe2e255',
+      factDigest: '4efdafbd0d9f3735',
+      historyDigest: 'b593ded8684f2eac',
+      factCount: 425,
+      historyCount: 300,
+    });
   });
 });

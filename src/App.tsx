@@ -183,7 +183,6 @@ import { useRosterDiscovery } from './view/use-roster-discovery';
 import { useRosterDossierFlow } from './view/use-roster-dossier-flow';
 import { useWorldSessionController } from './view/use-world-session-controller';
 import {
-  MAP_PRIMER_STORAGE_KEY,
   observerStorageKey,
   restoreWorldSession,
   type OpenWorldSource,
@@ -1060,11 +1059,6 @@ export function App() {
   }, [clearRosterDossier, navigation, playback, powerRosterSection]);
 
   const handleCloseMapPrimer = useCallback((_reason: MapPrimerCloseReason) => {
-    try {
-      localStorage.setItem(MAP_PRIMER_STORAGE_KEY, '1');
-    } catch {
-      // Primer completion is a preference only; storage failures must not block the world.
-    }
     navigation.closeTopLayer();
   }, [navigation]);
 
@@ -1105,10 +1099,7 @@ export function App() {
   }, [openCausalEvent]);
 
   const handleViewChange = useCallback((nextView: ObserverView) => {
-    if (nextView === 'chronicle') {
-      playback.pause();
-    } else {
-    }
+    playback.pause();
     clearRosterDossier(); navigation.goToView(nextView);
   }, [clearRosterDossier, navigation, playback]);
 
@@ -1260,6 +1251,7 @@ export function App() {
   const handleRosterSelect = useCallback((id: string) => {
     const current = worldRef.current;
     if (!current) return;
+    playback.pause();
     setMobileInspectorExpanded(Boolean(beginRosterDossier(id)));
     if (activeView === 'powers' && powerRosterSection === 'polities') {
       setSelection({ kind: 'country', id });
@@ -1281,7 +1273,7 @@ export function App() {
       else if (fleet) setSelection({ kind: 'fleet', id: fleet.id });
       return;
     }
-  }, [activeView, beginRosterDossier, powerRosterSection]);
+  }, [activeView, beginRosterDossier, playback, powerRosterSection]);
 
   const handleSelectArchiveEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
     setSelection({ kind, id });
@@ -1333,7 +1325,6 @@ export function App() {
     situationFocusRestoreAllowedRef.current = true;
     const projection = projectSituationWorkbench(current, preferredSituationId);
     if (!projection.selectedId || !projection.selected) return;
-    if (projection.selected.type === 'war_progress') { setOverlay('war'); setFocusedWarId(projection.selected.audit.scopeKey); }
     playback.pause();
     navigation.openLayer({ kind: 'situations', situationId: projection.selectedId });
   }, [navigation, playback]);
@@ -1354,6 +1345,16 @@ export function App() {
     situationFocusRestoreAllowedRef.current = true;
     navigation.closeTopLayer();
   }, [navigation]);
+
+  const handleShowSituationWarMap = useCallback(() => {
+    const situation = worldRef.current?.situationSystem.situations.find((item) => item.id === selectedSituationId);
+    if (situation?.type === 'war_progress') {
+      setOverlay('war');
+      setFocusedWarId(situation.scopeKey);
+    }
+    situationFocusRestoreAllowedRef.current = true;
+    navigation.closeTopLayer();
+  }, [navigation, selectedSituationId]);
 
   const handleSelectSituationEntity = useCallback((kind: ArchiveEntityKind, id: string) => {
     situationFocusRestoreAllowedRef.current = false;
@@ -1472,13 +1473,14 @@ export function App() {
       setToast('这支派系已退出当下朝局，未替你改选别派。');
       return;
     }
+    playback.pause();
     courtFocusRequestRef.current += 1;
     const courtFocus = { ...target, requestKey: courtFocusRequestRef.current };
     archiveFocusRestoreAllowedRef.current = false; causalFocusRestoreAllowedRef.current = false; situationFocusRestoreAllowedRef.current = false;
     clearRosterDossier(); setMobileInspectorExpanded(expand);
     setSelection({ kind: 'country', id: target.polityId, initialTab: 'court', tabRequestKey: courtFocus.requestKey, courtFocus });
     navigation.reset({ view: 'world', powerRosterSection, layers: [] });
-  }, [clearRosterDossier, navigation, powerRosterSection]);
+  }, [clearRosterDossier, navigation, playback, powerRosterSection]);
 
   const inspector = useMemo<ReactNode>(() => {
     if (!world || !selection) return null;
@@ -1625,16 +1627,17 @@ export function App() {
 
   const handleInspectObserverLead = useCallback((lead: ObserverLead) => {
     setPauseMatch(null);
-    setOverlay(lead.overlay);
     clearRosterDossier();
     if (lead.situationId) {
       setSelection(null);
       handleOpenSituationWorkbench(lead.situationId);
       return;
     }
+    playback.pause();
+    setOverlay(lead.overlay);
     setSelection(lead.target);
     navigation.goToView('world');
-  }, [clearRosterDossier, handleOpenSituationWorkbench, navigation]);
+  }, [clearRosterDossier, handleOpenSituationWorkbench, navigation, playback]);
 
   const handleToggleObserverLead = useCallback((lead: ObserverLead) => {
     const current = worldRef.current;
@@ -1828,12 +1831,14 @@ export function App() {
               focusedWarId={focusedWar?.warId ?? null} focusedWarArmyIds={focusedWar?.armyIds ?? []}
               onSelectBlank={closeInspectorToMap}
               onSelectRegion={(id) => {
+                playback.pause();
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
                 clearRosterDossier(); setSelection({ kind: 'region', id });
                 navigation.goToView('world');
               }}
               onSelectObject={(kind, id, marker) => {
+                playback.pause();
                 setMobileToolsOpen(false);
                 setMobileInspectorExpanded(false);
                 if (kind === 'army' || kind === 'fleet') setFocusedArmyId(id);
@@ -1846,9 +1851,9 @@ export function App() {
               }}
             />
 
-            {focusedWar && overlay === 'war' && !situationWorkbenchOpen ? <WarFocusSummary
+            {focusedWar && overlay === 'war' && !situationWorkbenchOpen && !inspector ? <WarFocusSummary
               war={focusedWar} onClose={() => setFocusedWarId(null)}
-              onInspectPerson={(id) => { setFocusedArmyId(null); setSelection({ kind: 'person', id }); }}
+              onInspectPerson={(id) => { playback.pause(); setFocusedArmyId(null); setSelection({ kind: 'person', id }); }}
               onInspectBattle={handleSelectScopedEvent}
             /> : null}
 
@@ -2134,7 +2139,7 @@ export function App() {
         onSelectCourtFaction={handleOpenCourtFaction}
         isWatched={Boolean(selectedSituationId && followed.has(`situation:${selectedSituationId}`))}
         onToggleWatch={handleToggleSelectedSituation}
-        onShowWarMap={handleCloseSituationWorkbench}
+        onShowWarMap={handleShowSituationWarMap}
         returnFocusTo={situationReturnFocusRef.current}
         shouldRestoreFocus={shouldRestoreSituationFocus}
       />

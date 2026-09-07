@@ -52,6 +52,7 @@ export function TopBar({
 }: TopBarProps) {
   const currentSeason = SEASONS[season];
   const nextSpeed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
+  const playbackLabel = isRunning ? '暂停演变' : turn === 0 ? '开始演变' : '继续演变';
 
   return (
     <header className="observer-topbar">
@@ -110,13 +111,14 @@ export function TopBar({
 
         <button
           type="button"
-          className="observer-icon-button observer-time-controls__toggle"
+          className="observer-playback-button"
           disabled={!canAdvance && !isRunning}
-          aria-label={isRunning ? '暂停自动推演' : '开始自动推演'}
+          aria-label={playbackLabel}
           aria-pressed={isRunning}
           onClick={onToggleRunning}
         >
           {isRunning ? <Pause size={18} fill="currentColor" aria-hidden="true" /> : <Play size={18} fill="currentColor" aria-hidden="true" />}
+          <span>{playbackLabel}</span>
         </button>
 
         <button

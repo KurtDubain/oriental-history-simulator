@@ -18,8 +18,6 @@ import {
 
 export type OpenWorldSource = 'create' | 'continue' | 'import' | 'collection';
 
-export const MAP_PRIMER_STORAGE_KEY = 'canghai-map-primer-complete-v1';
-
 export interface WorldSessionStorageReader {
   getItem(key: string): string | null;
 }
@@ -48,8 +46,12 @@ function supportsLegacyObserverStorage(mapContentVersion: string): boolean {
 
 function readObserverSettings(
   world: WorldState,
+  source: OpenWorldSource,
   storage: WorldSessionStorageReader,
 ): ObserverDeskSettings {
+  if (source === 'create') {
+    return completeObserverGuideStep(createObserverDeskSettings(), 'world-opened');
+  }
   try {
     const current = storage.getItem(observerStorageKey(world.seed, world.mapContentVersion));
     const legacy = supportsLegacyObserverStorage(world.mapContentVersion)
@@ -86,7 +88,7 @@ export function restoreWorldSession(
   storage: WorldSessionStorageReader,
   compactViewport: boolean,
 ): RestoredWorldSession {
-  const observerSettings = readObserverSettings(world, storage);
+  const observerSettings = readObserverSettings(world, source, storage);
   const embodiment = readEmbodiment(world, source, storage);
   const defaultRegionId = world.regions.find((region) => (
     world.polities.some((polity) => polity.alive && polity.capitalRegionId === region.id)
@@ -95,13 +97,6 @@ export function restoreWorldSession(
     ?? (embodiment.closure && world.characters.some((item) => item.id === embodiment.closure?.actorId)
       ? embodiment.closure.actorId
       : null);
-  let primerCompleted = false;
-  try {
-    primerCompleted = storage.getItem(MAP_PRIMER_STORAGE_KEY) === '1';
-  } catch {
-    // Preference storage is optional; first-run guidance remains the safe default.
-  }
-  const showPrimer = source === 'create' && world.turn === 0 && !primerCompleted;
   const view = restoredPersonId ? 'people' as const : 'world' as const;
   return {
     observerSettings,
@@ -117,7 +112,7 @@ export function restoreWorldSession(
     navigation: {
       view,
       powerRosterSection: 'polities',
-      layers: showPrimer ? [{ kind: 'primer' }] : [],
+      layers: [],
     },
   };
 }

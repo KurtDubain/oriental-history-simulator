@@ -191,11 +191,11 @@ export function createObserverDeskSettings(): ObserverDeskSettings {
     watchlist: [],
     pauseRules: {
       enabled: true,
-      majorHistory: true,
+      majorHistory: false,
       importanceThreshold: 4,
-      wars: true,
-      powerTransfers: true,
-      outbreaks: true,
+      wars: false,
+      powerTransfers: false,
+      outbreaks: false,
       watchlistHits: true,
       situationChanges: true,
     },
@@ -667,7 +667,7 @@ export function evaluateObserverPause(
       normalized.pauseRules.majorHistory
       && candidate.importance >= normalized.pauseRules.importanceThreshold
     ) {
-      return { eventId: candidate.id, eventTitle: candidate.title, rule: 'majorHistory', reason: `史事重要度达到 ${normalized.pauseRules.importanceThreshold}`, watchMatches };
+      return { eventId: candidate.id, eventTitle: candidate.title, rule: 'majorHistory', reason: '出现值得留意的大事', watchMatches };
     }
   }
   return null;
