@@ -342,6 +342,22 @@ async function openChronicleEventAndEscape(page, scenario) {
   if (scenario.viewport.width <= 700) {
     const filterToggle = page.locator('.history-workbench__filter-toggle');
     const filterControls = page.locator('.history-workbench__filter-controls');
+    const assertCollapsedFocus = async (detail) => {
+      await page.waitForFunction(() => document.activeElement?.matches('.history-workbench__filter-toggle'));
+      assert.equal(await filterToggle.getAttribute('aria-expanded'), 'false', `${scenario.slug} ${detail}后筛选应自动收起`);
+      assert.equal(await filterControls.isVisible(), false, `${scenario.slug} ${detail}后隐藏筛选控件`);
+      const focus = await page.evaluate(() => ({
+        tag: document.activeElement?.tagName,
+        hidden: document.activeElement instanceof HTMLElement && document.activeElement.offsetParent === null,
+      }));
+      assert.notEqual(focus.tag, 'BODY', `${scenario.slug} ${detail}后焦点不得退回 body`);
+      assert.equal(focus.hidden, false, `${scenario.slug} ${detail}后焦点不得停在隐藏控件`);
+    };
+    const expandFilters = async () => {
+      await activate(filterToggle, scenario);
+      assert.equal(await filterToggle.getAttribute('aria-expanded'), 'true', `${scenario.slug} 可重新展开史册筛选`);
+      assert.equal(await filterControls.isVisible(), true, `${scenario.slug} 重新展开后保留完整筛选`);
+    };
     assert.equal(
       await filterToggle.evaluate((element) => document.activeElement === element),
       true,
@@ -354,10 +370,51 @@ async function openChronicleEventAndEscape(page, scenario) {
     assert.equal(await filterToggle.getAttribute('aria-expanded'), 'true', `${scenario.slug} 可展开史册筛选`);
     assert.equal(await filterControls.isVisible(), true, `${scenario.slug} 展开后应显示完整筛选`);
     await page.screenshot({ path: artifactPath(scenario, 'chronicle-filters-expanded'), fullPage: false });
-    await page.locator('.history-workbench__filters select').first().selectOption('军事');
-    assert.equal(await filterToggle.getAttribute('aria-expanded'), 'false', `${scenario.slug} 执行筛选后自动收起`);
+    const selects = page.locator('.history-workbench__filters select');
+    await selects.nth(0).selectOption('军事');
+    await assertCollapsedFocus('选择史事类别');
+    assert.match(await filterToggle.textContent() ?? '', /已启用\s*1\s*项条件/, `${scenario.slug} 筛选摘要应更新条件数`);
+    const categoryLabels = await page.locator('.history-workbench__event-meta > span:first-child').allTextContents();
+    assert.ok(categoryLabels.every((label) => label === '军事'), `${scenario.slug} 类别筛选结果必须已经更新`);
+    await page.screenshot({ path: artifactPath(scenario, 'chronicle-filters-applied'), fullPage: false });
+
+    await expandFilters();
+    assert.equal(await selects.nth(0).inputValue(), '军事', `${scenario.slug} 重新展开应保留类别条件`);
+    await selects.nth(1).selectOption('2');
+    await assertCollapsedFocus('选择最低重要度');
+
+    await expandFilters();
+    const relatedValue = await selects.nth(2).locator('option').nth(1).getAttribute('value');
+    assert.ok(relatedValue, `${scenario.slug} 相关对象筛选应有可用选项`);
+    await selects.nth(2).selectOption(relatedValue);
+    await assertCollapsedFocus('选择相关对象');
+
+    await expandFilters();
+    const search = page.locator('.history-workbench__search input');
+    await search.fill('纪元');
+    await search.press('Enter');
+    await assertCollapsedFocus('搜索回车');
+
+    await expandFilters();
+    await activate(page.locator('.history-workbench__clear'), scenario);
+    await assertCollapsedFocus('清除筛选');
+    assert.match(await filterToggle.textContent() ?? '', /全部记录/, `${scenario.slug} 清除后摘要应恢复全部记录`);
+    await expandFilters();
+    assert.equal(await selects.nth(0).inputValue(), 'all', `${scenario.slug} 清除后类别应复位`);
+    assert.equal(await selects.nth(1).inputValue(), '1', `${scenario.slug} 清除后重要度应复位`);
+    assert.equal(await selects.nth(2).inputValue(), '', `${scenario.slug} 清除后相关对象应复位`);
+    assert.equal(await search.inputValue(), '', `${scenario.slug} 清除后检索词应复位`);
     await activate(filterToggle, scenario);
-    await page.locator('.history-workbench__filters select').first().selectOption('all');
+  } else {
+    const categorySelect = page.locator('.history-workbench__filters select').first();
+    await categorySelect.focus();
+    await categorySelect.selectOption('军事');
+    assert.equal(
+      await categorySelect.evaluate((element) => document.activeElement === element),
+      true,
+      `${scenario.slug} 桌面筛选不得强制移动焦点`,
+    );
+    await categorySelect.selectOption('all');
   }
 
   const eventEntry = page.locator('.history-workbench__event-list > li > button').first();

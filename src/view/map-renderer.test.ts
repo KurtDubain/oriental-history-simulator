@@ -12,7 +12,11 @@ import type {
 } from './map-contract';
 import { layoutMapMarkers } from './map-marker-layout';
 import { drawWorldMap } from './map-renderer';
-import { createMapViewportTransform, resolveMapSceneHit } from './map-scene-geometry';
+import {
+  createMapViewportTransform,
+  layoutMapPersonClusters,
+  resolveMapSceneHit,
+} from './map-scene-geometry';
 
 class Path2DStub {
   moveTo() {}
@@ -27,15 +31,34 @@ interface TextCall {
   font: string;
 }
 
+function textBox(call: TextCall) {
+  const fontSize = Number(call.font.match(/(\d+)px/)?.[1] ?? 8);
+  const width = Math.max(fontSize * 2, call.text.length * fontSize * 0.9 + 6);
+  const height = fontSize + 4;
+  return {
+    left: call.x - width / 2,
+    right: call.x + width / 2,
+    top: call.y - height / 2,
+    bottom: call.y + height / 2,
+  };
+}
+
+function boxesOverlap(left: ReturnType<typeof textBox>, right: ReturnType<typeof textBox>) {
+  return left.left < right.right && left.right > right.left
+    && left.top < right.bottom && left.bottom > right.top;
+}
+
 function recordingContext() {
   const fillTexts: TextCall[] = [];
   const strokeTexts: TextCall[] = [];
+  const arcs: Array<{ x: number; y: number; radius: number }> = [];
   const ellipses: Array<{ x: number; y: number }> = [];
   const translations: Array<{ x: number; y: number }> = [];
   const gradient = { addColorStop() {} };
   const context = {
     fillTexts,
     strokeTexts,
+    arcs,
     ellipses,
     translations,
     font: '',
@@ -58,7 +81,7 @@ function recordingContext() {
     moveTo() {},
     lineTo() {},
     quadraticCurveTo() {},
-    arc() {},
+    arc(x: number, y: number, radius: number) { arcs.push({ x, y, radius }); },
     ellipse(x: number, y: number) { ellipses.push({ x, y }); },
     fill() {},
     stroke() {},
@@ -188,6 +211,84 @@ describe('map renderer LOD contract', () => {
     const labels = context.fillTexts.map((call) => call.text);
     expect(labels).toContain('24将');
     expect(labels).not.toContain('沈砚等24人 · 2.4万');
+    const polityLabel = context.fillTexts.find((call) => call.text === '云岚国');
+    const clusterLabel = context.fillTexts.find((call) => call.text === '24将');
+    expect(polityLabel).toBeDefined();
+    expect(clusterLabel).toBeDefined();
+    expect(boxesOverlap(textBox(clusterLabel!), textBox(polityLabel!))).toBe(false);
+  });
+
+  it('omits an overview cluster label when polity and capital labels occupy every safe slot, without removing its hit target', () => {
+    const capital = region('capital', '云京', { x: 440, y: 230 }, {
+      polityId: 'polity-cloud', polityName: '云岚国', capital: true, cityLevel: 4,
+    });
+    const cluster: MapPersonForceClusterView = {
+      id: 'person-cluster:polity-cloud', regionId: capital.id, position: capital.center,
+      leaderName: '沈砚', personIds: ['person-1'], count: 24, soldiers: 24_000,
+      polityId: 'polity-cloud', polityColor: '#52694d',
+    };
+    const viewport = { width: 390, height: 644 };
+    const transform = createMapViewportTransform(viewport.width, viewport.height);
+    const layout = layoutMapPersonClusters([cluster], transform)[0];
+    const toWorld = (x: number, y: number) => ({
+      x: (x - transform.offsetX) / transform.scale,
+      y: (y - transform.offsetY) / (transform.scale * transform.yScale),
+    });
+    const blockers = [
+      ['north', '北都', layout.point.x, layout.point.y - 20],
+      ['east', '东都', layout.point.x + 32, layout.point.y],
+      ['west', '西都', layout.point.x - 32, layout.point.y],
+    ].map(([id, name, x, y]) => region(String(id), String(name), toWorld(Number(x), Number(y)), {
+      polityId: `polity-${id}`, polityName: `${name}国`, capital: true, cityLevel: 4,
+    }));
+    const mapScene = scene({ regions: [capital, ...blockers], personClusters: [cluster] });
+    const context = recordingContext();
+
+    drawWorldMap(
+      context,
+      { ...viewport, dpr: 1 },
+      mapScene,
+      'political',
+      [],
+      null,
+      null,
+      undefined,
+      { zoom: 1, panX: 0, panY: 0 },
+    );
+
+    expect(context.fillTexts.map((call) => call.text)).not.toContain('24将');
+    expect(context.arcs).toContainEqual(expect.objectContaining({
+      x: expect.closeTo(layout.point.x, 5),
+      y: expect.closeTo(layout.point.y, 5),
+    }));
+    expect(resolveMapSceneHit(
+      mapScene,
+      layout.point,
+      viewport.width,
+      viewport.height,
+    )).toMatchObject({ kind: 'personCluster', cluster: { id: cluster.id } });
+  });
+
+  it('places overview cluster labels deterministically for identical input', () => {
+    const capital = region('capital', '云京', { x: 440, y: 230 }, {
+      polityId: 'polity-cloud', polityName: '云岚国', capital: true, cityLevel: 4,
+    });
+    const cluster: MapPersonForceClusterView = {
+      id: 'person-cluster:polity-cloud', regionId: capital.id, position: capital.center,
+      leaderName: '沈砚', personIds: ['person-1'], count: 12, soldiers: 8_000,
+      polityId: 'polity-cloud', polityColor: '#52694d',
+    };
+    const first = recordingContext();
+    const second = recordingContext();
+    const args = [
+      { width: 390, height: 644, dpr: 1 }, scene({ regions: [capital], personClusters: [cluster] }),
+      'political', [], null, null, undefined, { zoom: 1, panX: 0, panY: 0 },
+    ] as const;
+
+    drawWorldMap(first, ...args);
+    drawWorldMap(second, ...args);
+
+    expect(first.fillTexts).toEqual(second.fillTexts);
   });
 
   it('draws the full sea theatre inside the unified military overlay', () => {
@@ -383,5 +484,6 @@ describe('map renderer LOD contract', () => {
     const personLabels = context.fillTexts.filter((call) => call.text.startsWith('将领'));
     expect(personLabels.length).toBeGreaterThan(0);
     expect(personLabels.length).toBeLessThanOrEqual(5);
+    expect(personLabels[0]?.text).toMatch(/将领\d+ · \d\.\d千/);
   });
 });

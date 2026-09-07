@@ -110,6 +110,13 @@ try {
     assert.equal(await page.getByTestId('quarter-pulse-waiting').textContent(), '开始演变，看看第一季发生什么。');
     await page.getByRole('button', { name: '开始演变' }).waitFor();
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-initial.png`, fullPage: false });
+    if (scenario.mobile) {
+      await page.locator('[data-map-zoom-in="true"]').click();
+      await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.mapViewport.zoom >= 1.34);
+      await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-regional-135.png`, fullPage: false });
+      await page.locator('[data-map-reset="true"]').click();
+      await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.mapViewport.zoom === 1);
+    }
 
     await setEightTimes(page, scenario.mobile);
     await page.getByRole('button', { name: '开始演变' }).click();
@@ -179,6 +186,30 @@ try {
   await watchedPage.screenshot({ path: `${ARTIFACT_DIR}/watched-situation-paused.png`, fullPage: false });
   process.stdout.write(`watched-situation: T${watchedState.time.turn} 因明确关注的局势变化停表\n`);
   await watchedContext.close();
+
+  const quietContext = await browser.newContext({
+    viewport: { width: 390, height: 844 },
+    isMobile: true,
+    hasTouch: true,
+    deviceScaleFactor: 3,
+  });
+  const quietPage = await quietContext.newPage();
+  await quietPage.goto(APP_URL, { waitUntil: 'networkidle' });
+  await quietPage.getByLabel('世界种子').fill('静观');
+  await quietPage.locator('#start-world').click();
+  await quietPage.locator('.world-map__canvas').waitFor();
+  await setEightTimes(quietPage, true);
+  await quietPage.getByRole('button', { name: '开始演变' }).click();
+  const quietRun = await advanceWhileRunning(quietPage, 2);
+  assert.equal(quietRun.current.time.turn, 2, '静观种子应推进至首个无故事季度');
+  assert.equal(quietRun.current.interface.quarterPulse.storyCount, 0, '静观 T2 应为无故事季度');
+  assert.equal(
+    await quietPage.locator('.quarter-pulse__compact-headline').textContent(),
+    '本季无大事',
+    '无故事季度不得让跨量纲账目抢占紧凑摘要',
+  );
+  await quietPage.screenshot({ path: `${ARTIFACT_DIR}/mobile-390x844-quiet-quarter.png`, fullPage: false });
+  await quietContext.close();
 } finally {
   await browser?.close();
   await server?.close();

@@ -84,11 +84,7 @@ export function QuarterPulse({
     },
   ];
   const visibleStories = stories.slice(0, MAX_QUARTER_PULSE_STORIES);
-  const strongestLedger = [...ledgers].sort((left, right) => (
-    Math.abs(right.delta) - Math.abs(left.delta)
-  ))[0];
-  const compactHeadline = visibleStories[0]?.title
-    ?? (strongestLedger ? `${strongestLedger.label} ${formatSigned(strongestLedger.delta)}` : '本季无大事');
+  const compactHeadline = visibleStories[0]?.title ?? '本季无大事';
 
   return (
     <section

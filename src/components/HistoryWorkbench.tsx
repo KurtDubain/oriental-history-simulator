@@ -265,13 +265,19 @@ export function HistoryWorkbench({
     onReset();
   }, [controlledTurn, onReset, world.turn]);
 
+  const collapseFilters = useCallback(() => {
+    setFiltersExpanded(false);
+    if (typeof window === 'undefined' || !window.matchMedia('(max-width: 700px)').matches) return;
+    window.requestAnimationFrame(() => filterToggleRef.current?.focus({ preventScroll: true }));
+  }, []);
+
   const clearFilters = useCallback(() => {
     setQuery('');
     setCategory('all');
     setMinimumImportance(1);
     setRelatedValue('');
-    setFiltersExpanded(false);
-  }, []);
+    collapseFilters();
+  }, [collapseFilters]);
 
   const handleEventKeyDown = (event: ReactKeyboardEvent<HTMLButtonElement>, index: number) => {
     let nextIndex: number | null = null;
@@ -385,7 +391,7 @@ export function HistoryWorkbench({
                   autoComplete="off"
                   onChange={(event) => setQuery(event.currentTarget.value)}
                   onKeyDown={(event) => {
-                    if (event.key === 'Enter') setFiltersExpanded(false);
+                    if (event.key === 'Enter') collapseFilters();
                   }}
                 />
               </span>
@@ -395,7 +401,7 @@ export function HistoryWorkbench({
               <span>史事类别</span>
               <select value={category} onChange={(event) => {
                 setCategory(event.currentTarget.value as EventCategory | 'all');
-                setFiltersExpanded(false);
+                collapseFilters();
               }}>
                 <option value="all">全部类别</option>
                 {HISTORY_EVENT_CATEGORIES.map((item) => <option key={item} value={item}>{item}</option>)}
@@ -406,7 +412,7 @@ export function HistoryWorkbench({
               <span>最低重要度</span>
               <select value={minimumImportance} onChange={(event) => {
                 setMinimumImportance(Number(event.currentTarget.value));
-                setFiltersExpanded(false);
+                collapseFilters();
               }}>
                 <option value={1}>全部记载</option>
                 <option value={2}>二等以上</option>
@@ -420,7 +426,7 @@ export function HistoryWorkbench({
               <span>相关对象</span>
               <select value={relatedValue} onChange={(event) => {
                 setRelatedValue(event.currentTarget.value);
-                setFiltersExpanded(false);
+                collapseFilters();
               }}>
                 <option value="">全部人物与地域</option>
                 {ENTITY_GROUPS.map((group) => {

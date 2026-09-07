@@ -157,6 +157,29 @@ describe('QuarterPulse Situation stream', () => {
     expect(markup).toContain('data-testid="quarter-pulse-quiet"');
     expect(markup).toContain('data-history-layer="quarter"');
     expect(markup).toContain('本季无大事');
+    expect(markup).not.toContain('quarter-pulse__compact-headline">粮食');
+    expect(markup).toContain('aria-label="人口净变化 +3。');
+    expect(markup).toContain('aria-label="粮食净变化 +7。');
+    expect(markup).toContain('aria-label="财富净变化 +7。');
+  });
+
+  it('keeps a neutral compact headline even when a quiet quarter has extreme food movement', () => {
+    const extremeReport = {
+      ...report,
+      food: { ...report.food, end: -99_999_900 },
+    } as TurnReport;
+    const markup = renderToStaticMarkup(createElement(QuarterPulse, {
+      report: extremeReport,
+      stories: [],
+      onSelectEvent: () => undefined,
+      onSelectSituation: () => undefined,
+      onSelectLedger: () => undefined,
+      compact: true,
+    }));
+
+    expect(markup).toContain('quarter-pulse__compact-headline">本季无大事');
+    expect(markup).toContain('data-testid="quarter-pulse-ledger-food"');
+    expect(markup).not.toContain('最重要');
   });
 
   it('marks the same bounded quarter projection as condensed for a full mobile dossier', () => {

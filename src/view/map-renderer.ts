@@ -754,15 +754,45 @@ function drawCity(
   context.restore();
 }
 
-function drawPolityLabels(
-  context: CanvasRenderingContext2D,
+interface MapLabelBox {
+  left: number;
+  right: number;
+  top: number;
+  bottom: number;
+}
+
+interface PolityLabelLayout {
+  label: string;
+  point: MapPoint;
+  fontSize: number;
+}
+
+function estimatedLabelBox(text: string, point: MapPoint, fontSize: number): MapLabelBox {
+  const width = Math.max(fontSize * 2, text.length * fontSize * 0.9 + 6);
+  const height = fontSize + 4;
+  return {
+    left: point.x - width / 2,
+    right: point.x + width / 2,
+    top: point.y - height / 2,
+    bottom: point.y + height / 2,
+  };
+}
+
+function labelBoxesOverlap(left: MapLabelBox, right: MapLabelBox, padding = 2): boolean {
+  return left.left < right.right + padding
+    && left.right > right.left - padding
+    && left.top < right.bottom + padding
+    && left.bottom > right.top - padding;
+}
+
+function layoutPolityLabels(
   regions: readonly MapRegionView[],
   transform: MapViewportTransform,
   overlay: MapOverlay,
   compactMap: boolean,
   lodLevel: MapLodLevel,
-) {
-  if (overlay !== "political" || (compactMap && lodLevel !== "overview")) return;
+): PolityLabelLayout[] {
+  if (overlay !== "political" || (compactMap && lodLevel !== "overview")) return [];
   const groups = new Map<string, MapRegionView[]>();
   for (const region of regions) {
     if (!region.polityId || !region.polityName) continue;
@@ -771,10 +801,7 @@ function drawPolityLabels(
     groups.set(region.polityId, group);
   }
 
-  context.save();
-  context.textAlign = "center";
-  context.textBaseline = "middle";
-  for (const group of groups.values()) {
+  return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right)).flatMap(([, group]) => {
     const capital = group.find((region) => region.capital);
     const anchor = capital?.center ?? {
       x: group.reduce((sum, region) => sum + region.center.x, 0) / group.length,
@@ -782,15 +809,31 @@ function drawPolityLabels(
     };
     const point = worldToScreen(anchor, transform);
     const label = group[0]?.polityName;
-    if (!label) continue;
-    const y = point.y + (compactMap ? 15 : 18);
-    context.font = `${compactMap ? 700 : 650} ${compactMap ? 10 : 12}px "Noto Serif SC", "Songti SC", STSong, serif`;
+    if (!label) return [];
+    return [{
+      label,
+      point: { x: point.x, y: point.y + (compactMap ? 15 : 18) },
+      fontSize: compactMap ? 10 : 12,
+    }];
+  });
+}
+
+function drawPolityLabels(
+  context: CanvasRenderingContext2D,
+  labels: readonly PolityLabelLayout[],
+  compactMap: boolean,
+) {
+  context.save();
+  context.textAlign = "center";
+  context.textBaseline = "middle";
+  for (const { label, point, fontSize } of labels) {
+    context.font = `${compactMap ? 700 : 650} ${fontSize}px "Noto Serif SC", "Songti SC", STSong, serif`;
     context.lineWidth = compactMap ? 3 : 4;
     context.strokeStyle = "rgba(241, 235, 218, 0.84)";
-    context.strokeText(label, point.x, y);
+    context.strokeText(label, point.x, point.y);
     context.globalAlpha = compactMap ? 0.84 : 0.72;
     context.fillStyle = INK;
-    context.fillText(label, point.x, y);
+    context.fillText(label, point.x, point.y);
     context.globalAlpha = 1;
   }
   context.restore();
@@ -914,6 +957,16 @@ export function drawWorldMap(
   };
   const compactMap = transform.scale < 0.42;
   const narrowMap = width < 720;
+  const polityLabelLayouts = layoutPolityLabels(regions, transform, overlay, compactMap, scene.level);
+  const protectedLabelBoxes = polityLabelLayouts.map(({ label, point, fontSize }) => (
+    estimatedLabelBox(label, point, fontSize)
+  ));
+  for (const label of profile.macroLabels) {
+    if (compactMap && label.kind === 'province' && label.priority < 3) continue;
+    const point = worldToScreen(label.center, transform);
+    const fontSize = compactMap ? 7 : label.kind === 'province' ? 9 : 10;
+    protectedLabelBoxes.push(estimatedLabelBox(label.label, point, fontSize));
+  }
   const renderedSeaZones = seaZones;
   const regionById = new Map(regions.map((region) => [region.id, region]));
   const regionNodesByRegion = new Map<string, MapRegionNodeLayout[]>();
@@ -924,6 +977,23 @@ export function drawWorldMap(
     const nodes = regionNodesByRegion.get(node.region.id) ?? [];
     nodes.push(node);
     regionNodesByRegion.set(node.region.id, nodes);
+  }
+  for (const region of regions) {
+    const selected = region.id === selectedRegionId;
+    const hovered = region.id === hoveredRegionId;
+    const showLabel = scene.regionLabelIds.has(region.id) || selected || hovered;
+    if (!showLabel || !(selected || hovered || region.capital || (region.cityLevel ?? 0) >= 4)) continue;
+    const center = worldToScreen(region.center, transform);
+    const fontSize = compactMap ? 9 : selected ? 12 : 11;
+    protectedLabelBoxes.push(estimatedLabelBox(region.name, { x: center.x, y: center.y + 2 }, fontSize));
+  }
+  for (const { point, radius } of layoutMapMarkers(markers, transform)) {
+    protectedLabelBoxes.push({
+      left: point.x - radius - 3,
+      right: point.x + radius + 3,
+      top: point.y - radius - 3,
+      bottom: point.y + radius + 3,
+    });
   }
   const highlightedRegions = new Set(highlightedRegionIds);
   const highlightStrength = clamp(visualSettings.highlightStrength ?? 1);
@@ -1046,7 +1116,7 @@ export function drawWorldMap(
     context.restore();
   });
 
-  drawPolityLabels(context, regions, transform, overlay, compactMap, scene.level);
+  drawPolityLabels(context, polityLabelLayouts, compactMap);
   drawMarkers(context, markers, transform, selectedObject);
 
   const staticPersonLayouts = layoutMapPersonForces(scene.persons ?? [], transform);
@@ -1064,6 +1134,16 @@ export function drawWorldMap(
       y: fromPoint.y + (toPoint.y - fromPoint.y) * movementProgress + offset.y,
     } };
   });
+  if (overlay === 'war' || selectedObject?.kind === 'army') {
+    for (const { point } of armyLayouts) {
+      protectedLabelBoxes.push({
+        left: point.x - (narrowMap ? 59 : 85),
+        right: point.x + (narrowMap ? 59 : 85),
+        top: point.y - 11,
+        bottom: point.y + 50,
+      });
+    }
+  }
   drawArmyOrders(context, armyLayouts, regions, transform, overlay, selectedObject, focusedWarId, movementProgress);
   drawArmyMarkers(context, armyLayouts, scene, overlay, selectedObject, narrowMap);
 
@@ -1124,6 +1204,7 @@ export function drawWorldMap(
     context.restore();
   }
   const occupiedLabels: Record<number, boolean> = {};
+  const occupiedLabelBoxes: MapLabelBox[] = [...protectedLabelBoxes];
   const personLabelLimit = narrowMap ? (focusedWarId ? 6 : 5)
     : compactMap ? (focusedWarId ? 12 : 8)
       : scene.level === 'local' ? 24 : 16;
@@ -1139,26 +1220,48 @@ export function drawWorldMap(
     context.textAlign = 'center'; context.textBaseline = 'top'; context.lineWidth = 3.5;
     context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
     context.strokeText(label, point.x, labelY); context.fillText(label, point.x, labelY);
+    occupiedLabelBoxes.push(estimatedLabelBox(label, {
+      x: point.x,
+      y: labelY + (compactMap ? 6 : 6.5),
+    }, compactMap ? 8 : 9));
     context.restore();
   }
-  for (const { cluster, point, radius } of layoutMapPersonClusters(scene.personClusters ?? [], transform)) {
+  for (const { cluster, point, radius } of layoutMapPersonClusters(scene.personClusters ?? [], transform)
+    .sort((left, right) => right.cluster.count - left.cluster.count || left.cluster.id.localeCompare(right.cluster.id))) {
     const strength = shortStrength(cluster.soldiers);
     context.save();
     context.globalAlpha = overlay === 'political' ? 0.78 : 1;
     context.fillStyle = PAPER_LIGHT; context.strokeStyle = cluster.polityColor; context.lineWidth = 1.8;
     context.beginPath(); context.arc(point.x, point.y, radius, 0, Math.PI * 2); context.fill(); context.stroke();
-    const labelY = point.y + radius + 3;
-    const cell = Math.round(point.x / 112) + Math.round(labelY / 30) * 100;
     if ((scene.level === 'overview' || !(compactMap || narrowMap))
-      && !occupiedLabels[cell]
       && (cluster.count > 1 || cluster.soldiers >= 2_000)) {
-      occupiedLabels[cell] = true;
       context.font = '650 8px "Noto Serif SC", serif'; context.textAlign = 'center'; context.textBaseline = 'top';
       context.lineWidth = 3; context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
       const label = scene.level === 'overview'
         ? `${cluster.count}将`
         : `${cluster.leaderName}等${cluster.count}人 · ${strength}`;
-      context.strokeText(label, point.x, labelY); context.fillText(label, point.x, labelY);
+      const fontSize = 8;
+      const labelWidth = Math.max(fontSize * 2, label.length * fontSize * 0.9 + 6);
+      const labelHeight = fontSize + 4;
+      const candidates = scene.level === 'overview' ? [
+        { x: point.x, y: point.y + radius + 3 + labelHeight / 2 },
+        { x: point.x, y: point.y - radius - 3 - labelHeight / 2 },
+        { x: point.x + radius + 4 + labelWidth / 2, y: point.y },
+        { x: point.x - radius - 4 - labelWidth / 2, y: point.y },
+      ] : [{ x: point.x, y: point.y + radius + 3 + labelHeight / 2 }];
+      const labelPoint = candidates.find((candidate) => {
+        const box = estimatedLabelBox(label, candidate, fontSize);
+        const insideCanvas = box.left >= 2 && box.right <= width - 2 && box.top >= 2 && box.bottom <= height - 2;
+        return insideCanvas && !occupiedLabelBoxes.some((other) => labelBoxesOverlap(box, other));
+      });
+      if (labelPoint) {
+        const labelBox = estimatedLabelBox(label, labelPoint, fontSize);
+        occupiedLabelBoxes.push(labelBox);
+        const cell = Math.round(labelPoint.x / 112) + Math.round(labelPoint.y / 30) * 100;
+        occupiedLabels[cell] = true;
+        context.textBaseline = 'middle';
+        context.strokeText(label, labelPoint.x, labelPoint.y); context.fillText(label, labelPoint.x, labelPoint.y);
+      }
     }
     context.restore();
   }
