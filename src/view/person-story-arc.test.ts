@@ -132,7 +132,7 @@ describe('person story arc', () => {
     const beat = story.find((item) => item.phase === 'setback' && item.sourceFactIds.includes('fact_story_wound'));
     expect(beat?.title).toContain('负伤退营');
     expect(beat?.sourceFactIds).toEqual(['fact_story_turn_battle', 'fact_story_wound']);
-    expect(beat?.primaryFactId).toBe('fact_story_turn_battle');
+    expect(beat?.primaryFactId).toBe('fact_story_wound');
     expect(beat?.summary).toContain('此役战前');
     expect(beat?.summary).toContain('退出行营');
     expect(story.length).toBeLessThanOrEqual(3);
@@ -169,6 +169,73 @@ describe('person story arc', () => {
       'fact_story_death_battle',
     ]);
     expect(ending?.summary).toContain(`同季卸下${office.kind}`);
-    expect(ending?.primaryFactId).toBe(battle.id);
+    expect(ending?.primaryFactId).toBe(deathId);
+  });
+
+  it('does not merge a past wound into a later battle chapter or send its link to unrelated battle evidence', () => {
+    const world = createWorld('人物经历时间边界');
+    const person = world.characters.find((item) => world.armies.some((army) => army.participantIds.includes(item.id)))!;
+    const early = battleFact(world, person.id, 'fact_story_early_battle', 5, 120);
+    const later = battleFact(world, person.id, 'fact_story_later_battle', 25, 90);
+    const woundId = 'fact_story_early_wound';
+    world.facts.push(early, {
+      id: woundId,
+      turn: 5,
+      year: 2,
+      season: '夏',
+      kind: 'character_wounded',
+      category: '军事',
+      importance: 4,
+      actorIds: [person.id],
+      polityIds: [person.polityId],
+      regionIds: [early.payload.targetRegionId],
+      causes: [],
+      stateDeltas: [{ entityType: 'character', entityId: person.id, field: 'health', before: 100, after: 72, delta: -28 }],
+      sourceFactIds: [early.id],
+      payload: {
+        characterId: person.id,
+        battleFactId: early.id,
+        warId: early.payload.warId,
+        regionId: early.payload.targetRegionId,
+        role: 'member',
+        sideWon: true,
+        soldiersBefore: 600,
+        soldiersAfter: 480,
+        losses: 120,
+        healthBefore: 100,
+        healthAfter: 72,
+        recoveryUntilTurn: 8,
+        observerProtectionConsumed: false,
+      },
+    }, later);
+    world.history.push({
+      id: 'history_story_early_wound',
+      turn: 5,
+      year: 2,
+      season: '夏',
+      category: '军事',
+      kind: '人物负伤',
+      title: `${person.name}负伤退营`,
+      summary: `${person.name}退出行营休养。`,
+      importance: 4,
+      actorIds: [person.id],
+      polityIds: [person.polityId],
+      regionIds: [early.payload.targetRegionId],
+      causes: [],
+      evidence: [],
+      stateDeltas: [],
+      sourceFactIds: [woundId],
+      situationIds: [],
+    });
+
+    const story = projectPersonStoryArc(world, person);
+    const wound = story.find((beat) => beat.sourceFactIds.includes(woundId));
+
+    expect(wound?.dateLabel).toContain('第 2 年');
+    expect(wound?.sourceFactIds).toEqual(['fact_story_early_battle', woundId]);
+    expect(wound?.sourceFactIds).not.toContain(later.id);
+    expect(wound?.primaryFactId).toBe(woundId);
+    expect(wound?.primaryEventId).toBe('history_story_early_wound');
+    expect(wound?.summary).toContain('休养至第8季');
   });
 });

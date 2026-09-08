@@ -369,6 +369,41 @@ describe('map renderer LOD contract', () => {
       .toContain('王行简 ↔ 顾守山 · 1步');
   });
 
+  it('places narrow war labels around protected capital text and keeps unselected labels terse', () => {
+    const capital = region('front', '广州', { x: 480, y: 290 }, {
+      polityId: 'polity-south', polityName: '南国', capital: true, cityLevel: 5,
+    });
+    const armies: MapArmyView[] = ['林维明', '许维成', '陆维宣'].map((name, index) => ({
+      id: `army-front-${index}`,
+      name: `第${index + 1}行营`,
+      regionId: capital.id,
+      position: capital.center,
+      polityId: 'polity-south',
+      strength: 2_400 - index * 300,
+      lawfulCommanderName: name,
+      orderKind: 'advance',
+    }));
+    const context = recordingContext();
+
+    drawWorldMap(
+      context,
+      { width: 390, height: 644, dpr: 1 },
+      { ...scene({ regions: [capital], armies }), level: 'regional' },
+      'war',
+      [],
+      null,
+      null,
+      undefined,
+      { zoom: 1.35, panX: 0, panY: 0 },
+    );
+
+    const capitalLabel = context.fillTexts.find((call) => call.text === '广州')!;
+    const armyLabels = context.fillTexts.filter((call) => armies.some((army) => army.lawfulCommanderName === call.text));
+    expect(armyLabels.length).toBeGreaterThan(0);
+    expect(armyLabels.every((call) => !call.text.includes('千'))).toBe(true);
+    expect(armyLabels.every((call) => !boxesOverlap(textBox(call), textBox(capitalLabel)))).toBe(true);
+  });
+
   it('keeps compact overview polity and capital hierarchy without restoring ordinary region names', () => {
     const capital = region('capital', '云京', { x: 440, y: 230 }, {
       polityId: 'polity_cloud',
@@ -485,5 +520,10 @@ describe('map renderer LOD contract', () => {
     expect(personLabels.length).toBeGreaterThan(0);
     expect(personLabels.length).toBeLessThanOrEqual(5);
     expect(personLabels[0]?.text).toMatch(/将领\d+ · \d\.\d千/);
+    for (let index = 0; index < personLabels.length; index += 1) {
+      for (let other = index + 1; other < personLabels.length; other += 1) {
+        expect(boxesOverlap(textBox(personLabels[index]!), textBox(personLabels[other]!))).toBe(false);
+      }
+    }
   });
 });

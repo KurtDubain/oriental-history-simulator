@@ -54,11 +54,11 @@ export interface CausalDrawerProps {
 }
 
 const ROLE_LABELS: Record<CausalRole, string> = {
-  structure: '结构原因',
-  condition: '必要条件',
-  trigger: '直接诱因',
-  choice: '人物选择',
-  outcome: '裁决结果',
+  structure: '事情背景',
+  condition: '当时局势',
+  trigger: '直接起因',
+  choice: '当事人所为',
+  outcome: '实际结果',
 };
 
 export function CausalDrawer({
@@ -132,35 +132,36 @@ export function CausalDrawer({
                     {factor.detail ? <p>{factor.detail}</p> : null}
                     {factor.actor ? <small>行动者 · {factor.actor}</small> : null}
                     {factor.evidence ? (
-                      onInspectEvidence ? (
-                        <button
-                          type="button"
-                          className="observer-causal-chain__evidence"
-                          aria-expanded={factor.refs?.length ? expandedFactorId === factor.id : undefined}
-                          onClick={() => {
-                            if (factor.refs?.length) setExpandedFactorId((current) => current === factor.id ? null : factor.id);
-                            else onInspectEvidence(factor);
-                          }}
-                        >
-                          <Search size={12} aria-hidden="true" />
-                          {factor.evidence}
-                        </button>
-                      ) : (
-                        <span className="observer-causal-chain__evidence observer-causal-chain__evidence--static">
-                          <Search size={12} aria-hidden="true" />
-                          {factor.evidence}
-                        </span>
-                      )
-                    ) : null}
-                    {expandedFactorId === factor.id && factor.refs?.length ? (
-                      <div className="observer-causal-chain__references" aria-label="结构化因果凭证">
-                        <span>凭证所指</span>
-                        {factor.refs.map((reference) => (
-                          <button key={`${reference.kind}-${reference.id}`} type="button" onClick={() => onSelectReference?.(reference)}>
-                            <strong>{reference.label}</strong><small>{reference.detail}</small>
+                      <details className="observer-causal-chain__details">
+                        <summary><Search size={12} aria-hidden="true" />详细依据</summary>
+                        {onInspectEvidence ? (
+                          <button
+                            type="button"
+                            className="observer-causal-chain__evidence"
+                            aria-expanded={factor.refs?.length ? expandedFactorId === factor.id : undefined}
+                            onClick={() => {
+                              if (factor.refs?.length) setExpandedFactorId((current) => current === factor.id ? null : factor.id);
+                              else onInspectEvidence(factor);
+                            }}
+                          >
+                            {factor.evidence}
                           </button>
-                        ))}
-                      </div>
+                        ) : (
+                          <span className="observer-causal-chain__evidence observer-causal-chain__evidence--static">
+                            {factor.evidence}
+                          </span>
+                        )}
+                        {expandedFactorId === factor.id && factor.refs?.length ? (
+                          <div className="observer-causal-chain__references" aria-label="结构化因果凭证">
+                            <span>凭证所指</span>
+                            {factor.refs.map((reference) => (
+                              <button key={`${reference.kind}-${reference.id}`} type="button" onClick={() => onSelectReference?.(reference)}>
+                                <strong>{reference.label}</strong><small>{reference.detail}</small>
+                              </button>
+                            ))}
+                          </div>
+                        ) : null}
+                      </details>
                     ) : null}
                   </div>
                   {index < event.factors.length - 1 ? <ArrowDown className="observer-causal-chain__arrow" size={15} aria-hidden="true" /> : null}

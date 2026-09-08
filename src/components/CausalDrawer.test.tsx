@@ -30,6 +30,11 @@ describe('CausalDrawer reading layer', () => {
     expect(markup).toContain('data-event-id="event-1"');
     expect(markup).toContain('何故与证据');
     expect(markup).toContain('此事为何发生？');
+    expect(markup).toContain('当事人所为');
+    expect(markup).toContain('<summary>');
+    expect(markup).toContain('详细依据');
+    expect(markup).not.toContain('人物选择');
+    expect(markup).not.toContain('裁决结果');
     expect(markup).toContain('接着看这些人');
     expect(markup.indexOf('此事为何发生？')).toBeLessThan(markup.indexOf('接着看这些人'));
     expect(markup).not.toContain('史事溯因');

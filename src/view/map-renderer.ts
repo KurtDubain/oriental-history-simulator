@@ -674,9 +674,11 @@ function drawArmyMarkers(
   overlay: MapOverlay,
   selectedObject: MapSelectedObject,
   narrow: boolean,
+  occupiedLabelBoxes: MapLabelBox[],
+  viewport: { width: number; height: number },
 ) {
   if (overlay !== 'war' && selectedObject?.kind !== 'army') return;
-  const labels: Array<{ point: MapPoint; text: string; selected: boolean }> = [];
+  const labels: Array<{ id: string; point: MapPoint; text: string; selected: boolean; strength: number }> = [];
   for (const { army, point } of layouts) {
     if (army.id === scene.expandedArmyId) continue;
     const selected = selectedObject?.kind === 'army' && selectedObject.id === army.id;
@@ -688,31 +690,42 @@ function drawArmyMarkers(
     context.strokeStyle = INK; context.lineWidth = 1.15;
     context.beginPath(); context.moveTo(point.x - 3, point.y); context.lineTo(point.x + 3, point.y); context.moveTo(point.x, point.y - 3); context.lineTo(point.x, point.y + 3); context.stroke();
     labels.push({
+      id: army.id,
       point,
       text: narrow
-        ? `${army.lawfulCommanderName ?? army.name} · ${shortStrength(army.strength)}`
+        ? `${army.lawfulCommanderName ?? army.name}${selected ? ` · ${shortStrength(army.strength)}` : ''}`
         : `${army.lawfulCommanderName ?? '无帅'} · ${army.name} · ${shortStrength(army.strength)}`,
       selected,
+      strength: army.strength,
     });
     context.restore();
   }
-  const occupied: Array<{ left: number; right: number; top: number; bottom: number }> = [];
-  const orderedLabels = labels.slice(0, narrow ? 6 : 12).sort((left, right) => Number(right.selected) - Number(left.selected));
+  const orderedLabels = labels.sort((left, right) => Number(right.selected) - Number(left.selected)
+    || right.strength - left.strength || (left.id < right.id ? -1 : left.id > right.id ? 1 : 0)).slice(0, narrow ? 6 : 12);
   for (const { point, text, selected } of orderedLabels) {
     const fontSize = narrow ? 8 : 9;
-    const width = Math.min(narrow ? 118 : 170, text.length * fontSize * 0.82 + 8);
-    const candidates = [point.y + 10, point.y + 24, point.y + 38];
-    const y = candidates.find((candidate) => {
-      const box = { left: point.x - width / 2, right: point.x + width / 2, top: candidate, bottom: candidate + fontSize + 3 };
-      return !occupied.some((other) => box.left < other.right && box.right > other.left && box.top < other.bottom && box.bottom > other.top);
+    const labelWidth = Math.min(narrow ? 118 : 170, text.length * fontSize * 0.82 + 8);
+    const labelHeight = fontSize + 4;
+    const candidates = [
+      { x: point.x, y: point.y + 17 },
+      { x: point.x, y: point.y - 17 },
+      { x: point.x + 11 + labelWidth / 2, y: point.y },
+      { x: point.x - 11 - labelWidth / 2, y: point.y },
+    ];
+    const labelPoint = candidates.find((candidate) => {
+      const box = { left: candidate.x - labelWidth / 2, right: candidate.x + labelWidth / 2,
+        top: candidate.y - labelHeight / 2, bottom: candidate.y + labelHeight / 2 };
+      return box.left >= 2 && box.right <= viewport.width - 2 && box.top >= 2 && box.bottom <= viewport.height - 2
+        && !occupiedLabelBoxes.some((other) => labelBoxesOverlap(box, other));
     });
-    if (y === undefined && !selected) continue;
-    const labelY = y ?? point.y + 10;
-    occupied.push({ left: point.x - width / 2, right: point.x + width / 2, top: labelY, bottom: labelY + fontSize + 3 });
+    if (!labelPoint && !selected) continue;
+    const position = labelPoint ?? candidates[0]!;
+    occupiedLabelBoxes.push({ left: position.x - labelWidth / 2, right: position.x + labelWidth / 2,
+      top: position.y - labelHeight / 2, bottom: position.y + labelHeight / 2 });
     context.save(); context.font = `650 ${narrow ? 8 : 9}px "Noto Serif SC", serif`;
-    context.textAlign = 'center'; context.textBaseline = 'top'; context.lineWidth = 3.5;
+    context.textAlign = 'center'; context.textBaseline = 'middle'; context.lineWidth = 3.5;
     context.strokeStyle = PAPER_LIGHT; context.fillStyle = selected ? VERMILION : INK;
-    context.strokeText(text, point.x, labelY); context.fillText(text, point.x, labelY); context.restore();
+    context.strokeText(text, position.x, position.y); context.fillText(text, position.x, position.y); context.restore();
   }
 }
 
@@ -1134,8 +1147,11 @@ export function drawWorldMap(
       y: fromPoint.y + (toPoint.y - fromPoint.y) * movementProgress + offset.y,
     } };
   });
+  drawArmyOrders(context, armyLayouts, regions, transform, overlay, selectedObject, focusedWarId, movementProgress);
+  drawArmyMarkers(context, armyLayouts, scene, overlay, selectedObject, narrowMap, protectedLabelBoxes, { width, height });
   if (overlay === 'war' || selectedObject?.kind === 'army') {
-    for (const { point } of armyLayouts) {
+    for (const { army, point } of armyLayouts) {
+      if (army.id === scene.expandedArmyId) continue;
       protectedLabelBoxes.push({
         left: point.x - (narrowMap ? 59 : 85),
         right: point.x + (narrowMap ? 59 : 85),
@@ -1144,8 +1160,6 @@ export function drawWorldMap(
       });
     }
   }
-  drawArmyOrders(context, armyLayouts, regions, transform, overlay, selectedObject, focusedWarId, movementProgress);
-  drawArmyMarkers(context, armyLayouts, scene, overlay, selectedObject, narrowMap);
 
   const personLayouts = staticPersonLayouts.map((layout) => {
     const army = layout.person.formationId ? armies.find((item) => item.id === layout.person.formationId) : undefined;
@@ -1211,19 +1225,28 @@ export function drawWorldMap(
   for (const { person, point, radius, label, selected } of personLabels.sort((left, right) => (
     right.priority - left.priority || right.person.soldiers - left.person.soldiers
   )).slice(0, personLabelLimit)) {
-    const labelY = point.y + radius + 3;
-    const cell = Math.round(point.x / 112) + Math.round(labelY / 30) * 100;
-    if (occupiedLabels[cell] && !selected) continue;
-    occupiedLabels[cell] = true;
+    const fontSize = compactMap ? 8 : 9;
+    const labelWidth = Math.max(fontSize * 2, label.length * fontSize * 0.9 + 6);
+    const labelHeight = fontSize + 4;
+    const candidates = [
+      { x: point.x, y: point.y + radius + 4 + labelHeight / 2 },
+      { x: point.x, y: point.y - radius - 4 - labelHeight / 2 },
+      { x: point.x + radius + 5 + labelWidth / 2, y: point.y },
+      { x: point.x - radius - 5 - labelWidth / 2, y: point.y },
+    ];
+    const labelPoint = candidates.find((candidate) => {
+      const box = estimatedLabelBox(label, candidate, fontSize);
+      return box.left >= 2 && box.right <= width - 2 && box.top >= 2 && box.bottom <= height - 2
+        && !occupiedLabelBoxes.some((other) => labelBoxesOverlap(box, other));
+    });
+    if (!labelPoint && !selected) continue;
+    const position = labelPoint ?? candidates[0]!;
     context.save();
-    context.font = `${person.isCommander ? 700 : 600} ${compactMap ? 8 : 9}px "Noto Serif SC", serif`;
-    context.textAlign = 'center'; context.textBaseline = 'top'; context.lineWidth = 3.5;
+    context.font = `${person.isCommander ? 700 : 600} ${fontSize}px "Noto Serif SC", serif`;
+    context.textAlign = 'center'; context.textBaseline = 'middle'; context.lineWidth = 3.5;
     context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
-    context.strokeText(label, point.x, labelY); context.fillText(label, point.x, labelY);
-    occupiedLabelBoxes.push(estimatedLabelBox(label, {
-      x: point.x,
-      y: labelY + (compactMap ? 6 : 6.5),
-    }, compactMap ? 8 : 9));
+    context.strokeText(label, position.x, position.y); context.fillText(label, position.x, position.y);
+    occupiedLabelBoxes.push(estimatedLabelBox(label, position, fontSize));
     context.restore();
   }
   for (const { cluster, point, radius } of layoutMapPersonClusters(scene.personClusters ?? [], transform)

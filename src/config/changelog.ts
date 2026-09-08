@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.1',
-  date: '2026-09-07',
-  title: '舆图避让，翻卷不断焦点',
+  version: '1.29.2',
+  date: '2026-09-08',
+  title: '经历归时，战局减字',
   items: [
-    '人物簇会避让国号与首府；无事之季保持克制，手机筛选后焦点回到可见入口。',
+    '负伤与结局各归其时，点开即见对应史实；手机战局标注互相避让，技术凭证默认收进详细依据。',
   ],
 };
 

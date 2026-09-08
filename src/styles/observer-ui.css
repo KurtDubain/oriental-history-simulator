@@ -2654,9 +2654,9 @@
 
 .observer-causal-chain__role {
   color: var(--observer-vermilion-dark);
-  font-size: 8px;
+  font-size: 10px;
   font-weight: 750;
-  letter-spacing: 0.13em;
+  letter-spacing: 0.08em;
 }
 
 .observer-causal-chain__factor h3 {
@@ -2670,7 +2670,7 @@
 .observer-causal-chain__factor p {
   margin: 0;
   color: var(--observer-ink-soft);
-  font-size: 10px;
+  font-size: 12px;
   line-height: 1.65;
 }
 
@@ -2678,7 +2678,7 @@
   display: block;
   margin-top: 5px;
   color: var(--observer-ink-faint);
-  font-size: 9px;
+  font-size: 11px;
 }
 
 .observer-causal-chain__arrow {
@@ -2688,16 +2688,35 @@
   color: var(--observer-ink-faint);
 }
 
+.observer-causal-chain__details {
+  margin-top: 7px;
+}
+
+.observer-causal-chain__details > summary {
+  display: inline-flex;
+  min-height: 30px;
+  align-items: center;
+  gap: 5px;
+  color: var(--observer-ink-soft);
+  cursor: pointer;
+  font-size: 11px;
+  list-style: none;
+}
+
+.observer-causal-chain__details > summary::-webkit-details-marker {
+  display: none;
+}
+
 .observer-causal-chain__evidence {
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  margin-top: 8px;
+  margin-top: 2px;
   padding: 3px 0;
   border: 0;
   border-bottom: 1px dotted var(--observer-line-strong);
   color: var(--observer-ink-faint);
-  font-size: 9px;
+  font-size: 11px;
   text-align: left;
   background: transparent;
 }
@@ -3468,7 +3487,8 @@ button.observer-causal-chain__evidence:hover {
   }
 
   .observer-causal-subjects button,
-  button.observer-causal-chain__evidence {
+  button.observer-causal-chain__evidence,
+  .observer-causal-chain__details > summary {
     min-height: 44px;
   }
 

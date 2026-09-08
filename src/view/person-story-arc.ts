@@ -77,6 +77,11 @@ function episodeCandidate(world: WorldState, episodes: readonly BattleEpisode[],
   const allFacts = ordered.flatMap((episode) => [episode.battle, ...episode.linked]);
   const death = [...allFacts].reverse().find((fact) => fact.kind === 'character_death');
   const wound = [...allFacts].reverse().find((fact) => fact.kind === 'character_wounded');
+  const turningFact = death ?? wound;
+  const focusEpisode = turningFact
+    ? ordered.find((episode) => episode.linked.some((fact) => fact.id === turningFact.id)) ?? latest
+    : latest;
+  const focusSide = battleSide(focusEpisode.battle, personId)!;
   const ended = allFacts.filter((fact) => fact.kind === 'appointment_ended');
   const largestLoss = Math.max(...ordered.map(({ battle }) => {
     const side = battleSide(battle, personId)!;
@@ -84,14 +89,15 @@ function episodeCandidate(world: WorldState, episodes: readonly BattleEpisode[],
   }));
   if (ordered.length === 1 && firstSide.participant.role === 'member' && largestLoss < .15
     && first.battle.importance < 4 && !wound && !death && !ended.length) return null;
-  const place = world.regions.find((item) => item.id === latest.battle.payload.targetRegionId)?.name ?? '无名战场';
+  const place = world.regions.find((item) => item.id === focusEpisode.battle.payload.targetRegionId)?.name ?? '无名战场';
   const totalLosses = ordered.reduce((sum, { battle }) => sum + battleSide(battle, personId)!.participant.losses, 0);
   const sourceFactIds = unique(allFacts.map((fact) => fact.id));
-  const sources = sourceEvents(events, personId, sourceFactIds, latest.battle.id);
-  const outcome = death ? '阵亡' : wound ? '负伤退营' : latestSide.won ? '取胜' : '受挫';
+  const primaryFactId = turningFact?.id ?? focusEpisode.battle.id;
+  const sources = sourceEvents(events, personId, sourceFactIds, primaryFactId);
+  const outcome = death ? '阵亡' : wound ? '负伤退营' : focusSide.won ? '取胜' : '受挫';
   const title = ordered.length === 1
-    ? `${place}${latestSide.stance}${latestSide.won ? '得胜' : '受挫'}${death || wound ? `，${outcome}` : ''}`
-    : `${place}${latestSide.stance === '守阵' ? '数度守阵' : '连番进兵'}，${outcome}`;
+    ? `${place}${focusSide.stance}${focusSide.won ? '得胜' : '受挫'}${death || wound ? `，${outcome}` : ''}`
+    : `${place}${focusSide.stance === '守阵' ? '数度守阵' : '连番进兵'}，${outcome}`;
   let summary = ordered.length === 1
     ? `此役战前${firstSide.participant.soldiersBefore}人，战损${firstSide.participant.losses}人，战后${firstSide.participant.soldiersAfter}人。`
     : `先后参战${ordered.length}次，记录战损累计${totalLosses}人；最近一战战前${latestSide.participant.soldiersBefore}人，战后${latestSide.participant.soldiersAfter}人。`;
@@ -103,7 +109,7 @@ function episodeCandidate(world: WorldState, episodes: readonly BattleEpisode[],
   }
   return {
     id: `person-story:battle:${ordered.map((item) => item.battle.id).join(':')}`,
-    turn: latest.battle.turn,
+    turn: turningFact?.turn ?? focusEpisode.battle.turn,
     phase: death ? 'ending' : wound || !latestSide.won ? 'setback' : 'battle',
     title,
     summary,
@@ -112,7 +118,7 @@ function episodeCandidate(world: WorldState, episodes: readonly BattleEpisode[],
     sourceFactIds,
     sourceEventIds: sources.ids,
     primaryEventId: sources.primary,
-    primaryFactId: latest.battle.id,
+    primaryFactId,
   };
 }
 
@@ -151,13 +157,27 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
     if (fact.id !== rootId) episode.linked.push(fact);
     episodes.set(rootId, episode);
   }
-  const battleGroups = new Map<string, BattleEpisode[]>();
-  for (const episode of episodes.values()) {
+  const battleGroups: BattleEpisode[][] = [];
+  const activeGroupByKey = new Map<string, BattleEpisode[]>();
+  const orderedEpisodes = [...episodes.values()].sort((left, right) => (
+    left.battle.turn - right.battle.turn || compareId(left.battle.id, right.battle.id)
+  ));
+  for (const episode of orderedEpisodes) {
     const side = battleSide(episode.battle, person.id)!;
     const key = `${episode.battle.payload.warId}:${episode.battle.payload.targetRegionId}:${side.stance}:${side.won}`;
-    battleGroups.set(key, [...(battleGroups.get(key) ?? []), episode]);
+    const current = activeGroupByKey.get(key);
+    const previous = current?.at(-1);
+    const currentTurnsFate = episode.linked.some((fact) => fact.kind === 'character_wounded' || fact.kind === 'character_death');
+    const previousTurnsFate = previous?.linked.some((fact) => fact.kind === 'character_wounded' || fact.kind === 'character_death');
+    if (!current || !previous || episode.battle.turn - previous.battle.turn > 4 || currentTurnsFate || previousTurnsFate) {
+      const next = [episode];
+      activeGroupByKey.set(key, next);
+      battleGroups.push(next);
+    } else {
+      current.push(episode);
+    }
   }
-  const candidates = [...battleGroups.values()].map((group) => episodeCandidate(world, group, person.id, events))
+  const candidates = battleGroups.map((group) => episodeCandidate(world, group, person.id, events))
     .filter((item): item is Candidate => Boolean(item));
   const linkedIds = new Set([...episodes.values()].flatMap((episode) => episode.linked.map((fact) => fact.id)));
   const injuryTurns = new Set(facts.filter((fact) => fact.kind === 'character_wounded' || fact.kind === 'character_death').map((fact) => fact.turn));
