@@ -25,6 +25,7 @@ const ORDER_REASON_LABELS: Readonly<Record<ArmyOrderReason, string>> = {
   war_goal: '奉命夺取本战目标',
   enemy_approach: '敌军已经逼近',
   frontline_support: '友军需要接应',
+  enemy_strength: '敌前兵力不足，暂缓攻坚',
   defend_war_goal: '本方战守要地受威胁',
   amphibious_landing: '陆路不通，改由水师送登陆岸',
   low_readiness: '军粮或军心不足以续战',
@@ -184,19 +185,43 @@ function targetForWar(world: WorldState, army: ArmyState, war: WarState): string
   const rankedLandTarget = (candidates: typeof enemyRegions) => candidates
     .map((region) => ({
       id: region.id,
+      approachable: canApproachTarget(world, army, region.id),
       distance: pathLength(world, army, region.id, allowed),
       priority: (war.targetRegionIds.includes(region.id) ? 80 : 0)
         + (region.id === enemy?.capitalRegionId ? 32 : 0)
         + region.strategicValue * 4 + region.cityLevel * 2,
     }))
     .filter((candidate) => Number.isFinite(candidate.distance))
-    .sort((left, right) => left.distance - right.distance
+    .sort((left, right) => Number(right.approachable) - Number(left.approachable) || left.distance - right.distance
       || right.priority - left.priority || stableCompare(left.id, right.id))[0]?.id;
   const goalTarget = rankedLandTarget(reachableGoals);
-  if (goalTarget) return goalTarget;
+  if (goalTarget && canApproachTarget(world, army, goalTarget)) return goalTarget;
   const amphibiousTarget = amphibiousApproach(world, army, war)?.targetRegionId;
   if (goalRegions.length > 0 && amphibiousTarget) return amphibiousTarget;
   return rankedLandTarget(enemyRegions) ?? amphibiousTarget ?? null;
+}
+
+/** Nearby troop concentrations and our own recent reports, not enemy skills or hidden reserves. */
+export function canApproachTarget(world: WorldState, army: ArmyState, targetId: string): boolean {
+  const target = world.regions.find((region) => region.id === targetId);
+  if (!target || target.controllerId === army.polityId) return true;
+  const report = [...world.facts].reverse().find((fact) => fact.kind === 'battle'
+    && fact.payload.targetRegionId === targetId && fact.payload.attacker.polityId === army.polityId
+    && world.turn - fact.turn <= 8);
+  const visible = target.neighbors.some((id) => world.regions.find((region) => region.id === id)?.controllerId === army.polityId);
+  if (!visible && !report) return true;
+  const leader = world.characters.find((person) => person.id === army.commanderId);
+  const defense = 1 + target.defense / 180 + (target.terrain === '山地' ? .18 : target.terrain === '丘陵' ? .09 : 0);
+  const troops = visible ? world.armies.filter((other) => other.polityId === target.controllerId
+    && other.regionId === targetId && !other.embarkedOperationId)
+    .reduce((sum, other) => sum + Math.ceil(other.soldiers / 1000) * 1000, 0) : 0;
+  const militia = Math.min(6000, target.population * .012) * (.48 + target.cityLevel * .07);
+  const observed = report?.kind === 'battle' && !report.payload.attackerWon ? report.payload.defenderPower : 0;
+  const resistance = Math.max((troops * 1.5 + militia) * defense, observed);
+  const own = army.soldiers * (.74 + (leader?.leadership ?? 50) / 190 + (leader?.cunning ?? 50) / 520)
+    * (.36 + army.morale / 260 + army.training / 360 + army.experience / 650 + army.supply / 300);
+  const resolve = .65 + (leader?.caution ?? 50) / 300 - (leader?.ambition ?? 50) / 500 + (observed > 0 ? .18 : 0);
+  return own >= resistance * resolve;
 }
 
 function defendedWarGoal(world: WorldState, army: ArmyState, war: WarState): string | null {
@@ -324,7 +349,7 @@ function desiredPlan(world: WorldState, army: ArmyState): OrderPlan {
       });
   }
   const enemy = closestEnemyArmy(world, army, war);
-  if (enemy && enemy.distance <= 3 && army.soldiers >= enemy.candidate.soldiers * 0.72) {
+  if (enemy && enemy.distance <= 3 && canApproachTarget(world, army, enemy.candidate.regionId)) {
     return plan('intercept', army, {
       warId: war.id,
       targetRegionId: enemy.candidate.regionId,
@@ -341,6 +366,12 @@ function desiredPlan(world: WorldState, army: ArmyState): OrderPlan {
       targetArmyId: primary.id,
       reasonCode: 'frontline_support',
     });
+  }
+  const nextEnemy = reachable.find((id) => world.regions.find((region) => region.id === id)?.controllerId !== army.polityId);
+  if (nextEnemy && !canApproachTarget(world, army, nextEnemy)) {
+    const retreat = world.regions.find((region) => region.id === army.regionId)?.controllerId !== army.polityId;
+    return plan(retreat ? 'retreat' : 'hold', army, { warId: war.id,
+      targetRegionId: retreat ? retreatTarget(world, army) : army.regionId, reasonCode: 'enemy_strength' });
   }
   return plan('advance', army, {
     warId: war.id,

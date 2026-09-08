@@ -11,6 +11,7 @@ import type {
   ArmyState,
   CharacterState,
   MilitaryStateProvenance,
+  StateDelta,
   WorldState,
 } from '../types';
 
@@ -95,23 +96,24 @@ export function recordArmyMovement(
   army.lastMovedTurn = turn;
 }
 
-export function creditBattleCommandStanding(world: WorldState, army: ArmyState, gain: number): void {
-  const lawful = world.characters.find((character) => character.id === army.commanderId && character.alive);
-  const actual = world.characters.find((character) => character.id === army.allegiance.characterId && character.alive);
-  if (!lawful && !actual) return;
-  if (!lawful || !actual || lawful.id === actual.id) {
-    const credited = actual ?? lawful;
-    if (credited) {
-      credited.renown = clamp(credited.renown + gain);
-      credited.merit = clamp(credited.merit + Math.max(1, Math.round(gain * 0.8)));
+export function creditBattleCommandStanding(world: WorldState, army: ArmyState, won: boolean, lossRate: number,
+  ids: readonly string[] = army.participantIds): StateDelta[] {
+  const deltas: StateDelta[] = [];
+  for (const id of new Set(ids)) {
+    const person = world.characters.find((item) => item.id === id && item.alive);
+    if (!person) continue;
+    const command = id === army.commanderId || id === army.allegiance.characterId;
+    for (const [field, gain] of [['merit', won ? command ? 3 : 2 : 0],
+      ['renown', won ? command ? 2 : 1 : command ? -Math.ceil(lossRate * 8) : 0],
+      ['influence', !won && command ? -Math.ceil(lossRate * 5) : 0],
+      ['deputyExperience', id === army.deputyCommanderId ? 4 : 0]] as const) {
+      if (!gain) continue;
+      const before = person[field];
+      person[field] = clamp(before + gain);
+      deltas.push({ entityType: 'character', entityId: id, field, before, after: person[field], delta: person[field] - before });
     }
-    return;
   }
-  const lawfulGain = Math.round(gain * 0.35);
-  lawful.renown = clamp(lawful.renown + lawfulGain);
-  lawful.merit = clamp(lawful.merit + Math.max(1, Math.round(lawfulGain * 0.8)));
-  actual.renown = clamp(actual.renown + gain - lawfulGain);
-  actual.merit = clamp(actual.merit + Math.max(1, Math.round((gain - lawfulGain) * 0.8)));
+  return deltas;
 }
 
 export function refreshArmyMilitaryAuthority(

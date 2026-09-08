@@ -281,6 +281,7 @@ const ORDER_VALUE_LABELS: Readonly<Record<string, string>> = {
   war_goal: '夺取战争目标',
   enemy_approach: '敌军逼近',
   frontline_support: '接应友军',
+  enemy_strength: '暂缓攻坚',
   defend_war_goal: '守卫战守要地',
   amphibious_landing: '改由水师送登陆岸',
   low_readiness: '军粮或军心不足',
@@ -366,11 +367,13 @@ function projectDelta(world: WorldState, factId: string, delta: StateDelta): Sit
     entityId: delta.entityId,
     entityLabel: entityLabel(world, delta.entityType, delta.entityId),
     field: delta.field,
-    fieldLabel: FIELD_LABELS[delta.field] ?? '状态变化',
+    fieldLabel: delta.field === 'alive' && delta.entityType === 'character' ? '生死'
+      : delta.field === 'alive' && delta.entityType === 'polity' ? '政权存续'
+      : FIELD_LABELS[delta.field] ?? '状态变化',
     before: delta.before,
     after: delta.after,
-    beforeLabel: valueLabel(world, delta.before, delta.field),
-    afterLabel: valueLabel(world, delta.after, delta.field),
+    beforeLabel: delta.field === 'alive' ? delta.before ? '存续' : '已退场' : valueLabel(world, delta.before, delta.field),
+    afterLabel: delta.field === 'alive' ? delta.after ? '存续' : delta.entityType === 'character' ? '已故' : '已亡' : valueLabel(world, delta.after, delta.field),
     delta: typeof delta.delta === 'number' ? delta.delta : null,
   };
 }
@@ -728,6 +731,7 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
   const recentDeltas = evidence
     .filter((fact) => recentFactIds.has(fact.id))
     .flatMap((fact) => fact.stateDeltas)
+    .filter((delta) => delta.entityLabel !== '相关对象' && delta.field !== 'status' && delta.field !== 'active')
     .slice(0, 4);
   const allFactIds = new Set(allFacts.map((fact) => fact.id));
   const missingResultFacts = resultFactIds.filter((id) => !allFactIds.has(id));

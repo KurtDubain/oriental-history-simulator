@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.2',
+  version: '1.29.3',
   date: '2026-09-08',
-  title: '经历归时，战局减字',
+  title: '人物纪年与关注回执',
   items: [
-    '负伤与结局各归其时，点开即见对应史实；手机战局标注互相避让，技术凭证默认收进详细依据。',
+    '首次参战查全史，重复盟约只记一次；关注变化停表可直达案卷，手机地图按层减字。',
   ],
 };
 

@@ -2,7 +2,7 @@ import type { MapOverlay } from '../components/WorldMap';
 import type { SituationPhase, SituationState } from '../sim/situations';
 import type { SimulationFact, WorldState } from '../sim/types';
 import { projectCoreImpacts } from './core-impact-projection';
-import { projectFactNarrative, projectSituationHistoricalScenes, type HistoricalScene } from './historical-scenes';
+import { participantBattleHeadline, projectFactNarrative, projectSituationHistoricalScenes, readableParticipant, type HistoricalScene } from './historical-scenes';
 import {
   projectSituationSnapshotItem,
   situationOutcomeLabel,
@@ -40,11 +40,7 @@ export interface ObserverLead {
 export interface ObserverLeadProjection { leads: ObserverLead[] }
 export const OBSERVER_LEAD_VISIBILITY_THRESHOLD = 40;
 export const OBSERVER_LEAD_RESOLUTION_ECHO_TURNS = 1;
-const PHASE_ORDER: Readonly<Record<SituationPhase, number>> = {
-  critical: 0,
-  active: 1,
-  emerging: 2,
-};
+const PHASE_ORDER: Readonly<Record<SituationPhase, number>> = { critical: 0, active: 1, emerging: 2 };
 const WAR_SITUATION_TYPES = new Set(['war_progress', 'military_power_crisis']);
 const STORY_FACT_KINDS = new Set<SimulationFact['kind']>([
   'war_started', 'war_ended', 'battle', 'territory_control_changed', 'army_order_changed',
@@ -65,9 +61,7 @@ interface SituationLeadChoice {
   evidence: readonly [string, string];
   recentChange: string;
 }
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
+const stableCompare = (left: string, right: string): number => left < right ? -1 : left > right ? 1 : 0;
 function compareSituations(left: SituationState, right: SituationState): number {
   return PHASE_ORDER[left.phase] - PHASE_ORDER[right.phase]
     || right.importance - left.importance
@@ -103,8 +97,15 @@ function situationHeadline(world: WorldState, item: SituationSnapshotItem, situa
   if (item.type === 'war_progress') {
     const war = projectWarGroups(world, situation.scopeKey);
     const contact = war?.contacts[0];
-    if (contact) return `${contact.attackerCommander}率${contact.attacker}将在${contact.region}迎战${contact.defenderCommanders}`;
-    if (war?.latestBattle) return `${war.latestBattle.attackerCommander}在${war.latestBattle.region}${war.latestBattle.result}`;
+    if (contact) {
+      const ids = [contact.attackerArmyId, ...contact.defenderArmyIds];
+      const armies = world.armies.filter((army) => ids.includes(army.id));
+      const person = readableParticipant(world, armies.flatMap((army) => army.participantIds));
+      const army = armies.find((entry) => entry.participantIds.includes(person?.id ?? ''));
+      if (person && army) return `${person.name}${army.commanderId === person.id ? '统领' : '随'}${army.name}，将在${contact.region}${army.id === contact.attackerArmyId ? '进攻' : '迎战'}${army.id === contact.attackerArmyId ? contact.defenderCommanders : contact.attackerCommander}`;
+      return `${contact.attackerCommander}率${contact.attacker}将在${contact.region}迎战${contact.defenderCommanders}`;
+    }
+    if (war?.latestBattle) return participantBattleHeadline(world, war.latestBattle.factId);
     const moving = war?.sides.flatMap((side) => side.groups.flatMap((group) => group.armies))
       .filter((army) => army.nextRegion)
       .sort((left, right) => (left.stepsToTarget ?? 99) - (right.stepsToTarget ?? 99) || stableCompare(left.id, right.id))[0];
@@ -242,7 +243,7 @@ function isStoryFact(fact: SimulationFact, currentFacts: readonly SimulationFact
 }
 
 function targetForFact(world: WorldState, fact: SimulationFact): ObserverLeadTarget | null {
-  const actorId = fact.actorIds.find((id) => world.characters.some((character) => character.id === id));
+  const actorId = readableParticipant(world, fact.actorIds)?.id;
   if (actorId) return { kind: 'person', id: actorId };
   const polityId = fact.polityIds.find((id) => world.polities.some((polity) => polity.id === id));
   if (polityId) return { kind: 'country', id: polityId };

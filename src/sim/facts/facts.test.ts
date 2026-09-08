@@ -111,15 +111,11 @@ describe('schema 4 authoritative fact layer', () => {
       losses: expect.any(Number),
     });
 
-    const unpublishedIds = new Set(unpublished.map((fact) => fact.id));
-    const creditedDeputy = world.characters.find((character) => character.biography.some((entry) => (
-      entry.kind === '首次参战' && entry.factId !== null && unpublishedIds.has(entry.factId)
-    )));
+    const creditedBattle = unpublished.find((fact) => [fact.payload.attacker, ...fact.payload.defenders]
+      .some((side) => side.deputyCommanderId && fact.stateDeltas.some((delta) => delta.entityId === side.deputyCommanderId && delta.field === 'deputyExperience')));
+    const credit = creditedBattle?.stateDeltas.find((delta) => delta.field === 'deputyExperience');
+    const creditedDeputy = world.characters.find((character) => character.id === credit?.entityId);
     expect(creditedDeputy?.deputyExperience).toBeGreaterThanOrEqual(4);
-    const creditedEntry = creditedDeputy?.biography.find((entry) => (
-      entry.kind === '首次参战' && entry.factId !== null && unpublishedIds.has(entry.factId)
-    ));
-    const creditedBattle = unpublished.find((fact) => fact.id === creditedEntry?.factId);
     expect(creditedBattle).toBeDefined();
     expect([
       ...(creditedBattle ? [creditedBattle.payload.attacker] : []),

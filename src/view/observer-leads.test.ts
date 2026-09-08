@@ -155,7 +155,7 @@ describe('observer story leads', () => {
   });
 
   it('selects at most three visible open Situations by phase, importance, tension, age and stable id', () => {
-    const base = worldAt(8, '当世三问-稳定排序');
+    const base = worldAt(16, '当世三问-稳定排序');
     const natural = base.situationSystem.situations.filter((item) => item.status === 'open');
     expect(natural.length).toBeGreaterThanOrEqual(4);
     const [first, second, third, fourth] = natural;
@@ -362,11 +362,11 @@ describe('observer story leads', () => {
 
   it('shows a concrete Situation scene headline once and keeps its result as evidence', () => {
     const world = worldAt(8);
-    const lead = deriveObserverLeads(world).find((item) => item.situationId && item.recentChange?.includes(' · '));
+    const lead = deriveObserverLeads(world).find((item) => item.situationId && item.primarySceneId?.startsWith('scene:') && item.recentChange?.includes(' · '));
     if (!lead?.situationId || !lead.recentChange) throw new Error('expected a scene-backed Situation lead');
     const situation = world.situationSystem.situations.find((item) => item.id === lead.situationId);
     if (!situation) throw new Error(`missing Situation ${lead.situationId}`);
-    const scene = projectSituationHistoricalScenes(world, situation, 1, null, 'active')[0];
+    const scene = projectSituationHistoricalScenes(world, situation, 24, null, 'active').find(item => item.id === lead.primarySceneId);
     if (!scene) throw new Error('expected a concrete historical scene');
 
     expect(lead.recentChange).toBe(`${scene.dateLabel} · ${scene.title}`);

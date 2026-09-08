@@ -17,7 +17,7 @@ import {
 
 describe('NAR01/NAR02 concrete historical scenes', () => {
   it('joins support, request, court response and direct consequences into one traceable scene', () => {
-    let world = createWorld('军权春秋');
+    let world = createWorld('孤城疫年');
     let resolution = world.facts.find((fact) => fact.kind === 'agency_intent_resolved');
     for (let turn = 0; turn < 80 && !resolution; turn += 1) {
       world = advanceWorld(world);

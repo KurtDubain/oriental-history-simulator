@@ -28,7 +28,7 @@ import {
 } from '../sim/agency';
 import { calculateCharacterPowerPosition } from '../sim/politics/power-ledger';
 import { battleRecoveryStatus } from '../sim/military/battle-readiness';
-import { projectHistoricalScenes } from './historical-scenes';
+import { canonicalEventKey, canonicalStoryKey, playerHistoryText, projectFactNarrative, projectHistoricalScenes } from './historical-scenes';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import {
   character,
@@ -71,7 +71,7 @@ interface PersonExperienceEntry {
 }
 
 function factNamesCharacter(fact: SimulationFact, characterId: string): boolean {
-  if (!fact.actorIds.includes(characterId)) return false;
+  if (fact.kind !== 'battle' && !fact.actorIds.includes(characterId)) return false;
   switch (fact.kind) {
     case 'battle':
       return [fact.payload.attacker, ...fact.payload.defenders].some((force) => (
@@ -150,6 +150,31 @@ export function toPersonExperienceRecords(
   const facts = readScope === 'all' ? readWorldFacts(world) : world.facts;
   const eventById = new Map(history.map((event) => [event.id, event]));
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
+  const claimed = new Set<string>();
+  const battles = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'battle' }> => (
+    fact.kind === 'battle' && factNamesCharacter(fact, item.id)
+  )).sort((a, b) => a.turn - b.turn || a.id.localeCompare(b.id));
+  const firstDeputy = battles.find((fact) => [fact.payload.attacker, ...fact.payload.defenders]
+    .some((side) => side.deputyCommanderId === item.id));
+  const battleRecord = (fact: SimulationFact | undefined, record: ArchiveRecord): ArchiveRecord => {
+    if (fact?.kind !== 'battle') return record;
+    const first = readScope === 'all' && fact.id === battles[0]?.id;
+    const deputy = readScope === 'all' && !first && fact.id === firstDeputy?.id;
+    const narrative = projectFactNarrative(world, fact);
+    return { ...record, title: `${first ? '首次参战 · ' : deputy ? '首次以副将身份参战 · ' : ''}${narrative.title}`,
+      summary: `${item.name}${deputy ? '首次以副将身份随军' : '参战'}。${narrative.summary}` };
+  };
+  const addEvent = (event: HistoryEvent, id = event.id) => {
+    const key = canonicalEventKey(event, factById);
+    if (claimed.has(key) || event.kind !== 'world_created' && event.sourceFactIds.length > 0
+      && event.sourceFactIds.every((sourceId) => knownFactIds.has(sourceId))) return;
+    claimed.add(key);
+    const battle = event.sourceFactIds.map((factId) => factById.get(factId))
+      .find((fact) => fact?.kind === 'battle' && factNamesCharacter(fact, item.id));
+    entries.push({ turn: event.turn, record: battleRecord(battle, { ...eventArchiveRecord(event), id }) });
+    knownEventIds.add(event.id);
+    if (event.kind !== 'world_created') event.sourceFactIds.forEach((factId) => knownFactIds.add(factId));
+  };
   const eventsBySourceFactId = new Map<string, HistoryEvent[]>();
   for (const event of history) {
     if (!event.actorIds.includes(item.id)) continue;
@@ -161,6 +186,8 @@ export function toPersonExperienceRecords(
   }
 
   for (const fact of biography) {
+    // This old biography label described a deputy debut and was bounded; reconstruct from all battles.
+    if (fact.kind === '首次参战') continue;
     const source = biographySource(item, fact, eventById, factById);
     if (!source) continue;
     const linkedFactEvents = source.fact
@@ -168,48 +195,32 @@ export function toPersonExperienceRecords(
       : [];
     const canonicalEvents = source.event ? [source.event] : linkedFactEvents;
     const canonicalEvent = canonicalEvents[0] ?? null;
-    for (const linkedEvent of canonicalEvents) {
-      knownEventIds.add(linkedEvent.id);
-      // The opening Chronicle is an umbrella for many independent founding
-      // Facts. Treating every one of them as already narrated by a person's
-      // generic “entered the annals” biography would hide that person's
-      // concrete initial appointment. Ordinary events remain canonical for
-      // all of their direct source Facts.
-      if (linkedEvent.kind !== 'world_created') {
-        for (const sourceFactId of linkedEvent.sourceFactIds) knownFactIds.add(sourceFactId);
-      }
-    }
+    if (canonicalEvent) { addEvent(canonicalEvent, fact.id); continue; }
+    const key = source.fact ? canonicalStoryKey(source.fact) : fact.id;
+    if (claimed.has(key)) continue;
+    claimed.add(key);
     if (source.fact) knownFactIds.add(source.fact.id);
     entries.push({
       turn: fact.turn,
-      record: {
-        ...(canonicalEvent ? eventArchiveRecord(canonicalEvent) : {
-          id: fact.id,
-          date: turnLabel(fact.turn),
-          title: fact.kind,
-          summary: fact.summary,
-          eventId: null,
-          importance: fact.importance,
-        }),
-        // Biography rows are the person's index into a canonical Fact or
-        // Chronicle, not a second telling. Keep the biography identity for
-        // stable dossier ordering while reusing any Chronicle projection that
-        // cites the same Fact.
+      record: battleRecord(source.fact ?? undefined, {
         id: fact.id,
-      },
+        date: turnLabel(fact.turn), title: fact.kind, summary: fact.summary,
+        eventId: null, importance: fact.importance,
+      }),
     });
   }
 
   for (const event of history) {
     if (!event.actorIds.includes(item.id) || knownEventIds.has(event.id)) continue;
-    entries.push({
-      turn: event.turn,
-      record: eventArchiveRecord(event),
-    });
-    knownEventIds.add(event.id);
-    if (event.kind !== 'world_created') {
-      for (const sourceFactId of event.sourceFactIds) knownFactIds.add(sourceFactId);
-    }
+    addEvent(event);
+  }
+
+  for (const fact of battles) {
+    if (knownFactIds.has(fact.id)) continue;
+    entries.push({ turn: fact.turn, record: battleRecord(fact, {
+      id: `${item.id}:experience:${fact.id}`, date: turnLabel(fact.turn), ...projectFactNarrative(world, fact),
+      eventId: null, importance: fact.importance,
+    }) });
   }
 
   const appointmentFacts = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }> => (
@@ -252,7 +263,7 @@ export function toPersonExperienceRecords(
 
   return entries
     .sort((left, right) => left.turn - right.turn || left.record.id.localeCompare(right.record.id))
-    .map((entry) => entry.record);
+    .map(({ record }) => ({ ...record, title: playerHistoryText(world, record.title), summary: playerHistoryText(world, record.summary) }));
 }
 
 function characterTraits(item: CharacterState) {
@@ -392,7 +403,7 @@ function projectPersonRelationships(world: WorldState, item: CharacterState): Pe
         relation: relationshipLabel(pair),
         sentiment: outwardSentiment,
         detail: `${item.name}：${outwardSentiment}（${outwardDetail}）；${targetName}：${inwardSentiment}（${inwardDetail}）`,
-        memories: relationshipMemories(item.name, targetName, pair),
+        memories: relationshipMemories(item.name, targetName, pair).map((text) => playerHistoryText(world, text)),
       };
     });
 }
@@ -916,7 +927,10 @@ export function toPersonInspector(
   const currentStep = agency.currentPlanSteps.find((step) => step.status === 'available');
   const coreDesires = agency.desires.map((desire) => desire.label);
   const relationships = projectPersonRelationships(world, item);
-  const experiences = toPersonExperienceRecords(world, item, 'active').slice(-12).reverse();
+  const experiences = (() => {
+    try { return toPersonExperienceRecords(world, item); }
+    catch { return toPersonExperienceRecords(world, item, 'active'); }
+  })().slice(-12).reverse();
   const personalForce = world.personalForces.find((force) => force.ownerId === item.id);
   const formation = personalForce?.formationId
     ? world.armies.find((army) => army.id === personalForce.formationId)
@@ -1023,7 +1037,7 @@ export function toPersonArchive(
     eyebrow: '人物传 · 生平行状',
     title: `${item.name}传`,
     subtitle: `${owner?.name ?? '无属'} · ${item.role} · ${item.lifeStage ?? `${item.age}岁`}`,
-    lead: `${item.name}的完整纪年；只收录可由史事或结算事实核验的经历。`,
+    lead: `${item.name}的生平纪年。`,
     facts: [
       { label: '生年', value: turnLabel(item.birthTurn ?? Math.max(0, world.turn - item.age * 4)) },
       { label: '家族', value: inspector.family ?? '家世不详' }, { label: '阶层', value: item.politicalClass ?? '出身未详' },

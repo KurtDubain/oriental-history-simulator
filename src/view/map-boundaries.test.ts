@@ -315,15 +315,40 @@ describe('shared map scene hit boundary', () => {
     for (const layout of layoutMapPersonForces(presentation.persons, transform)) {
       const region = regionById.get(layout.person.regionId);
       if (!region) throw new Error(`missing region ${layout.person.regionId}`);
+      expect(pointInPolygon(layout.person.position!, region.polygon)).toBe(true);
       for (let step = 0; step < 8; step += 1) {
         const angle = step * Math.PI / 4;
         const edge = screenToWorldPoint({
           x: layout.point.x + Math.cos(angle) * layout.radius,
           y: layout.point.y + Math.sin(angle) * layout.radius,
         }, viewport.width, viewport.height, 8, camera);
-        expect(pointInPolygon(edge, region.polygon), `${layout.person.personName} marker left ${region.name}`).toBe(true);
+        expect(presentation.profile.landShapes.some(shape => pointInPolygon(edge, shape.polygon)), `${layout.person.personName} marker left the painted coast at ${region.name}`).toBe(true);
       }
     }
+  });
+
+  it('keeps people, formations and overview clusters on painted land while fleets remain at sea', () => {
+    const { presentation } = mapProjection('沧衡-甲子');
+    const onLand = (point: { x: number; y: number }) => presentation.profile.landShapes.some(shape => pointInPolygon(point, shape.polygon));
+    const overview = buildMapLodScene(presentation, 'overview');
+    for (const item of [...presentation.persons, ...presentation.armies, ...overview.personClusters]) {
+      expect(item.position && onLand(item.position), item.id).toBe(true);
+    }
+    for (const fleet of presentation.fleets) expect(onLand(fleet.position), fleet.id).toBe(false);
+  });
+
+  it('frames land more closely on a narrow screen while keeping 100% horizontally pannable', () => {
+    const viewport = { width: 390, height: 644 };
+    const original = { zoom: 1, panX: 0, panY: 0 };
+    const transform = createMapViewportTransform(viewport.width, viewport.height, 8, original);
+    expect(transform.scale).toBeCloseTo((390 - 16) / 800);
+    const panned = panMapCamera(original, 20, 0, viewport.width, viewport.height);
+    expect(panned.panX).toBe(20);
+    const point = { x: 500, y: 300 };
+    const screen = worldToScreenPoint(point, createMapViewportTransform(viewport.width, viewport.height, 8, panned));
+    const restored = screenToWorldPoint(screen, viewport.width, viewport.height, 8, panned);
+    expect(restored.x).toBeCloseTo(point.x, 10);
+    expect(restored.y).toBeCloseTo(point.y, 10);
   });
 
   it('makes only painted, unexpanded war formations interactive', () => {

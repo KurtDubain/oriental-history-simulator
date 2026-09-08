@@ -209,13 +209,13 @@ describe('map renderer LOD contract', () => {
     );
 
     const labels = context.fillTexts.map((call) => call.text);
-    expect(labels).toContain('24将');
+    expect(labels).not.toContain('24将');
     expect(labels).not.toContain('沈砚等24人 · 2.4万');
     const polityLabel = context.fillTexts.find((call) => call.text === '云岚国');
     const clusterLabel = context.fillTexts.find((call) => call.text === '24将');
     expect(polityLabel).toBeDefined();
-    expect(clusterLabel).toBeDefined();
-    expect(boxesOverlap(textBox(clusterLabel!), textBox(polityLabel!))).toBe(false);
+    expect(clusterLabel).toBeUndefined();
+    expect(context.arcs.length).toBeGreaterThan(0);
   });
 
   it('omits an overview cluster label when polity and capital labels occupy every safe slot, without removing its hit target', () => {
@@ -431,12 +431,12 @@ describe('map renderer LOD contract', () => {
     );
 
     const labels = context.fillTexts.map((call) => call.text);
-    expect(labels).toContain('云京');
+    expect(labels).not.toContain('云京');
     expect(labels).toContain('云岚国');
     expect(labels).not.toContain('东丘');
     expect(context.strokeTexts).toContainEqual(expect.objectContaining({
       text: '云岚国',
-      font: expect.stringContaining('10px'),
+      font: expect.stringContaining('12px'),
     }));
   });
 
@@ -517,9 +517,7 @@ describe('map renderer LOD contract', () => {
     );
 
     const personLabels = context.fillTexts.filter((call) => call.text.startsWith('将领'));
-    expect(personLabels.length).toBeGreaterThan(0);
-    expect(personLabels.length).toBeLessThanOrEqual(5);
-    expect(personLabels[0]?.text).toMatch(/将领\d+ · \d\.\d千/);
+    expect(personLabels).toHaveLength(0);
     for (let index = 0; index < personLabels.length; index += 1) {
       for (let other = index + 1; other < personLabels.length; other += 1) {
         expect(boxesOverlap(textBox(personLabels[index]!), textBox(personLabels[other]!))).toBe(false);

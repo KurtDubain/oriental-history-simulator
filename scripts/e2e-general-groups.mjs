@@ -143,7 +143,7 @@ try {
       const width = canvas.clientWidth;
       const height = canvas.clientHeight;
       const padding = 8;
-      const baseScale = Math.min((width - padding * 2) / 1000, (height - padding * 2) / 700);
+      const baseScale = Math.min((width - padding * 2) / (width < 620 ? 800 : 1000), (height - padding * 2) / 700);
       return {
         x: (width - 1000 * baseScale) / 2 + camera.panX + Number(map.dataset.focusOffsetX ?? 0) + position[0] * baseScale * camera.zoom,
         y: (height - 700 * baseScale) / 2 + camera.panY + Number(map.dataset.focusOffsetY ?? 0) + position[1] * baseScale * camera.zoom,
@@ -212,8 +212,14 @@ try {
     }
     if (await battleButton.isEnabled()) {
       await battleButton.click();
-      await page.locator('.observer-causal-layer').waitFor();
-      await page.locator('.observer-causal-layer .observer-icon-button').click();
+      if (findWar(await snapshot(page), warId)?.latestBattle?.eventId) {
+        await page.locator('.observer-causal-layer').waitFor();
+        await page.locator('.observer-causal-layer .observer-icon-button').click();
+      } else {
+        await battleButton.locator('small').waitFor();
+        assert.match(await battleButton.innerText(), /战前.*伤亡/s);
+        await battleButton.click();
+      }
     }
 
     const firstGroup = latestSummary.locator('details').first();

@@ -38,6 +38,8 @@ describe('CausalDrawer reading layer', () => {
     expect(markup).toContain('接着看这些人');
     expect(markup.indexOf('此事为何发生？')).toBeLessThan(markup.indexOf('接着看这些人'));
     expect(markup).not.toContain('史事溯因');
+    expect(markup).toContain('<details class="observer-causal-drawer__consequence"><summary>详细依据 · 记录变化</summary>');
+    expect(markup).not.toContain('<footer class="observer-causal-drawer__consequence">');
   });
 
   it('does not render while closed', () => {

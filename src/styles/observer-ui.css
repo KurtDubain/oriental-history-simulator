@@ -97,6 +97,11 @@
   min-width: 0;
 }
 
+.observer-app:has(.observer-pause-receipt) { grid-template-rows: calc(var(--observer-topbar-height) + 52px) minmax(0, 1fr) var(--observer-chronicle-height); }
+.observer-topbar:has(.observer-pause-receipt) { height: calc(var(--observer-topbar-height) + 52px); grid-template-rows: calc(var(--observer-topbar-height) - var(--observer-safe-top)) 52px; }
+.observer-pause-receipt { grid-column: 1 / -1; grid-row: 2; min-height: 44px; padding: 4px 8px; border: 0; border-top: 1px solid var(--observer-line); color: var(--observer-vermilion-dark); background: transparent; text-align: left; font: inherit; font-size: 12px; line-height: 1.45; cursor: pointer; }
+.observer-pause-receipt span { margin-left: 8px; white-space: nowrap; }
+
 .observer-brand__seal {
   display: grid;
   flex: 0 0 auto;
@@ -2792,11 +2797,12 @@ button.observer-causal-chain__evidence:hover {
   border-top: 1px solid var(--observer-line-strong);
 }
 
-.observer-causal-drawer__consequence span {
+.observer-causal-drawer__consequence summary {
   color: var(--observer-vermilion-dark);
-  font-size: 8px;
+  font-size: 11px;
   font-weight: 750;
-  letter-spacing: 0.14em;
+  min-height: 44px;
+  cursor: pointer;
 }
 
 .observer-causal-drawer__consequence p,
@@ -3425,7 +3431,7 @@ button.observer-causal-chain__evidence:hover {
 
   .observer-date {
     position: absolute;
-    bottom: 4px;
+    top: calc(var(--observer-topbar-height) - 22px);
     left: 62px;
     gap: 5px;
   }

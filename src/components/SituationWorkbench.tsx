@@ -140,7 +140,7 @@ export function SituationWorkbench({
             aria-expanded={mobileDirectoryOpen}
             onClick={() => setMobileDirectoryOpen((value) => !value)}
           >
-            <ListTree size={16} aria-hidden="true" />切换案卷<ChevronDown size={14} aria-hidden="true" />
+            <ListTree size={16} aria-hidden="true" />其他案卷（{Math.max(0, directoryItems.length - 1)}）<ChevronDown size={14} aria-hidden="true" />
           </button>
           <button type="button" className="situation-workbench__close" onClick={onClose} aria-label="关闭战事与朝局">
             <X size={20} aria-hidden="true" />
@@ -166,7 +166,7 @@ export function SituationWorkbench({
                     data-situation-id={item.id}
                     data-selected={item.id === projection.selectedId || undefined}
                     aria-current={item.id === projection.selectedId ? 'true' : undefined}
-                    onClick={() => onSelectSituation(item.id)}
+                    onClick={() => { setMobileDirectoryOpen(false); onSelectSituation(item.id); }}
                   >
                     <span>{item.typeLabel} · {item.status === 'resolved' ? '已结束' : '进行中'}</span>
                     <strong>{item.title}</strong>

@@ -40,7 +40,7 @@ export function battleFateChances(
     - protection * loss, 0, 1);
   const danger = severity * severity;
   return {
-    death: clamp(Math.pow(danger, 1.65) * (.038 + role * .012 + (1 - health / 100) * .02), 0, .055),
+    death: clamp(severity * loss * (.038 + role * .012 + (1 - health / 100) * .02), 0, .055),
     wound: clamp(Math.pow(danger, .82) * (.31 + role * .04 + (1 - health / 100) * .06), 0, .38),
     severity,
     exposure: exposureLabel(severity),

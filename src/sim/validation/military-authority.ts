@@ -7,7 +7,7 @@ interface MilitaryAuthorityValidationOptions {
 
 const ORDER_KINDS = new Set(['hold', 'advance', 'intercept', 'reinforce', 'retreat']);
 const ORDER_REASONS = new Set([
-  'peace_garrison', 'war_goal', 'enemy_approach', 'frontline_support',
+  'peace_garrison', 'war_goal', 'enemy_approach', 'frontline_support', 'enemy_strength',
   'defend_war_goal', 'amphibious_landing', 'low_readiness', 'target_invalid',
 ]);
 const PROVENANCE = new Set(['opening', 'legacy', 'system', 'fact']);

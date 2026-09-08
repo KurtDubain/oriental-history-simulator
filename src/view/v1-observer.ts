@@ -498,7 +498,7 @@ export function worldToSituationPauseCandidates(world: WorldState): ObserverPaus
         situation,
         'core-character-death',
         fact,
-        `${situationPauseTitle(world, situation)}的核心人物${character.name}逝世`,
+        `${character.name}逝世`,
       );
       candidates.set(candidate.id, candidate);
     }

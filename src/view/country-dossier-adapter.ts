@@ -88,7 +88,8 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     ruler: ruler?.name ?? '君位空悬',
     rulerId: ruler?.id,
     capital: capital?.name ?? '流亡政权',
-    government: [item.governmentForm, item.dynastyName].filter(Boolean).join(' · '),
+    government: [item.governmentForm, item.dynastyName, ruler && ruler.age < 16
+      ? `${world.characters.find((person) => person.id === world.offices.find((office) => office.active && office.polityId === item.id && office.kind === '宰辅')?.holderId)?.name ?? '朝臣'}监国` : null].filter(Boolean).join(' · '),
     rulingFamily: rulingFamily?.name,
     rulingFamilyId: rulingFamily?.id ?? null,
     population: polityPopulation(world, item.id),

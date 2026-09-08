@@ -175,19 +175,37 @@ describe('EMB05-06 deputy identity action', () => {
     expect(validateTurnRuntime(world, next)).toEqual([]);
   });
 
-  it('lets a player-held deputy carry support into a next-quarter request using the same intent resolver', () => {
-    let world = createWorld('军权春秋');
+  it('lets an experienced player-held deputy carry real support into a request using the same intent resolver', () => {
+    let world = createWorld('孤城疫年');
     let chain: { actorId: string; afterSupport: WorldState; request: ReturnType<typeof projectCharacterEmbodiedActions>[number] } | null = null;
-    for (let turn = 0; turn < 32 && !chain; turn += 1) {
+    for (let turn = 0; turn < 120 && !chain; turn += 1) {
       for (const actor of world.agencyDecisionSystem.actors) {
+        // Controlled career/command vacancy; do not require a natural promotion
+        // by a fixed turn now that losing participation no longer earns merit.
+        const deputy = world.characters.find(person => person.id === actor.characterId)!;
+        const army = world.armies.find(item => item.deputyCommanderId === deputy.id);
+        const commander = world.characters.find(person => person.id === army?.commanderId);
+        if (!commander) continue;
+        deputy.merit = 58; deputy.deputyExperience = 60; deputy.leadership = 92;
+        deputy.renown = 60; deputy.loyalty = 88; deputy.insubordination = 0;
+        commander.loyalty = 28;
+        const family = world.families.find(item => item.id === deputy.familyId);
+        if (family) { family.prestige = 70; family.politicalInfluence = 70; }
+        world.hash = computeWorldHash(world);
         const supports = projectCharacterEmbodiedActions(world, actor.characterId).filter((item) => (
           item.available
           && (item.command.kind === 'cultivate_military_support' || item.command.kind === 'request_backing')
         ));
         for (const support of supports) {
-          const afterSupport = advanceWorld(world, { embodiedAction: support.command });
-          const request = projectCharacterEmbodiedActions(afterSupport, actor.characterId)
+          let afterSupport = advanceWorld(world, { embodiedAction: support.command });
+          let request = projectCharacterEmbodiedActions(afterSupport, actor.characterId)
             .find((item) => item.command.kind === 'request_independent_command' && item.available);
+          const secured = afterSupport.facts.some(f => f.kind === 'agency_support_resolved' && f.turn === world.turn && f.payload.actorId === actor.characterId && f.payload.outcome === 'secured');
+          for (let wait = 0; secured && !request && wait < 4; wait++) {
+            afterSupport = advanceWorld(afterSupport);
+            request = projectCharacterEmbodiedActions(afterSupport, actor.characterId)
+              .find(item => item.command.kind === 'request_independent_command' && item.available);
+          }
           if (request) { chain = { actorId: actor.characterId, afterSupport, request }; break; }
         }
         if (chain) break;

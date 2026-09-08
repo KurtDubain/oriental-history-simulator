@@ -4,12 +4,33 @@ import type {
   EvidenceRef,
   PolityState,
   ShipmentRecord,
+  WarState,
   WorldState,
 } from './types';
 import type { V03Emit, V03TurnContext } from './v03-context';
 
 const TRADE_TREATY_QUARTERS = 16;
 const MIN_TRIBUTE_QUARTERS = 8;
+
+export function canReopenWar(world: WorldState, attacker: PolityState, defenderId: string): boolean {
+  const peace = Math.max(-100, ...world.wars.filter((war) => !war.active && war.endedTurn !== null
+    && [war.attackerId, war.defenderId].includes(attacker.id)
+    && [war.attackerId, war.defenderId].includes(defenderId)).map((war) => war.endedTurn!));
+  return world.turn - peace >= 4 && (peace < 0 || attacker.warWeariness < 48
+    && attacker.treasury > 0 && world.armies.some((army) => army.polityId === attacker.id && army.supply >= 40));
+}
+
+export function peaceReason(world: WorldState, war: WarState, turn: number): string | null {
+  const sides = world.polities.filter((polity) => [war.attackerId, war.defenderId].includes(polity.id));
+  const duration = turn - war.startedTurn + 1;
+  const armies = world.armies.filter((army) => army.order.warId === war.id);
+  const lastAction = Math.max(war.startedTurn, war.lastBattleTurn, ...armies.map((army) => army.lastMovedTurn));
+  if (duration < 8) return null;
+  if (sides.reduce((sum, polity) => sum + polity.warWeariness, 0) >= 95) return '双方疲惫不堪';
+  if (sides.every((polity) => polity.treasury === 0)) return '双方军费难以为继';
+  if (turn - lastAction >= 6 && !armies.some((army) => army.order.reasonCode === 'amphibious_landing')) return '前线久无进展，双方收兵休整';
+  return duration >= 24 ? '战事旷日持久' : null;
+}
 
 function clamp(value: number, minimum = 0, maximum = 100): number {
   return Math.max(minimum, Math.min(maximum, value));
@@ -255,25 +276,28 @@ function settleTribute(
   const receiverBefore = receiver.treasury;
   payer.treasury -= paid;
   receiver.treasury += paid;
-  if (paid === due) {
+  const reduced = paid < due && paid >= due / 2 && relation.trust >= 50;
+  if (paid === due || reduced) {
     const reputationBefore = payer.diplomaticReputation;
     const trustBefore = relation.trust;
-    relation.trust = whole(clamp(relation.trust + 1));
+    relation.trust = whole(clamp(relation.trust + (reduced ? -2 : 1)));
+    if (reduced) relation.tributePerTurn = paid;
     if (context.season === '冬') payer.diplomaticReputation = whole(clamp(payer.diplomaticReputation + 1));
     emit({
       category: '外交',
       kind: 'tribute_paid',
-      title: `${payer.name}如期输纳贡金`,
-      summary: `${payer.name}从国库实付${paid}，${receiver.name}国库实收${paid}；转移总额守恒。`,
+      title: `${payer.name}${reduced ? '获准减贡' : '如期输纳贡金'}`,
+      summary: `${reduced ? `双方凭既有信用将季贡由${due}减为${paid}。` : ''}${payer.name}实付${paid}，${receiver.name}实收${paid}。`,
       importance: context.season === '冬' ? 2 : 1,
       actorIds: [payer.rulerId, receiver.rulerId],
       polityIds: [payer.id, receiver.id],
       causes: [
         { label: '朝贡义务', role: '结构', weight: 0.34, evidence: `本季应付${due}`, refs: [polityRef(payer, 'treasury', '纳贡方国库')] },
-        { label: '足额履约', role: '选择', weight: 0.33, evidence: `可用国库${payerBefore}，实付${paid}`, refs: [polityRef(payer, 'diplomaticReputation', '履约方信誉')] },
+        { label: reduced ? '减贡履约' : '足额履约', role: '选择', weight: 0.33, evidence: `国库${payerBefore}，实付${paid}`, refs: [polityRef(payer, 'diplomaticReputation')] },
         { label: '守恒转移', role: '结果', weight: 0.33, evidence: `${payer.name}-${paid}，${receiver.name}+${paid}`, refs: [polityRef(payer, 'treasury'), polityRef(receiver, 'treasury')] },
       ],
       stateDeltas: [
+        ...(reduced ? [{ entityType: 'diplomacy' as const, entityId: relation.id, field: 'tributePerTurn', before: due, after: paid }] : []),
         { entityType: 'polity', entityId: payer.id, field: 'treasury', before: payerBefore, after: payer.treasury, delta: -paid },
         { entityType: 'polity', entityId: receiver.id, field: 'treasury', before: receiverBefore, after: receiver.treasury, delta: paid },
         { entityType: 'diplomacy', entityId: relation.id, field: 'trust', before: trustBefore, after: relation.trust, delta: relation.trust - trustBefore },
@@ -414,7 +438,8 @@ function formTribute(world: WorldState, context: V03TurnContext, emit: V03Emit):
   if (context.season !== '冬') return;
   const alreadyPaying = new Set(world.diplomacy.map((relation) => relation.tributePayerId).filter((id): id is string => Boolean(id)));
   const candidates = world.diplomacy
-    .filter((relation) => relation.status === '中立' && relation.tributePayerId === null)
+    .filter((relation) => relation.status === '中立' && relation.tributePayerId === null
+      && relation.trust >= 20 && (relation.lastChangedTurn <= 0 || context.turn - relation.lastChangedTurn >= 4))
     .map((relation) => {
       const parties = relationParties(world, relation);
       if (!parties || !parties[0].alive || !parties[1].alive) return null;
@@ -431,6 +456,7 @@ function formTribute(world: WorldState, context: V03TurnContext, emit: V03Emit):
     .filter((candidate): candidate is NonNullable<typeof candidate> => Boolean(candidate))
     .filter((candidate) => (
       !alreadyPaying.has(candidate.payer.id)
+      && candidate.payer.treasury >= 8
       && candidate.ratio >= 2.15
       && candidate.threat >= 68
       && candidate.pressure >= 48
@@ -441,7 +467,7 @@ function formTribute(world: WorldState, context: V03TurnContext, emit: V03Emit):
   const { relation, receiver, payer, ratio, pressure, threat } = chosen;
   const payerRegions = world.regions.filter((region) => region.controllerId === payer.id);
   const taxBase = payerRegions.reduce((sum, region) => sum + region.wealth, 0);
-  const due = whole(clamp(80 + taxBase * 0.0008 + payer.treasury * 0.006, 80, 5_000));
+  const due = Math.max(1, Math.floor(Math.min(payer.treasury / 8, 80 + taxBase * 0.0008, 5_000)));
   const oldStatus = relation.status;
   relation.status = '朝贡';
   relation.tributePayerId = payer.id;
@@ -451,7 +477,7 @@ function formTribute(world: WorldState, context: V03TurnContext, emit: V03Emit):
     category: '外交',
     kind: 'tribute_imposed',
     title: `${payer.name}向${receiver.name}接受朝贡安排`,
-    summary: `实力悬殊、军事威胁与${payer.name}的财政压力共同迫使其承诺每季输纳${due}；贡金尚未凭空支付。`,
+    summary: `${payer.name}在军事压力下承诺每季输纳${due}，额度不超过签约时国库的八分之一；下季起支付。`,
     importance: 4,
     actorIds: [payer.rulerId, receiver.rulerId],
     polityIds: [payer.id, receiver.id],

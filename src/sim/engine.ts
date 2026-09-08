@@ -31,11 +31,12 @@ import {
   processV03EconomyAndTrade,
   processV03Maritime,
 } from './v03-ocean';
-import { processV03Diplomacy } from './v03-diplomacy';
+import { canReopenWar, peaceReason, processV03Diplomacy } from './v03-diplomacy';
 import {
   createV02WorldSystems,
   establishRulingFamilyBranch,
   getDiplomacy,
+  governingCharacter, selectRegent,
   markPeaceDiplomacy,
   markWarDiplomacy,
   processV02Diplomacy,
@@ -1136,7 +1137,6 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
       + character.renown * 0.04
       + character.loyalty * 0.02;
     const occupiedRulerIds = new Set(world.polities.filter((item) => item.alive && item.rulerId).map((item) => item.rulerId));
-    const localAdults = aliveCharacters(world, polity.id).filter((character) => !occupiedRulerIds.has(character.id));
     const legalMinor = selectCandidate(
       world.characters.filter((character) => (
         character.alive
@@ -1147,9 +1147,7 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
       )),
       (character) => lineageSupport(character) * 2 + character.age + character.influence,
     );
-    let regent = legalMinor
-      ? selectCandidate(localAdults, (character) => institutionalSupport(character) + character.governance + character.cunning + character.loyalty)
-      : undefined;
+    let regent = legalMinor ? selectRegent(world, polity) : undefined;
     let successor = legalMinor && regent
       ? legalMinor
       : selectCandidate(
@@ -1191,7 +1189,7 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
     polity.authority = clamp(polity.authority - (underRegency ? 15 : 8) + (regent?.cunning ?? successor.cunning) / 18);
     pushEvent(world, context, {
       category: '政治',
-      kind: underRegency ? 'regency' : sameDynasty ? 'succession' : 'usurpation',
+      kind: underRegency ? 'regency' : 'succession',
       title: underRegency
         ? `${successor.name}幼年继位，${anonymousCouncilRegency ? '摄政议会' : regent?.name ?? '朝臣'}监国`
         : sameDynasty ? `${successor.name}继位` : `${successor.familyName}氏乘继承危机入主${polity.shortName}国`,
@@ -1201,7 +1199,7 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
           : `${previousDynasty}${successor.name}凭真实谱系成为幼主；${regent?.name ?? '朝廷'}以既有成人官僚与派系资源承担摄政，中央权威因此承压。`
         : sameDynasty
         ? `${previousDynasty}${successor.name}凭真实谱系、家族认可与制度支持继承君位。`
-        : `${successor.name}没有旧宗室谱系资格，却凭官职、派系或军队支持夺取君位，${polity.shortName}国改奉${polity.dynastyName}。`,
+        : `${successor.name}在君位空缺后获拥立继位，${polity.shortName}国改奉${polity.dynastyName}；此次并非推翻在位君主。`,
       importance: underRegency ? 5 : sameDynasty ? 4 : 5,
       actorIds: [successor.id, ...(regent ? [regent.id] : []), ...(deceasedRuler ? [deceasedRuler.id] : [])],
       polityIds: [polity.id],
@@ -1211,7 +1209,7 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
         { label: '家族认可', role: '条件', weight: 0.18, evidence: `家族声望${world.families.find((family) => family.id === successor.familyId)?.prestige ?? 0}` },
         { label: underRegency ? '摄政安排' : '官职派系支持', role: '条件', weight: 0.22, evidence: anonymousCouncilRegency ? '无具名成人可用，由不具人物能力值的匿名议会监国' : underRegency ? `${regent?.name ?? '朝臣'}成年且制度支持${regent ? institutionalSupport(regent).toFixed(1) : '0'}` : `制度支持${institutionalSupport(successor).toFixed(1)}` },
         { label: '军队支持', role: '条件', weight: 0.14, evidence: successor.commandingArmyId ? `掌握军团${successor.commandingArmyId}` : '未直接掌军，以宫廷网络补足' },
-        { label: underRegency ? '摄政选择' : sameDynasty ? '继承选择' : '篡立选择', role: '选择', weight: 0.16, evidence: anonymousCouncilRegency ? '天下无可并入对象，启用已登记未成年候补与匿名议会' : underRegency ? '未成年合法继承人与在世成人摄政同时具备' : `候选总分${successionScore(successor).toFixed(1)}居首` },
+        { label: underRegency ? '摄政选择' : '继承选择', role: '选择', weight: 0.16, evidence: anonymousCouncilRegency ? '天下无可并入对象，启用已登记未成年候补与匿名议会' : underRegency ? '未成年合法继承人与在世成人摄政同时具备' : `候选总分${successionScore(successor).toFixed(1)}居首` },
       ],
       stateDeltas: [
         { entityType: 'polity', entityId: polity.id, field: 'rulerId', before: rulerIdBefore, after: successor.id },
@@ -1244,7 +1242,7 @@ function isAtWar(world: WorldState, polityId: string): boolean {
 
 function processPolitics(world: WorldState, context: MutableTurnContext): void {
   for (const polity of world.polities.filter((item) => item.alive).sort((left, right) => stableCompare(left.id, right.id))) {
-    const ruler = world.characters.find((character) => character.id === polity.rulerId && character.alive);
+    const ruler = governingCharacter(world, polity);
     if (!ruler) continue;
     const regions = world.regions.filter((region) => region.controllerId === polity.id);
     const governors = aliveCharacters(world, polity.id).filter((character) => character.governedRegionId);
@@ -2089,12 +2087,13 @@ function processWarDeclarations(world: WorldState, context: MutableTurnContext):
   const ordered = world.polities.filter((polity) => polity.alive).sort((left, right) => stableCompare(left.id, right.id));
   for (const attacker of ordered) {
     if (isAtWar(world, attacker.id) || context.turn - attacker.lastWarTurn < 8) continue;
-    const ruler = world.characters.find((character) => character.id === attacker.rulerId && character.alive);
+    const ruler = governingCharacter(world, attacker);
     if (!ruler) continue;
     const targets = borderEnemyIds(world, attacker.id)
       .map((id) => world.polities.find((polity) => polity.id === id && polity.alive))
       .filter((polity): polity is PolityState => polity !== undefined && !isAtWar(world, polity.id))
       .filter((defender) => getDiplomacy(world, attacker.id, defender.id)?.status !== '联盟')
+      .filter((defender) => canReopenWar(world, attacker, defender.id))
       .map((defender) => {
         const ownPower = militaryPower(world, attacker.id);
         const enemyPower = militaryPower(world, defender.id);
@@ -2119,7 +2118,7 @@ function processWarDeclarations(world: WorldState, context: MutableTurnContext):
     const target = targets[0];
     if (!target || target.score < 58) continue;
     startWar(world, context, attacker, target.defender, '边境与霸权之争', [
-      { label: '君主野心', weight: 0.28, evidence: `${ruler.name}野心${ruler.ambition}` },
+      { label: '执政者意向', weight: 0.28, evidence: `${ruler.name}${ruler.id === attacker.rulerId ? '亲政' : '监国'}，野心${ruler.ambition}` },
       { label: '风险偏好', weight: 0.16, evidence: `谨慎${ruler.caution}` },
       { label: '军力判断', weight: 0.3, evidence: `估计己方军力${Math.round(target.ownPower)}，对方${Math.round(target.enemyPower)}` },
       { label: '边境利益', weight: 0.16, evidence: `接壤战略价值${target.borderValue}` },
@@ -2481,25 +2480,11 @@ function resolveBattle(
 
   attackerArmy.experience = Math.round(clamp(attackerArmy.experience + (attackerWon ? 5 : 2)));
   attackerArmy.morale = Math.round(clamp(attackerArmy.morale + (attackerWon ? 8 : -13)));
-  creditBattleCommandStanding(world, attackerArmy, attackerWon ? 5 : 1);
-  for (const participantId of participantIdsBefore.get(attackerArmy.id) ?? []) {
-    const participant = world.characters.find((character) => character.id === participantId && character.alive);
-    if (participant) {
-      participant.merit = clamp(participant.merit + (attackerWon ? 2 : 1));
-      participant.renown = clamp(participant.renown + (attackerWon ? 1 : 0));
-    }
-  }
+  const careerDeltas = creditBattleCommandStanding(world, attackerArmy, attackerWon, attackerLossRate, participantIdsBefore.get(attackerArmy.id));
   for (const defender of defenders) {
     defender.experience = Math.round(clamp(defender.experience + (attackerWon ? 2 : 5)));
     defender.morale = Math.round(clamp(defender.morale + (attackerWon ? -12 : 7)));
-    creditBattleCommandStanding(world, defender, attackerWon ? 1 : 4);
-    for (const participantId of participantIdsBefore.get(defender.id) ?? []) {
-      const participant = world.characters.find((character) => character.id === participantId && character.alive);
-      if (participant) {
-        participant.merit = clamp(participant.merit + (attackerWon ? 1 : 2));
-        participant.renown = clamp(participant.renown + (attackerWon ? 0 : 1));
-      }
-    }
+    careerDeltas.push(...creditBattleCommandStanding(world, defender, !attackerWon, defenderLossRate, participantIdsBefore.get(defender.id)));
   }
 
   const participantFacts = (army: ArmyState) => (participantIdsBefore.get(army.id) ?? []).map((ownerId) => {
@@ -2529,6 +2514,7 @@ function resolveBattle(
     { label: '有限战场误差', weight: 0.08, evidence: `攻方${attackerVariance.toFixed(2)}，守方${defenderVariance.toFixed(2)}` },
   ];
   const battleDeltas: StateDelta[] = [
+    ...careerDeltas,
     { entityType: 'army', entityId: attackerArmy.id, field: 'soldiers', before: attackerBefore, after: attackerArmy.soldiers, delta: -attackerLosses },
     { entityType: 'army', entityId: attackerArmy.id, field: 'morale', before: attackerMoraleBefore, after: attackerArmy.morale, delta: attackerArmy.morale - attackerMoraleBefore },
     ...defenders.map((army) => ({
@@ -2823,12 +2809,8 @@ function processMilitary(world: WorldState, context: MutableTurnContext): void {
         actorIds: [attackerNow?.rulerId, defenderNow?.rulerId].filter((id): id is string => Boolean(id)),
         causes: [{ label: '参战主体消失', role: '结果', weight: 1, evidence: `${war.id}的一方或双方已失去政权载体` }],
       });
-    } else if (
-      duration >= 24
-      || (duration >= 12 && attackerNow.warWeariness + defenderNow.warWeariness >= 95)
-      || (duration >= 16 && !stillConnected)
-    ) {
-      endWar(world, context, war, duration >= 24 ? '战事旷日持久' : !stillConnected ? '战线已经分离' : '双方疲惫不堪');
+    } else if (peaceReason(world, war, context.turn) || duration >= 16 && !stillConnected) {
+      endWar(world, context, war, peaceReason(world, war, context.turn) ?? '战线已经分离');
     }
   }
   repairAppointments(world, context);

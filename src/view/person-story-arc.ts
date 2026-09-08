@@ -1,7 +1,7 @@
 import { readWorldFacts, readWorldHistory } from '../sim/archive';
 import type { BattleFact, SimulationFact } from '../sim/facts';
 import type { CharacterState, HistoryEvent, WorldState } from '../sim/types';
-import { projectFactNarrative } from './historical-scenes';
+import { canonicalStoryKey, playerHistoryText, projectFactNarrative } from './historical-scenes';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import { historyTurnDate } from './v1-history';
 
@@ -107,6 +107,8 @@ function episodeCandidate(world: WorldState, episodes: readonly BattleEpisode[],
     const offices = unique(ended.map((fact) => fact.kind === 'appointment_ended' ? fact.payload.officeKind : ''));
     summary += ` 同季卸下${offices.join('、')}。`;
   }
+  if (focusEpisode.battle.stateDeltas.some((delta) => delta.entityId === personId && delta.field === 'influence'
+    && typeof delta.before === 'number' && typeof delta.after === 'number' && delta.after < delta.before)) summary += ' 此败削弱了其军政影响。';
   return {
     id: `person-story:battle:${ordered.map((item) => item.battle.id).join(':')}`,
     turn: turningFact?.turn ?? focusEpisode.battle.turn,
@@ -123,14 +125,17 @@ function episodeCandidate(world: WorldState, episodes: readonly BattleEpisode[],
 }
 
 function factCandidate(world: WorldState, fact: SimulationFact, events: readonly HistoryEvent[]): Candidate | null {
-  const narrative = projectFactNarrative(world, fact);
+  const projected = projectFactNarrative(world, fact);
+  const narrative = { title: playerHistoryText(world, projected.title), summary: playerHistoryText(world, projected.summary) };
   let phase: PersonStoryPhase;
   let priority: number;
   if (fact.kind === 'character_death') { phase = 'ending'; priority = 0; }
   else if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
     const military = fact.payload.officeKind.includes('军团') || fact.payload.officeKind.includes('水师') || fact.payload.officeKind === '枢密使';
-    if (!military && fact.importance < 4) return null;
+    if (!military && fact.payload.officeKind === '廷臣' && fact.importance < 4) return null;
     phase = fact.kind === 'appointment_started' ? 'command' : 'setback'; priority = military ? 1 : 2;
+  } else if (fact.kind === 'local_governance_resolved' && fact.payload.outcome === 'enacted') {
+    phase = 'command'; priority = 2;
   } else return null;
   const sources = sourceEvents(events, fact.actorIds[0] ?? '', [fact.id], fact.id);
   return {
@@ -142,9 +147,11 @@ function factCandidate(world: WorldState, fact: SimulationFact, events: readonly
 
 /** One to three evidence-owned changes of circumstance; one battle settlement can occupy only one beat. */
 export function projectPersonStoryArc(world: WorldState, person: CharacterState, scope: 'all' | 'active' = 'all'): PersonStoryBeat[] {
+  const seen = new Set<string>();
   const facts = (scope === 'all' ? readWorldFacts(world) : world.facts)
     .filter((fact) => fact.actorIds.includes(person.id) && (fact.kind !== 'battle' || battleSide(fact, person.id)))
-    .sort((left, right) => left.turn - right.turn || compareId(left.id, right.id));
+    .sort((left, right) => left.turn - right.turn || compareId(left.id, right.id))
+    .filter((fact) => { const key = canonicalStoryKey(fact); if (seen.has(key)) return false; seen.add(key); return true; });
   const events = (scope === 'all' ? readWorldHistory(world) : world.history).filter(isDefaultVisibleHistoryEvent);
   const byId = new Map(facts.map((fact) => [fact.id, fact]));
   const episodes = new Map<string, BattleEpisode>();

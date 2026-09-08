@@ -384,6 +384,7 @@ export type ArmyOrderReason =
   | 'war_goal'
   | 'enemy_approach'
   | 'frontline_support'
+  | 'enemy_strength'
   | 'defend_war_goal'
   | 'amphibious_landing'
   | 'low_readiness'

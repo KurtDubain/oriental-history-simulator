@@ -6,6 +6,7 @@ import {
   SkipForward,
 } from 'lucide-react';
 import '../styles/observer-ui.css';
+import type { ObserverPauseMatch } from '../view/v1-observer';
 
 export type Season = '春' | '夏' | '秋' | '冬';
 export type PlaybackSpeed = 1 | 2 | 4 | 8;
@@ -22,6 +23,8 @@ export interface TopBarProps {
   onToggleRunning: () => void;
   onAdvance: () => void;
   onSpeedChange?: (speed: PlaybackSpeed) => void;
+  pauseMatch?: ObserverPauseMatch | null;
+  onReadPause?: (match: ObserverPauseMatch) => void;
 }
 
 const SEASONS: Record<Season, { months: string; key: string }> = {
@@ -49,6 +52,8 @@ export function TopBar({
   onToggleRunning,
   onAdvance,
   onSpeedChange,
+  pauseMatch,
+  onReadPause,
 }: TopBarProps) {
   const currentSeason = SEASONS[season];
   const nextSpeed = SPEEDS[(SPEEDS.indexOf(speed) + 1) % SPEEDS.length];
@@ -132,6 +137,15 @@ export function TopBar({
           <SkipForward size={17} aria-hidden="true" />
         </button>
       </div>
+      {!isRunning && pauseMatch && pauseMatch.watchMatches.length > 0 && onReadPause ? (
+        <button type="button" className="observer-pause-receipt" data-testid="watch-pause-receipt"
+          data-situation-id={pauseMatch.situationId} onClick={() => onReadPause(pauseMatch)}>
+          {pauseMatch.situationTrigger === 'resolution'
+            ? `你关注的“${pauseMatch.watchMatches[0]!.label}”已经结束，演变已暂停。`
+            : `你关注的“${pauseMatch.watchMatches[0]!.label}”发生${pauseMatch.eventTitle}，演变已暂停。`}
+          <span>查看变化 ›</span>
+        </button>
+      ) : null}
     </header>
   );
 }

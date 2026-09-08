@@ -30,9 +30,12 @@ function pointOutsideLand(point: MapPoint, profile: MapPresentationDefinition) {
   return profile.landShapes.every((shape) => !contains(point, shape.polygon));
 }
 
-function insideRegion(point: MapPoint, region: MapRegionView) {
-  const distanceToEdge = (candidate: MapPoint) => Math.min(...region.polygon.map((start, index) => {
-    const end = region.polygon[(index + 1) % region.polygon.length]!;
+function insideRegion(point: MapPoint, region: MapRegionView, profile: MapPresentationDefinition) {
+  const coast = profile.landShapes.find((shape) => shape.id === profile.regionDisplaySites[region.id]?.shapeId)?.polygon;
+  const boundaries = coast ? [region.polygon, coast] : [region.polygon];
+  const fits = (candidate: MapPoint) => boundaries.every((polygon) => contains(candidate, polygon));
+  const distanceToEdge = (candidate: MapPoint) => Math.min(...(coast ?? region.polygon).map((start, index, polygon) => {
+    const end = polygon[(index + 1) % polygon.length]!;
     const dx = end.x - start.x;
     const dy = end.y - start.y;
     const t = Math.max(0, Math.min(1, ((candidate.x - start.x) * dx + (candidate.y - start.y) * dy) / Math.max(1, dx * dx + dy * dy)));
@@ -40,7 +43,7 @@ function insideRegion(point: MapPoint, region: MapRegionView) {
   }));
   let candidate = point;
   for (let attempt = 0; attempt < 6; attempt += 1) {
-    if (contains(candidate, region.polygon) && distanceToEdge(candidate) >= 17) return candidate;
+    if (fits(candidate) && distanceToEdge(candidate) >= 17) return candidate;
     candidate = {
       x: region.center.x + (candidate.x - region.center.x) * 0.48,
       y: region.center.y + (candidate.y - region.center.y) * 0.48,
@@ -52,18 +55,20 @@ function insideRegion(point: MapPoint, region: MapRegionView) {
     left: Math.min(...xs), right: Math.max(...xs),
     top: Math.min(...ys), bottom: Math.max(...ys),
   };
-  let safest = contains(region.center, region.polygon) ? region.center : region.polygon[0]!;
-  let clearance = contains(safest, region.polygon) ? distanceToEdge(safest) : -1;
-  for (let row = 1; row < 10; row += 1) {
-    for (let column = 1; column < 10; column += 1) {
-      const sample = {
-        x: bounds.left + (bounds.right - bounds.left) * column / 10,
-        y: bounds.top + (bounds.bottom - bounds.top) * row / 10,
-      };
-      if (!contains(sample, region.polygon)) continue;
-      const distance = distanceToEdge(sample);
-      if (distance > clearance) { safest = sample; clearance = distance; }
+  let safest = fits(region.center) ? region.center : region.polygon[0]!;
+  let clearance = fits(safest) ? distanceToEdge(safest) : -1;
+  for (let pass = 0; pass < 3; pass += 1) {
+    const stepX = (bounds.right - bounds.left) / 10, stepY = (bounds.bottom - bounds.top) / 10;
+    for (let row = 1; row < 10; row += 1) {
+      for (let column = 1; column < 10; column += 1) {
+        const sample = { x: bounds.left + stepX * column, y: bounds.top + stepY * row };
+        if (!fits(sample)) continue;
+        const distance = distanceToEdge(sample);
+        if (distance > clearance) { safest = sample; clearance = distance; }
+      }
     }
+    bounds.left = safest.x - stepX; bounds.right = safest.x + stepX;
+    bounds.top = safest.y - stepY; bounds.bottom = safest.y + stepY;
   }
   return { ...safest };
 }
@@ -161,7 +166,7 @@ export function buildMapPresentation(
     if (!target) return [];
     return [...values].sort((left, right) => left.id.localeCompare(right.id)).map((army, index) => {
       const offset = armyOffsets[index % armyOffsets.length]!;
-      return { ...army, position: insideRegion({ x: target.center.x + offset.x, y: target.center.y + offset.y }, target) };
+      return { ...army, position: insideRegion({ x: target.center.x + offset.x, y: target.center.y + offset.y }, target, profile) };
     });
   });
   const armyPosition = new Map(presentedArmies.map((army) => [army.id, army.position!]));
@@ -191,7 +196,7 @@ export function buildMapPresentation(
         const camp = armyPosition.get(person.formationId) ?? target.center;
         const angle = Math.max(0, member - 1) * 2.4;
         const radius = member === 0 ? 0 : 11 + Math.floor((member - 1) / 3) * 5;
-        const position = insideRegion({ x: camp.x + Math.cos(angle) * radius, y: camp.y + Math.sin(angle) * radius }, target);
+        const position = insideRegion({ x: camp.x + Math.cos(angle) * radius, y: camp.y + Math.sin(angle) * radius }, target, profile);
         return { ...person, position };
       } else {
         const column = parkedIndex % 5;
@@ -199,7 +204,7 @@ export function buildMapPresentation(
         parkedIndex += 1;
         offset = { x: (column - 2) * 10, y: 17 + row * 9 };
       }
-      const position = insideRegion({ x: target.center.x + offset.x, y: target.center.y + offset.y }, target);
+      const position = insideRegion({ x: target.center.x + offset.x, y: target.center.y + offset.y }, target, profile);
       return { ...person, position };
     });
   });

@@ -922,7 +922,7 @@ export function App() {
       setPauseMatch(matchedPause);
       if (matchedPause) {
         playback.pause();
-        setToast(`${matchedPause.reason}：${matchedPause.eventTitle}。自动推演已暂停。`);
+        setToast(matchedPause.watchMatches.length ? null : `${matchedPause.reason}：${matchedPause.eventTitle}。自动推演已暂停。`);
       }
       return true;
     } catch (error) {
@@ -1658,15 +1658,19 @@ export function App() {
   }, [selectedSituationId, toggleObserverWatchItem]);
 
   const handleSelectPauseMatch = useCallback((match: ObserverPauseMatch) => {
-    if (!match.situationId) return;
+    setPauseMatch(null);
+    if (!match.situationId) { selectQuarterEvent(match.eventId); return; }
     commitObserverSettings(setObserverWatchAlert(
       observerSettingsRef.current,
       'situation',
       match.situationId,
       false,
     ));
+    if (match.situationTrigger === 'core-character-death' && match.sourceFactId) {
+      selectQuarterEvent(match.sourceFactId); return;
+    }
     handleOpenSituationWorkbench(match.situationId, observerDeskTriggerRef.current);
-  }, [commitObserverSettings, handleOpenSituationWorkbench]);
+  }, [commitObserverSettings, handleOpenSituationWorkbench, selectQuarterEvent]);
 
   const handleGuideAction = useCallback((step: ObserverGuideStepId) => {
     const current = worldRef.current;
@@ -1789,6 +1793,8 @@ export function App() {
             onToggleRunning={handleToggleRunning}
             onAdvance={() => advanceOne('manual')}
             onSpeedChange={handleSpeedChange}
+            pauseMatch={pauseMatch}
+            onReadPause={handleSelectPauseMatch}
           />
 
           <NavigationRail

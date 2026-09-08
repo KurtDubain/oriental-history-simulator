@@ -582,6 +582,7 @@ describe('C03/C04 authoritative Situation pause projection', () => {
     expect(candidates[1]).toMatchObject({
       situationId: 'situation-death',
       sourceFactId: 'fact-death',
+      title: `${projectedDeceased.name}逝世`,
       refs: [{ kind: 'situation', id: 'situation-death' }],
     });
   });

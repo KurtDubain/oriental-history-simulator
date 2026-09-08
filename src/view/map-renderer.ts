@@ -307,6 +307,7 @@ function drawGeographicContours(
   transform: MapViewportTransform,
   compactMap: boolean,
   profile: MapPresentationDefinition,
+  showLabels = true,
 ) {
   context.save();
   context.lineJoin = "round";
@@ -325,6 +326,7 @@ function drawGeographicContours(
   context.textAlign = "center";
   context.textBaseline = "middle";
   for (const label of profile.macroLabels) {
+    if (!showLabels) continue;
     if (compactMap && label.kind === "province" && label.priority < 3) continue;
     const point = worldToScreen(label.center, transform);
     const geographical = label.kind !== "province";
@@ -970,11 +972,17 @@ export function drawWorldMap(
   };
   const compactMap = transform.scale < 0.42;
   const narrowMap = width < 720;
-  const polityLabelLayouts = layoutPolityLabels(regions, transform, overlay, compactMap, scene.level);
+  const polityLabelLayouts = narrowMap && scene.level !== 'overview' || focusedWarId ? []
+    : layoutPolityLabels(regions, transform, overlay, compactMap, scene.level);
+  const frontRegions = new Set(armies.flatMap((army) => [army.regionId, ...(army.orderPathRegionIds ?? []), army.expectedContact?.regionId]));
+  const showRegionName = (region: MapRegionView) => region.id === selectedRegionId || region.id === hoveredRegionId
+    || (focusedWarId ? frontRegions.has(region.id) : scene.regionLabelIds.has(region.id)
+      && (!narrowMap || scene.level !== 'overview' && (region.capital || (region.cityLevel ?? 0) >= 4)));
   const protectedLabelBoxes = polityLabelLayouts.map(({ label, point, fontSize }) => (
     estimatedLabelBox(label, point, fontSize)
   ));
   for (const label of profile.macroLabels) {
+    if (narrowMap || focusedWarId) continue;
     if (compactMap && label.kind === 'province' && label.priority < 3) continue;
     const point = worldToScreen(label.center, transform);
     const fontSize = compactMap ? 7 : label.kind === 'province' ? 9 : 10;
@@ -994,7 +1002,7 @@ export function drawWorldMap(
   for (const region of regions) {
     const selected = region.id === selectedRegionId;
     const hovered = region.id === hoveredRegionId;
-    const showLabel = scene.regionLabelIds.has(region.id) || selected || hovered;
+    const showLabel = showRegionName(region);
     if (!showLabel || !(selected || hovered || region.capital || (region.cityLevel ?? 0) >= 4)) continue;
     const center = worldToScreen(region.center, transform);
     const fontSize = compactMap ? 9 : selected ? 12 : 11;
@@ -1035,7 +1043,7 @@ export function drawWorldMap(
     context.restore();
   });
 
-  drawGeographicContours(context, transform, compactMap, profile);
+  drawGeographicContours(context, transform, compactMap, profile, !narrowMap && !focusedWarId);
 
   routes.forEach((route) => {
     if (scene.level !== "local") return;
@@ -1076,7 +1084,7 @@ export function drawWorldMap(
     const center = worldToScreen(region.center, transform);
     const regionNodes = regionNodesByRegion.get(region.id) ?? [];
     const portNode = regionNodes.find((node) => node.kind === "port");
-    if (portNode) drawPort(context, portNode.point, compactMap, region.id === selectedRegionId);
+    if (portNode) drawPort(context, portNode.point, compactMap || narrowMap, region.id === selectedRegionId);
 
     const selected = region.id === selectedRegionId;
     const hovered = region.id === hoveredRegionId;
@@ -1114,7 +1122,7 @@ export function drawWorldMap(
     }
 
     context.save();
-    const showLabel = scene.regionLabelIds.has(region.id) || selected || hovered;
+    const showLabel = showRegionName(region);
     if (showLabel) {
       context.textAlign = "center";
       context.textBaseline = "middle";
@@ -1209,7 +1217,7 @@ export function drawWorldMap(
       }
     }
     const compactLabel = selected || person.isCommander || scene.level === 'local' || overlay === 'war';
-    if (person.showLabel && (relevant || selected) && (!(compactMap || narrowMap) || compactLabel)) personLabels.push({
+    if (person.showLabel && (relevant || selected) && (!narrowMap || scene.expandedArmyId || selected || scene.level === 'local') && (!(compactMap || narrowMap) || compactLabel)) personLabels.push({
       ...layout,
       label: `${person.personName} · ${strength}`,
       priority: selected ? 3 : person.isCommander ? 2 : person.isFactionLeader ? 1 : 0,
@@ -1256,13 +1264,13 @@ export function drawWorldMap(
     context.globalAlpha = overlay === 'political' ? 0.78 : 1;
     context.fillStyle = PAPER_LIGHT; context.strokeStyle = cluster.polityColor; context.lineWidth = 1.8;
     context.beginPath(); context.arc(point.x, point.y, radius, 0, Math.PI * 2); context.fill(); context.stroke();
-    if ((scene.level === 'overview' || !(compactMap || narrowMap))
+    if ((!narrowMap || scene.level !== 'overview')
       && (cluster.count > 1 || cluster.soldiers >= 2_000)) {
       context.font = '650 8px "Noto Serif SC", serif'; context.textAlign = 'center'; context.textBaseline = 'top';
       context.lineWidth = 3; context.strokeStyle = PAPER_LIGHT; context.fillStyle = INK;
       const label = scene.level === 'overview'
         ? `${cluster.count}将`
-        : `${cluster.leaderName}等${cluster.count}人 · ${strength}`;
+        : `${cluster.leaderName} · ${strength}`;
       const fontSize = 8;
       const labelWidth = Math.max(fontSize * 2, label.length * fontSize * 0.9 + 6);
       const labelHeight = fontSize + 4;

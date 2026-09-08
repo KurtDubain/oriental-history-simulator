@@ -173,10 +173,10 @@ export function CausalDrawer({
           )}
 
           {event.consequence ? (
-            <footer className="observer-causal-drawer__consequence">
-              <span>后续影响</span>
+            <details className="observer-causal-drawer__consequence">
+              <summary>详细依据 · 记录变化</summary>
               <p>{event.consequence}</p>
-            </footer>
+            </details>
           ) : null}
 
           {event.politicalFocus?.length ? (

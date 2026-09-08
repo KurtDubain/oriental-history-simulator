@@ -334,8 +334,11 @@ function preparationSignals(
     ? character.leadership + character.merit * 0.48 + character.deputyExperience * 0.32
       - commander.leadership - commander.merit * 0.22
     : -100;
+  const recentDefeat = Boolean(commander && world.facts.some((fact) => fact.kind === 'battle' && turn - fact.turn <= 8
+    && (fact.payload.attackerWon ? fact.payload.defenders : [fact.payload.attacker]).some((side) =>
+      side.commanderId === commander.id && side.losses / Math.max(1, side.soldiersBefore) >= .3)));
   const commanderDiscredited = Boolean(commander && army && (
-    commander.loyalty <= 34
+    recentDefeat || commander.loyalty <= 34
     || army.morale <= 22
     || (actorViewOfCommander?.grievance ?? 0) >= 58
   ));
@@ -370,7 +373,7 @@ function preparationSignals(
     : !cooledDown
       ? '近期刚有军令更替，朝廷尚不受理再次换帅'
       : commanderDiscredited
-        ? '现任主帅的军心、忠诚或上下关系已经明显动摇'
+        ? recentDefeat ? '现任主帅近期遭到重挫，军令人选需要重新考虑' : '现任主帅的军心、忠诚或上下关系已经明显动摇'
         : claimAdvantage >= 32
           ? '申请人的军功与统军履历已明显胜过现任主帅'
           : '现任主帅并未失势，申请人的履历优势也还不够明显';

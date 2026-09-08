@@ -126,8 +126,10 @@ describe('quarterly runtime validation', () => {
 
   it('does not iterate either pre-existing archive during runtime validation', () => {
     let previous = createWorld('北境军令');
-    for (let turn = 0; turn < 12; turn += 1) previous = advanceWorld(previous);
-    const next = advanceWorld(previous);
+    let next = advanceWorld(previous);
+    while (next.turn < 120 && !next.agencyDecisionSystem.actors.some(actor => actor.goal.sourceFactIds.length > 0)) {
+      previous = next; next = advanceWorld(previous);
+    }
     expect(next.agencyDecisionSystem.actors.some((actor) => actor.goal.sourceFactIds.length > 0)).toBe(true);
 
     const guardedArchive = <Item>(

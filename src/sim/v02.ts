@@ -1091,19 +1091,35 @@ export function processCharacterDeathConsequences(
   if (deathFacts.length > 0) syncFamilyMembers(world);
 }
 
+export function selectRegent(world: WorldState, polity: PolityState): CharacterState | undefined {
+  const adults = livingAdults(world, polity.id).filter((person) => person.id !== polity.rulerId);
+  const office = world.offices.find((item) => item.active && item.polityId === polity.id && item.kind === '宰辅');
+  return adults.find((person) => person.id === office?.holderId) ?? [...adults].sort((a, b) =>
+    (b.governance + b.cunning + b.loyalty + b.influence) - (a.governance + a.cunning + a.loyalty + a.influence)
+    || stableCompare(a.id, b.id))[0];
+}
+
+export function governingCharacter(world: WorldState, polity: PolityState): CharacterState | undefined {
+  const ruler = world.characters.find((person) => person.id === polity.rulerId && person.alive);
+  return ruler && ruler.age < 16 ? selectRegent(world, polity) : ruler;
+}
+
 function processAdulthood(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
   for (const character of world.characters.filter((item) => item.alive)) {
     const previousStage = character.lifeStage;
     character.lifeStage = lifeStage(character.age, true);
     if (character.age !== 16 || character.adultTurn !== null) continue;
     character.adultTurn = context.turn;
+    const polity = world.polities.find((item) => item.alive && item.rulerId === character.id);
+    const regent = polity ? selectRegent(world, polity) : undefined;
     const event = emit({
       category: '政治',
       kind: 'character_adult',
-      title: `${character.name}成年`,
-      summary: `${character.name}完成成长阶段，开始具备任官、婚姻与独立政治选择的资格。`,
-      importance: character.politicalClass === '宗室' ? 2 : 1,
-      actorIds: [character.id, ...character.parentIds],
+      title: `${character.name}${polity ? '成年亲政' : '成年'}`,
+      summary: polity ? `${character.name}成年亲政，${regent?.name ?? '朝臣'}还政；官职、部曲不变。`
+        : `${character.name}成年，开始具备任官、婚姻与独立政治选择的资格。`,
+      importance: polity ? 4 : character.politicalClass === '宗室' ? 2 : 1,
+      actorIds: [character.id, ...character.parentIds, ...(regent ? [regent.id] : [])],
       polityIds: [character.polityId],
       regionIds: [character.locationRegionId],
       causes: [
@@ -1116,6 +1132,7 @@ function processAdulthood(world: WorldState, context: V02TurnContext, emit: Emit
       ],
     });
     addBiography(character, event, '成年');
+    if (regent) { addBiography(regent, event, '还政'); remember(world, character.id, regent.id, '恩义', 6, event.summary, event.id); }
   }
 }
 
@@ -1478,6 +1495,7 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
     refreshFactionPowerLedgers(world, polity.id);
     const ruler = world.characters.find((character) => character.id === polity.rulerId && character.alive);
     if (!ruler) continue;
+    const executive = governingCharacter(world, polity) ?? ruler;
     const factions = world.factions
       .filter((faction) => faction.active && faction.polityId === polity.id && faction.memberIds.length > 0)
       .sort((left, right) => right.power - left.power || stableCompare(left.id, right.id));
@@ -1486,7 +1504,7 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
     const leader = world.characters.find((character) => character.id === dominant.leaderId && character.alive);
     if (!leader) continue;
     polity.courtInfluence = Math.round(clamp(
-      ruler.influence * 0.4 + polity.authority * 0.35 + polity.administration * 0.25 - Math.max(0, dominant.power - 55) * 0.25,
+      executive.influence * 0.4 + polity.authority * 0.35 + polity.administration * 0.25 - Math.max(0, dominant.power - 55) * 0.25,
     ));
 
     const rebuiltCourtRequest = requestedCourtAction
@@ -1813,10 +1831,10 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       continue;
     }
 
-    const purgeScore = ruler.cunning * 0.35 + polity.authority * 0.28 + ruler.caution * 0.12
+    const purgeScore = executive.cunning * 0.35 + polity.authority * 0.28 + executive.caution * 0.12
       + Math.max(0, dominant.power - 60) * 0.4 - leader.loyalty * 0.15;
     if (
-      leader.id !== ruler.id
+      leader.id !== ruler.id && leader.id !== executive.id
       && dominant.power >= 64
       && polity.authority >= 55
       && purgeScore >= 66
@@ -1838,7 +1856,7 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       refreshFactionPowerLedgers(world, polity.id);
       const causes: EventCause[] = [
           { label: '派系威胁', role: '结构', weight: 0.3, evidence: ledgerEvidence },
-          { label: '君主能力', role: '条件', weight: 0.25, evidence: `谋略${ruler.cunning}、权威${polity.authority}` },
+          { label: '执政能力', role: '条件', weight: 0.25, evidence: `${executive.name}谋略${executive.cunning}、权威${polity.authority}` },
           { label: '压制选择', role: '选择', weight: 0.25, evidence: `清洗效用${purgeScore.toFixed(1)}达到66` },
           { label: '政治后果', role: '结果', weight: 0.2, evidence: `派系权力${oldPower}→${dominant.power}，领袖影响${oldInfluence}→${leader.influence}` },
       ];
@@ -1879,16 +1897,16 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       const fact = emitCourtActionResolvedFact(world, context, {
         action: 'purge',
         polityId: polity.id,
-        actorFactionId: ruler.factionId,
+        actorFactionId: executive.factionId,
         targetFactionId: dominant.id,
-        initiatorId: ruler.id,
+        initiatorId: executive.id,
         targetId: leader.id,
         reasonCode: 'central_reassertion',
         score: purgeScore,
         threshold: 66,
         rulerBeforeId: ruler.id,
         rulerAfterId: ruler.id,
-        affectedFactionIds: [dominant.id, ...(ruler.factionId ? [ruler.factionId] : [])],
+        affectedFactionIds: [dominant.id, ...(executive.factionId ? [executive.factionId] : [])],
         removedMemberIds,
         importance: 4,
         causes,
@@ -1912,10 +1930,10 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       const event = emit({
         category: '政治',
         kind: 'purge',
-        title: `${ruler.name}清洗${dominant.name}`,
-        summary: `${ruler.name}依靠中央权威对${dominant.name}动手：${purgeResults.join('，')}。`,
+        title: `${executive.name}清洗${dominant.name}`,
+        summary: `${executive.name}依靠中央权威对${dominant.name}动手：${purgeResults.join('，')}。`,
         importance: 4,
-        actorIds: [ruler.id, leader.id],
+        actorIds: [executive.id, leader.id],
         polityIds: [polity.id],
         regionIds: polity.capitalRegionId ? [polity.capitalRegionId] : [],
         causes: fact.causes,
@@ -1923,7 +1941,7 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
         ...projectFactLinks(fact),
       });
       addBiography(leader, event, '遭到清洗');
-      remember(world, leader.id, ruler.id, '羞辱', 28, event.summary, event.id);
+      remember(world, leader.id, executive.id, '羞辱', 28, event.summary, event.id);
     }
   }
 
@@ -2134,31 +2152,22 @@ export function processV02MilitaryCareers(world: WorldState, context: V02TurnCon
       const deputy = world.characters.find((character) => character.id === participation.deputyCommanderId && character.alive);
       if (!deputy) continue;
       const armyName = world.armies.find((army) => army.id === participation.armyId)?.name ?? participation.armyId;
-      const before = deputy.merit;
-      deputy.deputyExperience = Math.round(clamp(deputy.deputyExperience + 4));
-      deputy.merit = Math.round(clamp(deputy.merit + 3));
-      deputy.renown = Math.round(clamp(deputy.renown + 1));
-      if (!deputy.biography.some((fact) => fact.kind === '首次参战')) {
-        addFactBiography(deputy, battle, '首次参战', `${deputy.name}首次以${armyName}副将身份见于事实档案。`, 2);
-      }
-      const threshold = [25, 50, 75].find((value) => before < value && deputy.merit >= value);
+      const awarded = battle.stateDeltas.find((delta) => delta.entityId === deputy.id && delta.field === 'merit');
+      const before = typeof awarded?.before === 'number' ? awarded.before : deputy.merit;
+      const after = typeof awarded?.after === 'number' ? awarded.after : before;
+      const threshold = [25, 50, 75].find((value) => before < value && after >= value);
       if (threshold) {
         const event = emit({
           category: '军事',
           kind: 'deputy_merit',
           title: `${deputy.name}以副将战功显名`,
-          summary: `${deputy.name}在连续战役中积累可核验战功，开始具备独立统军的声望与经验。`,
+          summary: `${deputy.name}随${armyName}在${world.regions.find((region) => region.id === battle.payload.targetRegionId)?.name ?? '前线'}得胜，战功渐著。`,
           importance: threshold >= 50 ? 3 : 2,
           actorIds: [deputy.id, participation.commanderId],
           polityIds: [participation.polityId],
           regionIds: [battle.payload.targetRegionId],
-          causes: [
-            { label: '副将岗位', role: '结构', weight: 0.22, evidence: `${battle.id}记录${deputy.name}为${armyName}副将` },
-            { label: '战役经历', role: '条件', weight: 0.3, evidence: `副将经验${deputy.deputyExperience}，本季参与${battle.payload.targetRegionId}会战` },
-            { label: '能力表现', role: '选择', weight: 0.23, evidence: `统率${deputy.leadership}、谋略${deputy.cunning}` },
-            { label: '声望结果', role: '结果', weight: 0.25, evidence: `战功${before}→${deputy.merit}，越过${threshold}门槛` },
-          ],
-          stateDeltas: [{ entityType: 'character', entityId: deputy.id, field: 'merit', before, after: deputy.merit, delta: deputy.merit - before }],
+          causes: [{ label: '战功', role: '结果', weight: 1, evidence: `功绩${before}→${after}` }],
+          stateDeltas: [{ entityType: 'character', entityId: deputy.id, field: 'merit', before, after, delta: after - before }],
           ...projectFactLinks(battle),
         });
         addBiography(deputy, event, '副将显名');
@@ -2285,7 +2294,8 @@ function desiredOffices(world: WorldState): Array<Omit<OfficeAppointment, 'id' |
     }
     const occupied = new Set(desired.filter((office) => office.polityId === polity.id).map((office) => office.holderId));
     const court = livingAdults(world, polity.id).filter((character) => !occupied.has(character.id));
-    const chancellor = [...court].sort((left, right) => (
+    const chancellor = (world.characters.find((person) => person.id === polity.rulerId)?.age ?? 16) < 16
+      ? selectRegent(world, polity) : [...court].sort((left, right) => (
       (right.governance + right.cunning + right.influence) - (left.governance + left.cunning + left.influence)
       || stableCompare(left.id, right.id)
     ))[0];

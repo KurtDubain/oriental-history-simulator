@@ -83,11 +83,11 @@ describe('restoreWorldSession', () => {
       historyCount: world.history.length,
     }).toEqual({
       turn: 12,
-      hash: '8ac8f4521fe2e255',
-      factDigest: '4efdafbd0d9f3735',
-      historyDigest: 'b593ded8684f2eac',
-      factCount: 425,
-      historyCount: 300,
+      hash: '84da697597babbaa',
+      factDigest: 'ae99f4dc1f97805e',
+      historyDigest: '24072eb10b66e793',
+      factCount: 329,
+      historyCount: 269,
     });
   });
 });

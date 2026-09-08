@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
 
@@ -533,6 +533,7 @@ async function openArchiveEventAndEscape(page, scenario) {
 }
 
 async function ensureSituationTrigger(page, scenario, maxTurn = 8) {
+  await activate(page.locator('[data-observer-view="world"]'), scenario);
   for (let index = 0; index < maxTurn; index += 1) {
     const trigger = page.locator('[data-situation-workbench-trigger="true"]').first();
     if (await trigger.count()) return trigger;
@@ -702,6 +703,10 @@ async function verifyScenario(browser, scenario) {
     assert.equal(finalState.playback.running, false, `${scenario.slug} 场景结束时自动推演应为暂停`);
     await page.screenshot({ path: artifactPath(scenario, 'final-quarter'), fullPage: false });
     assert.deepEqual(browserErrors, [], `${scenario.slug} 不得产生 console.error 或 pageerror`);
+  } catch (error) {
+    await writeFile(artifactPath(scenario, 'failure').replace(/\.png$/, '.json'), JSON.stringify({ state: await state(page), browserErrors }, null, 2));
+    await page.screenshot({ path: artifactPath(scenario, 'failure') });
+    throw error;
   } finally {
     await context.close();
   }

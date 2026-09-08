@@ -197,7 +197,7 @@ describe('person Agency dossier', () => {
     expect(inspector.agency?.primaryGoal).toBeNull();
     expect(inspector.agency?.currentPlanSteps).toEqual([]);
     expect(inspector.summary).toContain('眼下仍在权衡');
-    expect(archive.chapters).toHaveLength(inspector.storyArc?.length ?? 0);
+    expect(archive.chapters).toEqual([]); // The full archive is the canonical chronology, not a duplicate story panel.
     expect(JSON.stringify(archive.chapters)).not.toContain('眼下尚未形成明确打算');
 
     const playerFacing = JSON.stringify(inspector.agency);
@@ -649,13 +649,14 @@ describe('person experience attribution', () => {
   it('keeps genuine deputy, appointment and marriage records from a fixed natural world', () => {
     const world = advanceWorldBy(createWorld('春战副将'), 8);
 
-    const deputy = world.characters.find((character) => character.biography.some((entry) => entry.kind === '首次参战' && entry.factId));
+    const firstBattle = world.facts.find((fact) => fact.kind === 'battle' && fact.payload.attacker.deputyCommanderId);
+    const deputy = world.characters.find((character) => firstBattle?.kind === 'battle' && character.id === firstBattle.payload.attacker.deputyCommanderId);
     expect(deputy).toBeDefined();
     if (deputy) {
-      const firstBattle = deputy.biography.find((entry) => entry.kind === '首次参战' && entry.factId);
       const records = toPersonArchive(world, deputy).records;
-      expect(records.some((record) => record.id === firstBattle?.id)).toBe(true);
-      const source = world.facts.find((fact) => fact.id === firstBattle?.factId);
+      expect(records.some((record) => record.id === `${deputy.id}:experience:${firstBattle?.id}`
+        || world.history.some(event => event.id === record.eventId && event.sourceFactIds.includes(firstBattle!.id)))).toBe(true);
+      const source = firstBattle;
       expect(source?.actorIds).toContain(deputy.id);
       if (source?.kind === 'battle') {
         expect([source.payload.attacker, ...source.payload.defenders].some((force) => (
@@ -682,8 +683,9 @@ describe('person experience attribution', () => {
         };
         world.history.push(canonicalEvent);
         const deduplicated = toPersonArchive(world, deputy).records;
-        expect(deduplicated.find((record) => record.id === firstBattle?.id)?.eventId).toBe(canonicalEvent.id);
-        expect(deduplicated.some((record) => record.id === canonicalEvent.id)).toBe(false);
+        expect(deduplicated.filter(record => world.history.some(event => event.id === record.eventId
+          && event.sourceFactIds.includes(source.id)))).toHaveLength(1);
+        expect(deduplicated.some((record) => record.id === `${deputy.id}:experience:${source.id}`)).toBe(false);
       }
     }
 
@@ -721,6 +723,8 @@ describe('person experience attribution', () => {
         .map((office) => [`${person.id}:experience:${office.id}:initial`, office]));
 
       for (const record of toPersonExperienceRecords(world, person)) {
+        const battle = world.facts.find((fact) => fact.kind === 'battle' && `${person.id}:experience:${fact.id}` === record.id);
+        if (battle) { expect(battle.actorIds).toContain(person.id); continue; }
         const biography = biographyById.get(record.id);
         if (biography) {
           if (biography.eventId) expect(eventById.get(biography.eventId)?.actorIds).toContain(person.id);

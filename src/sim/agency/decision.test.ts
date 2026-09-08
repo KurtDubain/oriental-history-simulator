@@ -233,6 +233,23 @@ function decisionFixture(seed: string, expected: 'executed' | 'rejected'): Decis
 }
 
 describe('C10/C11 authoritative agency decision core', () => {
+  it('opens an existing deputy claim after a recent major command defeat, not a minor loss or an old defeat', () => {
+    for (const [lossRate, age, expected] of [[.4, 0, true], [.1, 0, false], [.4, 9, false]] as const) {
+      const { world, context, armyId, commanderId } = decisionFixture('败局问责受控', 'rejected');
+      const commander = world.characters.find(person => person.id === commanderId)!;
+      commander.loyalty = 100;
+      world.armies.find(army => army.id === armyId)!.morale = 90;
+      const battle = context.facts.find(fact => fact.kind === 'battle')!;
+      if (battle.kind !== 'battle') throw new Error('missing battle');
+      const loss = Math.round(battle.payload.attacker.soldiersBefore * lossRate);
+      emitSimulationFact(world, context, { ...battle, payload: { ...battle.payload, attackerWon: false,
+        attacker: { ...battle.payload.attacker, losses: loss, soldiersAfter: battle.payload.attacker.soldiersBefore - loss } } });
+      if (age) for (const fact of world.facts) if (fact.kind === 'battle' && !fact.payload.attackerWon) fact.turn -= age;
+      processAgencyDecisionSystem(world, context, eventEmitter(world, context));
+      expect(context.facts.some(fact => fact.kind === 'agency_intent_submitted')).toBe(expected);
+    }
+  });
+
   it('submits, executes and institutionally records an independent-command request', () => {
     const { world, context, armyId, deputyId, commanderId } = decisionFixture('agency-command-executed', 'executed');
     const evidenceId = context.facts[0]?.id;
@@ -569,7 +586,7 @@ describe('C10/C11 authoritative agency decision core', () => {
   });
 
   it('opens a v1.0 schema-4 save without inventing historical support actions', () => {
-    let legacy = createWorld('agency-v10-support-migration');
+    let legacy = createWorld('孤城疫年');
     for (let index = 0; index < 80; index += 1) {
       legacy = advanceWorld(legacy);
       if (legacy.agencyDecisionSystem.actors.length > 0

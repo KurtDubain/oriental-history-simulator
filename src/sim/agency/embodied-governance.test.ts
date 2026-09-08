@@ -11,6 +11,7 @@ import {
   type WorldState,
 } from '../index';
 import { MAX_LOCAL_GOVERNANCE_ACTIONS_PER_TURN } from './embodied-governance';
+import { projectPersonStoryArc } from '../../view/person-story-arc';
 
 const LOCAL_ACTIONS = new Set(['open_granary', 'reduce_levy']);
 
@@ -168,6 +169,8 @@ describe('EMB05/06 local governor identity action', () => {
       expect(domain?.kind).toBe('local_governance_resolved');
       if (domain?.kind !== 'local_governance_resolved') throw new Error('missing local result');
       expect(domain.payload.outcome).toBe('enacted');
+      const governor = next.characters.find(person => person.id === actorId)!;
+      expect(projectPersonStoryArc(next, governor).some(beat => beat.sourceFactIds.includes(domain.id))).toBe(true);
       expect(domain.payload.unrestAfter).toBeLessThan(domain.payload.unrestBefore);
       if (domain.payload.action === 'open_granary') {
         const foodDelta = domain.stateDeltas.find((delta) => delta.entityType === 'region' && delta.field === 'food');

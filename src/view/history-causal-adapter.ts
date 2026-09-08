@@ -9,7 +9,7 @@ import {
   uniqueArchiveLinks,
 } from './dossier-adapter-shared';
 import { projectHistoryEventPoliticalFocus } from './political-focus';
-import { projectFactNarrative } from './historical-scenes';
+import { playerHistoryText, projectFactNarrative } from './historical-scenes';
 
 function tone(category: EventCategory, kind: string): ChronicleTone {
   if (kind.includes('继承') || kind.includes('即位') || kind.includes('建国')) return 'succession';
@@ -24,8 +24,8 @@ export function toChronicleEvent(world: WorldState, item: HistoryEvent): Chronic
     id: item.id,
     date: `第 ${item.year} 年 · ${item.season}`,
     category: item.category,
-    title: item.title,
-    summary: item.summary,
+    title: playerHistoryText(world, item.title),
+    summary: playerHistoryText(world, item.summary),
     location: item.regionIds.map((id) => region(world, id)?.name).filter(Boolean).join('、'),
     actors: item.actorIds.map((id) => character(world, id)?.name).filter((name): name is string => Boolean(name)),
     tone: tone(item.category, item.kind),
@@ -129,21 +129,21 @@ export function toCausalEvent(world: WorldState, item: HistoryEvent): CausalEven
       : undefined,
     evidence: cause.evidence,
     refs: (cause.refs ?? []).map((ref) => causalReference(world, ref)).filter((ref): ref is CausalReference => Boolean(ref)),
-  }));
+  })).filter((factor) => item.kind !== 'character_death' || factor.role !== 'outcome');
   factors.push({
     id: `${item.id}-outcome`,
     role: 'outcome',
-    label: item.title,
-    detail: item.summary,
-    evidence: item.stateDeltas.length
+    label: playerHistoryText(world, item.title),
+    detail: playerHistoryText(world, item.summary),
+    evidence: [...item.causes.filter((cause) => cause.role === '结果').map((cause) => cause.evidence), item.stateDeltas.length
       ? `${item.stateDeltas.length} 项世界状态发生改变`
-      : item.evidence[0],
+      : item.evidence[0]].filter(Boolean).join('；'),
   });
   return {
     id: item.id,
     date: `第 ${item.year} 年 · ${item.season}`,
-    title: item.title,
-    summary: item.summary,
+    title: playerHistoryText(world, item.title),
+    summary: playerHistoryText(world, item.summary),
     factors,
     politicalFocus: projectHistoryEventPoliticalFocus(world, item),
     subjects: uniqueArchiveLinks([

@@ -14,7 +14,7 @@ import {
   type WarState,
   type WorldState,
 } from '../sim';
-import { distributeFormationGain } from '../sim/military/personal-forces';
+import { applyFormationLosses, distributeFormationGain } from '../sim/military/personal-forces';
 import { toCountryInspector } from './country-dossier-adapter';
 import { projectCoreImpacts } from './core-impact-projection';
 
@@ -265,6 +265,11 @@ describe('core military-political impact projection', () => {
     const staged = openingWorld('军政影响-低补给交战');
     const fixture = stageBorderWar(staged);
     removeAllRegionalFood(staged);
+    // A hungry force still attacks an observably weak garrison; it should not charge a superior stack.
+    applyFormationLosses(staged, [fixture.defender], fixture.defender.soldiers - 500);
+    fixture.attacker.order.kind = 'intercept';
+    fixture.attacker.order.targetArmyId = fixture.defender.id;
+    fixture.attacker.order.reasonCode = 'enemy_approach';
     fixture.attacker.food = fixture.attacker.soldiers * 0.5;
     fixture.defender.food = fixture.defender.soldiers * 2;
 

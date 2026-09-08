@@ -4,6 +4,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { advanceWorld, createWorld } from '../sim';
 import { deriveObserverLeads } from '../view/observer-leads';
 import { ObserverLeads, observerLeadTargetKey, observerLeadWatchKey } from './ObserverLeads';
+import { TopBar } from './TopBar';
+import type { ObserverPauseMatch } from '../view/v1-observer';
 
 function leadsAt(turn: number, seed: string) {
   let world = createWorld(seed);
@@ -23,6 +25,23 @@ function render(leads: ReturnType<typeof deriveObserverLeads>, situationCount = 
 }
 
 describe('ObserverLeads', () => {
+  it('shows a receipt only for a directed watch pause and uses its stored identity', () => {
+    const match: ObserverPauseMatch = {
+      eventId: 'event-battle', eventTitle: '广州之战', reason: '关注变化', rule: 'situationChanges',
+      situationId: 'war-story', situationTrigger: 'phase-change', sourceFactId: 'fact-battle',
+      watchMatches: [{ kind: 'situation', id: 'war-story', label: '雍攻沧', detail: '', alert: true }],
+    };
+    const bar = (pauseMatch: ObserverPauseMatch | null, isRunning = false) => renderToStaticMarkup(createElement(TopBar, {
+      year: 23, season: '夏', turn: 89, isRunning, pauseMatch,
+      onReadPause: vi.fn(), onAdvance: vi.fn(), onToggleRunning: vi.fn(),
+    }));
+    expect(bar(match)).toContain('你关注的“雍攻沧”发生广州之战');
+    expect(bar(match)).toContain('data-situation-id="war-story"');
+    expect(bar({ ...match, situationTrigger: 'resolution' })).toContain('已经结束');
+    expect(bar(null)).not.toContain('watch-pause-receipt');
+    expect(bar({ ...match, watchMatches: [] })).not.toContain('watch-pause-receipt');
+    expect(bar(match, true)).not.toContain('watch-pause-receipt');
+  });
   it('keeps the story entrance visible without manufacturing empty questions', () => {
     const markup = render(deriveObserverLeads(createWorld('当世三问-空白开局')));
 
@@ -78,5 +97,18 @@ describe('ObserverLeads', () => {
     expect(markup).toContain(`<strong data-testid="observer-lead-question">${lead.question}</strong>`);
     expect(markup).toContain('data-story-rank="main"');
     for (const evidence of lead.evidence) expect(markup).toContain(evidence);
+  });
+
+  it('keeps a changed headline watched by Situation identity, without adopting another case', () => {
+    const lead = leadsAt(8, '春战副将').leads.find((item) => item.situationId)!;
+    const renamed = { ...lead, question: '另一位实际参战者继续守城' };
+    const markup = renderToStaticMarkup(createElement(ObserverLeads, {
+      leads: [renamed, { ...renamed, id: 'another-lead', situationId: 'another-case' }],
+      watchedKeys: new Set([observerLeadWatchKey(lead)]), situationCount: 2,
+      onInspect: vi.fn(), onToggleWatch: vi.fn(), onOpenSituations: vi.fn(),
+    }));
+    expect(observerLeadWatchKey(renamed)).toBe(observerLeadWatchKey(lead));
+    expect(markup.match(/aria-pressed="true"/g)).toHaveLength(1);
+    expect(markup.match(/aria-pressed="false"/g)).toHaveLength(1);
   });
 });

@@ -1,4 +1,4 @@
-import type { SimulationFact, StateDelta, WorldState } from '../sim/types';
+import type { HistoryEvent, SimulationFact, StateDelta, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations';
 import { findWorldFact, readWorldFacts, readWorldHistory } from '../sim/archive';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
@@ -26,6 +26,61 @@ export interface HistoricalScene {
 }
 
 export type HistoricalSceneReadScope = 'all' | 'active';
+
+/** Presentation only: historical records and their ids stay untouched. */
+export function playerHistoryText(world: WorldState, text: string): string {
+  return text.replace(/\b(?:c|fac|f|a|r|p|fleet)_\w+\b/g, (id) => (
+    [...world.characters, ...world.factions, ...world.families, ...world.armies,
+      ...world.regions, ...world.polities, ...world.fleets].find((item) => item.id === id)?.name
+    ?? (id.startsWith('c_') ? '一位旧识' : '旧日所属')
+  )).replace(/具名出生是人口群体中的叙事标记，不重复增加州域人口。/g, '')
+    .replace(/，承诺转化为可追溯的信任记忆|；这次回应已经进入双方关系与军令审查|；此承诺可因履职而完成，也可因抗命而破裂/g, '')
+    .replace(/经职位、支持与风险审查后获准/g, '获朝廷准许')
+    .replace(/(?:进入|见于)事实档案/g, '留下记载').replace(/可核验|可查证/g, '')
+    .replace(/在初始官档中登记为/g, '开篇时任').trim();
+}
+
+export function canonicalStoryKey(fact: SimulationFact): string {
+  if (fact.kind === 'faction_relation_changed') {
+    const p = fact.payload;
+    return `faction:${fact.turn}:${[p.leftFactionId, p.rightFactionId].sort().join(':')}:${p.action}:${p.relation}`;
+  }
+  return fact.id;
+}
+
+export function canonicalEventKey(event: HistoryEvent, facts: ReadonlyMap<string, SimulationFact>): string {
+  return event.kind === 'world_created' || !event.sourceFactIds.length ? event.id
+    : event.sourceFactIds.map((id) => facts.has(id) ? canonicalStoryKey(facts.get(id)!) : id).sort().join('|');
+}
+
+/** Choose a reading entry only among the supplied real participants, never reassign their actions. */
+export function readableParticipant(world: WorldState, ids: readonly string[]) {
+  const coverage = (id: string) => [
+    world.offices.some((office) => office.active && office.holderId === id),
+    world.personalForces.some((force) => force.ownerId === id && force.soldiers > 0),
+    world.factions.some((faction) => faction.active && faction.leaderId === id),
+    world.relationships.some((relation) => relation.sourceId === id || relation.targetId === id),
+    world.agencyDecisionSystem.actors.some((actor) => actor.characterId === id && actor.goal.status === 'active'),
+    world.characters.find((person) => person.id === id)?.biography.some((entry) => entry.turn > 0),
+  ].filter(Boolean).length;
+  return world.characters.filter((person) => ids.includes(person.id))
+    .sort((a, b) => coverage(b.id) - coverage(a.id) || a.id.localeCompare(b.id))[0];
+}
+
+export function participantBattleHeadline(world: WorldState, factId: string): string {
+  const fact = world.facts.find((item) => item.id === factId);
+  if (fact?.kind !== 'battle') return '战线仍在变化';
+  const sides = [fact.payload.attacker, ...fact.payload.defenders];
+  const ids = (side: typeof sides[number]) => [side.commanderId, side.deputyCommanderId,
+    ...(side.participants ?? []).map((person) => person.characterId)].filter((id): id is string => Boolean(id));
+  const person = readableParticipant(world, sides.flatMap(ids));
+  const side = sides.find((item) => ids(item).includes(person?.id ?? ''));
+  const attack = side === fact.payload.attacker;
+  const won = attack === fact.payload.attackerWon;
+  return person && side
+    ? `${person.name}${side.commanderId === person.id ? '率部' : '随军'}在${regionName(world, fact.payload.targetRegionId)}${won ? '得胜' : '受挫'}`
+    : `${regionName(world, fact.payload.targetRegionId)}之战，${fact.payload.attackerWon ? '攻方取胜' : '守方守住'}`;
+}
 
 function stableCompare(left: string, right: string): number {
   return left < right ? -1 : left > right ? 1 : 0;
@@ -120,8 +175,8 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact): F
     };
   }
   if (fact.kind === 'battle') {
-    const attacker = characterName(world, fact.payload.attacker.allegianceCharacterId ?? fact.payload.attacker.commanderId);
-    const defenders = fact.payload.defenders.map((item) => characterName(world, item.allegianceCharacterId ?? item.commanderId)).join('、') || '守军';
+    const attacker = characterName(world, fact.payload.attacker.commanderId);
+    const defenders = fact.payload.defenders.map((item) => characterName(world, item.commanderId)).join('、') || '守军';
     const losses = fact.payload.attacker.losses + fact.payload.defenders.reduce((sum, item) => sum + item.losses, 0);
     return {
       title: `${regionName(world, fact.payload.targetRegionId)}之战`,
@@ -592,7 +647,10 @@ function inheritanceFactTouchesSituation(fact: SimulationFact, situation: Situat
   const polities = new Set(situation.participants.polityIds);
   if (fact.kind === 'character_death') return characters.has(fact.payload.characterId);
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
-    return polities.has(fact.payload.polityId) && characters.has(fact.payload.holderId);
+    return polities.has(fact.payload.polityId) && characters.has(fact.payload.holderId)
+      && (fact.payload.officeKind === '君主' || fact.stateDeltas.some((delta) => (
+        delta.before !== delta.after && ['rulerId', 'heirId', 'regentId', 'rulingFamilyId'].includes(delta.field)
+      )));
   }
   return fact.kind === 'court_action_resolved'
     && polities.has(fact.payload.polityId)

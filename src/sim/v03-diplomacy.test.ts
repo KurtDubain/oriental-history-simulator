@@ -168,6 +168,29 @@ describe('V0.3 material diplomacy', () => {
     expect(defaultEvents.find((event) => event.kind === 'tribute_breached')?.causes.every((cause) => (cause.refs?.length ?? 0) > 0)).toBe(true);
   });
 
+  it('reduces affordable tribute with earned trust but does not forgive an empty treasury', () => {
+    const world = createWorld('减贡受控');
+    const { relation, left: payer, right: receiver } = firstRelation(world);
+    relation.status = '朝贡'; relation.tributePayerId = payer.id;
+    relation.tributePerTurn = 240; relation.lastChangedTurn = 0; relation.trust = 60;
+    payer.treasury = 160; receiver.treasury = 1000;
+    const context = contextFor(world, 1, '夏'), events: HistoryEvent[] = [];
+    processV03Diplomacy(world, context, emitter(events, context));
+    expect(payer.treasury + receiver.treasury).toBe(1160);
+    expect(relation.status).toBe('朝贡');
+    expect(relation.tributePerTurn).toBe(160);
+    expect(events.find(event => event.kind === 'tribute_paid')?.stateDeltas).toContainEqual(
+      expect.objectContaining({ field: 'tributePerTurn', before: 240, after: 160 }));
+    const next = contextFor(world, 2, '秋');
+    processV03Diplomacy(world, next, emitter(events, next));
+    expect(relation.tributePayerId).toBeNull();
+    expect(relation.trust).toBeLessThan(58);
+    payer.treasury = 1000;
+    const retry = contextFor(world, 3, '冬');
+    processV03Diplomacy(world, retry, emitter(events, retry));
+    expect(relation.tributePayerId).toBeNull();
+  });
+
   it('creates and later releases tribute only when causal power and pressure thresholds cross', () => {
     const world = createWorld('v03-diplomacy-formation');
     const { relation, left: strong, right: weak } = firstRelation(world);
@@ -185,16 +208,21 @@ describe('V0.3 material diplomacy', () => {
     strong.authority = 100;
     weak.authority = 4;
     weak.administration = 4;
-    weak.treasury = 0;
+    weak.treasury = 640;
     weak.warWeariness = 100;
     relation.threatAtoB = 100;
     const context = contextFor(world, 3, '冬');
     const events: HistoryEvent[] = [];
 
     expect(v03DiplomaticPower(world, strong.id)).toBeGreaterThan(v03DiplomaticPower(world, weak.id) * 2.15);
+    const empty = structuredClone(world);
+    empty.polities.find((polity) => polity.id === weak.id)!.treasury = 0;
+    processV03Diplomacy(empty, contextFor(empty, 3, '冬'), emitter([], contextFor(empty, 3, '冬')));
+    expect(empty.diplomacy.find((item) => item.id === relation.id)?.tributePayerId).toBeNull();
     processV03Diplomacy(world, context, emitter(events, context));
     expect(relation.status).toBe('朝贡');
     expect(relation.tributePayerId).toBe(weak.id);
+    expect(relation.tributePerTurn).toBeLessThanOrEqual(weak.treasury / 8);
     expect(events.find((event) => event.kind === 'tribute_imposed')?.causes.every((cause) => (cause.refs?.length ?? 0) > 0)).toBe(true);
 
     // Eight quarters later the former payer has recovered and coercive threat is gone.

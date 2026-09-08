@@ -37,7 +37,7 @@ function createBaseMapViewportTransform(
   const drawableWidth = Math.max(1, width - padding * 2);
   const drawableHeight = Math.max(1, height - padding * 2);
   const renderHeight = width < 620 ? MAP_COMPACT_RENDER_HEIGHT : MAP_DESKTOP_RENDER_HEIGHT;
-  const scale = Math.min(drawableWidth / MAP_WORLD_WIDTH, drawableHeight / renderHeight);
+  const scale = Math.min(drawableWidth / (width < 620 ? 800 : MAP_WORLD_WIDTH), drawableHeight / renderHeight);
   return {
     scale,
     offsetX: (width - MAP_WORLD_WIDTH * scale) / 2,
@@ -73,7 +73,7 @@ export function clampMapCamera(
     MAP_MAX_ZOOM,
     Math.max(MAP_MIN_ZOOM, Number.isFinite(camera.zoom) ? camera.zoom : MAP_MIN_ZOOM),
   );
-  if (zoom <= MAP_MIN_ZOOM + 0.0001) return { ...DEFAULT_MAP_CAMERA };
+  if (zoom <= MAP_MIN_ZOOM + 0.0001 && width >= 620) return { ...DEFAULT_MAP_CAMERA };
   const base = createBaseMapViewportTransform(width, height, padding);
   const rawPanX = Number.isFinite(camera.panX) ? camera.panX : 0;
   const rawPanY = Number.isFinite(camera.panY) ? camera.panY : 0;

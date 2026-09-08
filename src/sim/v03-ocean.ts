@@ -2104,21 +2104,9 @@ function resolveLanding(
   const losses = Math.min(army.soldiers - 1, whole(army.soldiers * (won ? 0.08 : 0.27)));
   applyFormationLosses(world, [army], losses);
   context.population.militaryDeaths += losses;
-  creditBattleCommandStanding(world, army, won ? 5 : 1);
-  for (const participant of participantBefore) {
-    const character = world.characters.find((item) => item.id === participant.ownerId && item.alive);
-    if (!character) continue;
-    character.merit = clamp(character.merit + (won ? 2 : 1));
-    character.renown = clamp(character.renown + (won ? 1 : 0));
-  }
+  const careerDeltas = creditBattleCommandStanding(world, army, won, losses / Math.max(1, soldiersBefore), participantBefore.map((item) => item.ownerId));
   for (const defender of defenders) {
-    creditBattleCommandStanding(world, defender, won ? 1 : 4);
-    for (const participant of defenderSnapshots.find((item) => item.armyId === defender.id)?.participants ?? []) {
-      const character = world.characters.find((item) => item.id === participant.characterId && item.alive);
-      if (!character) continue;
-      character.merit = clamp(character.merit + (won ? 1 : 2));
-      character.renown = clamp(character.renown + (won ? 0 : 1));
-    }
+    careerDeltas.push(...creditBattleCommandStanding(world, defender, !won, 0));
   }
   const militiaLoss = Math.min(target.population, whole(Math.min(7_000, target.population * 0.012) * (won ? 0.18 : 0.08)));
   target.population -= militiaLoss;
@@ -2142,7 +2130,7 @@ function resolveLanding(
       { label: '攻防实力', role: '条件', weight: 0.31, evidence: `攻方${Math.round(attackPower * variance)}、守方${Math.round(defensePower)}` },
       { label: '登陆结算', role: '结果', weight: 0.25, evidence: `攻方损失${losses}，民兵损失${militiaLoss}` },
     ],
-    stateDeltas: [{ entityType: 'army', entityId: army.id, field: 'soldiers', before: soldiersBefore, after: army.soldiers, delta: -losses }],
+    stateDeltas: [...careerDeltas, { entityType: 'army', entityId: army.id, field: 'soldiers', before: soldiersBefore, after: army.soldiers, delta: -losses }],
     sourceFactIds: armyOrderFactIds([army]),
     payload: {
       warId: war.id,
