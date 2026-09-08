@@ -57,7 +57,8 @@ describe('deterministic character names', () => {
     expect(polity).toBeDefined();
     const promotedIds = new Set<string>();
     for (let index = 0; index < GIVEN_NAMES.length + 8; index += 1) {
-      const promoted = promoteBackgroundPerson(initial, polity!, `name-audit-${index}`, '顾');
+      const employer = initial.polities.find(p => initial.backgroundPeople.some(stub => stub.polityId === p.id && stub.promotedCharacterId === null))!;
+      const promoted = promoteBackgroundPerson(initial, employer, `name-audit-${index}`, '顾');
       expect(promoted).not.toBeNull();
       if (promoted) promotedIds.add(promoted.id);
     }

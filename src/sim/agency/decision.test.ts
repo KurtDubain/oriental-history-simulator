@@ -586,12 +586,9 @@ describe('C10/C11 authoritative agency decision core', () => {
   });
 
   it('opens a v1.0 schema-4 save without inventing historical support actions', () => {
-    let legacy = createWorld('孤城疫年');
-    for (let index = 0; index < 80; index += 1) {
-      legacy = advanceWorld(legacy);
-      if (legacy.agencyDecisionSystem.actors.length > 0
-        && legacy.facts.some((fact) => fact.kind === 'agency_intent_resolved' && fact.payload.outcome === 'executed')) break;
-    }
+    // Finish a further quarter after the controlled battle input so the save
+    // contains a complete, ordinary lastTurn report rather than a test half-tick.
+    const legacy = advanceWorldBy(decisionFixture('旧档军令', 'executed').world, 2);
     expect(legacy.agencyDecisionSystem.actors.length).toBeGreaterThan(0);
     const legacyResolution = legacy.facts.find((fact) => (
       fact.kind === 'agency_intent_resolved' && fact.payload.outcome === 'executed'

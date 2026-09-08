@@ -13,9 +13,12 @@ const TRADE_TREATY_QUARTERS = 16;
 const MIN_TRIBUTE_QUARTERS = 8;
 
 export function canReopenWar(world: WorldState, attacker: PolityState, defenderId: string): boolean {
-  const peace = Math.max(-100, ...world.wars.filter((war) => !war.active && war.endedTurn !== null
+  const last = world.wars.filter((war) => !war.active && war.endedTurn !== null
     && [war.attackerId, war.defenderId].includes(attacker.id)
-    && [war.attackerId, war.defenderId].includes(defenderId)).map((war) => war.endedTurn!));
+    && [war.attackerId, war.defenderId].includes(defenderId)).sort((a,b) => b.endedTurn! - a.endedTurn!)[0];
+  const peace = last?.endedTurn ?? -100;
+  if (last && last.lastBattleTurn < last.startedTurn && !world.armies.some(a => a.polityId === attacker.id
+    && (a.lastMovedTurn > peace || a.order.issuedTurn > peace))) return false;
   return world.turn - peace >= 4 && (peace < 0 || attacker.warWeariness < 48
     && attacker.treasury > 0 && world.armies.some((army) => army.polityId === attacker.id && army.supply >= 40));
 }
@@ -28,7 +31,7 @@ export function peaceReason(world: WorldState, war: WarState, turn: number): str
   if (duration < 8) return null;
   if (sides.reduce((sum, polity) => sum + polity.warWeariness, 0) >= 95) return '双方疲惫不堪';
   if (sides.every((polity) => polity.treasury === 0)) return '双方军费难以为继';
-  if (turn - lastAction >= 6 && !armies.some((army) => army.order.reasonCode === 'amphibious_landing')) return '前线久无进展，双方收兵休整';
+  if (turn - lastAction >= 6 && !world.navalOperations.some(o => o.warId === war.id && o.stage !== '完成' && o.stage !== '失败')) return '前线久无进展，双方收兵休整';
   return duration >= 24 ? '战事旷日持久' : null;
 }
 

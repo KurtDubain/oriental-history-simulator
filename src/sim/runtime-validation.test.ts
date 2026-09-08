@@ -22,6 +22,20 @@ function violationCodes(previous: WorldState, next: WorldState): Set<string> {
 }
 
 describe('quarterly runtime validation', () => {
+  it('accepts a same-quarter evicted corridor only when an actual trade shipment proves its identity', () => {
+    const previous = createWorld('有界商路并非未知实体');
+    const next = advanceWorld(previous);
+    const shipment = next.lastTurn!.trade.shipments.find(s => s.kind === '贸易')!;
+    expect(shipment).toBeDefined();
+    const id = `corridor:${shipment.originRegionId}:${shipment.destinationRegionId}:${shipment.commodity}`;
+    next.tradeCorridors = next.tradeCorridors.filter(c => c.id !== id);
+    next.hash = computeWorldHash(next);
+    const artifacts = deriveRuntimeTurnArtifacts(previous,next);
+    expect(validateTurnRuntime(previous,next,{...artifacts,changedEntityIds:{tradeCorridor:[id]}})).toEqual([]);
+    expect(validateTurnRuntime(previous,next,{...artifacts,changedEntityIds:{tradeCorridor:[`${id}:invented`]}})
+      .some(v => v.code === 'runtime.changed-id')).toBe(true);
+  });
+
   it('accepts a real quarter while retaining the exhaustive validator for boundaries', () => {
     const previous = createWorld('runtime-validator-real-turn');
     const next = advanceWorld(previous);

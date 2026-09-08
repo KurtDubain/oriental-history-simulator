@@ -91,23 +91,12 @@ function infectionPressure(world: WorldState, regionId: string, population: numb
   return clamp((infectious / Math.max(1, population)) * 1_200);
 }
 
-function lastLocalGovernanceTurn(world: WorldState, actorId: string): number | null {
+function lastLocalGovernanceTurn(world: WorldState, key: 'actorId' | 'polityId', id: string): number | null {
   const recent = world.facts.slice(-LOCAL_GOVERNANCE_FACT_LOOKBACK);
   for (let index = recent.length - 1; index >= 0; index -= 1) {
     const fact = recent[index];
     if (fact?.kind === 'local_governance_resolved'
-      && fact.payload.actorId === actorId
-      && fact.payload.outcome !== 'invalidated') return fact.turn;
-  }
-  return null;
-}
-
-function lastPolityLocalGovernanceTurn(world: WorldState, polityId: string): number | null {
-  const recent = world.facts.slice(-LOCAL_GOVERNANCE_FACT_LOOKBACK);
-  for (let index = recent.length - 1; index >= 0; index -= 1) {
-    const fact = recent[index];
-    if (fact?.kind === 'local_governance_resolved'
-      && fact.payload.polityId === polityId
+      && fact.payload[key] === id
       && fact.payload.outcome !== 'invalidated') return fact.turn;
   }
   return null;
@@ -159,8 +148,8 @@ function governanceFrame(world: WorldState, actorId: string): GovernanceFrame | 
     levyPressure,
     grainCost: Math.max(20, Math.round(population * 0.018)),
     treasuryCost: Math.max(16, Math.round(population * 0.004 + (region?.wealth ?? 0) * 0.02)),
-    recentTurn: lastLocalGovernanceTurn(world, actor.id),
-    recentPolityTurn: polity ? lastPolityLocalGovernanceTurn(world, polity.id) : null,
+    recentTurn: lastLocalGovernanceTurn(world, 'actorId', actor.id),
+    recentPolityTurn: polity ? lastLocalGovernanceTurn(world, 'polityId', polity.id) : null,
   };
 }
 
@@ -170,19 +159,20 @@ function unavailableReason(
   action: LocalGovernanceActionKind,
 ): string | null {
   if (!frame.actor.alive) return '此人已经不在人世';
-  if (!frame.permission || !frame.region || !frame.polity) return '任所或地方长官职权已经发生变化';
+  if (!frame.permission || !frame.region || !frame.polity) return '已无地方职权';
   if (frame.recentTurn !== null && world.turn - frame.recentTurn < LOCAL_GOVERNANCE_ACTION_COOLDOWN_TURNS) {
-    return `上一项地方措施刚刚落定，至少要到第${frame.recentTurn + LOCAL_GOVERNANCE_ACTION_COOLDOWN_TURNS}回合再议`;
+    return `前策待验，第${frame.recentTurn + LOCAL_GOVERNANCE_ACTION_COOLDOWN_TURNS}季可再议`;
   }
   if (frame.recentPolityTurn !== null && world.turn - frame.recentPolityTurn < LOCAL_GOVERNANCE_POLITY_COOLDOWN_TURNS) {
-    return `${frame.polity.shortName}上一季刚处置过一项地方措施，本季需先看成效`;
+    return `${frame.polity.shortName}须先看上季施政成效`;
   }
   if (action === 'open_granary') {
-    if (frame.region.unrest < 10 || frame.reliefPressure < 42) return `${frame.region.name}眼下尚无需要开仓的明确民生压力`;
+    if (frame.region.unrest < 10 || frame.reliefPressure < 42) return '眼下无须开仓';
     if (frame.region.food < frame.grainCost) return `${frame.region.name}仓粮不足，至少需要${compact(frame.grainCost)}石`;
     return null;
   }
-  if (frame.region.unrest < 22 || frame.levyPressure < 50) return `${frame.region.name}眼下赋役与民怨尚未形成减免压力`;
+  if (frame.region.unrest < 22 || frame.levyPressure < 50) return '眼下无须减赋';
+  if (frame.foodSeasons < .25) return '缺粮时退赋不能代替供粮';
   if (frame.polity.treasury < frame.treasuryCost) return `${frame.polity.shortName}国库不足，至少需要${compact(frame.treasuryCost)}财力`;
   return null;
 }
@@ -209,10 +199,10 @@ export function projectEmbodiedLocalGovernanceActions(
       command: createEmbodiedActionCommand(world, actorId, 'open_granary', 'region', frame.region.id),
       label: '开仓赈济',
       targetLabel: frame.region.name,
-      intent: `动用${frame.region.name}仓粮，先缓解饥困、流民与地方不安。`,
-      cost: `预计动用${compact(frame.grainCost)}石州粮`,
-      obstacle: `${pressureCopy(frame, 'open_granary')}；开仓后下一季储粮会更薄`,
-      nextSignal: `观察${frame.region.name}动荡、人口迁出与下一季粮食支撑`,
+      intent: '发粮安民。',
+      cost: `${compact(frame.grainCost)}石州粮`,
+      obstacle: pressureCopy(frame, 'open_granary'),
+      nextSignal: '看粮食与民怨是否改善',
       available: reliefUnavailable === null,
       unavailableReason: reliefUnavailable,
     },
@@ -220,10 +210,10 @@ export function projectEmbodiedLocalGovernanceActions(
       command: createEmbodiedActionCommand(world, actorId, 'reduce_levy', 'region', frame.region.id),
       label: '减免本季赋',
       targetLabel: frame.region.name,
-      intent: `请朝廷把本季部分赋款退回${frame.region.name}，让百姓与市井缓一口气。`,
-      cost: `预计由国库退还${compact(frame.treasuryCost)}财力`,
-      obstacle: `${pressureCopy(frame, 'reduce_levy')}；朝廷会衡量国库与地方治理成效`,
-      nextSignal: `观察${frame.region.name}动荡、地方财货与朝廷对这名长官的评价`,
+      intent: '国库退赋，减轻负担。',
+      cost: `国库退还${compact(frame.treasuryCost)}财力`,
+      obstacle: pressureCopy(frame, 'reduce_levy'),
+      nextSignal: '看退赋后地方是否好转',
       available: levyUnavailable === null,
       unavailableReason: levyUnavailable,
     },
@@ -405,16 +395,22 @@ export function resolveLocalGovernanceAction(
       ? 6 + Math.round(actor.governance / 25) + Math.round(pressure / 35)
       : 4 + Math.round(actor.governance / 30) + Math.round(pressure / 45);
     region.unrest = clamp(region.unrest - unrestRelief);
-    actor.influence = clamp(actor.influence + (candidate.action === 'open_granary' ? 2 : 1));
-    actor.merit = clamp(actor.merit + (candidate.action === 'open_granary' ? 2 : 1));
-    if (unrestBefore >= 45) polity.legitimacy = clamp(polity.legitimacy + 1);
+    const previous = [...world.facts].reverse().find(f => f.kind === 'local_governance_resolved'
+      && f.payload.regionId === region.id && f.payload.outcome === 'enacted' && context.turn - f.turn <= 8);
+    const effective = frame.foodSeasons >= 1 && (!previous || previous.kind === 'local_governance_resolved'
+      && unrestBefore < previous.payload.unrestBefore);
+    if (effective) {
+      actor.influence = clamp(actor.influence + (candidate.action === 'open_granary' ? 2 : 1));
+      actor.merit = clamp(actor.merit + (candidate.action === 'open_granary' ? 2 : 1));
+      if (unrestBefore >= 45) polity.legitimacy = clamp(polity.legitimacy + 1);
+    }
     if (candidate.action === 'open_granary') {
       const foodBefore = region.food;
       foodSpent = Math.min(region.food, frame.grainCost);
       region.food -= foodSpent;
       context.food.civilianConsumed += foodSpent;
       addDelta(deltas, 'region', region.id, 'food', foodBefore, region.food);
-      resultSummary = `${actor.name}获准在${region.name}开仓，实际发出${compact(foodSpent)}石粮；当地动荡由${Math.round(unrestBefore)}降至${Math.round(region.unrest)}，但州仓储粮随之减少。`;
+      resultSummary = `${actor.name}在${region.name}开仓赈粮${compact(foodSpent)}石；动荡${Math.round(unrestBefore)}→${Math.round(region.unrest)}，州仓相应减粮。`;
     } else {
       const treasuryBefore = polity.treasury;
       const wealthBefore = region.wealth;
@@ -423,24 +419,17 @@ export function resolveLocalGovernanceAction(
       region.wealth += treasurySpent;
       addDelta(deltas, 'polity', polity.id, 'treasury', treasuryBefore, polity.treasury);
       addDelta(deltas, 'region', region.id, 'wealth', wealthBefore, region.wealth);
-      resultSummary = `${actor.name}获准为${region.name}减免本季赋，国库退回${compact(treasurySpent)}财力；当地动荡由${Math.round(unrestBefore)}降至${Math.round(region.unrest)}。`;
+      resultSummary = `${actor.name}为${region.name}减赋，国库退还${compact(treasurySpent)}财力；动荡${Math.round(unrestBefore)}→${Math.round(region.unrest)}。`;
     }
     addDelta(deltas, 'region', region.id, 'unrest', unrestBefore, region.unrest);
     addDelta(deltas, 'character', actor.id, 'influence', influenceBefore, actor.influence);
     addDelta(deltas, 'character', actor.id, 'merit', meritBefore, actor.merit);
     addDelta(deltas, 'polity', polity.id, 'legitimacy', legitimacyBefore, polity.legitimacy);
-  } else if (outcome === 'deferred') {
-    resultSummary = actor && region
-      ? `${actor.name}提出为${region.name}${actionLabel}，但${reasonCode === 'insufficient_grain' ? '州仓可用粮不足' : reasonCode === 'insufficient_treasury' ? '国库无力承担' : '朝廷要求再核地方与财政'}，本季没有动用粮财。`
-      : '这项地方措施因任所变化而未能进入裁决。';
-  } else if (outcome === 'refused') {
-    resultSummary = actor && region
-      ? `${actor.name}提出为${region.name}${actionLabel}，朝廷认为地方压力与财政代价尚不足以破例，本季没有准行。`
-      : '这项地方措施没有得到准行。';
   } else {
-    resultSummary = actor
-      ? `${actor.name}原定的${actionLabel}因任所、职权或地方压力已经变化，未能成行。`
-      : '原定地方长官已经失去人物载体，这项措施未能成行。';
+    const obstacle = reasonCode === 'insufficient_grain' ? '仓粮不足'
+      : reasonCode === 'insufficient_treasury' ? '国库不足'
+        : outcome === 'invalidated' ? '任所或地方情形变化' : '朝廷未准';
+    resultSummary = `${actor?.name ?? '长官'}所请${actionLabel}因${obstacle}未行，本季未动用粮财。`;
   }
   const actualUnrestAfter = region?.unrest ?? unrestBefore;
   const fact = emitSimulationFact(world, context, {
@@ -452,18 +441,14 @@ export function resolveLocalGovernanceAction(
     regionIds: region ? [region.id] : candidate.regionId ? [candidate.regionId] : [],
     causes: [
       {
-        label: '地方压力', role: '结构', weight: 0.3,
+        label: '地方压力', role: '结构', weight: 0.35,
         evidence: region ? `${region.name}粮可支${foodSeasonsBefore.toFixed(1)}季、动荡${Math.round(unrestBefore)}、破坏${Math.round(region.devastation)}` : '原任所已不可核验',
       },
       {
-        label: '长官主张', role: '选择', weight: 0.25,
+        label: '长官主张', role: '选择', weight: 0.3,
         evidence: actor && region ? `${actor.name}以地方长官身份提出为${region.name}${actionLabel}` : `原定措施为${actionLabel}`,
       },
-      {
-        label: '朝廷审核', role: '条件', weight: 0.2,
-        evidence: actor && polity ? `政略${actor.governance}、行政${Math.round(polity.administration)}、权威${Math.round(polity.authority)}，合计${score}/${threshold}` : '任所或职权已经失效',
-      },
-      { label: '实际结果', role: '结果', weight: 0.25, evidence: resultSummary },
+      { label: '实际结果', role: '结果', weight: 0.35, evidence: resultSummary },
     ],
     stateDeltas: deltas,
     sourceFactIds: [],
@@ -488,11 +473,7 @@ export function resolveLocalGovernanceAction(
   const event = emit({
     category: '经济',
     kind: `${candidate.action}_${outcome}`,
-    title: outcome === 'enacted' && actor && region
-      ? `${actor.name}${candidate.action === 'open_granary' ? `在${region.name}开仓赈济` : `为${region.name}减免本季赋`}`
-      : actor && region
-        ? `${actor.name}所请${region.name}${actionLabel}${outcome === 'deferred' ? '暂缓' : outcome === 'refused' ? '未准' : '未行'}`
-        : `地方措施${outcome === 'invalidated' ? '未行' : '未准'}`,
+    title: `${actor?.name ?? '长官'}在${region?.name ?? '任所'}${actionLabel}${outcome === 'enacted' ? '' : outcome === 'deferred' ? '暂缓' : '未行'}`,
     summary: resultSummary,
     importance: fact.importance,
     actorIds: fact.actorIds,

@@ -4,7 +4,7 @@ import {
   type RouteDefinition,
 } from '../maps/types';
 import { FAMILY_NAMES, GIVEN_NAMES, selectAvailableGivenName } from './names';
-import { DEFAULT_MAP_PROFILE_ID, getMapProfile, getMapProfileRevision } from '../maps';
+import { DEFAULT_MAP_PROFILE_ID, getMapProfile, getMapProfileRevision, getMapProfileForContentVersion } from '../maps';
 import type { MapProfile, MapProfileId } from '../maps/types';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
 import {
@@ -36,7 +36,7 @@ import {
   createV02WorldSystems,
   establishRulingFamilyBranch,
   getDiplomacy,
-  governingCharacter, selectRegent,
+  governingCharacter, selectRegent, trustedForOffice,
   markPeaceDiplomacy,
   markWarDiplomacy,
   processV02Diplomacy,
@@ -106,7 +106,7 @@ import {
   armyOrderIsExecutable,
   armyOrderPath,
   pathBetween,
-  planArmyOrders,
+  planArmyOrders, executableWarTarget,
 } from './military/orders';
 import {
   createRebellionFactionSettlement,
@@ -588,7 +588,7 @@ function climateProductionFactor(region: RegionState, season: Season): number {
   return 1;
 }
 
-function processRegions(world: WorldState, context: MutableTurnContext): void {
+export function processRegions(world: WorldState, context: MutableTurnContext): void {
   const orderedRegions = [...world.regions].sort((left, right) => stableCompare(left.id, right.id));
   for (const region of orderedRegions) {
     region.devastation = clamp(region.devastation - 1 - practiceEffect(world, region.id, 'devastation-recovery') * 2);
@@ -599,7 +599,9 @@ function processRegions(world: WorldState, context: MutableTurnContext): void {
       * (1 - region.devastation / 140)
       * (1 + practiceEffect(world, region.id, 'harvest'))
       * weather;
-    const produced = integer(region.population * productivity);
+    const land = getMapProfileForContentVersion(world.mapContentVersion).simulation.regions.find(item => item.id === region.id)?.populationBase ?? region.population;
+    // Land does not vanish with its cultivators; labour still bounds the harvest.
+    const produced = integer(Math.min(region.population * 2, Math.sqrt(region.population * land)) * productivity);
     region.food += produced;
     context.food.produced += produced;
 
@@ -659,7 +661,7 @@ function processRegions(world: WorldState, context: MutableTurnContext): void {
     );
     region.wealth += output;
     context.wealth.produced += output;
-    const householdConsumed = Math.min(region.wealth, integer(region.population * 0.018));
+    const householdConsumed = Math.min(region.wealth, integer(region.population * 0.018 + Math.max(0, region.wealth - region.population * 2) * .01));
     region.wealth -= householdConsumed;
     context.wealth.householdConsumed += householdConsumed;
 
@@ -667,7 +669,7 @@ function processRegions(world: WorldState, context: MutableTurnContext): void {
     if (polity) {
       const tax = Math.min(
         region.wealth,
-        integer(output * polity.taxRate * (0.55 + polity.administration / 200)),
+        integer(output * polity.taxRate * (0.55 + polity.administration / 200) * (1 - region.unrest / 150)),
       );
       region.wealth -= tax;
       polity.treasury += tax;
@@ -683,13 +685,6 @@ function aliveCharacters(world: WorldState, polityId: string): CharacterState[] 
 
 function spawnCharacter(world: WorldState, polity: PolityState, purpose: string, forcedFamily?: string): CharacterState | null {
   return promoteBackgroundPerson(world, polity, purpose, forcedFamily);
-}
-
-function ensureRoster(world: WorldState, polity: PolityState): void {
-  // V0.2具名人物是人口群体中的叙事标记。常规补员来自已记录的出生与成年，
-  // 不再为了凑名册而凭空制造成年角色；spawnCharacter仅保留给极端职位断档。
-  void world;
-  void polity;
 }
 
 function characterDeathChance(age: number): number {
@@ -901,7 +896,6 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
   }
 
   for (const polity of world.polities.filter((item) => item.alive)) {
-    ensureRoster(world, polity);
     const ruler = world.characters.find((character) => character.id === polity.rulerId && character.alive);
     if (ruler) ruler.governedRegionId = null;
     const polityArmies = world.armies
@@ -913,7 +907,7 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
       if (!current?.alive || current.polityId !== polity.id || !isBattleReadyCharacter(world, current)) {
         if (current) current.commandingArmyId = null;
         const replacement = selectCandidate(
-          aliveCharacters(world, polity.id).filter((character) => isBattleReadyCharacter(world, character) && !character.commandingArmyId && !character.commandingFleetId && !character.governedRegionId
+          aliveCharacters(world, polity.id).filter((character) => trustedForOffice(world, polity, character) && isBattleReadyCharacter(world, character) && !character.commandingArmyId && !character.commandingFleetId && !character.governedRegionId
             && personalForce(world, character.id)?.formationId === null),
           (character) => character.leadership * 0.55 + character.cunning * 0.2 + character.loyalty * 0.2 + character.renown * 0.05,
         ) ?? spawnCharacter(world, polity, 'emergency-commander');
@@ -975,7 +969,7 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
       if (regionId === polity.capitalRegionId || governed.has(regionId)) continue;
       const governor = selectCandidate(
         aliveCharacters(world, polity.id).filter((character) => (
-          character.id !== polity.rulerId
+          trustedForOffice(world, polity, character) && character.id !== polity.rulerId
           && !character.governedRegionId
           && !character.commandingArmyId
           && !character.commandingFleetId
@@ -1102,7 +1096,6 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
 }
 
 export function resolveVacantRulers(world: WorldState, context: MutableTurnContext): void {
-  for (const polity of world.polities.filter((item) => item.alive)) ensureRoster(world, polity);
   for (const polity of world.polities.filter((item) => item.alive && !item.rulerId)) {
     const previousDynasty = polity.dynastyName;
     const previousFamilyId = polity.rulingFamilyId;
@@ -1262,14 +1255,14 @@ function processPolitics(world: WorldState, context: MutableTurnContext): void {
     const oldAuthority = polity.authority;
     const oldAdministration = polity.administration;
     const administrationTarget = clamp(
-      ruler.governance * 0.48 + averageGovernance * 0.37 + 18 - regions.length * 1.2 - averageUnrest * 0.12,
+      ruler.governance * 0.48 + averageGovernance * 0.37 + 18 - Math.sqrt(regions.length) * 3.6 - averageUnrest * 0.12,
     );
     const legitimacyTarget = clamp(
       30 + ruler.governance * 0.22 + averageFoodSecurity * 24 + (polity.capitalRegionId ? 8 : 0)
       - polity.warWeariness * 0.26 - averageUnrest * 0.16,
     );
     const authorityTarget = clamp(
-      26 + ruler.cunning * 0.3 + polity.administration * 0.28 - regions.length * 1.15
+      26 + ruler.cunning * 0.3 + polity.administration * 0.28 - Math.sqrt(regions.length) * 3.45
       - polity.warWeariness * 0.2 - averageUnrest * 0.14,
     );
     polity.administration = Math.round(clamp(polity.administration + clamp(administrationTarget - polity.administration, -2, 2)));
@@ -1326,7 +1319,7 @@ function routeBetween(world: WorldState, leftId: string, rightId: string): Route
 
 function selectArmyCommander(world: WorldState, polity: PolityState): CharacterState | null {
   let candidate: CharacterState | null | undefined = selectCandidate(
-    aliveCharacters(world, polity.id).filter((character) => isAvailableForExpedition(world, polity.id, character)),
+    aliveCharacters(world, polity.id).filter((character) => trustedForOffice(world, polity, character) && isAvailableForExpedition(world, polity.id, character)),
     (character) => character.leadership * 0.52
       + character.cunning * 0.18
       + character.loyalty * 0.2
@@ -1453,7 +1446,7 @@ function replenishArmy(
   const affordable = integer(polity.treasury / 0.18);
   const recruits = Math.min(
     target - army.soldiers,
-    integer(region.population * 0.012),
+    integer(region.population * 0.012 * (1 - region.devastation / 100) * (1 - region.unrest / 100)),
     affordable,
   );
   if (recruits <= 0) return;
@@ -1652,6 +1645,7 @@ function startWar(
   goal: WarState['goal'] = kind === 'rebellion' ? '独立' : '边境',
 ): { war: WarState; fact: WarStartedFact } {
   world.counters.war += 1;
+  const executableTarget = executableWarTarget(world, attacker.id, defender.id);
   const war: WarState = {
     id: `war_${String(world.counters.war).padStart(4, '0')}`,
     kind,
@@ -1669,7 +1663,7 @@ function startWar(
       .filter((region) => region.controllerId === defender.id && region.neighbors.some((neighborId) => (
         world.regions.find((neighbor) => neighbor.id === neighborId)?.controllerId === attacker.id
       )))
-      .sort((left, right) => right.strategicValue - left.strategicValue || stableCompare(left.id, right.id))
+      .sort((left, right) => Number(right.id === executableTarget) - Number(left.id === executableTarget) || right.strategicValue - left.strategicValue || stableCompare(left.id, right.id))
       .slice(0, 3)
       .map((region) => region.id),
     exhaustion: 0,
@@ -2002,7 +1996,6 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
       defector.loyalty = Math.round(clamp(defector.loyalty + 18));
     }
   }
-  ensureRoster(world, newPolity);
   ensureEligiblePersonalForces(world);
   const mobilizedArmy = defectingArmy ?? createArmy(world, newPolity, region, context, character);
   if (!mobilizedArmy) throw new Error('Rebellion passed its resource gate but could not mobilize an army');
@@ -2094,6 +2087,7 @@ function processWarDeclarations(world: WorldState, context: MutableTurnContext):
       .filter((polity): polity is PolityState => polity !== undefined && !isAtWar(world, polity.id))
       .filter((defender) => getDiplomacy(world, attacker.id, defender.id)?.status !== '联盟')
       .filter((defender) => canReopenWar(world, attacker, defender.id))
+      .filter((defender) => executableWarTarget(world, attacker.id, defender.id) !== null)
       .map((defender) => {
         const ownPower = militaryPower(world, attacker.id);
         const enemyPower = militaryPower(world, defender.id);
@@ -2208,7 +2202,10 @@ function eliminatePolity(
     removeArmy(world, army, context, true);
   }
   const victorCapital = victor.capitalRegionId ?? region.id;
+  const reception: StateDelta[] = [];
   for (const character of world.characters.filter((item) => item.alive && item.polityId === loser.id)) {
+    reception.push({ entityType: 'character', entityId: character.id, field: 'polityId', before: loser.id, after: victor.id },
+      { entityType: 'character', entityId: character.id, field: 'loyalty', before: character.loyalty, after: Math.round(clamp(character.loyalty * .55)) });
     character.polityId = victor.id;
     character.locationRegionId = victorCapital;
     character.governedRegionId = null;
@@ -2269,6 +2266,7 @@ function eliminatePolity(
       { label: '政权接管', weight: 0.15, evidence: `${victor.name}取得其国库${treasuryBefore}` },
     ],
     stateDeltas: [
+      ...reception,
       { entityType: 'polity', entityId: loser.id, field: 'alive', before: true, after: false },
       { entityType: 'polity', entityId: loser.id, field: 'treasury', before: treasuryBefore, after: 0, delta: -treasuryBefore },
       { entityType: 'polity', entityId: victor.id, field: 'treasury', before: victor.treasury - treasuryBefore, after: victor.treasury, delta: treasuryBefore },
@@ -2480,7 +2478,7 @@ function resolveBattle(
 
   attackerArmy.experience = Math.round(clamp(attackerArmy.experience + (attackerWon ? 5 : 2)));
   attackerArmy.morale = Math.round(clamp(attackerArmy.morale + (attackerWon ? 8 : -13)));
-  const careerDeltas = creditBattleCommandStanding(world, attackerArmy, attackerWon, attackerLossRate, participantIdsBefore.get(attackerArmy.id));
+  const careerDeltas = creditBattleCommandStanding(world, attackerArmy, attackerWon, attackerLossRate, participantIdsBefore.get(attackerArmy.id), defenders.length > 0);
   for (const defender of defenders) {
     defender.experience = Math.round(clamp(defender.experience + (attackerWon ? 2 : 5)));
     defender.morale = Math.round(clamp(defender.morale + (attackerWon ? -12 : 7)));

@@ -20,6 +20,10 @@ const ORDER_LABELS = {
   retreat: '撤退',
 } as const;
 
+export function minimumLandingForce(soldiers: number): number {
+  return Math.min(soldiers, Math.max(1_000, Math.round(soldiers * .35)));
+}
+
 const ORDER_REASON_LABELS: Readonly<Record<ArmyOrderReason, string>> = {
   peace_garrison: '战事已息，留营守备',
   war_goal: '奉命夺取本战目标',
@@ -140,13 +144,10 @@ function amphibiousApproach(world: WorldState, army: ArmyState, war: WarState): 
       readyFleet: world.fleets.some((fleet) => (
         fleet.polityId === army.polityId
         && fleet.homePortRegionId === region.id
-        && fleet.transports * 1_000 >= army.soldiers
-      )),
-      homeFleet: world.fleets.some((fleet) => (
-        fleet.polityId === army.polityId && fleet.homePortRegionId === region.id
+        && fleet.transports * 1_000 >= minimumLandingForce(army.soldiers)
       )),
     }))
-    .filter(({ landDistance }) => Number.isFinite(landDistance));
+    .filter(({ landDistance, readyFleet }) => readyFleet && Number.isFinite(landDistance));
   const enemyPorts = world.regions.filter((region) => region.controllerId === enemyId && region.port);
   const goalPorts = enemyPorts.filter((region) => war.targetRegionIds.includes(region.id));
   const targetPorts = goalPorts.length > 0 ? goalPorts : enemyPorts;
@@ -160,9 +161,7 @@ function amphibiousApproach(world: WorldState, army: ArmyState, war: WarState): 
         + target.strategicValue * 4 + target.cityLevel * 2,
     })))
     .filter(({ seaDistance }) => Number.isFinite(seaDistance))
-    .sort((left, right) => Number(right.origin.readyFleet) - Number(left.origin.readyFleet)
-      || Number(right.origin.homeFleet) - Number(left.origin.homeFleet)
-      || left.origin.landDistance - right.origin.landDistance
+    .sort((left, right) => left.origin.landDistance - right.origin.landDistance
       || left.seaDistance - right.seaDistance
       || right.targetPriority - left.targetPriority
       || stableCompare(left.origin.region.id, right.origin.region.id)
@@ -179,9 +178,6 @@ function targetForWar(world: WorldState, army: ArmyState, war: WarState): string
   const allowed = new Set([army.polityId, enemyId]);
   const enemyRegions = world.regions.filter((region) => region.controllerId === enemyId);
   const goalRegions = enemyRegions.filter((region) => war.targetRegionIds.includes(region.id));
-  const reachableGoals = goalRegions.filter((region) => (
-    Number.isFinite(pathLength(world, army, region.id, allowed))
-  ));
   const rankedLandTarget = (candidates: typeof enemyRegions) => candidates
     .map((region) => ({
       id: region.id,
@@ -194,11 +190,30 @@ function targetForWar(world: WorldState, army: ArmyState, war: WarState): string
     .filter((candidate) => Number.isFinite(candidate.distance))
     .sort((left, right) => Number(right.approachable) - Number(left.approachable) || left.distance - right.distance
       || right.priority - left.priority || stableCompare(left.id, right.id))[0]?.id;
-  const goalTarget = rankedLandTarget(reachableGoals);
+  const goalTarget = rankedLandTarget(goalRegions);
   if (goalTarget && canApproachTarget(world, army, goalTarget)) return goalTarget;
-  const amphibiousTarget = amphibiousApproach(world, army, war)?.targetRegionId;
-  if (goalRegions.length > 0 && amphibiousTarget) return amphibiousTarget;
-  return rankedLandTarget(enemyRegions) ?? amphibiousTarget ?? null;
+  const seaGoal = !goalTarget && goalRegions.length ? amphibiousApproach(world, army, war)?.targetRegionId : null;
+  if (seaGoal) return seaGoal;
+  return rankedLandTarget(enemyRegions) ?? amphibiousApproach(world, army, war)?.targetRegionId ?? null;
+}
+
+/** The declaration must have at least one first objective that an existing formation can execute. */
+export function executableWarTarget(world: WorldState, attackerId: string, defenderId: string): string | null {
+  const border = world.regions.filter(r => r.controllerId === defenderId
+    && r.neighbors.some(id => world.regions.find(r => r.id === id)?.controllerId === attackerId));
+  for (const army of world.armies.filter(a => a.polityId === attackerId && !a.embarkedOperationId
+    && a.supply >= 40 && a.morale >= 35).sort((a,b) => stableCompare(a.id,b.id))) {
+    for (const target of border) {
+      const path = pathBetween(world, army.regionId, target.id, new Set([attackerId, defenderId]));
+      if (!path || path.slice(0,-1).some(id => world.regions.find(r => r.id === id)?.controllerId !== attackerId)) continue;
+      const pantry = path.slice(0,-1).every(id => {
+        const region = world.regions.find(r => r.id === id)!;
+        return region.food >= army.soldiers || army.food >= army.soldiers * path.length;
+      });
+      if (pantry && canApproachTarget(world, army, target.id)) return target.id;
+    }
+  }
+  return null;
 }
 
 /** Nearby troop concentrations and our own recent reports, not enemy skills or hidden reserves. */
@@ -226,9 +241,9 @@ export function canApproachTarget(world: WorldState, army: ArmyState, targetId: 
 
 function defendedWarGoal(world: WorldState, army: ArmyState, war: WarState): string | null {
   const allowed = new Set([army.polityId]);
-  return war.targetRegionIds
-    .map((id) => world.regions.find((region) => region.id === id))
-    .filter((region): region is WorldState['regions'][number] => region?.controllerId === army.polityId)
+  const enemies = world.armies.filter(a => a.polityId === enemyIdFor(war, army.polityId) && !a.embarkedOperationId);
+  return world.regions.filter(region => region.controllerId === army.polityId
+    && (war.targetRegionIds.includes(region.id) || enemies.some(a => region.neighbors.includes(a.regionId))))
     .map((region) => ({ region, distance: pathLength(world, army, region.id, allowed) }))
     .filter(({ distance }) => Number.isFinite(distance))
     .sort((left, right) => left.distance - right.distance || stableCompare(left.region.id, right.region.id))[0]?.region.id ?? null;

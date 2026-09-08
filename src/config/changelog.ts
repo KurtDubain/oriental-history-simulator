@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.3',
+  version: '1.29.4',
   date: '2026-09-08',
-  title: '人物纪年与关注回执',
+  title: '供养与军政因果',
   items: [
-    '首次参战查全史，重复盟约只记一次；关注变化停表可直达案卷，手机地图按层减字。',
+    '修正粮食、任用与出征条件，区分施政和战功。',
   ],
 };
 

@@ -45,7 +45,7 @@ describe('balance and causal continuity', () => {
   it('requires a real peace interval and recovery, without preventing first wars', () => {
     const { world, army, war } = front();
     const polity = world.polities.find(item => item.id === army.polityId)!;
-    war.active = false; war.endedTurn = 11;
+    war.active = false; war.endedTurn = 11; war.lastBattleTurn = 10;
     polity.treasury = 1000; polity.warWeariness = 10; army.supply = 90;
     expect(canReopenWar(world, polity, war.defenderId)).toBe(false);
     world.turn = 15;
@@ -63,7 +63,20 @@ describe('balance and causal continuity', () => {
     army.lastMovedTurn = 1;
     expect(peaceReason(world, war, world.turn)).toContain('久无进展');
     army.order.reasonCode = 'amphibious_landing';
-    expect(peaceReason(world, war, world.turn)).toBeNull();
+    expect(peaceReason(world, war, world.turn)).toContain('久无进展');
+  });
+
+  it('does not repeat an unexecuted war on the same deployment just because peace has elapsed', () => {
+    const { world, army, war } = front();
+    const polity = world.polities.find(p => p.id === army.polityId)!;
+    war.active = false; war.endedTurn = 10; war.lastBattleTurn = -1;
+    world.turn = 16; polity.treasury = 10000; polity.warWeariness = 0;
+    for (const unit of world.armies.filter(a => a.polityId === polity.id)) {
+      unit.lastMovedTurn = 0; unit.order.issuedTurn = 0; unit.supply = 100;
+    }
+    expect(canReopenWar(world, polity, war.defenderId)).toBe(false);
+    army.lastMovedTurn = 15;
+    expect(canReopenWar(world, polity, war.defenderId)).toBe(true);
   });
 
   it('gives experience for defeat but merit only for victory and records command responsibility', () => {

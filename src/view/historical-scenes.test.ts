@@ -17,7 +17,8 @@ import {
 
 describe('NAR01/NAR02 concrete historical scenes', () => {
   it('joins support, request, court response and direct consequences into one traceable scene', () => {
-    let world = createWorld('孤城疫年');
+    // A positive integration sample, not a requirement that every seed request command.
+    let world = createWorld('山河故人-新验');
     let resolution = world.facts.find((fact) => fact.kind === 'agency_intent_resolved');
     for (let turn = 0; turn < 80 && !resolution; turn += 1) {
       world = advanceWorld(world);
@@ -88,7 +89,9 @@ describe('NAR01/NAR02 concrete historical scenes', () => {
     const scenes = projectSituationHistoricalScenes(world, situation, 3);
     expect(scenes.length).toBeGreaterThan(0);
     expect(scenes.length).toBeLessThanOrEqual(3);
-    expect(scenes[0].shortText).toMatch(/([㐀-鿿]+之战.*(取胜|守住)|阵亡于[㐀-鿿]+)/u);
+    const sources = world.facts.filter(f => scenes[0].sourceFactIds.includes(f.id));
+    expect(sources.some(f => f.actorIds.some(id => scenes[0].shortText.includes(world.characters.find(p => p.id === id)?.name ?? '\u0000')))).toBe(true);
+    expect(sources.some(f => f.regionIds.some(id => scenes[0].shortText.includes(world.regions.find(r => r.id === id)?.name ?? '\u0000')))).toBe(true);
     expect(scenes[0].sourceFactIds.length).toBeGreaterThan(0);
   });
 

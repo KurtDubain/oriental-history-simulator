@@ -511,14 +511,17 @@ function maintainBackgroundCohorts(world: WorldState, turn: number): void {
   ));
   for (const person of world.backgroundPeople.filter((candidate) => candidate.promotedCharacterId === null)) {
     const age = Math.floor((turn - person.birthTurn) / 4);
-    if (age >= 12) person.opportunity = Math.round(clamp(person.opportunity + 1));
+    if (age >= 12) person.opportunity = Math.min(40, person.opportunity + 1);
   }
   for (const region of [...world.regions].sort((left, right) => stableCompare(left.id, right.id))) {
     let unpromoted = world.backgroundPeople.filter((person) => (
       person.regionId === region.id && person.promotedCharacterId === null
     )).length;
     let ordinal = 1;
-    while (unpromoted < 4) {
+    const needsChild = !world.backgroundPeople.some(person => person.regionId === region.id
+      && person.promotedCharacterId === null && turn - person.birthTurn < 64);
+    const target = needsChild && unpromoted < 6 ? Math.max(4, unpromoted + 1) : 4;
+    while (unpromoted < target) {
       let id = `bg:${region.id}:born:${turn}:${ordinal}`;
       while (world.backgroundPeople.some((person) => person.id === id)) {
         ordinal += 1;
@@ -553,6 +556,11 @@ export function promoteBackgroundPerson(
   const wardRegency = purpose === 'regency-ward';
   if (wardRegency) maintainBackgroundCohorts(world, world.turn);
   const minimumAge = wardRegency ? 0 : 16;
+  const priority = (person: BackgroundPersonState) => {
+    const age = Math.floor((world.turn - person.birthTurn) / 4);
+    const ability = purpose.includes('commander') ? person.potential.leadership : person.potential.governance;
+    return ability * (1 - Math.max(0, age - 50) / 120) + Math.min(40, person.opportunity) * .2;
+  };
   let stub = world.backgroundPeople
     .filter((person) => (
       person.promotedCharacterId === null
@@ -563,45 +571,26 @@ export function promoteBackgroundPerson(
     .sort((left, right) => (
       (wardRegency ? Math.floor((world.turn - right.birthTurn) / 4) * 100 : 0)
       - (wardRegency ? Math.floor((world.turn - left.birthTurn) / 4) * 100 : 0)
-      || (right.opportunity + right.potential.leadership + right.potential.governance + right.potential.cunning)
-      - (left.opportunity + left.potential.leadership + left.potential.governance + left.potential.cunning)
+      || priority(right) - priority(left)
       || stableCompare(left.id, right.id)
     ))[0];
   if (!stub) {
     const regionId = polity.capitalRegionId ?? polity.controlledRegionIds[0];
     if (!regionId) throw new Error(`Cannot promote a background person for landless polity ${polity.id}`);
-    stub = world.backgroundPeople
-      .filter((person) => (
-        person.promotedCharacterId === null
-        && Math.floor((world.turn - person.birthTurn) / 4) >= minimumAge
-        && Math.floor((world.turn - person.birthTurn) / 4) <= 75
-      ))
-      .sort((left, right) => (
-        (right.opportunity + right.potential.leadership + right.potential.governance + right.potential.cunning)
-        - (left.opportunity + left.potential.leadership + left.potential.governance + left.potential.cunning)
-        || stableCompare(left.id, right.id)
-      ))[0];
-    if (stub) {
-      // The person already existed in the bounded background cohort; only their
-      // place of opportunity changes. Birth time and potential remain immutable.
-      stub.polityId = polity.id;
-      stub.regionId = regionId;
-    } else {
-      const occupiedRulers = new Set(world.polities.filter((item) => item.alive).map((item) => item.rulerId));
-      const fallback = livingAdults(world, polity.id)
-        .filter((character) => !character.commandingArmyId && !character.commandingFleetId && !character.governedRegionId && !occupiedRulers.has(character.id))
-        .sort((left, right) => right.leadership + right.governance - left.leadership - left.governance || stableCompare(left.id, right.id))[0];
-      if (fallback) return fallback;
-      if (!wardRegency) return null;
-      let ordinal = 1;
-      let id = `bg:${regionId}:born:${world.turn}:ward:${ordinal}`;
-      while (world.backgroundPeople.some((person) => person.id === id)) {
-        ordinal += 1;
-        id = `bg:${regionId}:born:${world.turn}:ward:${ordinal}`;
-      }
-      appendBackgroundPerson(world, regionId, id, world.turn, 0);
-      stub = world.backgroundPeople.find((person) => person.id === id) as BackgroundPersonState;
+    const occupiedRulers = new Set(world.polities.filter((item) => item.alive).map((item) => item.rulerId));
+    const fallback = livingAdults(world, polity.id)
+      .filter((character) => trustedForOffice(world, polity, character) && !character.commandingArmyId && !character.commandingFleetId && !character.governedRegionId && !occupiedRulers.has(character.id))
+      .sort((left, right) => right.leadership + right.governance - left.leadership - left.governance || stableCompare(left.id, right.id))[0];
+    if (fallback) return fallback;
+    if (!wardRegency) return null;
+    let ordinal = 1;
+    let id = `bg:${regionId}:born:${world.turn}:ward:${ordinal}`;
+    while (world.backgroundPeople.some((person) => person.id === id)) {
+      ordinal += 1;
+      id = `bg:${regionId}:born:${world.turn}:ward:${ordinal}`;
     }
+    appendBackgroundPerson(world, regionId, id, world.turn, 0);
+    stub = world.backgroundPeople.find((person) => person.id === id) as BackgroundPersonState;
   }
   world.counters.character += 1;
   const id = `c_${String(world.counters.character).padStart(3, '0')}`;
@@ -650,14 +639,14 @@ export function promoteBackgroundPerson(
     politicalClass: forcedFamily || wardRegency ? '宗室' : stub.politicalClass,
     influence: Math.round(clamp(8 + stub.opportunity * 0.35)),
     personalWealth: Math.round(clamp(5 + stub.opportunity * 0.2)),
-    merit: purpose.includes('commander') ? 12 : 0,
+    merit: 0,
     deputyExperience: 0,
     insubordination: 0,
     biography: [],
     biographyDigest: stableHash([]),
     tier: '背景晋升',
     sourceStubId: stub.id,
-    health: 100,
+    health: Math.round(100 - Math.max(0, age - 50) * 1.5),
     activeDiseaseId: null,
     protectedUntilTurn: null,
     factionId: null,
@@ -676,17 +665,14 @@ function processPendingBackgroundPromotions(world: WorldState, emit: EmitEvent):
     const event = emit({
       category: '政治',
       kind: 'background_promoted',
-      title: `${character.name}进入史册`,
-      summary: `${character.name}原是${world.regions.find((region) => region.id === stub.regionId)?.name ?? '地方'}背景人口中的潜在人才，因职位缺口、机会与既定潜能被提升为具名人物。`,
+      title: `${character.name}出仕`,
+      summary: `${character.name}从${world.regions.find((region) => region.id === stub.regionId)?.name ?? '地方'}入朝候用，时年${character.age}岁。`,
       importance: 2,
       actorIds: [character.id],
       polityIds: [character.polityId],
       regionIds: [character.locationRegionId],
       causes: [
-        { label: '背景潜能', role: '结构', weight: 0.3, evidence: `统率${stub.potential.leadership}、治理${stub.potential.governance}、谋略${stub.potential.cunning}在世界创建时已固定` },
-        { label: '职位缺口', role: '触发', weight: 0.28, evidence: '统治或军队出现无人可任的真实职位缺口' },
-        { label: '机会积累', role: '条件', weight: 0.22, evidence: `机会值${stub.opportunity}` },
-        { label: '核心晋升', role: '结果', weight: 0.2, evidence: `${stub.id}→${character.id}；背景记录保留并链接` },
+        { label: '任用依据', role: '条件', weight: 1, evidence: `职位缺人；统率${character.leadership}、治理${character.governance}，健康${character.health}` },
       ],
       stateDeltas: [{ entityType: 'character', entityId: character.id, field: 'tier', before: '背景', after: '背景晋升' }],
     });
@@ -1092,7 +1078,7 @@ export function processCharacterDeathConsequences(
 }
 
 export function selectRegent(world: WorldState, polity: PolityState): CharacterState | undefined {
-  const adults = livingAdults(world, polity.id).filter((person) => person.id !== polity.rulerId);
+  const adults = livingAdults(world, polity.id).filter((person) => person.id !== polity.rulerId && trustedForOffice(world, polity, person));
   const office = world.offices.find((item) => item.active && item.polityId === polity.id && item.kind === '宰辅');
   return adults.find((person) => person.id === office?.holderId) ?? [...adults].sort((a, b) =>
     (b.governance + b.cunning + b.loyalty + b.influence) - (a.governance + a.cunning + a.loyalty + a.influence)
@@ -1102,6 +1088,15 @@ export function selectRegent(world: WorldState, polity: PolityState): CharacterS
 export function governingCharacter(world: WorldState, polity: PolityState): CharacterState | undefined {
   const ruler = world.characters.find((person) => person.id === polity.rulerId && person.alive);
   return ruler && ruler.age < 16 ? selectRegent(world, polity) : ruler;
+}
+
+/** Annexation is reception, not immediate trust or restoration of a lost throne. */
+export function trustedForOffice(world: WorldState, polity: PolityState, person: CharacterState): boolean {
+  const former = world.polities.find(p => !p.alive && p.rulerId === person.id);
+  if (!former) return true;
+  const support = world.relationships.some(r => r.sourceId === polity.rulerId && r.targetId === person.id
+    && r.trust > r.grievance + 40 && r.gratitude > 0);
+  return support || person.loyalty >= 45 && world.turn - (former.eliminatedTurn ?? world.turn) >= 8;
 }
 
 function processAdulthood(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
@@ -2293,7 +2288,7 @@ function desiredOffices(world: WorldState): Array<Omit<OfficeAppointment, 'id' |
       if (fleet.deputyCommanderId) desired.push({ polityId: polity.id, kind: '水师副将', holderId: fleet.deputyCommanderId, regionId: fleet.homePortRegionId, armyId: null, fleetId: fleet.id, rank: 50 });
     }
     const occupied = new Set(desired.filter((office) => office.polityId === polity.id).map((office) => office.holderId));
-    const court = livingAdults(world, polity.id).filter((character) => !occupied.has(character.id));
+    const court = livingAdults(world, polity.id).filter((character) => !occupied.has(character.id) && trustedForOffice(world, polity, character));
     const chancellor = (world.characters.find((person) => person.id === polity.rulerId)?.age ?? 16) < 16
       ? selectRegent(world, polity) : [...court].sort((left, right) => (
       (right.governance + right.cunning + right.influence) - (left.governance + left.cunning + left.influence)

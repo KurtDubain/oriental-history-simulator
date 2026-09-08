@@ -7,7 +7,7 @@ const PORT = Number(process.env.SELF_EVOLUTION_E2E_PORT ?? 4199);
 const APP_URL = process.env.SELF_EVOLUTION_E2E_URL ?? `http://127.0.0.1:${PORT}`;
 const VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const ARTIFACT_DIR = `output/self-evolution-v${VERSION}`;
-const EXPECTED_T12_HASH = '84da697597babbaa';
+const EXPECTED_T12_HASH = '54ec9d476b29018d';
 const SCENARIOS = [
   { slug: 'desktop-1440x900', viewport: { width: 1440, height: 900 }, mobile: false },
   { slug: 'mobile-390x844', viewport: { width: 390, height: 844 }, mobile: true },
@@ -102,6 +102,9 @@ try {
     await page.getByLabel('世界种子').fill('春战副将');
     await page.locator('#start-world').click();
     await page.locator('.world-map__canvas').waitFor();
+    // Screenshots on a 3x mobile surface can exceed the external-clock lease.
+    // Keep the existing test clock active; only explicit advanceTime bursts tick.
+    await page.evaluate(() => setInterval(() => window.advanceTime(0), 250));
     const initial = await readState(page);
     assert.equal(initial.time.turn, 0);
     assert.equal(initial.observer.primerOpen, false, `${scenario.slug} 不应强制打开读图`);

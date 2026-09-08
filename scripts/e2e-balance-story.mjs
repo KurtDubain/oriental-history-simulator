@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
-const dir = 'output/balance-story-review/browser';
+const dir = process.env.E2E_OUTPUT_DIR ?? 'output/balance-story-review/browser';
 await mkdir(dir, { recursive: true });
 const browser = await chromium.launch({ headless: true });
 const results = [];
@@ -24,8 +24,12 @@ try {
     };
     await shot('initial');
     for (let turn = 1; turn <= 120; turn++) {
-      await page.getByRole('button', { name: '推进至下一季', exact: true }).evaluate(button => button.click());
-      await page.waitForFunction(expected => JSON.parse(window.render_game_to_text()).time.turn === expected, turn);
+      await page.getByRole('button', { name: '推进至下一季', exact: true }).click();
+      await page.waitForFunction(expected => JSON.parse(window.render_game_to_text()).time.turn === expected, turn).catch(async error => {
+        await shot(`failed-expected-t${turn}`);
+        await writeFile(`${dir}/${name}-failure.json`, JSON.stringify({ turn, state:await state(), errors, body:await page.locator('body').innerText() }, null, 2));
+        throw error;
+      });
       if ([12, 64, 120].includes(turn)) await shot(`t${turn}`);
     }
     const final = await state();

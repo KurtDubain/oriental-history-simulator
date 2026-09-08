@@ -97,14 +97,14 @@ export function recordArmyMovement(
 }
 
 export function creditBattleCommandStanding(world: WorldState, army: ArmyState, won: boolean, lossRate: number,
-  ids: readonly string[] = army.participantIds): StateDelta[] {
+  ids: readonly string[] = army.participantIds, fieldBattle = true): StateDelta[] {
   const deltas: StateDelta[] = [];
   for (const id of new Set(ids)) {
     const person = world.characters.find((item) => item.id === id && item.alive);
     if (!person) continue;
     const command = id === army.commanderId || id === army.allegiance.characterId;
-    for (const [field, gain] of [['merit', won ? command ? 3 : 2 : 0],
-      ['renown', won ? command ? 2 : 1 : command ? -Math.ceil(lossRate * 8) : 0],
+    for (const [field, gain] of [['merit', won ? fieldBattle ? command ? 3 : 2 : command ? 1 : 0 : 0],
+      ['renown', won ? fieldBattle ? command ? 2 : 1 : 0 : command ? -Math.ceil(lossRate * 8) : 0],
       ['influence', !won && command ? -Math.ceil(lossRate * 5) : 0],
       ['deputyExperience', id === army.deputyCommanderId ? 4 : 0]] as const) {
       if (!gain) continue;

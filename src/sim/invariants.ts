@@ -704,11 +704,7 @@ function validateAgencyIntentArchive(
   }
 }
 
-/**
- * Derive the incremental validation envelope only from this quarter's appended
- * Facts/Events. The operation deliberately uses array slices and never walks an
- * existing archive prefix.
- */
+/** Validate only this quarter's appended records, without scanning the archive prefix. */
 export function deriveRuntimeTurnArtifacts(
   previous: WorldState,
   next: WorldState,
@@ -1311,6 +1307,10 @@ export function validateTurnRuntime(
         ...runtimeCollection(previous, kind).map((entity) => entity.id),
         ...runtimeCollection(next, kind).map((entity) => entity.id),
       ]);
+      // A delivered corridor can be evicted by this tick's bounded retention.
+      if (kind === 'tradeCorridor') for (const s of next.lastTurn?.trade.shipments ?? []) {
+        if (s.kind === '贸易') knownIds.add(`corridor:${s.originRegionId}:${s.destinationRegionId}:${s.commodity}`);
+      }
       for (const duplicate of duplicateIds(changedIds)) {
         push(violations, 'runtime.changed-id-duplicate', `${kind}重复声明变更ID ${duplicate}`, duplicate);
       }

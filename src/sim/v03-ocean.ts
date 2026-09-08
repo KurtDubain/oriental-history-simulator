@@ -9,7 +9,7 @@ import {
   refreshArmyMilitaryAuthority,
   syncArmyPersonnelLocations,
 } from './military/authority';
-import { armyOrderFactIds, issueAmphibiousArmyOrder } from './military/orders';
+import { armyOrderFactIds, issueAmphibiousArmyOrder, minimumLandingForce } from './military/orders';
 import { applyFormationLosses, formationForces, setFormationStatus } from './military/personal-forces';
 import type { V03Emit, V03TurnContext } from './v03-context';
 import {
@@ -48,7 +48,6 @@ const BASE_PRICES: CommodityPrices = {
 
 const MAX_SHIPMENTS_PER_TURN = 512;
 const MAX_TRADE_CORRIDORS = 160;
-const MIN_LANDING_FORCE = 1_000;
 const MAX_LANDING_LOAD_AGE = 5;
 const MAX_LANDING_VOYAGE_AGE = 8;
 const MIN_VOYAGE_SEA_SHARE = 25;
@@ -457,7 +456,6 @@ function findPath(
       || stableCompare(left, right)
     ))[0] as string;
     open.delete(current);
-    if (current === goalId) break;
     for (const candidate of adjacency.get(current) ?? []) {
       if (candidate.edge.capacity <= 0) continue;
       const edgeCost = candidate.edge.distance + candidate.edge.risk * 0.08 + 1;
@@ -470,29 +468,24 @@ function findPath(
       }
     }
   }
-  if (!previous.has(goalId)) {
-    cache.set(cacheKey, null);
-    return null;
-  }
-  const path: TransportEdge[] = [];
-  let cursor = goalId;
-  while (cursor !== startId) {
-    const step = previous.get(cursor);
-    if (!step) {
-      cache.set(cacheKey, null);
-      return null;
+  // Reuse this source's shortest paths only inside the current economic tick.
+  for (const targetId of adjacency.keys()) {
+    const path: TransportEdge[] = [];
+    let cursor = targetId;
+    while (previous.has(cursor)) {
+      const step = previous.get(cursor)!;
+      path.push(step.edge);
+      cursor = step.node;
     }
-    path.push(step.edge);
-    cursor = step.node;
+    path.reverse();
+    cache.set(`${startId}>${targetId}`, cursor === startId ? {
+      edges: path,
+      cost: distances.get(targetId) ?? 0,
+      risk: path.length === 0 ? 0 : path.reduce((sum, edge) => sum + edge.risk, 0) / path.length,
+    } : null);
   }
-  path.reverse();
-  const result = {
-    edges: path,
-    cost: distances.get(goalId) ?? 0,
-    risk: path.length === 0 ? 0 : path.reduce((sum, edge) => sum + edge.risk, 0) / path.length,
-  };
-  cache.set(cacheKey, result);
-  return result;
+  cache.set(cacheKey, cache.get(cacheKey) ?? null);
+  return cache.get(cacheKey) ?? null;
 }
 
 function reservePath(
@@ -586,7 +579,7 @@ function targetStock(region: RegionState, commodity: CommodityKind): number {
 }
 
 function priceFor(region: RegionState, commodity: CommodityKind): number {
-  return Math.max(1, whole(region.prices[commodity]));
+  return Math.max(1, region.prices[commodity]);
 }
 
 function updatePrices(world: WorldState): void {
@@ -598,7 +591,7 @@ function updatePrices(world: WorldState): void {
       const anchor = BASE_PRICES[commodity] * (1 + scarcity * 0.75);
       const previous = priceFor(region, commodity);
       const proposed = previous * 0.76 + anchor * 0.24;
-      region.prices[commodity] = Math.max(1, whole(clamp(proposed, previous * 0.85, previous * 1.15)));
+      region.prices[commodity] = Math.max(1, Math.round(clamp(proposed, previous * 0.85, previous * 1.15) * 100) / 100);
     }
   }
 }
@@ -751,10 +744,6 @@ function orderLandingFleetsHome(world: WorldState, operation: NavalOperationStat
     fleet.targetRegionId = operation.originRegionId;
     fleet.targetSeaZoneId = operation.seaZonePath[0] ?? null;
   }
-}
-
-function minimumLandingForce(soldiers: number): number {
-  return Math.min(soldiers, Math.max(MIN_LANDING_FORCE, whole(soldiers * 0.35)));
 }
 
 function failLandingLoading(
@@ -1066,11 +1055,11 @@ function processTrades(
         - (commodityAmount(left, commodity) - targetStock(left, commodity))
         || stableCompare(left.id, right.id)
       ))
-      .slice(0, 10);
+      .slice(0, commodity === '粮食' ? world.regions.length : 10);
     const importers = world.regions
       .filter((region) => commodityAmount(region, commodity) < targetStock(region, commodity) * 1.35)
       .sort((left, right) => priceFor(right, commodity) - priceFor(left, commodity) || stableCompare(left.id, right.id))
-      .slice(0, 12);
+      .slice(0, commodity === '粮食' ? world.regions.length : 12);
     const candidates: Array<{ origin: RegionState; destination: RegionState; margin: number }> = [];
     for (const origin of exporters) {
       for (const destination of importers) {
@@ -1083,23 +1072,28 @@ function processTrades(
         candidates.push({ origin, destination, margin: priceFor(destination, commodity) - priceFor(origin, commodity) });
       }
     }
-    candidates.sort((left, right) => right.margin - left.margin
+    candidates.sort((left, right) => (commodity === '粮食'
+      ? left.destination.food / Math.max(1, left.destination.population) - right.destination.food / Math.max(1, right.destination.population)
+        || Math.hypot(left.origin.x - left.destination.x, left.origin.y - left.destination.y)
+          - Math.hypot(right.origin.x - right.destination.x, right.origin.y - right.destination.y)
+      : right.margin - left.margin)
       || stableCompare(`${left.origin.id}:${left.destination.id}`, `${right.origin.id}:${right.destination.id}`));
 
-    for (const candidate of candidates.slice(0, 36)) {
+    for (const candidate of commodity === '粮食' ? candidates : candidates.slice(0, 36)) {
       if (context.trade.shipments.length >= MAX_SHIPMENTS_PER_TURN) break;
       const { origin, destination } = candidate;
+      const surplus = whole(commodityAmount(origin, commodity) - targetStock(origin, commodity));
+      const shortage = whole(targetStock(destination, commodity) * 1.2 - commodityAmount(destination, commodity));
+      if (!surplus || !shortage || candidate.margin <= 1.5) continue;
       const path = findPath(world, origin.id, destination.id, cache);
       if (!path || path.edges.length === 0) continue;
       const protectedTrade = activeTradeAgreement(world, origin.controllerId, destination.controllerId);
       const transportCost = path.cost * (commodity === '粮食' ? 0.045 : 0.07) * (protectedTrade ? 0.9 : 1);
       if (candidate.margin <= Math.max(1.5, transportCost)) continue;
-      const surplus = whole(commodityAmount(origin, commodity) - targetStock(origin, commodity));
-      const shortage = whole(targetStock(destination, commodity) * 1.2 - commodityAmount(destination, commodity));
       const unitPrice = (priceFor(origin, commodity) + priceFor(destination, commodity)) / 200;
       const affordable = whole(destination.wealth / Math.max(0.01, unitPrice * 1.05));
       const treatyCapacity = protectedTrade ? 1.15 : 1;
-      const request = Math.min(surplus, shortage, affordable, whole((commodity === '粮食' ? 6_000 : 1_800) * treatyCapacity));
+      const request = Math.min(surplus, shortage, affordable, commodity === '粮食' ? shortage : whole(1_800 * treatyCapacity));
       if (request <= 0) continue;
       const id = createShipmentId(world);
       const accepted = reservePath(world, context, path, request, id, portUsage);
@@ -2104,7 +2098,7 @@ function resolveLanding(
   const losses = Math.min(army.soldiers - 1, whole(army.soldiers * (won ? 0.08 : 0.27)));
   applyFormationLosses(world, [army], losses);
   context.population.militaryDeaths += losses;
-  const careerDeltas = creditBattleCommandStanding(world, army, won, losses / Math.max(1, soldiersBefore), participantBefore.map((item) => item.ownerId));
+  const careerDeltas = creditBattleCommandStanding(world, army, won, losses / Math.max(1, soldiersBefore), participantBefore.map((item) => item.ownerId), defenders.length > 0);
   for (const defender of defenders) {
     careerDeltas.push(...creditBattleCommandStanding(world, defender, !won, 0));
   }
@@ -2359,7 +2353,7 @@ function maybeCreateLandingOperation(world: WorldState, context: V03TurnContext,
             && item.homePortRegionId === army.regionId
             && item.portRegionId === army.regionId
             && item.lastMovedTurn !== context.turn
-            && item.transports * 1_000 >= army.soldiers
+            && item.transports * 1_000 >= minimumLandingForce(army.soldiers)
           ))
           .sort((left, right) => right.transports - left.transports || stableCompare(left.id, right.id))[0];
         if (!fleet) continue;

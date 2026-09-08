@@ -220,6 +220,6 @@ describe('EMB05/06 local governor identity action', () => {
     const local = projectCharacterEmbodiedActions(next, actorId)
       .filter((item) => LOCAL_ACTIONS.has(item.command.kind));
     expect(local).toHaveLength(2);
-    expect(local.every((item) => !item.available && item.unavailableReason?.includes('上一项地方措施'))).toBe(true);
+    expect(local.every((item) => !item.available && item.unavailableReason?.includes('可再议'))).toBe(true);
   });
 });
