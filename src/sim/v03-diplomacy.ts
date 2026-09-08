@@ -1,4 +1,5 @@
 import { stableCompare } from './random';
+import { executableWarTarget } from './military/orders';
 import type {
   DiplomacyState,
   EvidenceRef,
@@ -17,8 +18,17 @@ export function canReopenWar(world: WorldState, attacker: PolityState, defenderI
     && [war.attackerId, war.defenderId].includes(attacker.id)
     && [war.attackerId, war.defenderId].includes(defenderId)).sort((a,b) => b.endedTurn! - a.endedTurn!)[0];
   const peace = last?.endedTurn ?? -100;
-  if (last && last.lastBattleTurn < last.startedTurn && !world.armies.some(a => a.polityId === attacker.id
-    && (a.lastMovedTurn > peace || a.order.issuedTurn > peace))) return false;
+  if (last && last.lastBattleTurn < last.startedTurn) {
+    const target = executableWarTarget(world, attacker.id, defenderId);
+    if (!target) return false;
+    const frontier = world.regions.find(r => r.id === target)!;
+    const changed = !last.targetRegionIds.includes(target) || world.armies.some(a => a.polityId === attacker.id
+      && (a.lastMovedTurn > peace && frontier.neighbors.includes(a.regionId)
+        || world.facts.some(f => f.kind === 'army_order_changed' && f.payload.armyId === a.id
+          && f.payload.next.warId === last.id && f.payload.next.reasonCode === 'enemy_strength'))
+      && executableWarTarget(world, attacker.id, defenderId, a.id) === target);
+    if (!changed) return false;
+  }
   return world.turn - peace >= 4 && (peace < 0 || attacker.warWeariness < 48
     && attacker.treasury > 0 && world.armies.some((army) => army.polityId === attacker.id && army.supply >= 40));
 }

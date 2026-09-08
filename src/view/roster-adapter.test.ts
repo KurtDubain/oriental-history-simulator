@@ -32,6 +32,48 @@ function expectAscending(items: readonly RosterItem[], key: string): void {
 }
 
 describe('roster domain projection', () => {
+  it('finds a deceased governor through linked relief work even when the block preview omits it', () => {
+    const world = createWorld('故人施政可回看');
+    const person = world.characters.find(p => p.governedRegionId)!;
+    person.alive = false;
+    const source = world.history[0];
+    world.history.push({ ...source, id: 'old_relief', turn: 5, kind: 'local_governance', importance: 3,
+      title: `${person.name}开仓赈济`, summary: `${person.name}开仓赈济。`, actorIds: [person.id] });
+    person.biography.push({ id: 'bio_relief', eventId: 'old_relief', factId: null, turn: 5,
+      kind: '开仓赈济', summary: `${person.name}开仓赈济。`, importance: 3 });
+    world.turn = 80; world.year = 21;
+    compactWorldArchive(world);
+    for (const block of world.archiveSystem.blocks) block.importantEventPreviews = [];
+    clearWorldArchiveDecodeCache();
+    const before = serializeWorld(world);
+    const entry = projectRosterDirectory(world).people.items.find(p => p.id === person.id)!;
+    expect(entry.reason?.target).toEqual({ kind: 'event', id: 'old_relief' });
+    expect(entry.reason?.label).toContain('开仓赈济');
+    expect(archiveDecodeCacheEntryCount()).toBe(0);
+    expect(serializeWorld(world)).toBe(before);
+    person.biography[person.biography.length - 1].eventId = 'missing_event';
+    expect(projectRosterDirectory(world).people.items.find(p => p.id === person.id)?.reason?.target.id).not.toBe('missing_event');
+  });
+
+  it('discovers a dead former ruler by an archived transition, not present influence or death recency', () => {
+    const world = createWorld('故人不因失职失去历史');
+    const person = world.characters[0]!;
+    person.alive = false; person.influence = 0; person.role = '廷臣';
+    for (const office of world.offices) if (office.holderId === person.id) office.active = false;
+    const source = world.history[0]!;
+    world.history.push({ ...source, id: 'historical_accession', turn: 5, kind: 'succession', importance: 5,
+      title: `${person.name}获拥立`, summary: `${person.name}继位。`, actorIds: [person.id] });
+    world.turn = 80; world.year = 21;
+    compactWorldArchive(world);
+    clearWorldArchiveDecodeCache();
+    const entry = projectRosterDirectory(world).people.items.find(p => p.id === person.id)!;
+    expect(entry.reason?.label).toBe(`${person.name}获拥立`);
+    expect(entry.reason?.target).toEqual({ kind: 'event', id: 'historical_accession' });
+    expect(entry.subtitle).toContain('曾任君主');
+    expect(entry.discovery?.filters.identity).toBe('ruler');
+    expect(archiveDecodeCacheEntryCount()).toBe(0);
+  });
+
   it('is pure, deterministic and emits only navigable attention reasons', () => {
     const world = createWorld('名录纯投影');
     const before = serializeWorld(world);

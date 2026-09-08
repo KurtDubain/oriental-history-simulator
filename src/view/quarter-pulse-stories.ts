@@ -8,7 +8,7 @@ export const MAX_QUARTER_PULSE_STORIES = 3;
 
 const MAIN_APPOINTMENT_KINDS = new Set(['君主', '宰辅', '枢密使', '军团主帅', '水师提督']);
 const MAIN_FACT_KINDS = new Set<SimulationFact['kind']>(['war_started', 'war_ended', 'battle', 'territory_control_changed',
-  'army_order_changed', 'faction_lifecycle', 'faction_relation_changed', 'court_action_resolved']);
+  'faction_lifecycle', 'faction_relation_changed', 'court_action_resolved']);
 const MAIN_CHRONICLE_KINDS = new Set([
   'capital_fall', 'rebellion', 'army_raised', 'succession', 'polity_eliminated', 'polity_dissolved',
   'power_broker', 'power_broker_fell', 'purge',
@@ -137,10 +137,12 @@ function evidenceClusters(stories: readonly QuarterPulseStory[]): QuarterPulseSt
 function isMainFactEligible(fact: SimulationFact, coreImpactFactIds: ReadonlySet<string>): boolean {
   if (coreImpactFactIds.has(fact.id)) return true;
   if (MAIN_FACT_KINDS.has(fact.kind)) return true;
+  if (fact.kind === 'army_order_changed') return fact.payload.next.kind !== 'hold'
+    && fact.payload.next.warId !== null && fact.payload.next.reasonCode !== 'frontline_support';
   if (fact.kind === 'character_wounded') return fact.importance >= 3;
   if (fact.kind === 'character_death') return fact.payload.cause === 'battle' || fact.payload.role === '君主' || fact.importance >= 3;
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
-    return MAIN_APPOINTMENT_KINDS.has(fact.payload.officeKind);
+    return MAIN_APPOINTMENT_KINDS.has(fact.payload.officeKind) && (fact.importance >= 3 || fact.sourceFactIds.length > 0);
   }
   return fact.kind === 'local_governance_resolved'
     && fact.payload.outcome === 'enacted'

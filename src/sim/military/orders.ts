@@ -198,10 +198,10 @@ function targetForWar(world: WorldState, army: ArmyState, war: WarState): string
 }
 
 /** The declaration must have at least one first objective that an existing formation can execute. */
-export function executableWarTarget(world: WorldState, attackerId: string, defenderId: string): string | null {
+export function executableWarTarget(world: WorldState, attackerId: string, defenderId: string, formationId?: string): string | null {
   const border = world.regions.filter(r => r.controllerId === defenderId
     && r.neighbors.some(id => world.regions.find(r => r.id === id)?.controllerId === attackerId));
-  for (const army of world.armies.filter(a => a.polityId === attackerId && !a.embarkedOperationId
+  for (const army of world.armies.filter(a => a.polityId === attackerId && (!formationId || a.id === formationId) && !a.embarkedOperationId
     && a.supply >= 40 && a.morale >= 35).sort((a,b) => stableCompare(a.id,b.id))) {
     for (const target of border) {
       const path = pathBetween(world, army.regionId, target.id, new Set([attackerId, defenderId]));
@@ -364,13 +364,20 @@ function desiredPlan(world: WorldState, army: ArmyState): OrderPlan {
       });
   }
   const enemy = closestEnemyArmy(world, army, war);
-  if (enemy && enemy.distance <= 3 && canApproachTarget(world, army, enemy.candidate.regionId)) {
+  // Intercept an invasion, not an unrelated garrison that distracts from the declared objective.
+  if (enemy && enemy.distance <= 3
+    && world.regions.find(r => r.id === enemy.candidate.regionId)?.controllerId === army.polityId
+    && canApproachTarget(world, army, enemy.candidate.regionId)) {
     return plan('intercept', army, {
       warId: war.id,
       targetRegionId: enemy.candidate.regionId,
       targetArmyId: enemy.candidate.id,
       reasonCode: 'enemy_approach',
     });
+  }
+  if (war.attackerId === army.polityId && war.targetRegionIds.includes(targetRegionId)
+    && executableWarTarget(world, army.polityId, war.defenderId, army.id) === targetRegionId) {
+    return plan('advance', army, { warId: war.id, targetRegionId, reasonCode: 'war_goal' });
   }
   const primary = primaryArmy(world, army, war, targetRegionId);
   if (primary.id !== army.id && primary.regionId !== army.regionId) {

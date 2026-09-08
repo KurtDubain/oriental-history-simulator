@@ -23,8 +23,6 @@ import {
   ROOT_DESIRE_LABELS,
   toPersonalMemoryPlayerViews,
   type CharacterAgencyDecisionState,
-  type CharacterDesireProjection,
-  type RootDesire,
 } from '../sim/agency';
 import { calculateCharacterPowerPosition } from '../sim/politics/power-ledger';
 import { battleRecoveryStatus } from '../sim/military/battle-readiness';
@@ -47,7 +45,7 @@ import {
   projectPersonPoliticalFocus,
   type PoliticalFocusLink,
 } from './political-focus';
-import { projectPersonStoryArc } from './person-story-arc';
+import { projectPersonStoryArc, personHistoricalOffice, personShortBiography } from './person-story-arc';
 
 export type PersonInspectorProjection = PersonInspectorData & {
   politicalFocus: readonly PoliticalFocusLink[];
@@ -412,7 +410,7 @@ type AgencyIntentSubmittedFact = Extract<SimulationFact, { kind: 'agency_intent_
 type AgencyIntentResolvedFact = Extract<SimulationFact, { kind: 'agency_intent_resolved' }>;
 
 const COMMAND_PLAN_STEP_LABELS: Readonly<Record<string, string>> = {
-  earn_merit: '积累可查证的功绩',
+  earn_merit: '积累军功',
   seek_patronage: '寻找愿意提携自己的上位者',
   build_military_support: '在军中建立支持',
   seek_family_backing: '争取家族背书',
@@ -430,20 +428,20 @@ function commandCheckEvidence(
 ): PersonAgencyCommandRequestView['evidence'] {
   const copy: Readonly<Record<string, { pass: string; fail: string }>> = {
     permission: {
-      pass: '仍任该军副将，授令权也未发生变化',
-      fail: '军职或授令权已经改变，此次请求无从继续',
+      pass: '仍任副将，授令权未变',
+      fail: '军职或授令权已变',
     },
     resource: {
-      pass: '副将历练与可查战功足以进入朝廷考量',
-      fail: '副将历练与可查战功仍显不足',
+      pass: '历练与战功足以请令',
+      fail: '历练与战功不足',
     },
     relationship: {
-      pass: '已有可查支持足以进入朝廷考量',
-      fail: '尚无足够的上位提携或家门背书',
+      pass: '已有足够支持',
+      fail: '提携与家门支持不足',
     },
     risk: {
-      pass: '朝廷认为授令风险尚可承受',
-      fail: '朝廷担心军权过重，暂不愿授令',
+      pass: '朝廷认为可以授令',
+      fail: '朝廷顾忌军权过重',
     },
   };
   const reasonCode = String(fact.payload.reasonCode);
@@ -503,7 +501,7 @@ function commandResolutionCopy(
       stage: 'blocked',
       statusLabel: '请令作罢',
       title: `所请${armyName}军令已经作罢`,
-      summary: '军职或授令权已经改变，原有请求资格不再成立。',
+      summary: '军职已变，此请作罢。',
     };
   }
   if (fact.payload.outcome === 'deferred') {
@@ -513,12 +511,12 @@ function commandResolutionCopy(
       statusLabel: '暂缓授令',
       title: `所请${armyName}军令暂缓再议`,
       summary: reason === 'insufficient_record'
-        ? '朝廷认为军旅履历仍显不足，待再有功绩后复议。'
+        ? '履历不足，待立功后再议。'
         : reason === 'insufficient_support'
-          ? '军中与朝廷支持尚未稳固，此次暂缓再议。'
+          ? '支持不足，暂缓再议。'
           : reason === 'competing_request'
-            ? '同一朝廷本季另有更优先的军令请求，此请暂缓再议。'
-            : '朝廷本季没有作出授令决定，留待日后复议。',
+            ? '朝廷先议另一份请令。'
+            : '朝廷尚未决定授令。',
     };
   }
   if (fact.payload.institutionResponse === 'curbed') {
@@ -526,7 +524,7 @@ function commandResolutionCopy(
       stage: 'blocked',
       statusLabel: '已遭削权',
       title: `请领${armyName}军令未准，副将之职被撤`,
-      summary: '朝廷把这次请令视作军权风险；没有授令，并撤下其副将之职。',
+      summary: '朝廷顾忌军权，驳回请令并撤下副将之职。',
     };
   }
   if (fact.payload.institutionResponse === 'appeased') {
@@ -534,7 +532,7 @@ function commandResolutionCopy(
       stage: 'blocked',
       statusLabel: '另受安抚',
       title: `未获${armyName}军令，朝廷另作安抚`,
-      summary: '资望尚不足以换帅；朝廷没有交出军令，但以名位与礼遇作了安抚。',
+      summary: '未获军令，另以名位安抚。',
     };
   }
   return {
@@ -542,8 +540,8 @@ function commandResolutionCopy(
     statusLabel: '此次未准',
     title: `朝廷未准${armyName}军令`,
     summary: fact.payload.reasonCode === 'court_risk'
-      ? '朝廷担心军权过重，本季没有准许这项请求。'
-      : '朝廷认为其资望尚不足以取代现任主帅，本季未准。',
+      ? '朝廷顾忌军权，未准。'
+      : '资望不足以换帅，未准。',
   };
 }
 
@@ -668,7 +666,7 @@ function currentTerminalCommandRequest(
       statusLabel: '已经掌军',
       title: `现掌${armyName}军令`,
       summary: `此人后来经正式任命成为${armyName}主帅，早先的请令结果已不再代表现状。`,
-      evidence: [{ tone: 'support', label: '现任', detail: `军团与人物任职记录均表明其正在统领${armyName}` }],
+      evidence: [{ tone: 'support', label: '现任', detail: `现领${armyName}` }],
       sourceEventId: appointmentEventId,
     };
   }
@@ -708,19 +706,11 @@ function currentTerminalCommandRequest(
         ? `原先所指军团已经不复存在`
         : `已无从再请领${armyName}军令`,
     summary: actorDead
-      ? '人物已经去世，原有请令打算随其生平一并终止。'
+      ? '人物已经去世，请令至此终止。'
       : targetMissing
-        ? '原先所指军团已经不复存在，这项打算失去了对象。'
-        : '此人如今已不再担任该军副将，早先未准或暂缓的结果已不再代表眼下进展。',
-    evidence: [{
-      tone: 'barrier',
-      label: '现状',
-      detail: actorDead
-        ? '人物生卒记录表明其已无法继续请令'
-        : targetMissing
-          ? '当世军团名录中已无原先所指军团'
-          : '当前军职记录中，此人已不是该军副将',
-    }],
+        ? '所请军团已经解散。'
+        : '已不再担任该军副将，此请作罢。',
+    evidence: [],
     sourceEventId: null,
   };
 }
@@ -770,7 +760,7 @@ export function toPersonCommandRequestView(
       statusLabel: '已经请令',
       title: `已向朝廷请领${armyName}军令`,
       summary: '请令已经入册，尚待朝廷作出裁定。',
-      evidence: [{ tone: 'support', label: '已行', detail: '正式请令已经递出，不再只是个人盘算' }],
+      evidence: [{ tone: 'support', label: '已行', detail: '请令已递出' }],
       sourceEventId: commandSourceEventId(world, submitted.id),
     };
   }
@@ -789,39 +779,24 @@ export function toPersonCommandRequestView(
     title: stage === 'planned' ? `想独领${armyName}` : `为请领${armyName}军令铺路`,
     summary: currentStep
       ? currentStep.action === 'request_independent_command'
-        ? '所需条件已经大致齐备，下一步才会正式请令。'
+        ? '准备已齐，尚待请令。'
         : `眼下先${COMMAND_PLAN_STEP_LABELS[currentStep.action] ?? '补足所需准备'}；尚未正式请令。`
       : requestStep?.evidence
         ? `${naturalCommandEvidence(requestStep.evidence)}，尚未正式请令。`
-        : '所需准备尚未齐备，眼下还不能正式请令。',
+        : '准备未齐，尚不能请令。',
     evidence: preparedCommandEvidence(world, actor),
     sourceEventId: null,
   };
-}
-
-function readableDesireReason(
-  desire: CharacterDesireProjection,
-  kind: RootDesire,
-): string {
-  const axis = desire.axes.find((item) => item.kind === kind);
-  const sources = axis?.sources
-    .filter((source) => source.kind !== 'seed' && source.contribution > 0)
-    .sort((left, right) => right.contribution - left.contribution)
-    .slice(0, 2)
-    .map((source) => source.summary) ?? [];
-  if (sources.length === 1) return `源于${sources[0]}`;
-  if (sources.length > 1) return `源于${sources[0]}，也受到${sources[1]}影响`;
-  return '眼下没有特别强烈的外部推力';
 }
 
 function decisionClosureReason(actor: CharacterAgencyDecisionState): string {
   if (actor.goal.status === 'achieved' || actor.goal.closureReason === 'command_obtained') {
     return '已经获得这支军团的正式军令';
   }
-  if (actor.goal.closureReason === 'actor_dead') return '人物已经去世，这项打算随之终止';
+  if (actor.goal.closureReason === 'actor_dead') return '人物已故，此事终止';
   if (actor.goal.closureReason === 'position_lost') return '已不再担任所指军团的副将，无从继续请令';
   if (actor.goal.closureReason === 'target_missing') return '所指军团已经不复存在';
-  if (actor.goal.closureReason === 'request_exhausted') return '多次请令未获准，此事暂且搁下';
+  if (actor.goal.closureReason === 'request_exhausted') return '屡请未准，暂且搁下';
   return '这项打算已经结束';
 }
 
@@ -839,7 +814,7 @@ function projectAuthoritativeAgency(
     .map((kind) => ({
       label: ROOT_DESIRE_LABELS[kind],
       core: true,
-      reason: readableDesireReason(desire, kind),
+      reason: '',
     }));
   const availability: PersonAgencyView['availability'] = !item.alive
     ? 'closed'
@@ -866,12 +841,12 @@ function projectAuthoritativeAgency(
     reason: naturalCommandEvidence(step.evidence),
   })) ?? [];
   const reason = availability === 'closed'
-    ? '人物已经去世，不再形成新的行动'
+    ? '已故，不再行动'
     : availability === 'dormant'
-      ? '尚未成年，眼下还没有进入世事'
+      ? '尚未成年'
       : actor
-        ? '这项打算已经进入季度结算，会随职位、履历和朝局继续推进'
-        : '眼下没有形成会进入季度结算的明确行动';
+        ? '已有打算，随演变推进'
+        : '眼下没有新的行动';
   return {
     availability,
     reason,
@@ -924,8 +899,7 @@ export function toPersonInspector(
     },
     recentPowerScenes: powerScenes,
   };
-  const currentStep = agency.currentPlanSteps.find((step) => step.status === 'available');
-  const coreDesires = agency.desires.map((desire) => desire.label);
+  const storyArc = inspectorStoryArc(world, item);
   const relationships = projectPersonRelationships(world, item);
   const experiences = (() => {
     try { return toPersonExperienceRecords(world, item); }
@@ -962,7 +936,7 @@ export function toPersonInspector(
     name: item.name,
     age: item.age,
     gender: item.sex,
-    role: item.alive ? item.role : '已故',
+    role: item.alive ? item.role : `生前曾任${personHistoricalOffice(world, item)}`,
     lifeStage: item.lifeStage,
     politicalClass: item.politicalClass,
     tier: item.tier,
@@ -991,7 +965,7 @@ export function toPersonInspector(
     traits: characterTraits(item),
     relationships,
     experiences,
-    storyArc: inspectorStoryArc(world, item),
+    storyArc,
     militaryForce: personalForce || !item.alive && latestPersonalBattle ? {
       soldiers: personalForce?.soldiers ?? latestPersonalBattle?.soldiersAfter ?? 0,
       cohesion: personalForce?.cohesion,
@@ -1010,15 +984,7 @@ export function toPersonInspector(
         : null,
     } : undefined,
     politicalFocus: projectPersonPoliticalFocus(world, item),
-    summary: commandRequest
-      ? `请令：${commandRequest.title}。${commandRequest.summary}`
-      : agency.primaryGoal
-        ? `所图：${agency.primaryGoal.label}。${currentStep ? `眼下先${currentStep.label}` : agency.primaryGoal.reason}${agency.primaryGoal.barrier ? `；难处在于${agency.primaryGoal.barrier}` : ''}。`
-      : agency.availability === 'dormant'
-        ? `最看重${coreDesires.join('与') || agency.longTermDirectionLabel}，尚未成年，眼下还没有明确打算。`
-        : agency.availability === 'closed'
-          ? `此人生平已定；其长远所重以${agency.longTermDirectionLabel}为先。`
-          : `最看重${coreDesires.join('与') || agency.longTermDirectionLabel}，眼下仍在权衡。`,
+    summary: personShortBiography(world, item, storyArc),
   };
 }
 
@@ -1036,8 +1002,8 @@ export function toPersonArchive(
     kind: 'person',
     eyebrow: '人物传 · 生平行状',
     title: `${item.name}传`,
-    subtitle: `${owner?.name ?? '无属'} · ${item.role} · ${item.lifeStage ?? `${item.age}岁`}`,
-    lead: `${item.name}的生平纪年。`,
+    subtitle: `${owner?.name ?? '无属'} · ${inspector.role} · ${item.lifeStage ?? `${item.age}岁`}`,
+    lead: inspector.summary ?? '',
     facts: [
       { label: '生年', value: turnLabel(item.birthTurn ?? Math.max(0, world.turn - item.age * 4)) },
       { label: '家族', value: inspector.family ?? '家世不详' }, { label: '阶层', value: item.politicalClass ?? '出身未详' },

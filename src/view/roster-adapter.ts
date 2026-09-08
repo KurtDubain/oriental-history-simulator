@@ -419,8 +419,8 @@ function situationCandidate(
 function personIdentity(
   context: ProjectionContext,
   person: CharacterState,
+  office = context.activeOfficesByHolder.get(person.id)?.[0],
 ): { id: PersonIdentity; label: string; rank: number } {
-  const office = context.activeOfficesByHolder.get(person.id)?.[0];
   if (office?.kind === '君主') return { id: 'ruler', label: '君主', rank: office.rank };
   if (office?.kind === '宰辅' || office?.kind === '枢密使' || office?.kind === '廷臣') {
     return { id: 'court', label: office.kind, rank: office.rank };
@@ -438,17 +438,16 @@ function personIdentity(
   return { id: 'unassigned', label: '暂无实职', rank: 0 };
 }
 
-function highOfficeAttentionLabel(identity: ReturnType<typeof personIdentity>): string {
-  if (identity.id === 'ruler') return '君主在位';
-  if (identity.label === '枢密使') return '执掌枢密';
-  if (identity.label === '行营主帅') return '统领一营';
-  if (identity.label === '水师提督') return '统领水师';
-  return `现任${identity.label}`;
-}
-
 function personItems(context: ProjectionContext): RosterItem[] {
+  // Existing archive previews retain career landmarks without unpacking every century for a directory.
+  const historical = [...context.world.history.map(e => ({ ...e, eventId: e.id })),
+    ...context.world.archiveSystem.blocks.flatMap(b => b.importantEventPreviews)]
+    .filter(e => /succession|regency|power_broker|rebellion|purge|governance|deputy_promoted|coup/.test(e.kind))
+    .sort((a, b) => b.importance - a.importance || a.turn - b.turn || stableCompare(a.eventId, b.eventId));
   return context.world.characters.map((item) => {
-    const identity = personIdentity(context, item);
+    const past = context.world.offices.filter(o => o.holderId === item.id).sort((a,b) => b.rank - a.rank)[0];
+    const identity = personIdentity(context, item, item.alive ? undefined : past);
+    const officeLabel = item.alive ? identity.label : past ? `曾任${past.kind}` : '未见任官记载';
     const recent = personEvent(context, item.id);
     const actualCommand = context.world.armies.some((army) => army.commanderId === item.id)
       || context.world.fleets.some((fleet) => fleet.commanderId === item.id);
@@ -475,12 +474,16 @@ function personItems(context: ProjectionContext): RosterItem[] {
       )
       : null;
     const watched = explainWatchAlert(watchAlert, event ?? situation);
-    const structural = identity.rank >= 70
-      ? candidate('authority', highOfficeAttentionLabel(identity), { kind: 'item', id: item.id }, { value: identity.rank })
-      : actualCommand
-        ? candidate('command', '现掌一军', { kind: 'item', id: item.id }, { value: item.leadership })
-        : candidate('standing', '声望渐显', { kind: 'item', id: item.id }, { value: item.influence ?? item.renown });
-    const attention = chooseAttention([watched, situation, event, structural].filter((entry): entry is AttentionCandidate => Boolean(entry)));
+    const turning = historical.find(e => e.actorIds.includes(item.id) && `${e.title}${e.summary}`.includes(item.name))
+      ?? item.biography.filter(b => b.eventId && /赈济|免本季赋|战阵负伤/.test(b.kind) && b.summary.includes(item.name)
+        && context.world.archiveSystem.blocks.some(block => block.indexes.actor[item.id]?.includes(b.eventId!)))
+        .sort((a,b) => b.importance - a.importance || a.turn - b.turn)
+        .map(b => ({ ...b, title: `${item.name}·${b.kind}` }))[0];
+    const remembered = turning ? candidate('recent-event', turning.title,
+      { kind: 'event', id: turning.eventId! }, { importance: turning.importance }) : null;
+    const structural = candidate(item.alive && identity.rank >= 70 ? 'authority' : actualCommand ? 'command' : 'standing',
+      officeLabel, { kind: 'item', id: item.id }, { value: item.alive ? identity.rank : past?.rank ?? 0 });
+    const attention = chooseAttention([watched, ...(item.alive ? [situation, event] : []), remembered, structural].filter((entry): entry is AttentionCandidate => Boolean(entry)));
     const quickViews = [
       item.alive ? 'living' : 'deceased',
       item.alive && recent ? 'recent' : null,
@@ -491,7 +494,7 @@ function personItems(context: ProjectionContext): RosterItem[] {
     return {
       id: item.id,
       title: item.name,
-      subtitle: `${polity(context.world, item.polityId)?.name ?? '无属'} · ${item.alive ? identity.label : '故人'} · ${item.politicalClass ?? '出身未详'}`,
+      subtitle: `${polity(context.world, item.polityId)?.name ?? '无属'} · ${item.alive ? '' : '故人 · '}${officeLabel}`,
       meta: `${item.age} 岁 · ${item.alive ? `影响 ${Math.round(item.influence ?? item.renown)}` : `卒于第${item.deathTurn ?? '?'}季`}`,
       accent: polity(context.world, item.polityId)?.color,
       alert: Boolean(watched?.reason.kind === 'watched-alert') || (item.ambition > 78 && item.loyalty < 40),

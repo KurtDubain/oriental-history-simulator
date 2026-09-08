@@ -196,7 +196,9 @@ describe('person Agency dossier', () => {
     expect(inspector.agency?.desires).toHaveLength(2);
     expect(inspector.agency?.primaryGoal).toBeNull();
     expect(inspector.agency?.currentPlanSteps).toEqual([]);
-    expect(inspector.summary).toContain('眼下仍在权衡');
+    expect(inspector.summary).toContain(person.name);
+    expect(inspector.summary).toContain(world.offices.find(o => o.holderId === person.id)!.kind);
+    expect(inspector.summary).not.toContain('眼下仍在权衡');
     expect(archive.chapters).toEqual([]); // The full archive is the canonical chronology, not a duplicate story panel.
     expect(JSON.stringify(archive.chapters)).not.toContain('眼下尚未形成明确打算');
 

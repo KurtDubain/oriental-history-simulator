@@ -146,7 +146,6 @@ export function QuarterPulse({
                     onClick={() => onSelectSituation(story.situationId)}
                   >
                     <span className="quarter-pulse__event-meta">
-                      {primary ? <span className="quarter-pulse__priority">本季首事</span> : null}
                       <span className="quarter-pulse__situation-kind">{story.kindLabel}</span>
                       <span>{story.typeLabel} · {story.threadTitle}</span>
                     </span>
@@ -157,7 +156,6 @@ export function QuarterPulse({
               );
               const content = <>
                 <span className="quarter-pulse__event-meta">
-                  {primary ? <span className="quarter-pulse__priority">本季首事</span> : null}
                   <span>{story.category}</span>
                   {story.location ? <span>{story.location}</span> : null}
                 </span>

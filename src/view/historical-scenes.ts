@@ -36,7 +36,7 @@ export function playerHistoryText(world: WorldState, text: string): string {
   )).replace(/具名出生是人口群体中的叙事标记，不重复增加州域人口。/g, '')
     .replace(/，承诺转化为可追溯的信任记忆|；这次回应已经进入双方关系与军令审查|；此承诺可因履职而完成，也可因抗命而破裂/g, '')
     .replace(/经职位、支持与风险审查后获准/g, '获朝廷准许')
-    .replace(/(?:进入|见于)事实档案/g, '留下记载').replace(/可核验|可查证/g, '')
+    .replace(/(?:进入|见于)事实档案/g, '留下记载').replace(/可核验|可查证|，身后身份记为[^。]+/g, '')
     .replace(/在初始官档中登记为/g, '开篇时任').trim();
 }
 

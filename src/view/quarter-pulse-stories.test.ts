@@ -88,6 +88,24 @@ function chronicleEvent(
 }
 
 describe('TRIM01 QuarterPulse story projection', () => {
+  it('leaves a routine hold-order quarter quiet without removing the order Fact', () => {
+    const base = advanceWorld(createWorld('例行固守不充当大事'));
+    const army = base.armies[0];
+    const report = base.lastTurn!;
+    const fact: Extract<SimulationFact, { kind: 'army_order_changed' }> = {
+      id: 'routine-hold', turn: report.turn, year: report.year, season: report.season,
+      kind: 'army_order_changed', category: '军事', importance: 4,
+      actorIds: [army.commanderId], polityIds: [army.polityId], regionIds: [army.regionId],
+      sourceFactIds: [], causes: [], stateDeltas: [],
+      payload: { armyId: army.id, polityId: army.polityId, previous: army.order,
+        next: { ...army.order, kind: 'hold', reasonCode: 'frontline_support' } },
+    };
+    const world = { ...base, facts: [fact], history: [],
+      lastTurn: { ...report, factIds: [fact.id], eventIds: [] } };
+    expect(projectQuarterPulse(world).stories).toEqual([]);
+    expect(world.facts).toEqual([fact]);
+  });
+
   it('ranks ordinary history and Situation changes in one normalized pool capped at three stories', () => {
     const candidates: QuarterPulseStory[] = [
       eventStory('event-minor', 20),

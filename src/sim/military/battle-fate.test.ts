@@ -187,6 +187,18 @@ describe('battle participant fate', () => {
     expect(woundedHealth.death).toBeGreaterThan(defeated.death);
   });
 
+  it('expresses meaningful conditional exposure in the observed twenty-to-forty percent loss range, without a death floor', () => {
+    const p = { characterId: 'risk', soldiersBefore: 1000, soldiersAfter: 800, losses: 200,
+      factionId: null, formationCommanderId: 'risk', role: 'commander' as const };
+    const moderate = battleFateChances(p, false, 80, 50, 50);
+    const severe = battleFateChances({ ...p, soldiersAfter: 600, losses: 400 }, false, 80, 50, 50);
+    expect(moderate.death).toBeGreaterThan(.004);
+    expect(severe.death).toBeGreaterThan(moderate.death);
+    expect(moderate.wound).toBeGreaterThan(.04);
+    expect(battleFateChances({ ...p, losses: 0, soldiersAfter: 1000 }, false, 80, 50, 50).death).toBe(0);
+    expect(battleFateChances(p, true, 80, 50, 50).death).toBeGreaterThan(0);
+  });
+
   it('does not draw another wound while the previous injury is still being rested', () => {
     const world = createWorld('带伤不反复抽签');
     const { fact, commanderId } = battleForCommander(world);

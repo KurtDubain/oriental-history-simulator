@@ -66,6 +66,36 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it('keeps accession and a sourced capital capture above repeated late victories, without crediting the absent ruler', () => {
+    const world = createWorld('重要转折非固定人生');
+    const person = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;
+    const battle = battleFact(world, person.id, 'career_battle', 30, 100);
+    const ruler = world.characters.find(p => p.id !== person.id)!;
+    const capital = battle.payload.targetRegionId;
+    world.facts.push(battle, { ...battle, id: 'late_battle', turn: 100 }, {
+      ...battle, id: 'career_capture', kind: 'territory_control_changed', sourceFactIds: [battle.id],
+      payload: { regionId: capital, previousControllerId: 'old_polity', nextControllerId: person.polityId, reason: 'battle_capture', warId: battle.payload.warId },
+    });
+    const event = { id: 'career_accession', turn: 20, year: 6, season: '春' as const, category: '政治' as const,
+      kind: 'succession', title: `${person.name}登位`, summary: `${person.name}获拥立继位。`, importance: 5 as const,
+      actorIds: [person.id], polityIds: [person.polityId], regionIds: [], causes: [], evidence: [], sourceFactIds: [], situationIds: [],
+      stateDeltas: [{ entityType: 'polity' as const, entityId: person.polityId, field: 'rulerId', before: ruler.id, after: person.id }],
+    };
+    world.history.push(event, { ...event, id: 'capital_event', kind: 'capital_fall', turn: 30,
+      title: '旧国失都', summary: '旧国迁都，权威下降。', actorIds: [person.id, ruler.id],
+      regionIds: ['unrelated_first_sorted_region', capital], sourceFactIds: ['career_capture'],
+      stateDeltas: [{ entityType: 'polity', entityId: 'old_polity', field: 'capitalRegionId', before: capital, after: 'elsewhere' }],
+    });
+    const before = serializeWorld(world);
+    const arc = projectPersonStoryArc(world, person);
+    expect(arc.some(b => b.title === `${person.name}登位`)).toBe(true);
+    expect(arc.find(b => b.sourceEventIds.includes('capital_event'))?.title).toContain('参战，攻克');
+    expect(projectPersonStoryArc(world, ruler).find(b => b.sourceEventIds.includes('capital_event'))?.title).toBe('任内国事：旧国失都');
+    expect(serializeWorld(world)).toBe(before);
+    world.facts.reverse(); world.history.reverse();
+    expect(projectPersonStoryArc(world, person)).toEqual(arc);
+  });
+
   it('compresses repeated battles, keeps first/costliest/latest sources and deduplicates the Chronicle telling', () => {
     const world = createWorld('人物故事压缩');
     const person = world.characters.find((item) => world.armies.some((army) => army.participantIds.includes(item.id)))!;

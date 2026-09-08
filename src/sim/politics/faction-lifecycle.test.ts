@@ -52,6 +52,28 @@ function moveToQuarter(
 }
 
 describe('POL02 stable faction identity and lifecycle', () => {
+  it('distinguishes a shared territorial origin by its real leader, not an ordinal suffix', () => {
+    const world = createWorld('同地不同组织');
+    world.factions = [];
+    world.armies = [];
+    world.counters.faction = 0;
+    for (const person of world.characters) {
+      person.factionId = null;
+      person.governedRegionId = world.regions[0].id;
+    }
+    bootstrapFactionModel(world, 'opening');
+    const named = world.factions.filter(f => f.name.includes('·'));
+    expect(named.length).toBeGreaterThan(0);
+    for (const faction of named) {
+      const leader = world.characters.find(p => p.id === faction.leaderId)!;
+      expect(faction.name).toBe(`${world.regions[0].name}系·${leader.name}一系`);
+    }
+    expect(new Set(world.factions.map(f => f.id)).size).toBe(world.factions.length);
+    const names = world.factions.map(f => [f.id, f.name]);
+    bootstrapFactionModel(world, 'legacy');
+    expect(world.factions.map(f => [f.id, f.name])).toEqual(names);
+  });
+
   it('settles a group leader departure in the same quarter with causal evidence', () => {
     const world = createWorld('POL02-首领离境结算');
     const faction = world.factions.find((item) => item.active && item.coreMemberIds.length >= 2);

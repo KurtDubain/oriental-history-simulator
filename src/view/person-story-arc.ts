@@ -38,11 +38,9 @@ const compareId = (left: string, right: string) => left < right ? -1 : left > ri
 const unique = (values: readonly string[]) => [...new Set(values.filter(Boolean))].sort(compareId);
 
 function battleSide(fact: BattleFact, characterId: string) {
-  const attacker = fact.payload.attacker.participants?.find((item) => item.characterId === characterId);
-  if (attacker) return { participant: attacker, won: fact.payload.attackerWon, stance: '进兵' } as const;
-  for (const defender of fact.payload.defenders) {
-    const participant = defender.participants?.find((item) => item.characterId === characterId);
-    if (participant) return { participant, won: !fact.payload.attackerWon, stance: '守阵' } as const;
+  for (const [index, force] of [fact.payload.attacker, ...fact.payload.defenders].entries()) {
+    const participant = force.participants?.find(p => p.characterId === characterId);
+    if (participant) return { participant, won: index === 0 ? fact.payload.attackerWon : !fact.payload.attackerWon, stance: index === 0 ? '进兵' : '守阵' };
   }
   return null;
 }
@@ -62,98 +60,83 @@ function rootBattleId(fact: SimulationFact, byId: ReadonlyMap<string, Simulation
 }
 
 function sourceEvents(events: readonly HistoryEvent[], personId: string, factIds: readonly string[], primaryFactId: string) {
-  const wanted = new Set(factIds);
-  const linked = events.filter((event) => event.actorIds.includes(personId) && event.sourceFactIds.some((id) => wanted.has(id)));
+  const linked = events.filter((event) => event.actorIds.includes(personId) && event.sourceFactIds.some((id) => factIds.includes(id)));
   const primary = linked.find((event) => event.sourceFactIds.includes(primaryFactId)) ?? linked[0];
   return { ids: unique(linked.map((event) => event.id)), primary: primary?.id ?? null };
 }
 
 function episodeCandidate(world: WorldState, episodes: readonly BattleEpisode[], personId: string, events: readonly HistoryEvent[]): Candidate | null {
-  const ordered = [...episodes].sort((left, right) => left.battle.turn - right.battle.turn || compareId(left.battle.id, right.battle.id));
-  const first = ordered[0]!;
-  const latest = ordered.at(-1)!;
-  const firstSide = battleSide(first.battle, personId)!;
-  const latestSide = battleSide(latest.battle, personId)!;
-  const allFacts = ordered.flatMap((episode) => [episode.battle, ...episode.linked]);
-  const death = [...allFacts].reverse().find((fact) => fact.kind === 'character_death');
-  const wound = [...allFacts].reverse().find((fact) => fact.kind === 'character_wounded');
-  const turningFact = death ?? wound;
-  const focusEpisode = turningFact
-    ? ordered.find((episode) => episode.linked.some((fact) => fact.id === turningFact.id)) ?? latest
-    : latest;
-  const focusSide = battleSide(focusEpisode.battle, personId)!;
-  const ended = allFacts.filter((fact) => fact.kind === 'appointment_ended');
-  const largestLoss = Math.max(...ordered.map(({ battle }) => {
-    const side = battleSide(battle, personId)!;
-    return side.participant.losses / Math.max(1, side.participant.soldiersBefore);
-  }));
-  if (ordered.length === 1 && firstSide.participant.role === 'member' && largestLoss < .15
-    && first.battle.importance < 4 && !wound && !death && !ended.length) return null;
-  const place = world.regions.find((item) => item.id === focusEpisode.battle.payload.targetRegionId)?.name ?? '无名战场';
-  const totalLosses = ordered.reduce((sum, { battle }) => sum + battleSide(battle, personId)!.participant.losses, 0);
-  const sourceFactIds = unique(allFacts.map((fact) => fact.id));
-  const primaryFactId = turningFact?.id ?? focusEpisode.battle.id;
-  const sources = sourceEvents(events, personId, sourceFactIds, primaryFactId);
-  const outcome = death ? '阵亡' : wound ? '负伤退营' : focusSide.won ? '取胜' : '受挫';
-  const title = ordered.length === 1
-    ? `${place}${focusSide.stance}${focusSide.won ? '得胜' : '受挫'}${death || wound ? `，${outcome}` : ''}`
-    : `${place}${focusSide.stance === '守阵' ? '数度守阵' : '连番进兵'}，${outcome}`;
-  let summary = ordered.length === 1
-    ? `此役战前${firstSide.participant.soldiersBefore}人，战损${firstSide.participant.losses}人，战后${firstSide.participant.soldiersAfter}人。`
-    : `先后参战${ordered.length}次，记录战损累计${totalLosses}人；最近一战战前${latestSide.participant.soldiersBefore}人，战后${latestSide.participant.soldiersAfter}人。`;
-  if (wound?.kind === 'character_wounded') summary += ` 健康由${wound.payload.healthBefore}降至${wound.payload.healthAfter}，退出行营并休养至第${wound.payload.recoveryUntilTurn ?? wound.turn + 2}季。`;
-  if (death?.kind === 'character_death') summary += ' 本人阵亡，职位、兵权与余部在同季结清。';
-  if (ended.length) {
-    const offices = unique(ended.map((fact) => fact.kind === 'appointment_ended' ? fact.payload.officeKind : ''));
-    summary += ` 同季卸下${offices.join('、')}。`;
-  }
-  if (focusEpisode.battle.stateDeltas.some((delta) => delta.entityId === personId && delta.field === 'influence'
-    && typeof delta.before === 'number' && typeof delta.after === 'number' && delta.after < delta.before)) summary += ' 此败削弱了其军政影响。';
+  const first = episodes[0]!, latest = episodes.at(-1)!;
+  const allFacts = episodes.flatMap(e => [e.battle, ...e.linked]);
+  const death = allFacts.find(f => f.kind === 'character_death');
+  const wound = allFacts.find(f => f.kind === 'character_wounded');
+  const turning = death ?? wound;
+  const focus = episodes.find(e => e.linked.includes(turning!)) ?? latest;
+  const side = battleSide(focus.battle, personId)!;
+  const ended = allFacts.filter(f => f.kind === 'appointment_ended');
+  const loss = Math.max(...episodes.map(e => { const p = battleSide(e.battle, personId)!.participant; return p.losses / Math.max(1, p.soldiersBefore); }));
+  if (episodes.length === 1 && side.participant.role === 'member' && loss < .15
+    && first.battle.importance < 4 && !turning && !ended.length) return null;
+  const place = world.regions.find(r => r.id === focus.battle.payload.targetRegionId)?.name ?? '无名战场';
+  const ids = unique(allFacts.map(f => f.id)), primary = turning?.id ?? focus.battle.id;
+  const sources = sourceEvents(events, personId, ids, primary);
+  const p = side.participant;
+  let summary = episodes.length === 1
+    ? `此役战前${p.soldiersBefore}人，战损${p.losses}人，战后${p.soldiersAfter}人。`
+    : `先后参战${episodes.length}次，记录战损累计${episodes.reduce((n,e) => n + battleSide(e.battle, personId)!.participant.losses, 0)}人；最近一战战前${p.soldiersBefore}人，战后${p.soldiersAfter}人。`;
+  if (wound?.kind === 'character_wounded') summary += ` 负伤退出行营，休养至第${wound.payload.recoveryUntilTurn ?? wound.turn + 2}季。`;
+  if (ended.length) summary += ` 同季卸下${unique(ended.map(f => f.payload.officeKind)).join('、')}。`;
   return {
-    id: `person-story:battle:${ordered.map((item) => item.battle.id).join(':')}`,
-    turn: turningFact?.turn ?? focusEpisode.battle.turn,
-    phase: death ? 'ending' : wound || !latestSide.won ? 'setback' : 'battle',
-    title,
-    summary,
-    importance: Math.max(...allFacts.map((fact) => fact.importance)),
-    priority: death ? 0 : wound || largestLoss >= .3 || latestSide.participant.role === 'commander' ? 1 : 3,
-    sourceFactIds,
-    sourceEventIds: sources.ids,
-    primaryEventId: sources.primary,
-    primaryFactId,
+    id: primary, turn: turning?.turn ?? focus.battle.turn,
+    phase: death ? 'ending' : wound || !side.won ? 'setback' : 'battle',
+    title: `${place}${episodes.length > 1 ? '连番' : ''}${side.stance}${side.won ? '得胜' : '受挫'}${death ? '，阵亡' : wound ? '，负伤退营' : ''}`,
+    summary, importance: Math.max(...allFacts.map(f => f.importance)),
+    priority: death ? 0 : wound || loss >= .3 ? 2 : 4,
+    sourceFactIds: ids, sourceEventIds: sources.ids, primaryEventId: sources.primary, primaryFactId: primary,
   };
 }
 
-function factCandidate(world: WorldState, fact: SimulationFact, events: readonly HistoryEvent[]): Candidate | null {
-  const projected = projectFactNarrative(world, fact);
-  const narrative = { title: playerHistoryText(world, projected.title), summary: playerHistoryText(world, projected.summary) };
+function factCandidate(world: WorldState, fact: SimulationFact, events: readonly HistoryEvent[], personId: string): Candidate | null {
   let phase: PersonStoryPhase;
   let priority: number;
   if (fact.kind === 'character_death') { phase = 'ending'; priority = 0; }
   else if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
-    const military = fact.payload.officeKind.includes('军团') || fact.payload.officeKind.includes('水师') || fact.payload.officeKind === '枢密使';
-    if (!military && fact.payload.officeKind === '廷臣' && fact.importance < 4) return null;
-    phase = fact.kind === 'appointment_started' ? 'command' : 'setback'; priority = military ? 1 : 2;
+    if (fact.payload.officeKind === '廷臣' && fact.importance < 4) return null;
+    phase = fact.kind === 'appointment_started' ? 'command' : 'setback';
+    priority = fact.payload.officeKind === '君主' ? 0 : fact.payload.rank >= 70 ? 1 : 3;
   } else if (fact.kind === 'local_governance_resolved' && fact.payload.outcome === 'enacted') {
     phase = 'command'; priority = 2;
+  } else if (fact.kind === 'court_action_resolved' && [fact.payload.initiatorId, fact.payload.targetId].includes(personId)) {
+    phase = fact.payload.targetId === personId ? 'setback' : 'command'; priority = 0;
+  } else if (fact.kind === 'faction_lifecycle' && fact.payload.nextLeaderId === personId
+    && fact.payload.previousLeaderId !== personId && fact.turn > 0) {
+    phase = 'command'; priority = 2;
+  } else if (fact.kind === 'faction_relation_changed' && fact.payload.action === 'ended'
+    && [fact.payload.leftLeaderId, fact.payload.rightLeaderId].includes(personId)) {
+    phase = 'setback'; priority = 3;
   } else return null;
-  const sources = sourceEvents(events, fact.actorIds[0] ?? '', [fact.id], fact.id);
+  const narrative = projectFactNarrative(world, fact);
+  if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
+    narrative.title += ` · ${fact.payload.officeKind}`;
+  }
+  const sources = sourceEvents(events, personId, [fact.id], fact.id);
   return {
-    id: `person-story:${fact.id}`, turn: fact.turn, phase, title: narrative.title, summary: narrative.summary,
+    id: fact.id, turn: fact.turn, phase, title: narrative.title, summary: narrative.summary,
     importance: fact.importance, priority, sourceFactIds: [fact.id], sourceEventIds: sources.ids,
     primaryEventId: sources.primary, primaryFactId: fact.id,
   };
 }
 
-/** One to three evidence-owned changes of circumstance; one battle settlement can occupy only one beat. */
+/** One to three evidence-owned changes; archived lives are read only when opened. */
 export function projectPersonStoryArc(world: WorldState, person: CharacterState, scope: 'all' | 'active' = 'all'): PersonStoryBeat[] {
   const seen = new Set<string>();
-  const facts = (scope === 'all' ? readWorldFacts(world) : world.facts)
+  const allFacts = scope === 'all' ? readWorldFacts(world) : world.facts;
+  const facts = allFacts
     .filter((fact) => fact.actorIds.includes(person.id) && (fact.kind !== 'battle' || battleSide(fact, person.id)))
     .sort((left, right) => left.turn - right.turn || compareId(left.id, right.id))
     .filter((fact) => { const key = canonicalStoryKey(fact); if (seen.has(key)) return false; seen.add(key); return true; });
   const events = (scope === 'all' ? readWorldHistory(world) : world.history).filter(isDefaultVisibleHistoryEvent);
-  const byId = new Map(facts.map((fact) => [fact.id, fact]));
+  const byId = new Map(allFacts.map((fact) => [fact.id, fact]));
   const episodes = new Map<string, BattleEpisode>();
   for (const fact of facts) {
     const rootId = rootBattleId(fact, byId);
@@ -191,24 +174,57 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
   for (const fact of facts) {
     if (fact.kind === 'battle' || linkedIds.has(fact.id) || fact.kind === 'character_wounded') continue;
     if (fact.kind === 'appointment_ended' && !fact.sourceFactIds.length && injuryTurns.has(fact.turn)) continue;
-    const candidate = factCandidate(world, fact, events);
+    const candidate = factCandidate(world, fact, events, person.id);
     if (candidate) candidates.push(candidate);
+  }
+  // Accession and capital relocation are authoritative Chronicle changes, not battle participation.
+  for (const event of events) {
+    const accession = event.stateDeltas.some(d => d.field === 'rulerId' && d.after === person.id);
+    const capital = event.kind === 'capital_fall';
+    const oldCapitalId = event.stateDeltas.find(d => d.field === 'capitalRegionId')?.before;
+    const involved = event.actorIds.includes(person.id);
+    const capture = capital ? [...episodes.values()].find(e => e.battle.turn === event.turn
+      && e.battle.payload.targetRegionId === oldCapitalId && battleSide(e.battle, person.id)?.won
+      && event.sourceFactIds.some(id => { const f = byId.get(id); return f && rootBattleId(f, byId) === e.battle.id; })) : undefined;
+    if (!accession && !(capital && (involved || capture))) continue;
+    const battle = capture?.battle;
+    const place = world.regions.find(r => r.id === oldCapitalId)?.name ?? '旧都';
+    const title = accession ? `${person.name}登位` : battle ? `${person.name}参战，攻克${place}` : `任内国事：${event.title}`;
+    const sourceFactIds = unique([...event.sourceFactIds, ...(battle ? [battle.id] : []), ...facts.filter(f => accession
+      && f.turn === event.turn && f.kind === 'appointment_started' && f.payload.holderId === person.id
+      && f.payload.officeKind === '君主').map(f => f.id)]);
+    candidates.push({ id: event.id, turn: event.turn, importance: event.importance,
+      priority: accession ? -2 : battle ? -1 : 1, phase: accession ? 'command' : battle ? 'battle' : 'setback',
+      title, summary: event.summary,
+      sourceFactIds, sourceEventIds: [event.id], primaryEventId: event.id, primaryFactId: battle?.id ?? event.sourceFactIds[0] ?? event.id });
   }
   const terminal = !person.alive ? candidates.filter((item) => item.phase === 'ending')
     .sort((left, right) => right.turn - left.turn || compareId(left.id, right.id))[0] : undefined;
   const pool = candidates.filter((item) => item !== terminal).sort((left, right) => left.priority - right.priority
-    || right.importance - left.importance || right.turn - left.turn || compareId(left.id, right.id));
+    || right.importance - left.importance || left.turn - right.turn || compareId(left.id, right.id));
   const chosen: Candidate[] = [];
   for (const item of pool) {
     if (chosen.length >= (terminal ? 2 : 3)) break;
-    if (chosen.some((entry) => entry.sourceFactIds.some((id) => item.sourceFactIds.includes(id)))) continue;
+    if (chosen.some(entry => entry.title === item.title || entry.sourceFactIds.some(id => item.sourceFactIds.includes(id)))) continue;
     chosen.push(item);
   }
   const ordered = chosen.sort((left, right) => left.turn - right.turn || compareId(left.id, right.id));
   if (terminal) ordered.push(terminal);
   return ordered.map((item) => ({
     phase: item.phase, phaseLabel: phaseLabels[item.phase], dateLabel: historyTurnDate(item.turn).label,
-    title: item.title, summary: item.summary, sourceFactIds: item.sourceFactIds,
+    title: playerHistoryText(world, item.title), summary: playerHistoryText(world, item.summary), sourceFactIds: item.sourceFactIds,
     sourceEventIds: item.sourceEventIds, primaryEventId: item.primaryEventId, primaryFactId: item.primaryFactId,
   }));
+}
+
+/** Important former offices survive death and the bounded biography window. */
+export function personHistoricalOffice(world: WorldState, person: CharacterState): string {
+  return world.offices.filter(o => o.holderId === person.id).sort((a, b) => b.rank - a.rank || a.appointedTurn - b.appointedTurn)[0]?.kind ?? '未见任官记载';
+}
+
+export function personShortBiography(world: WorldState, person: CharacterState, beats: readonly PersonStoryBeat[]): string {
+  const first = world.offices.filter(o => o.holderId === person.id).sort((a, b) => a.appointedTurn - b.appointedTurn || b.rank - a.rank)[0];
+  const beginning = first && !beats.some(b => b.dateLabel === historyTurnDate(first.appointedTurn).label && b.title.includes(first.kind))
+    ? `${historyTurnDate(first.appointedTurn).label}，${person.name}任${first.kind}。` : '';
+  return beginning + beats.map(b => `${b.dateLabel}，${b.title}。`).join('') || `${person.name}尚无重要经历见于记载。`;
 }

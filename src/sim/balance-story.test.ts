@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { advanceWorld, computeWorldHash, createWorld, deserializeWorld, serializeWorld, validateWorld } from './index';
 import { creditBattleCommandStanding } from './military/authority';
-import { canApproachTarget, planArmyOrders } from './military/orders';
+import { canApproachTarget, executableWarTarget, planArmyOrders } from './military/orders';
 import { canReopenWar, peaceReason } from './v03-diplomacy';
 import { governingCharacter, selectRegent, syncOfficeAppointments } from './v02';
 import { createTurnContext } from './turn-context-state';
@@ -24,6 +24,25 @@ function front() {
 }
 
 describe('balance and causal continuity', () => {
+  it('executes its declared reachable objective instead of following an unrelated enemy garrison', () => {
+    const { world, army, target, war } = front();
+    const enemy = world.armies.find(a => a.polityId === war.defenderId)!;
+    world.armies = [army, enemy];
+    army.soldiers = 50000; army.supply = 100; army.morale = 90; army.food = 1000000;
+    enemy.soldiers = 50;
+    expect(executableWarTarget(world, army.polityId, war.defenderId, army.id)).not.toBeNull();
+    const goal = executableWarTarget(world, army.polityId, war.defenderId, army.id)!;
+    war.targetRegionIds = [goal];
+    planArmyOrders(world, createTurnContext(world));
+    expect(army.order.kind).toBe('advance');
+    expect(army.order.targetRegionId).toBe(goal);
+    // A changed concentration can still invalidate the attack; declaration does not force suicide.
+    enemy.regionId = goal; enemy.soldiers = 1000000;
+    planArmyOrders(world, createTurnContext(world));
+    expect(army.order.kind !== 'advance' || army.order.targetRegionId !== goal).toBe(true);
+    expect(target).toBeDefined();
+  });
+
   it('counts visible co-located defenders but does not inspect their private abilities', () => {
     const { world, army, target } = front();
     const enemy = world.armies.find(item => item.polityId === target.controllerId)!;
@@ -67,7 +86,7 @@ describe('balance and causal continuity', () => {
   });
 
   it('does not repeat an unexecuted war on the same deployment just because peace has elapsed', () => {
-    const { world, army, war } = front();
+    const { world, army, war, target } = front();
     const polity = world.polities.find(p => p.id === army.polityId)!;
     war.active = false; war.endedTurn = 10; war.lastBattleTurn = -1;
     world.turn = 16; polity.treasury = 10000; polity.warWeariness = 0;
@@ -75,6 +94,10 @@ describe('balance and causal continuity', () => {
       unit.lastMovedTurn = 0; unit.order.issuedTurn = 0; unit.supply = 100;
     }
     expect(canReopenWar(world, polity, war.defenderId)).toBe(false);
+    // A timestamp alone is not a deployment: restore an executable, supplied frontier.
+    world.armies = [army];
+    army.soldiers = 50000; army.food = 500000;
+    world.regions.filter(r => r.controllerId === war.defenderId && r.id !== target.id).forEach(r => { r.controllerId = polity.id; });
     army.lastMovedTurn = 15;
     expect(canReopenWar(world, polity, war.defenderId)).toBe(true);
   });

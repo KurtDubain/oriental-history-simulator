@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.4',
-  date: '2026-09-08',
-  title: '供养与军政因果',
+  version: '1.29.5',
+  date: '2026-09-09',
+  title: '人物与历史',
   items: [
-    '修正粮食、任用与出征条件，区分施政和战功。',
+    '重识人物生平，收紧出征与战场风险。',
   ],
 };
 

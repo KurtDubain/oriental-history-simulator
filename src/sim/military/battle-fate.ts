@@ -38,10 +38,12 @@ export function battleFateChances(
     + role * loss * .08
     + (1 - health / 100) * loss * .16
     - protection * loss, 0, 1);
-  const danger = severity * severity;
+  // Actual casualties expose the retinue: do not suppress the same exposure twice
+  // with severity² and another fractional power. Negligible losses remain negligible.
+  const danger = severity * loss * loss / (loss + .1);
   return {
-    death: clamp(severity * loss * (.038 + role * .012 + (1 - health / 100) * .02), 0, .055),
-    wound: clamp(Math.pow(danger, .82) * (.31 + role * .04 + (1 - health / 100) * .06), 0, .38),
+    death: clamp(danger * (.2 + role * .05 + (1 - health / 100) * .1), 0, .055),
+    wound: clamp(danger * (2.5 + role * .4 + (1 - health / 100) * .6), 0, .38),
     severity,
     exposure: exposureLabel(severity),
   };
@@ -147,7 +149,7 @@ function die(world: WorldState, context: MutableTurnContext, battle: BattleFact,
   const place = world.regions.find((item) => item.id === battle.payload.targetRegionId)?.name ?? '战场';
   const event = emit({
     category: '军事', kind: 'character_battle_death', title: `${person.name}阵亡于${place}`,
-    summary: `${person.name}率本部${row.participant.soldiersBefore}人陷入重创战局，损失${row.participant.losses}人后阵亡；职位、兵权与余部已于本季结算。`,
+    summary: `${person.name}本部${row.participant.soldiersBefore}人参战，损失${row.participant.losses}人，本人在此役阵亡。`,
     importance: fact.importance, actorIds: [person.id], polityIds: [row.polityId], regionIds: [battle.payload.targetRegionId], causes, stateDeltas: deltas, ...projectFactLinks(fact),
   });
   addBiography(person, event, '战死');

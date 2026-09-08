@@ -196,10 +196,6 @@ function rememberPoliticalBiography(
   }
 }
 
-function chineseOrdinal(value: number): string {
-  return ['', '二', '三', '四', '五', '六', '七', '八', '九'][value - 1] ?? String(value);
-}
-
 function factionName(world: WorldState, polityId: string, leader: CharacterState): string {
   const army = (world.armies ?? []).find((item) => item.commanderId === leader.id || item.allegiance?.characterId === leader.id);
   const governed = leader.governedRegionId
@@ -221,8 +217,7 @@ function factionName(world: WorldState, polityId: string, leader: CharacterState
           : family
             ? `${family.familyName}氏`
             : `${leader.name}旧部`;
-  const duplicates = world.factions.filter((item) => item.polityId === polityId && item.name.startsWith(base)).length;
-  return duplicates === 0 ? base : `${base}${chineseOrdinal(duplicates + 1)}`;
+  return world.factions.some(item => item.polityId === polityId && item.name === base) ? `${base}·${leader.name}一系` : base;
 }
 
 function createFactionState(
