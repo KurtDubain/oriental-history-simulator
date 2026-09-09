@@ -29,54 +29,54 @@ const GENERAL_GROUP_BASELINES = {
       "fc86e9fa71f202c8"
     ],
     [
-      "8c84a0cb0a8175cb",
-      "8c1fa13a4968ba73",
+      "5d5ff1072c0f95f4",
+      "67e8734faa709fa5",
       "2e2bd60da7284cee"
     ],
     [
-      "1110efb80b046788",
-      "f141c5527fa30da9",
-      "229cf714b3d9cba6"
+      "680eb0aa3990d10c",
+      "77bd24d42bdbaad8",
+      "837b11c9e01b9c6a"
     ],
     [
-      "c137c30eabbe509f",
-      "b535871fcc0128aa",
-      "0de34d72a48633a1"
+      "b7e5fc8737aa5cbc",
+      "7c40699ea42f578f",
+      "5a4c182f899c6fa3"
     ],
     [
-      "9f730be47d9a19bf",
-      "0e263c7be40adfce",
-      "4312466c0a707902"
+      "5d56b8d0d900f589",
+      "21f78b4dc12031e7",
+      "5f66e6599dd4bf44"
     ],
     [
-      "ab333f4cc604f47d",
-      "8a1c2db8f6c0e455",
-      "6e65f1df67082d22"
+      "db88bc3fd152df1f",
+      "4d64863e50c0eefc",
+      "0f85aff4c83b67db"
     ],
     [
-      "0d771763a972bc45",
-      "dedc0b25b644a1e7",
-      "3f8840ae2be7dd29"
+      "71660c143bb89364",
+      "275c03d1a9bfe002",
+      "6958508310981ec6"
     ],
     [
-      "6e3fbc0f628debea",
-      "367e2e9e6c4f0078",
-      "3608b87fd3046516"
+      "3417557943848f10",
+      "efcc23124338c176",
+      "9e16984a2192a048"
     ],
     [
-      "b654730c170e7d24",
-      "426f2273dd687365",
-      "07dbd540b09e8d82"
+      "c2acfc43b56d6230",
+      "1a2e2ac5552b7a17",
+      "3d6cbc7a5289b16f"
     ],
     [
-      "d89a4645912f4efb",
-      "3038711b3988b78e",
-      "23347deafb67b382"
+      "547faff8e2275fdc",
+      "bb389617991800bb",
+      "1b94efce7394445d"
     ],
     [
-      "2a14918a99d64ec3",
-      "c47a0ce8bfc69df1",
-      "c8643dc13525f754"
+      "504190d6d885536b",
+      "aeb0b6aeb00c1fa5",
+      "364806c505b3d95e"
     ]
   ],
   "州县民生": [
@@ -96,54 +96,54 @@ const GENERAL_GROUP_BASELINES = {
       "25fe3f75d465931d"
     ],
     [
-      "8cc4806a4d957cb8",
-      "841445ba2f9a5a45",
+      "99ae084af44c9bd4",
+      "4e5a7db457ee9d97",
       "f8fc93d93f0d8a92"
     ],
     [
-      "7480e6339c4c7dee",
-      "7fdc79732e18f323",
-      "9d4a47c1f4145b5d"
+      "3628d25c128335df",
+      "3b2048e8d7e7b1b0",
+      "de4459d51d880cb0"
     ],
     [
-      "7fa6c3d780149cf7",
-      "5843a069bf747dca",
-      "301455f6e9e97c83"
+      "63ddae96300e3e8f",
+      "35b0b68480e1c3c3",
+      "5aa4d3b8a7a7e859"
     ],
     [
-      "0ce2b6d56ece2f2a",
-      "d0411e0837319a45",
-      "06a5793bba3823a4"
+      "de599663870b2250",
+      "9e2afbae867461ec",
+      "d0fbe8a70d65af94"
     ],
     [
-      "10b0c638c07510a0",
-      "8c4c71530503d3db",
-      "1d85030833c22dae"
+      "6b11c627c011acfd",
+      "b6fa2291a77810d8",
+      "4f4882fb797c6a98"
     ],
     [
-      "6cba45eee68a12b7",
-      "00c3f27ad39d2d82",
-      "1ec0319ebe272ccb"
+      "35d6f220704ce3af",
+      "d7cd339376095142",
+      "18c188105efacbec"
     ],
     [
-      "86db766e3d10f261",
-      "0ea8f4131e9912e6",
-      "9849490ec3879865"
+      "824818c642c739c0",
+      "f2f7620f1fc726b9",
+      "ae049ced6d82f6a7"
     ],
     [
-      "c62ffb712494dec0",
-      "4d1df3a196d4ef4e",
-      "8435737ae0b8b1bd"
+      "39aa35a98518da49",
+      "d91eef220525084f",
+      "e7786b752b3497be"
     ],
     [
-      "669e0554abe4cc2e",
-      "ab0071ba2cce1712",
-      "991aa1383ba8f63e"
+      "1c2dad69f489811d",
+      "f010a657912b53c8",
+      "e158baa1049ef574"
     ],
     [
-      "af5f71d2df5eedaf",
-      "bee1548d5cfaa72b",
-      "6100f5b18760fd8d"
+      "dbeedf63079387ce",
+      "3f560a0c8c792c92",
+      "7667fb4f50d38835"
     ]
   ]
 } as const;

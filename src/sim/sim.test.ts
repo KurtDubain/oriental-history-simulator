@@ -769,7 +769,13 @@ describe('V0.3 deterministic history simulation', () => {
     expect(eventKinds.battle).toBeGreaterThan(0);
     expect(eventKinds.region_captured).toBeGreaterThan(0);
     expect(eventKinds.succession).toBeGreaterThan(0);
-    expect(eventKinds.polity_eliminated).toBeGreaterThan(0);
+    // Extinction is conditional, not a quota for this seed. The last-territory
+    // landing fixture in military/orders.test.ts requires and verifies it.
+    for (const polity of world.polities.filter(p => !p.alive)) {
+      expect(polity.controlledRegionIds).toEqual([]);
+      expect(history.some(event => event.kind === 'polity_eliminated'
+        && event.polityIds.includes(polity.id))).toBe(true);
+    }
     expect(world.polities
       .filter((polity) => polity.id.startsWith('p_rebel_') && polity.eliminatedTurn !== null)
       .every((polity) => Number(polity.eliminatedTurn) > polity.foundedTurn)).toBe(true);

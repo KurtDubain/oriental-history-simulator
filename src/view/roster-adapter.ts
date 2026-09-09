@@ -27,6 +27,7 @@ import {
 } from './roster-discovery';
 import { situationTypeLabel } from './situation-snapshot';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
+import { personHistoryEvidence, projectPersonStoryArc } from './person-story-arc';
 import type { ObserverWatchItem } from './v1-observer';
 import {
   character,
@@ -439,11 +440,7 @@ function personIdentity(
 }
 
 function personItems(context: ProjectionContext): RosterItem[] {
-  // Existing archive previews retain career landmarks without unpacking every century for a directory.
-  const historical = [...context.world.history.map(e => ({ ...e, eventId: e.id })),
-    ...context.world.archiveSystem.blocks.flatMap(b => b.importantEventPreviews)]
-    .filter(e => /succession|regency|power_broker|rebellion|purge|governance|deputy_promoted|coup/.test(e.kind))
-    .sort((a, b) => b.importance - a.importance || a.turn - b.turn || stableCompare(a.eventId, b.eventId));
+  const evidence = personHistoryEvidence(context.world);
   return context.world.characters.map((item) => {
     const past = context.world.offices.filter(o => o.holderId === item.id).sort((a,b) => b.rank - a.rank)[0];
     const identity = personIdentity(context, item, item.alive ? undefined : past);
@@ -474,16 +471,14 @@ function personItems(context: ProjectionContext): RosterItem[] {
       )
       : null;
     const watched = explainWatchAlert(watchAlert, event ?? situation);
-    const turning = historical.find(e => e.actorIds.includes(item.id) && `${e.title}${e.summary}`.includes(item.name))
-      ?? item.biography.filter(b => b.eventId && /赈济|免本季赋|战阵负伤/.test(b.kind) && b.summary.includes(item.name)
-        && context.world.archiveSystem.blocks.some(block => block.indexes.actor[item.id]?.includes(b.eventId!)))
-        .sort((a,b) => b.importance - a.importance || a.turn - b.turn)
-        .map(b => ({ ...b, title: `${item.name}·${b.kind}` }))[0];
+    const story = projectPersonStoryArc(context.world, item, 'all', evidence);
+    const turning = story.filter(b => b.phase !== 'ending')
+      .sort((a, b) => b.importance - a.importance || b.sourceFactIds.length - a.sourceFactIds.length)[0];
     const remembered = turning ? candidate('recent-event', turning.title,
-      { kind: 'event', id: turning.eventId! }, { importance: turning.importance }) : null;
+      { kind: 'item', id: item.id }, { importance: turning.importance, value: turning.sourceFactIds.length }) : null;
     const structural = candidate(item.alive && identity.rank >= 70 ? 'authority' : actualCommand ? 'command' : 'standing',
       officeLabel, { kind: 'item', id: item.id }, { value: item.alive ? identity.rank : past?.rank ?? 0 });
-    const attention = chooseAttention([watched, ...(item.alive ? [situation, event] : []), remembered, structural].filter((entry): entry is AttentionCandidate => Boolean(entry)));
+    const attention = chooseAttention([watched, ...(item.alive ? [situation, recent && story.some(b => b.sourceEventIds.includes(recent.id)) ? event : null] : []), remembered, structural].filter((entry): entry is AttentionCandidate => Boolean(entry)));
     const quickViews = [
       item.alive ? 'living' : 'deceased',
       item.alive && recent ? 'recent' : null,

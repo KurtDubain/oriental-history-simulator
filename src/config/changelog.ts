@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.5',
+  version: '1.29.6',
   date: '2026-09-09',
-  title: '人物与历史',
+  title: '历史表达维护',
   items: [
-    '重识人物生平，收紧出征与战场风险。',
+    '逐场讲清同季战况，连缀人物事业，校正君主随军身份。',
   ],
 };
 

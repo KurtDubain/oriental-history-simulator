@@ -1,6 +1,7 @@
 import { FAMILY_NAMES, GIVEN_NAMES, selectAvailableGivenName } from './names';
 import { findMapProfileForContentVersion } from '../maps';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
+import { detachPersonalForce, personalForce } from './military/personal-forces';
 import { emitSimulationFact, projectFactLinks, type FactTurnBuffer } from './facts';
 import {
   courtAllianceIdentityFromCommand,
@@ -2135,7 +2136,40 @@ function recordTurningPointBiographies(world: WorldState, context: V02TurnContex
   }
 }
 
+/** Live boundary only: accession ends subordinate service, never rewrites the old oath. */
+export function releaseRulerSubordination(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
+  for (const polity of world.polities.filter(p => p.alive)) {
+    const ruler = world.characters.find(c => c.alive && c.id === polity.rulerId);
+    if (!ruler) continue;
+    const deltas: StateDelta[] = [];
+    const force = personalForce(world, ruler.id);
+    const army = world.armies.find(a => a.id === force?.formationId && a.commanderId !== ruler.id);
+    const units = [...world.armies, ...world.fleets].filter(unit => unit.deputyCommanderId === ruler.id);
+    if (army) {
+      if (army.allegiance.characterId === ruler.id) deltas.push({ entityType: 'army', entityId: army.id,
+        field: 'allegiance.characterId', before: ruler.id, after: army.commanderId });
+      detachPersonalForce(world, ruler.id);
+      deltas.push({ entityType: 'character', entityId: ruler.id, field: 'personalForce.formationId', before: army.id, after: null });
+    }
+    for (const unit of units) {
+      unit.deputyCommanderId = null;
+      deltas.push({ entityType: 'sailors' in unit ? 'fleet' : 'army', entityId: unit.id, field: 'deputyCommanderId', before: ruler.id, after: null });
+    }
+    const duties = world.commitments.filter(c => c.kind === '军令' && c.status === '生效' && c.promisorId === ruler.id);
+    if (!deltas.length && !duties.length) continue;
+    const event = emit({ category: '政治', kind: 'appointment', title: `${ruler.name}以君位解除旧日随军职分`,
+      summary: `第${context.turn}季，${ruler.name}现为${polity.name}君主，不再担任他人副将；本人部曲仍归本人，旧随军承诺失效，不记背约。`,
+      importance: 3, actorIds: [ruler.id], polityIds: [polity.id], regionIds: [ruler.locationRegionId],
+      causes: [{ label: '在位身份', role: '条件', weight: 1, evidence: `${polity.name}现由${ruler.name}在位` }],
+      stateDeltas: [...deltas, ...duties.map(c => ({ entityType: 'commitment' as const, entityId: c.id, field: 'status', before: '生效', after: '失效' }))],
+    });
+    for (const duty of duties) resolveCommitment(world, duty, '失效', event);
+    addBiography(ruler, event, '解除旧军职');
+  }
+}
+
 export function processV02MilitaryCareers(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
+  releaseRulerSubordination(world, context, emit);
   const battleFacts = context.facts.filter((fact): fact is Extract<SimulationFact, { kind: 'battle' }> => fact.kind === 'battle');
   const creditedParticipations = new Set<string>();
   for (const battle of battleFacts) {
@@ -2180,7 +2214,7 @@ export function processV02MilitaryCareers(world: WorldState, context: V02TurnCon
       : undefined;
     const commander = world.characters.find((character) => character.id === army.commanderId && character.alive);
     const polity = world.polities.find((item) => item.id === army.polityId && item.alive);
-    if (!deputy || !commander || !polity) continue;
+    if (!deputy || !commander || !polity || deputy.id === polity.rulerId) continue;
     let duty = world.commitments.find((commitment) => (
       commitment.kind === '军令'
       && commitment.status === '生效'

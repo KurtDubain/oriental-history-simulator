@@ -7,7 +7,7 @@ const PORT = Number(process.env.SELF_EVOLUTION_E2E_PORT ?? 4199);
 const APP_URL = process.env.SELF_EVOLUTION_E2E_URL ?? `http://127.0.0.1:${PORT}`;
 const VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const ARTIFACT_DIR = `output/self-evolution-v${VERSION}`;
-const EXPECTED_T12_HASH = '54ec9d476b29018d';
+const EXPECTED_T12_HASH = 'ee64875c4c23fd28';
 const SCENARIOS = [
   { slug: 'desktop-1440x900', viewport: { width: 1440, height: 900 }, mobile: false },
   { slug: 'mobile-390x844', viewport: { width: 390, height: 844 }, mobile: true },

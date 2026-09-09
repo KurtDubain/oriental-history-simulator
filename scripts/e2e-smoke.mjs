@@ -581,7 +581,9 @@ async function exerciseSituationSnapshot(context, { seed, turn, requiredTypes })
   const directoryButtons = workbench.locator('.situation-workbench__directory li > button');
   if (await directoryButtons.count() > 1) {
     const firstSelected = workbenchState.observer.selectedSituationId;
-    await directoryButtons.nth(1).click();
+    const directoryToggle = workbench.locator('.situation-workbench__directory-toggle');
+    if (await directoryToggle.getAttribute('aria-expanded') !== 'true') await directoryToggle.click();
+    await workbench.locator(`.situation-workbench__directory li > button:not([data-situation-id="${firstSelected}"])`).first().click();
     workbenchState = await snapshot(page);
     assert.notEqual(workbenchState.observer.selectedSituationId, firstSelected, '目录切换必须保留 Situation 身份');
     assert.equal(workbenchState.deterministicWorldHash, situationHash, '切换局势不得改变世界哈希');

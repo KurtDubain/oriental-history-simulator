@@ -60,7 +60,7 @@ export function selectExpeditionResponses(
   const enemyFrontStrength = world.armies.filter((army) => army.polityId === enemyId
     && Boolean(war?.targetRegionIds.includes(army.regionId))).reduce((sum, army) => sum + army.soldiers, 0);
   const decisions = world.characters
-    .filter((item) => item.id !== commander.id && isAvailableForExpedition(world, polity.id, item))
+    .filter((item) => item.id !== commander.id && item.id !== polity.rulerId && isAvailableForExpedition(world, polity.id, item))
     .map((character): ExpeditionResponseDecision | null => {
       const force = personalForce(world, character.id)!;
       const tie = relation(world, character.id, commander.id);
@@ -70,10 +70,9 @@ export function selectExpeditionResponses(
       const front = Boolean(war?.targetRegionIds.some((id) => id === character.governedRegionId
         || id === force.homeRegionId || id === character.locationRegionId));
       const samePlace = character.locationRegionId === region.id;
-      const rulerDuty = character.id === polity.rulerId;
       const localDuty = Boolean(character.governedRegionId && character.governedRegionId !== region.id && !front);
       const capitalDuty = character.locationRegionId === polity.capitalRegionId && region.id !== polity.capitalRegionId && !front;
-      const relevant = samePlace || sameFaction || kin || jointBattle || front || rulerDuty || localDuty || capitalDuty
+      const relevant = samePlace || sameFaction || kin || jointBattle || front || localDuty || capitalDuty
         || Boolean(tie?.memories.length);
       if (!relevant) return null;
       const trust = smooth(unit(tie?.trust ?? 40));
@@ -86,7 +85,7 @@ export function selectExpeditionResponses(
         ['同属一系', sameFaction ? .3 : 0], ['家门相连', kin ? .34 : 0], ['愿借此役争取功名', smooth(unit(character.ambition)) * .22],
       ];
       const stayMotives: Motive[] = [
-        ['须坐镇国中', rulerDuty && !front ? 1 : 0], ['所守地方不在此路', localDuty ? .88 : 0],
+        ['所守地方不在此路', localDuty ? .88 : 0],
         ['须留守中枢', capitalDuty ? .58 : 0], ['谨慎保全部曲', smooth(unit(character.caution)) * .32],
         ['本部尚未齐备', (1 - readiness) * .48], ['路途遥远', samePlace ? 0 : .22],
       ];

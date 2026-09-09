@@ -150,9 +150,9 @@ try {
     let selected = await snapshot(page);
     assert.equal(selected.interface.selectedDetail.alive, false, `${scenario.slug} 战死者档案应保留死亡状态`);
     const arc = selected.interface.selectedDetail.storyArc;
-    assert.ok(Array.isArray(arc) && arc.length >= 1 && arc.length <= 3, `${scenario.slug} 故人生平应为一至三段真实转折`);
+    assert.ok(Array.isArray(arc) && arc.length >= 1 && arc.length <= 5, `${scenario.slug} 故人生平应为一至五段真实经历，不强制补满`);
     assert.equal(arc.at(-1)?.phase, 'ending', `${scenario.slug} 故人生平最后一段必须是结局`);
-    assert.ok(arc.every((beat) => beat.sourceFactIds.length), `${scenario.slug} 每段生平都必须有 Fact 来源`);
+    assert.ok(arc.every((beat) => beat.sourceFactIds.length || beat.sourceEventIds.length), `${scenario.slug} 每段生平必须有真实 Fact 或兼容史事来源`);
     assert.equal(selected.interface.selectedDetail.militaryForce?.status, '已解散', `${scenario.slug} 故人档案应保留最后军势而非现役军势`);
     await departed.inspector.scrollIntoViewIfNeeded();
     await page.screenshot({ path: `${artifactDir}/${scenario.slug}-deceased-story.png`, fullPage: false });
@@ -178,6 +178,12 @@ try {
   assert.equal(results[0].battleDeath, results[1].battleDeath, '桌面与移动端必须发现同一战死者');
   assert.equal(results[0].finalHash, results[1].finalHash, '两种视口观察不得改变世界演化');
   console.log(JSON.stringify({ version, seed, results, failures: [] }, null, 2));
+} catch (error) {
+  for (const [index, page] of browser.contexts().flatMap(context => context.pages()).entries()) {
+    await page.screenshot({ path: `${artifactDir}/failure-${index}.png`, fullPage: true });
+    await writeFile(`${artifactDir}/failure-${index}.txt`, await page.locator('body').innerText());
+  }
+  throw error;
 } finally {
   await browser.close();
   if (server) await server.close();

@@ -5,6 +5,7 @@ import { chromium } from 'playwright';
 const dir = process.argv[2] ?? 'output/history-discovery-v1.29.5/browser';
 const file = process.argv[3] ?? 'output/playwright/revisit-v1294/1.portable.json';
 const name = process.argv[4] ?? '顾崇珩';
+const view = process.argv[5] ?? 'deceased';
 await mkdir(dir, { recursive: true });
 const browser = await chromium.launch();
 try {
@@ -22,10 +23,10 @@ try {
     await page.waitForTimeout(400);
     const quickView = page.locator('.roster-panel__controls select').first();
     if (await page.locator('[data-roster-filter-toggle]').isVisible()) await page.locator('[data-roster-filter-toggle]').click();
-    await quickView.selectOption('deceased');
+    await quickView.selectOption(view);
     const filterToggle = page.locator('[data-roster-filter-toggle]');
     if (await filterToggle.isVisible() && await filterToggle.getAttribute('aria-expanded') === 'true') await filterToggle.click();
-    const row = page.locator('[data-roster-id]').filter({ hasText: name }).first();
+    const row = (name ? page.locator('[data-roster-id]').filter({ hasText: name }) : page.locator('[data-roster-id]')).first();
     for (let i = 0; !await row.count() && i < 3; i++) {
       await page.getByRole('button', { name: /继续展卷/ }).click();
     }

@@ -99,6 +99,9 @@ describe('balance and causal continuity', () => {
     army.soldiers = 50000; army.food = 500000;
     world.regions.filter(r => r.controllerId === war.defenderId && r.id !== target.id).forEach(r => { r.controllerId = polity.id; });
     army.lastMovedTurn = 15;
+    expect(canReopenWar(world, polity, war.defenderId)).toBe(false);
+    army.recentMovement = { fromRegionId: world.regions.find(r => !target.neighbors.includes(r.id) && r.id !== army.regionId)!.id,
+      toRegionId: army.regionId, turn: 15, orderKind: 'advance', warId: null };
     expect(canReopenWar(world, polity, war.defenderId)).toBe(true);
   });
 

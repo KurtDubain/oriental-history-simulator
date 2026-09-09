@@ -824,7 +824,7 @@ export function processV03Disease(world: WorldState, context: V03TurnContext, em
       }
     }
     if (!character.activeDiseaseId && battleRecoveryStatus(world, character.id, context.turn).recovering) {
-      character.health = Math.round(clamp(character.health + 5));
+      character.health = Math.round(clamp(character.health + 4)); // Includes the ordinary +1 above: five total, not six.
     }
     if (previousHealth >= 45 && character.health < 45 && character.activeDiseaseId) {
       const pathogen = world.pathogens.find((item) => item.id === character.activeDiseaseId);

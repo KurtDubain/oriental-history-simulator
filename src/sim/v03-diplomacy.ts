@@ -1,5 +1,6 @@
 import { stableCompare } from './random';
 import { executableWarTarget } from './military/orders';
+import { readWorldFacts } from './archive';
 import type {
   DiplomacyState,
   EvidenceRef,
@@ -22,11 +23,20 @@ export function canReopenWar(world: WorldState, attacker: PolityState, defenderI
     const target = executableWarTarget(world, attacker.id, defenderId);
     if (!target) return false;
     const frontier = world.regions.find(r => r.id === target)!;
-    const changed = !last.targetRegionIds.includes(target) || world.armies.some(a => a.polityId === attacker.id
-      && (a.lastMovedTurn > peace && frontier.neighbors.includes(a.regionId)
-        || world.facts.some(f => f.kind === 'army_order_changed' && f.payload.armyId === a.id
-          && f.payload.next.warId === last.id && f.payload.next.reasonCode === 'enemy_strength'))
-      && executableWarTarget(world, attacker.id, defenderId, a.id) === target);
+    const facts = readWorldFacts(world);
+    const changed = !last.targetRegionIds.includes(target) || world.armies.some(a => {
+      if (a.polityId !== attacker.id || executableWarTarget(world, attacker.id, defenderId, a.id) !== target) return false;
+      const orders = facts.filter(f => f.kind === 'army_order_changed' && f.payload.armyId === a.id
+        && f.turn >= last.startedTurn && f.turn <= peace && f.payload.next.warId === last.id);
+      // Leaving and returning to the same failed staging point is not a new route.
+      const previouslyHere = orders.some(f => f.kind === 'army_order_changed'
+        && [f.payload.previous.targetRegionId, f.payload.next.targetRegionId].includes(a.regionId));
+      const arrived = a.recentMovement && a.recentMovement.turn > peace && frontier.neighbors.includes(a.regionId)
+        && !frontier.neighbors.includes(a.recentMovement.fromRegionId) && !previouslyHere;
+      const corridorChanged = facts.some(f => f.kind === 'territory_control_changed' && f.turn > peace
+        && f.payload.nextControllerId === attacker.id && frontier.neighbors.includes(f.payload.regionId));
+      return Boolean(arrived || corridorChanged);
+    });
     if (!changed) return false;
   }
   return world.turn - peace >= 4 && (peace < 0 || attacker.warWeariness < 48

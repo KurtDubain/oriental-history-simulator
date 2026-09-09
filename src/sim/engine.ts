@@ -42,6 +42,7 @@ import {
   processV02Diplomacy,
   processCharacterDeathConsequences,
   processV02MilitaryCareers,
+  releaseRulerSubordination,
   processV02PoliticalCommitments,
   processV02Politics,
   processV02Society,
@@ -866,6 +867,7 @@ function selectCandidate(
 }
 
 function repairAppointments(world: WorldState, context: MutableTurnContext): void {
+  releaseRulerSubordination(world, context, input => pushEvent(world, context, input));
   for (const character of world.characters) {
     if (!character.alive) {
       character.governedRegionId = null;
@@ -929,6 +931,7 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
         : undefined;
       if (
         !deputy?.alive
+        || deputy.id === polity.rulerId
         || !isBattleReadyCharacter(world, deputy)
         || deputy.polityId !== polity.id
         || deputy.id === army.commanderId
@@ -1227,6 +1230,7 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
       ],
     });
   }
+  releaseRulerSubordination(world, context, input => pushEvent(world, context, input));
 }
 
 function isAtWar(world: WorldState, polityId: string): boolean {

@@ -5,7 +5,7 @@ import type { HistoryEvent, StateDelta, WorldState } from '../types';
 import type { MutableTurnContext } from '../turn-context-state';
 import { addBiography } from '../v02';
 import type { V03EventInput } from '../v03-context';
-import { battleRecoveryStatus, isBattleReadyCharacter } from './battle-readiness';
+import { battleRecoveryStatus, isBattleReadyCharacter, woundRecoveryQuarters } from './battle-readiness';
 import { detachPersonalForce, personalForce } from './personal-forces';
 
 type Participant = NonNullable<BattleFact['payload']['attacker']['participants']>[number];
@@ -87,7 +87,7 @@ function wound(
   const before = person.health;
   const loss = row.participant.losses / Math.max(1, row.participant.soldiersBefore);
   const variation = keyedRandom(world.seed, context.turn, 'battle-recovery', battle.id, person.id);
-  const recoveryQuarters = Math.max(1, Math.ceil(.4 + severity * 4.2 + variation * 3.2));
+  const recoveryQuarters = woundRecoveryQuarters(person.age, severity, before, variation);
   const recoveryUntilTurn = context.turn + recoveryQuarters;
   const formationId = personalForce(world, person.id)?.formationId ?? null;
   person.health = Math.max(5, before - Math.round(7 + severity * 28 + loss * 8

@@ -1514,6 +1514,7 @@ function repairFleets(world: WorldState, context: V03TurnContext, emit: V03Emit)
     const deputy = fleet.deputyCommanderId ? world.characters.find((character) => character.id === fleet.deputyCommanderId) : undefined;
     const validDeputy = Boolean(
       deputy?.alive
+      && !world.polities.some(p => p.alive && p.rulerId === deputy.id)
       && deputy.polityId === fleet.polityId
       && !deputy.commandingArmyId
       && !deputy.commandingFleetId

@@ -166,7 +166,7 @@ function situationChoices(world: WorldState, situation: SituationState, item: Si
     const factId = primaryFactId(world, scene);
     return {
       primarySceneId: scene.id,
-      primarySourceFactIds: factId ? [factId] : [],
+      primarySourceFactIds: factId ? scene.sourceFactIds : [],
       evidence: sceneEvidence(item, scene),
       recentChange: `${scene.dateLabel} · ${scene.title}`,
     };
@@ -199,7 +199,7 @@ function projectSituationLead(world: WorldState, situation: SituationState, reso
   return {
     id: `lead-situation:${situation.id}`,
     label: WAR_SITUATION_TYPES.has(situation.type) ? '军争' : '朝局',
-    question: situationHeadline(world, item, situation, resolvedEcho),
+    question: choice.primarySceneId.startsWith('scene:war:') ? choice.recentChange.slice(choice.recentChange.lastIndexOf(' · ') + 3) : situationHeadline(world, item, situation, resolvedEcho),
     evidence: choice.evidence,
     target,
     overlay: WAR_SITUATION_TYPES.has(situation.type) ? 'war' : 'political',

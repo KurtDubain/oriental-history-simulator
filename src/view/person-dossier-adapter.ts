@@ -15,8 +15,6 @@ import type {
 } from '../sim/types';
 import {
   findWorldHistoryEvent,
-  readWorldFacts,
-  readWorldHistory,
 } from '../sim/archive';
 import {
   projectCharacterDesires,
@@ -45,7 +43,7 @@ import {
   projectPersonPoliticalFocus,
   type PoliticalFocusLink,
 } from './political-focus';
-import { projectPersonStoryArc, personHistoricalOffice, personShortBiography } from './person-story-arc';
+import { projectPersonStoryArc, personHistoricalOffice, personShortBiography, personHistoryEvidence, isContinuousRulerSeat } from './person-story-arc';
 
 export type PersonInspectorProjection = PersonInspectorData & {
   politicalFocus: readonly PoliticalFocusLink[];
@@ -54,14 +52,6 @@ export type PersonInspectorProjection = PersonInspectorData & {
 export type PersonArchiveProjection = ArchiveDossier & {
   politicalFocus: readonly PoliticalFocusLink[];
 };
-
-function inspectorStoryArc(world: WorldState, item: CharacterState) {
-  try {
-    return projectPersonStoryArc(world, item, 'all');
-  } catch {
-    return projectPersonStoryArc(world, item, 'active');
-  }
-}
 
 interface PersonExperienceEntry {
   turn: number;
@@ -143,9 +133,10 @@ export function toPersonExperienceRecords(
   const knownEventIds = new Set<string>();
   const knownFactIds = new Set<string>();
   const biography = Array.isArray(item.biography) ? item.biography : [];
-  const history = (readScope === 'all' ? readWorldHistory(world) : world.history)
+  const evidence = readScope === 'all' ? personHistoryEvidence(world) : null;
+  const history = (evidence?.events ?? world.history)
     .filter(isDefaultVisibleHistoryEvent);
-  const facts = readScope === 'all' ? readWorldFacts(world) : world.facts;
+  const facts = evidence?.facts ?? world.facts;
   const eventById = new Map(history.map((event) => [event.id, event]));
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
   const claimed = new Set<string>();
@@ -163,13 +154,19 @@ export function toPersonExperienceRecords(
       summary: `${item.name}${deputy ? '首次以副将身份随军' : '参战'}。${narrative.summary}` };
   };
   const addEvent = (event: HistoryEvent, id = event.id) => {
+    const sourceFacts = event.sourceFactIds.map(sourceId => factById.get(sourceId));
+    const relocation = sourceFacts.length > 0 && sourceFacts.every(f => f && isContinuousRulerSeat(f, facts));
+    const continued = relocation ? sourceFacts.find(f => f?.kind === 'appointment_started') : undefined;
+    if (relocation && !continued) return;
     const key = canonicalEventKey(event, factById);
     if (claimed.has(key) || event.kind !== 'world_created' && event.sourceFactIds.length > 0
       && event.sourceFactIds.every((sourceId) => knownFactIds.has(sourceId))) return;
     claimed.add(key);
     const battle = event.sourceFactIds.map((factId) => factById.get(factId))
       .find((fact) => fact?.kind === 'battle' && factNamesCharacter(fact, item.id));
-    entries.push({ turn: event.turn, record: battleRecord(battle, { ...eventArchiveRecord(event), id }) });
+    entries.push({ turn: event.turn, record: continued?.kind === 'appointment_started'
+      ? { ...eventArchiveRecord(event), id, title: '君位移驻', summary: `${item.name}仍在位，君位驻地改为${region(world, continued.payload.regionId)?.name ?? '新驻地'}。` }
+      : battleRecord(battle, { ...eventArchiveRecord(event), id }) });
     knownEventIds.add(event.id);
     if (event.kind !== 'world_created') event.sourceFactIds.forEach((factId) => knownFactIds.add(factId));
   };
@@ -230,13 +227,15 @@ export function toPersonExperienceRecords(
     .map((fact) => fact.payload.appointmentId));
   for (const fact of appointmentFacts) {
     if (knownFactIds.has(fact.id)) continue;
+    const continued = isContinuousRulerSeat(fact, appointmentFacts);
+    if (continued && fact.kind === 'appointment_ended') continue;
     entries.push({
       turn: fact.turn,
       record: {
         id: `${item.id}:experience:${fact.id}`,
         date: turnLabel(fact.turn),
-        title: fact.kind === 'appointment_started' ? `就任${fact.payload.officeKind}` : `卸任${fact.payload.officeKind}`,
-        summary: appointmentSummary(world, item, fact),
+        title: continued ? '君位移驻' : fact.kind === 'appointment_started' ? `就任${fact.payload.officeKind}` : `卸任${fact.payload.officeKind}`,
+        summary: continued ? `${item.name}仍在位，君位驻地改为${region(world, fact.payload.regionId)?.name ?? '新驻地'}。` : appointmentSummary(world, item, fact),
         eventId: null,
         importance: fact.importance,
       },
@@ -899,19 +898,14 @@ export function toPersonInspector(
     },
     recentPowerScenes: powerScenes,
   };
-  const storyArc = inspectorStoryArc(world, item);
+  const storyArc = projectPersonStoryArc(world, item);
   const relationships = projectPersonRelationships(world, item);
-  const experiences = (() => {
-    try { return toPersonExperienceRecords(world, item); }
-    catch { return toPersonExperienceRecords(world, item, 'active'); }
-  })().slice(-12).reverse();
+  const experiences = toPersonExperienceRecords(world, item).slice(-12).reverse();
   const personalForce = world.personalForces.find((force) => force.ownerId === item.id);
   const formation = personalForce?.formationId
     ? world.armies.find((army) => army.id === personalForce.formationId)
     : undefined;
-  const inspectorFacts = item.alive ? world.facts : (() => {
-    try { return readWorldFacts(world); } catch { return world.facts; }
-  })();
+  const inspectorFacts = item.alive ? world.facts : personHistoryEvidence(world).facts;
   const latestBattle = [...inspectorFacts].reverse().find((fact) => fact.kind === 'battle' && (
     fact.payload.attacker.participants?.some((participant) => participant.characterId === item.id)
     || fact.payload.defenders.some((defender) => defender.participants?.some((participant) => participant.characterId === item.id))

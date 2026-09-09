@@ -9,6 +9,7 @@ import {
   serializeWorld,
 } from '../sim';
 import { toCountryInspector } from './country-dossier-adapter';
+import { projectPersonStoryArc } from './person-story-arc';
 import { polityPopulation, worldPopulation } from './dossier-adapter-shared';
 import {
   projectRosterCollection,
@@ -38,7 +39,7 @@ describe('roster domain projection', () => {
     person.alive = false;
     const source = world.history[0];
     world.history.push({ ...source, id: 'old_relief', turn: 5, kind: 'local_governance', importance: 3,
-      title: `${person.name}开仓赈济`, summary: `${person.name}开仓赈济。`, actorIds: [person.id] });
+      title: `${person.name}开仓赈济`, summary: `${person.name}开仓赈济。`, actorIds: [person.id], sourceFactIds: [], stateDeltas: [] });
     person.biography.push({ id: 'bio_relief', eventId: 'old_relief', factId: null, turn: 5,
       kind: '开仓赈济', summary: `${person.name}开仓赈济。`, importance: 3 });
     world.turn = 80; world.year = 21;
@@ -47,9 +48,10 @@ describe('roster domain projection', () => {
     clearWorldArchiveDecodeCache();
     const before = serializeWorld(world);
     const entry = projectRosterDirectory(world).people.items.find(p => p.id === person.id)!;
-    expect(entry.reason?.target).toEqual({ kind: 'event', id: 'old_relief' });
+    expect(entry.reason?.target).toEqual({ kind: 'item', id: person.id });
     expect(entry.reason?.label).toContain('开仓赈济');
-    expect(archiveDecodeCacheEntryCount()).toBe(0);
+    expect(projectPersonStoryArc(world, person).some(b => b.sourceEventIds.includes('old_relief'))).toBe(true);
+    expect(archiveDecodeCacheEntryCount()).toBeGreaterThan(0);
     expect(serializeWorld(world)).toBe(before);
     person.biography[person.biography.length - 1].eventId = 'missing_event';
     expect(projectRosterDirectory(world).people.items.find(p => p.id === person.id)?.reason?.target.id).not.toBe('missing_event');
@@ -62,16 +64,17 @@ describe('roster domain projection', () => {
     for (const office of world.offices) if (office.holderId === person.id) office.active = false;
     const source = world.history[0]!;
     world.history.push({ ...source, id: 'historical_accession', turn: 5, kind: 'succession', importance: 5,
-      title: `${person.name}获拥立`, summary: `${person.name}继位。`, actorIds: [person.id] });
+      title: `${person.name}获拥立`, summary: `${person.name}继位。`, actorIds: [person.id], sourceFactIds: [], stateDeltas: [] });
     world.turn = 80; world.year = 21;
     compactWorldArchive(world);
     clearWorldArchiveDecodeCache();
     const entry = projectRosterDirectory(world).people.items.find(p => p.id === person.id)!;
-    expect(entry.reason?.label).toBe(`${person.name}获拥立`);
-    expect(entry.reason?.target).toEqual({ kind: 'event', id: 'historical_accession' });
+    expect(entry.reason?.label).toBe(`${person.name}登位`);
+    expect(entry.reason?.target).toEqual({ kind: 'item', id: person.id });
+    expect(projectPersonStoryArc(world, person).some(b => b.sourceEventIds.includes('historical_accession'))).toBe(true);
     expect(entry.subtitle).toContain('曾任君主');
     expect(entry.discovery?.filters.identity).toBe('ruler');
-    expect(archiveDecodeCacheEntryCount()).toBe(0);
+    expect(archiveDecodeCacheEntryCount()).toBeGreaterThan(0);
   });
 
   it('is pure, deterministic and emits only navigable attention reasons', () => {
@@ -270,7 +273,7 @@ describe('roster domain projection', () => {
     );
   });
 
-  it('never decodes a cold archive block while building roster views', () => {
+  it('reports malformed cold history instead of silently calling it an empty career', () => {
     const world = createWorld('名录不读冷卷');
     world.turn = 80;
     world.year = 21;
@@ -282,7 +285,7 @@ describe('roster domain projection', () => {
     coldBlock.payloadBase64 = `!${coldBlock.payloadBase64.slice(1)}`;
     clearWorldArchiveDecodeCache();
 
-    expect(() => projectRosterDirectory(world)).not.toThrow();
+    expect(() => projectRosterDirectory(world)).toThrow(/archive payload/);
     expect(archiveDecodeCacheEntryCount()).toBe(0);
   });
 

@@ -165,6 +165,7 @@ import { makeTextSnapshot } from './view/game-text-snapshot';
 import {
   selectedEntityLabel,
   watchItemForSelection,
+  refreshObserverWatch,
   watchItemForSituation,
 } from './view/observer-selection';
 import type { Selection, SnapshotOptions } from './view/observer-shell-contract';
@@ -368,7 +369,7 @@ export function App() {
     observerLeadProjection: world ? deriveObserverLeadProjection(world) : null,
     historicalTurn: historicalView?.turn ?? null,
     watchedCount: observerSettings.watchlist.length,
-    watchlist: observerSettings.watchlist.map((item) => ({ ...item })),
+    watchlist: observerSettings.watchlist.map(item => world ? refreshObserverWatch(world, item) : item),
     guideCompleted: observerGuideProgress(observerSettings).completed,
     pauseReason: pauseMatch?.reason ?? null,
     pauseRule: pauseMatch?.rule ?? null,
@@ -398,11 +399,7 @@ export function App() {
   }, []);
 
   const commitWorld = useCallback((nextWorld: WorldState) => {
-    const refreshedWatchlist = observerSettingsRef.current.watchlist.map((item) => {
-      if (item.kind !== 'situation') return item;
-      const currentItem = watchItemForSituation(nextWorld, item.id);
-      return currentItem ? { ...currentItem, alert: item.alert } : item;
-    });
+    const refreshedWatchlist = observerSettingsRef.current.watchlist.map(item => refreshObserverWatch(nextWorld, item));
     const leadProjection = deriveObserverLeadProjection(nextWorld);
     const nextObserverSettings = {
       ...observerSettingsRef.current,
@@ -2156,7 +2153,7 @@ export function App() {
 
       <ObserverDesk
         open={observerDeskOpen && Boolean(world)}
-        settings={observerSettings}
+        settings={{ ...observerSettings, watchlist: observerSettings.watchlist.map(item => world ? refreshObserverWatch(world, item) : item) }}
         onSettingsChange={commitObserverSettings}
         onClose={handleCloseObserverDesk}
         onSelectWatchItem={handleSelectWatchItem}

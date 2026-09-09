@@ -97,7 +97,7 @@ describe('dossier adapter boundaries', () => {
     expect(toCountryArchive(world, country).records.some((record) => record.eventId === coldEvent.id)).toBe(true);
   });
 
-  it('keeps ordinary person, family and polity inspectors on the active history window', () => {
+  it('reports corrupt complete person history while keeping lightweight family and polity summaries readable', () => {
     const world = createWorld('冷卷不阻地图速览');
     const person = world.characters.find((candidate) => candidate.familyId !== null) ?? world.characters[0];
     const personFamily = world.families.find((candidate) => candidate.id === person.familyId)
@@ -114,7 +114,7 @@ describe('dossier adapter boundaries', () => {
     coldBlock.payloadBase64 = `!${coldBlock.payloadBase64.slice(1)}`;
     clearWorldArchiveDecodeCache();
 
-    expect(() => toPersonInspector(world, person)).not.toThrow();
+    expect(() => toPersonInspector(world, person)).toThrow(/archive payload/);
     expect(() => toFamilyInspector(world, personFamily)).not.toThrow();
     let countryInspector: ReturnType<typeof toCountryInspector> | null = null;
     expect(() => {

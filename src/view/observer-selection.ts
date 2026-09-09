@@ -6,6 +6,12 @@ import { projectSituationSnapshotItem } from './situation-snapshot';
 import type { Selection } from './observer-shell-contract';
 import type { ObserverWatchItem } from './v1-observer';
 
+export function refreshObserverWatch(world: WorldState, item: ObserverWatchItem): ObserverWatchItem {
+  const current = item.kind === 'situation' ? watchItemForSituation(world, item.id)
+    : watchItemForSelection(world, { kind: item.kind, id: item.id });
+  return current ? { ...current, alert: item.alert } : item;
+}
+
 /** Resolve a current observer selection without changing the supplied world. */
 export function selectedEntityLabel(world: WorldState, selection: Selection): string | null {
   if (!selection) return null;
@@ -36,7 +42,7 @@ export function watchItemForSelection(
     if (item) detail = `${item.memberIds.length}名成员 · 声望${Math.round(item.prestige)}`;
   } else if (selection.kind === 'person') {
     const item = world.characters.find((candidate) => candidate.id === selection.id);
-    if (item) detail = `${item.alive ? item.role : '已故'} · ${item.age}岁 · 影响${Math.round(item.influence)}`;
+    if (item) detail = item.alive ? `${item.role} · ${item.age}岁 · 影响${Math.round(item.influence)}` : `已故 · 享年${item.age}岁`;
   } else if (selection.kind === 'region') {
     const item = world.regions.find((candidate) => candidate.id === selection.id);
     const owner = item ? world.polities.find((candidate) => candidate.id === item.controllerId) : null;

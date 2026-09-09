@@ -17,14 +17,27 @@ import {
 
 describe('NAR01/NAR02 concrete historical scenes', () => {
   it('joins support, request, court response and direct consequences into one traceable scene', () => {
-    // A positive integration sample, not a requirement that every seed request command.
-    let world = createWorld('山河故人-新验');
-    let resolution = world.facts.find((fact) => fact.kind === 'agency_intent_resolved');
-    for (let turn = 0; turn < 80 && !resolution; turn += 1) {
-      world = advanceWorld(world);
-      resolution = world.facts.find((fact) => fact.kind === 'agency_intent_resolved');
-    }
-    if (!resolution || resolution.kind !== 'agency_intent_resolved') throw new Error('expected a natural command resolution');
+    // Projection contract: a recorded request and response, not a quota for a seed's life story.
+    const world = createWorld('军令来源链夹具');
+    const unit = world.armies.find(a => a.deputyCommanderId)!;
+    const actorId = unit.deputyCommanderId!, rulerId = world.polities.find(p => p.id === unit.polityId)!.rulerId;
+    const base = { turn: 4, year: 2, season: '春' as const, category: '政治' as const, importance: 4 as const,
+      actorIds: [actorId], polityIds: [unit.polityId], regionIds: [unit.regionId], causes: [], stateDeltas: [] };
+    const source: SimulationFact = { ...base, id: 'support_evidence', kind: 'agency_support_resolved', sourceFactIds: [],
+      payload: { actorId, goalId: 'goal_evidence', planId: 'plan_evidence', planStepId: 'support_step', action: 'request_backing',
+        attemptOrdinal: 1, targetKind: 'ruler', targetId: rulerId, targetArmyId: unit.id, polityId: unit.polityId,
+        outcome: 'secured', strength: 70, retryAfterTurn: null } };
+    const submitted: SimulationFact = { ...base, id: 'request_evidence', kind: 'agency_intent_submitted', sourceFactIds: [source.id],
+      payload: { actorId, goalId: 'goal_evidence', goalType: 'secure_independent_command', goalCreatedTurn: 1,
+        planId: 'plan_evidence', planStepId: 'step_evidence', action: 'request_independent_command', attemptOrdinal: 1,
+        targetArmyId: unit.id, polityId: unit.polityId, currentCommanderId: unit.commanderId, appointingAuthorityId: rulerId } };
+    const resolution: Extract<SimulationFact, { kind: 'agency_intent_resolved' }> = { ...base,
+      id: 'resolution_evidence', kind: 'agency_intent_resolved', sourceFactIds: [submitted.id], payload: {
+        submissionFactId: submitted.id, actorId, goalId: 'goal_evidence', planId: 'plan_evidence', planStepId: 'step_evidence',
+        action: 'request_independent_command', attemptOrdinal: 1, targetArmyId: unit.id, polityId: unit.polityId,
+        previousCommanderId: unit.commanderId, appointingAuthorityId: rulerId, outcome: 'executed', reasonCode: 'command_granted',
+        institutionResponse: 'command_granted', retryAfterTurn: null, checks: [], decisionScore: 70, decisionThreshold: 60 } };
+    world.facts.push(source, submitted, resolution);
     const actor = world.characters.find((item) => item.id === resolution.payload.actorId);
     const army = world.armies.find((item) => item.id === resolution.payload.targetArmyId);
     const scene = projectHistoricalScenes(world, [resolution], 1)[0];
@@ -36,7 +49,9 @@ describe('NAR01/NAR02 concrete historical scenes', () => {
     expect(scene.sourceFactIds).toContain(resolution.id);
     expect(scene.sourceFactIds).toContain(resolution.payload.submissionFactId);
     const submission = world.facts.find((fact) => fact.id === resolution.payload.submissionFactId);
-    expect(submission?.sourceFactIds.some((id) => scene.sourceFactIds.includes(id))).toBe(true);
+    expect(submission?.sourceFactIds).toContain(source.id);
+    expect(scene.sourceFactIds).toContain(source.id);
+    expect(scene.sourceFactIds).toContain(submitted.id);
   }, 30_000);
 
   it('joins a battle and same-quarter territorial transfer without reading Chronicle prose', () => {

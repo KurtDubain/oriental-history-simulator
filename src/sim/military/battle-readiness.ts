@@ -4,6 +4,12 @@ interface WoundFact {
   payload: { characterId: string; recoveryUntilTurn?: number };
 }
 
+/** Age changes recovery time smoothly, not eligibility or an upper health limit. */
+export function woundRecoveryQuarters(age: number, severity: number, health: number, variation: number): number {
+  return Math.max(1, Math.ceil(.4 + severity * 4.2 + variation * 3.2
+    + Math.pow(Math.max(0, age) / 70, 3) * (.8 + severity + (100 - health) / 100)));
+}
+
 export function battleRecoveryStatus(
   world: { facts: readonly unknown[]; turn: number },
   characterId: string,
