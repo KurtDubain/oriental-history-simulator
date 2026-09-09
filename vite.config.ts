@@ -169,7 +169,7 @@ export default defineConfig({
           ) return 'framework';
           if (normalized.includes('/node_modules/fflate/')) return 'framework';
           if (normalized.includes('/src/maps/')) return 'maps';
-          if (normalized.endsWith('/src/sim/military/personal-forces.ts')) {
+          if (normalized.endsWith('/src/sim/military/personal-forces.ts') || normalized.endsWith('/src/sim/military/orders.ts')) {
             return 'simulation-support';
           }
           if (

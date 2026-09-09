@@ -113,15 +113,15 @@ function sortedBlocks(archive: WorldArchiveSystemState): WorldArchiveBlock[] {
 }
 
 /** Returns the entire authoritative Fact chain, deduplicating active cold pins. */
-export function readWorldFacts(world: ArchiveWorldState): SimulationFact[] {
+export function readWorldFacts(world: ArchiveWorldState, sinceTurn = 0): SimulationFact[] {
   const archive = world.archiveSystem;
-  if (!archive || archive.blocks.length === 0) return [...world.facts];
+  if (!archive || archive.blocks.length === 0) return world.facts.filter(f => f.turn >= sinceTurn);
   const result: SimulationFact[] = [];
   const seen = new Set<string>();
   for (const block of sortedBlocks(archive)) {
-    appendUnique(result, seen, decodeArchiveBlock(block).facts);
+    if (block.throughTurn >= sinceTurn) appendUnique(result, seen, decodeArchiveBlock(block).facts.filter(f => f.turn >= sinceTurn));
   }
-  appendUnique(result, seen, world.facts);
+  appendUnique(result, seen, world.facts.filter(f => f.turn >= sinceTurn));
   return result;
 }
 

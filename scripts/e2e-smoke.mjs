@@ -996,7 +996,7 @@ async function exerciseMapViewportTouch(context, page) {
 
   await page.locator('[data-map-zoom-in="true"]').click();
   await page.waitForFunction(() => document.querySelector('.world-map')?.getAttribute('data-map-lod') === 'regional');
-  const fitScale = Math.min((box.width - 16) / 1000, (box.height - 16) / 700);
+  const fitScale = Math.min((box.width - 16) / (box.width < 620 ? 800 : 1000), (box.height - 16) / 700);
   const currentZoom = Number(await map.getAttribute('data-map-zoom'));
   const currentPanX = Number(await map.getAttribute('data-map-pan-x'));
   const currentPanY = Number(await map.getAttribute('data-map-pan-y'));
@@ -1063,6 +1063,8 @@ async function expandAnyStructuredReference(page) {
   for (let factorIndex = 0; factorIndex < await factors.count(); factorIndex += 1) {
     const evidence = factors.nth(factorIndex).locator('button.observer-causal-chain__evidence');
     if (!(await evidence.count())) continue;
+    const details = factors.nth(factorIndex).locator('details.observer-causal-chain__details');
+    if (await details.count() && await details.getAttribute('open') === null) await details.locator('summary').click();
     await evidence.click();
     const references = factors.nth(factorIndex).locator('.observer-causal-chain__references');
     if (await references.count()) return references;
@@ -1934,6 +1936,8 @@ try {
   assert.ok(mobileMapLayout.dockWidth >= 370, '移动端观察导航应成为全宽底部观察坞');
   assert.equal(mobileMapLayout.mapLayout, 'private-v03-r1');
   const mobileLeads = mobilePage.locator('[data-observer-leads="true"]');
+  assert.equal(await mobileLeads.count(), 0, 'T0没有大事时不应保留空线索栏');
+  const mobileLeadTurn = await advanceTo(mobilePage, 4);
   await mobileLeads.waitFor();
   await assertWithinViewport(mobilePage, '[data-observer-leads="true"]', '移动端史家线索不可横向溢出');
   assert.equal(await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(), 0, '移动端默认只显示紧凑线索条，避免遮挡舆图');
@@ -1941,13 +1945,13 @@ try {
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();
   assert.equal(
     await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(),
-    Math.min(1, mobileTurn0.observer.focusLeads.length),
+    Math.min(1, mobileLeadTurn.observer.focusLeads.length),
     '移动端可展开第一条现有线索',
   );
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();
   assert.equal(
     await mobileLeads.locator('[data-testid="observer-lead"]:visible').count(),
-    mobileTurn0.observer.focusLeads.length,
+    mobileLeadTurn.observer.focusLeads.length,
     '移动端可展开全部现有线索',
   );
   await mobileLeads.locator('.observer-leads__mobile-toggle').click();

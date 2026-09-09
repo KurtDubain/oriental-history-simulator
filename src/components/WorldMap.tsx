@@ -284,14 +284,18 @@ export function WorldMap({
     [camera, scene, selectedObject, selectedRegionId, size.height, size.width],
   );
   const focusOffset = useMemo(() => (
-    selectedAnchor && quickLookOcclusion
+    quickLookOcclusion && (selectedAnchor || focusedWarId)
       ? resolveMapFocusOffset({
-        anchor: selectedAnchor,
+        anchor: selectedAnchor ?? layoutMapArmyIcons(scene.armies, scene.regions,
+          createMapViewportTransform(size.width, size.height, undefined, camera))
+          .filter(layout => focusedWarArmyIds.includes(layout.army.id))
+          .sort((a, b) => a.point.y - b.point.y)[0]?.point ?? { x: 0, y: 0 },
         viewport: { width: size.width, height: size.height },
         occlusion: quickLookOcclusion,
+        margin: selectedAnchor ? 16 : 36,
       })
       : { ...ZERO_FOCUS_OFFSET }
-  ), [quickLookOcclusion, selectedAnchor, size.height, size.width]);
+  ), [camera, focusedWarArmyIds, focusedWarId, quickLookOcclusion, scene, selectedAnchor, size.height, size.width]);
   const highlightStrength = useQuarterHighlightPulse({
     epoch: highlightEpoch,
     regionIds: highlightedRegionIds,
@@ -426,7 +430,7 @@ export function WorldMap({
 
   useLayoutEffect(() => {
     const host = hostRef.current;
-    if (!host || !mobileQuickLookOpen) {
+    if (!host || !mobileQuickLookOpen && !focusedWarId) {
       setQuickLookOcclusion((current) => sameOcclusion(current, null) ? current : null);
       return undefined;
     }
@@ -436,15 +440,15 @@ export function WorldMap({
       return undefined;
     }
     const inspector = host.closest('.observer-app')
-      ?.querySelector<HTMLElement>('.observer-inspector[data-mobile-mode="quick"]');
-    if (!inspector) return undefined;
+      ?.querySelector<HTMLElement>(mobileQuickLookOpen ? '.observer-inspector[data-mobile-mode="quick"]' : '.war-focus-summary');
+    if (!inspector) { setQuickLookOcclusion(null); return undefined; }
 
     const updateOcclusion = () => {
       const hostRect = host.getBoundingClientRect();
       const inspectorRect = inspector.getBoundingClientRect();
-      const left = Math.max(0, inspectorRect.left - hostRect.left);
-      const top = Math.max(0, inspectorRect.top - hostRect.top);
-      const right = Math.min(hostRect.width, inspectorRect.right - hostRect.left);
+      const left = mobileQuickLookOpen ? Math.max(0, inspectorRect.left - hostRect.left) : 0;
+      const top = mobileQuickLookOpen ? Math.max(0, inspectorRect.top - hostRect.top) : 0;
+      const right = mobileQuickLookOpen ? Math.min(hostRect.width, inspectorRect.right - hostRect.left) : hostRect.width;
       const bottom = Math.min(hostRect.height, inspectorRect.bottom - hostRect.top);
       const next = right > left && bottom > top
         ? { x: left, y: top, width: right - left, height: bottom - top }
@@ -472,7 +476,7 @@ export function WorldMap({
       inspector.removeEventListener('transitionend', updateOcclusion);
       inspector.removeEventListener('transitioncancel', updateOcclusion);
     };
-  }, [mobileQuickLookOpen, size.height, size.width]);
+  }, [focusedWarId, mobileQuickLookOpen, selectedObject, size.height, size.width]);
 
   useEffect(() => {
     const canvas = canvasRef.current;

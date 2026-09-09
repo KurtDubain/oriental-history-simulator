@@ -244,9 +244,11 @@ function defendedWarGoal(world: WorldState, army: ArmyState, war: WarState): str
   const enemies = world.armies.filter(a => a.polityId === enemyIdFor(war, army.polityId) && !a.embarkedOperationId);
   return world.regions.filter(region => region.controllerId === army.polityId
     && (war.targetRegionIds.includes(region.id) || enemies.some(a => region.neighbors.includes(a.regionId))))
-    .map((region) => ({ region, distance: pathLength(world, army, region.id, allowed) }))
+    .map((region) => ({ region, distance: pathLength(world, army, region.id, allowed),
+      threatened: enemies.some(a => region.neighbors.includes(a.regionId)) }))
     .filter(({ distance }) => Number.isFinite(distance))
-    .sort((left, right) => left.distance - right.distance || stableCompare(left.region.id, right.region.id))[0]?.region.id ?? null;
+    .sort((left, right) => Number(right.threatened) - Number(left.threatened)
+      || left.distance - right.distance || stableCompare(left.region.id, right.region.id))[0]?.region.id ?? null;
 }
 
 function warForArmy(world: WorldState, army: ArmyState): WarState | null {

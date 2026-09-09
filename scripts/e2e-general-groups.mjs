@@ -135,7 +135,7 @@ try {
     }
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-war-focus.png` });
 
-    const formation = current.mapObjects.armies[0];
+    const formation = current.mapObjects.armies.find(army => projectedArmyIds.includes(army.id));
     assert.ok(formation?.position, `${scenario.slug} 战局应有可点击的编队锚点`);
     const clickPoint = await page.evaluate(({ position, camera }) => {
       const canvas = document.querySelector('.world-map__canvas');

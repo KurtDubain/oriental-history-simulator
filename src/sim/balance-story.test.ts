@@ -9,6 +9,7 @@ import { settleCharacterDeathState } from './character-death';
 import { resolveVacantRulers } from './engine';
 import { expelFactionMembers } from './politics/faction-lifecycle';
 import type { WarState } from './types';
+import { recoverHealth, isBattleReadyCharacter } from './military/battle-readiness';
 
 function front() {
   const world = createWorld('军政因果受控');
@@ -24,6 +25,33 @@ function front() {
 }
 
 describe('balance and causal continuity', () => {
+  it('responds to an observed threatened border instead of forever sitting on the nearest old goal', () => {
+    const { world, army, war } = front();
+    const guard = world.armies.find(a => a.polityId === war.defenderId)!;
+    const [home, frontier, enemyLand] = world.regions;
+    world.regions = [home, frontier, enemyLand];
+    home.controllerId = frontier.controllerId = guard.polityId; enemyLand.controllerId = army.polityId;
+    home.neighbors = [frontier.id]; frontier.neighbors = [home.id, enemyLand.id]; enemyLand.neighbors = [frontier.id];
+    world.armies = [army, guard]; army.regionId = enemyLand.id; guard.regionId = home.id;
+    guard.supply = guard.morale = 100; war.targetRegionIds = [home.id];
+    planArmyOrders(world, createTurnContext(world));
+    expect(guard.order.kind).toBe('reinforce');
+    expect(guard.order.targetRegionId).toBe(frontier.id);
+    guard.regionId = frontier.id;
+    planArmyOrders(world, createTurnContext(world));
+    expect(guard.order.kind).toBe('hold');
+    expect(guard.order.reasonCode).toBe('defend_war_goal');
+  });
+  it('recovers more slowly with age without an automatic retirement or death birthday', () => {
+    expect(recoverHealth(85, 60, 7)).toBeLessThan(recoverHealth(30, 60, 7));
+    let old = 100;
+    for (let i = 0; i < 40; i++) old = recoverHealth(85, old, 1);
+    expect(old).toBeLessThan(100);
+    expect(old).toBeGreaterThan(55);
+    expect(isBattleReadyCharacter({ facts: [], turn: 40 }, { id: 'veteran', health: old })).toBe(true);
+    expect(Math.abs(recoverHealth(79, 100, 1) - recoverHealth(80, 100, 1))).toBeLessThanOrEqual(1);
+    expect(recoverHealth(110, 20, 7)).toBeGreaterThan(20);
+  });
   it('executes its declared reachable objective instead of following an unrelated enemy garrison', () => {
     const { world, army, target, war } = front();
     const enemy = world.armies.find(a => a.polityId === war.defenderId)!;
@@ -102,7 +130,11 @@ describe('balance and causal continuity', () => {
     expect(canReopenWar(world, polity, war.defenderId)).toBe(false);
     army.recentMovement = { fromRegionId: world.regions.find(r => !target.neighbors.includes(r.id) && r.id !== army.regionId)!.id,
       toRegionId: army.regionId, turn: 15, orderKind: 'advance', warId: null };
-    expect(canReopenWar(world, polity, war.defenderId)).toBe(true);
+    const evidence = { causes: [] as import('./types').EventCause[], factIds: [] as string[] };
+    expect(canReopenWar(world, polity, war.defenderId, evidence)).toBe(true);
+    expect(evidence.causes[0].evidence).toContain(army.name);
+    expect(evidence.causes[0].evidence).toContain(target.name);
+    expect(evidence.causes[0].refs?.some(r => r.entityId === war.id)).toBe(true);
   });
 
   it('gives experience for defeat but merit only for victory and records command responsibility', () => {

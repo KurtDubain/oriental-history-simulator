@@ -471,11 +471,11 @@ function personItems(context: ProjectionContext): RosterItem[] {
       )
       : null;
     const watched = explainWatchAlert(watchAlert, event ?? situation);
-    const story = projectPersonStoryArc(context.world, item, 'all', evidence);
-    const turning = story.filter(b => b.phase !== 'ending')
-      .sort((a, b) => b.importance - a.importance || b.sourceFactIds.length - a.sourceFactIds.length)[0];
+    const story = projectPersonStoryArc(context.world, item, evidence);
+    const turning = [...story].sort((a, b) => b.importance - a.importance
+      || b.sourceFactIds.length + b.sourceEventIds.length - a.sourceFactIds.length - a.sourceEventIds.length)[0];
     const remembered = turning ? candidate('recent-event', turning.title,
-      { kind: 'item', id: item.id }, { importance: turning.importance, value: turning.sourceFactIds.length }) : null;
+      { kind: 'item', id: item.id }, { importance: turning.importance, value: turning.sourceFactIds.length + turning.sourceEventIds.length }) : null;
     const structural = candidate(item.alive && identity.rank >= 70 ? 'authority' : actualCommand ? 'command' : 'standing',
       officeLabel, { kind: 'item', id: item.id }, { value: item.alive ? identity.rank : past?.rank ?? 0 });
     const attention = chooseAttention([watched, ...(item.alive ? [situation, recent && story.some(b => b.sourceEventIds.includes(recent.id)) ? event : null] : []), remembered, structural].filter((entry): entry is AttentionCandidate => Boolean(entry)));

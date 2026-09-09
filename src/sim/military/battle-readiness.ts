@@ -4,7 +4,13 @@ interface WoundFact {
   payload: { characterId: string; recoveryUntilTurn?: number };
 }
 
-/** Age changes recovery time smoothly, not eligibility or an upper health limit. */
+/** Recovery capacity declines continuously; age itself never removes a command. */
+export function recoverHealth(age: number, health: number, gain: number): number {
+  const capacity = Math.max(35, 100 - 25 * Math.pow(Math.max(0, age) / 90, 4));
+  const restored = health + Math.max(1, Math.round(gain / (1 + Math.pow(Math.max(0, age) / 80, 3))));
+  return Math.round(Math.max(0, Math.min(100, restored, Math.max(capacity, health - 1))));
+}
+
 export function woundRecoveryQuarters(age: number, severity: number, health: number, variation: number): number {
   return Math.max(1, Math.ceil(.4 + severity * 4.2 + variation * 3.2
     + Math.pow(Math.max(0, age) / 70, 3) * (.8 + severity + (100 - health) / 100)));

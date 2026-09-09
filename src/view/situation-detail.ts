@@ -324,9 +324,7 @@ function dateLabel(turn: number): string {
   return historyTurnDate(turn).label;
 }
 
-function compactNumber(value: number): string {
-  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(value);
-}
+const compactNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format;
 
 function valueLabel(world: WorldState, value: DeltaValue, field: string): string {
   if (typeof value === 'number') return compactNumber(value);

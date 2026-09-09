@@ -4,6 +4,7 @@ import { readWorldFacts } from './archive';
 import type {
   DiplomacyState,
   EvidenceRef,
+  EventCause,
   PolityState,
   ShipmentRecord,
   WarState,
@@ -14,17 +15,21 @@ import type { V03Emit, V03TurnContext } from './v03-context';
 const TRADE_TREATY_QUARTERS = 16;
 const MIN_TRIBUTE_QUARTERS = 8;
 
-export function canReopenWar(world: WorldState, attacker: PolityState, defenderId: string): boolean {
+export function canReopenWar(world: WorldState, attacker: PolityState, defenderId: string,
+  evidence?: { causes: EventCause[]; factIds: string[] }): boolean {
   const last = world.wars.filter((war) => !war.active && war.endedTurn !== null
     && [war.attackerId, war.defenderId].includes(attacker.id)
     && [war.attackerId, war.defenderId].includes(defenderId)).sort((a,b) => b.endedTurn! - a.endedTurn!)[0];
   const peace = last?.endedTurn ?? -100;
+  if (world.turn - peace < 4 || peace >= 0 && (attacker.warWeariness >= 48 || attacker.treasury <= 0
+    || !world.armies.some(a => a.polityId === attacker.id && a.supply >= 40))) return false;
   if (last && last.lastBattleTurn < last.startedTurn) {
     const target = executableWarTarget(world, attacker.id, defenderId);
     if (!target) return false;
     const frontier = world.regions.find(r => r.id === target)!;
-    const facts = readWorldFacts(world);
-    const changed = !last.targetRegionIds.includes(target) || world.armies.some(a => {
+    const facts = readWorldFacts(world, last.startedTurn);
+    let reason = !last.targetRegionIds.includes(target) ? `上次未能交战，此次改以${frontier.name}为可执行目标` : '';
+    const changed = reason || world.armies.some(a => {
       if (a.polityId !== attacker.id || executableWarTarget(world, attacker.id, defenderId, a.id) !== target) return false;
       const orders = facts.filter(f => f.kind === 'army_order_changed' && f.payload.armyId === a.id
         && f.turn >= last.startedTurn && f.turn <= peace && f.payload.next.warId === last.id);
@@ -33,14 +38,21 @@ export function canReopenWar(world: WorldState, attacker: PolityState, defenderI
         && [f.payload.previous.targetRegionId, f.payload.next.targetRegionId].includes(a.regionId));
       const arrived = a.recentMovement && a.recentMovement.turn > peace && frontier.neighbors.includes(a.regionId)
         && !frontier.neighbors.includes(a.recentMovement.fromRegionId) && !previouslyHere;
-      const corridorChanged = facts.some(f => f.kind === 'territory_control_changed' && f.turn > peace
+      const corridorChanged = facts.find(f => f.kind === 'territory_control_changed' && f.turn > peace
         && f.payload.nextControllerId === attacker.id && frontier.neighbors.includes(f.payload.regionId));
+      if (arrived) reason = `${a.name}于第${a.recentMovement!.turn}季从${world.regions.find(r => r.id === a.recentMovement!.fromRegionId)?.name}抵达${world.regions.find(r => r.id === a.regionId)?.name}，新部署可进抵${frontier.name}`;
+      else if (corridorChanged?.kind === 'territory_control_changed') {
+        reason = `停战后取得${world.regions.find(r => r.id === corridorChanged.payload.regionId)?.name}，现有军队可进抵${frontier.name}`;
+        evidence?.factIds.push(corridorChanged.id);
+      }
       return Boolean(arrived || corridorChanged);
     });
     if (!changed) return false;
+    evidence?.causes.push({ label: '再战条件变化', weight: .1, role: '条件', evidence: reason,
+      refs: [{ kind: 'entity', entityType: 'war', entityId: last.id, label: '上次无战停兵' },
+        { kind: 'entity', entityType: 'region', entityId: target, label: frontier.name }] });
   }
-  return world.turn - peace >= 4 && (peace < 0 || attacker.warWeariness < 48
-    && attacker.treasury > 0 && world.armies.some((army) => army.polityId === attacker.id && army.supply >= 40));
+  return true;
 }
 
 export function peaceReason(world: WorldState, war: WarState, turn: number): string | null {

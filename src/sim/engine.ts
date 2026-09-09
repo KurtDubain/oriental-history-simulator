@@ -1647,6 +1647,7 @@ function startWar(
   emitDeclaration = true,
   kind: WarState['kind'] = 'interstate',
   goal: WarState['goal'] = kind === 'rebellion' ? '独立' : '边境',
+  sourceFactIds: string[] = [],
 ): { war: WarState; fact: WarStartedFact } {
   world.counters.war += 1;
   const executableTarget = executableWarTarget(world, attacker.id, defender.id);
@@ -1685,7 +1686,7 @@ function startWar(
     regionIds: [...war.targetRegionIds],
     causes,
     stateDeltas: [{ entityType: 'war', entityId: war.id, field: 'active', before: false, after: true }],
-    sourceFactIds: [],
+    sourceFactIds,
     payload: {
       warId: war.id,
       warKind: war.kind,
@@ -2115,13 +2116,15 @@ function processWarDeclarations(world: WorldState, context: MutableTurnContext):
       .sort((left, right) => right.score - left.score || stableCompare(left.defender.id, right.defender.id));
     const target = targets[0];
     if (!target || target.score < 58) continue;
+    const reopening = { causes: [] as EventCause[], factIds: [] as string[] };
+    canReopenWar(world, attacker, target.defender.id, reopening);
     startWar(world, context, attacker, target.defender, '边境与霸权之争', [
       { label: '执政者意向', weight: 0.28, evidence: `${ruler.name}${ruler.id === attacker.rulerId ? '亲政' : '监国'}，野心${ruler.ambition}` },
       { label: '风险偏好', weight: 0.16, evidence: `谨慎${ruler.caution}` },
       { label: '军力判断', weight: 0.3, evidence: `估计己方军力${Math.round(target.ownPower)}，对方${Math.round(target.enemyPower)}` },
       { label: '边境利益', weight: 0.16, evidence: `接壤战略价值${target.borderValue}` },
-      { label: '决策阈值', weight: 0.1, evidence: `开战效用${target.score.toFixed(1)}高于58` },
-    ]);
+      ...(reopening.causes.length ? reopening.causes : [{ label: '决策阈值', weight: 0.1, evidence: `开战效用${target.score.toFixed(1)}高于58` }]),
+    ], true, 'interstate', '边境', reopening.factIds);
   }
 }
 

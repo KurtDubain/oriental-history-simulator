@@ -228,6 +228,9 @@ describe('self-contained world cold archive', () => {
     expect(world.facts.at(-1)?.turn).toBe(95);
     expect(world.history.at(-1)?.turn).toBe(95);
     expect(stableStringify(readWorldFacts(world))).toBe(originalFacts);
+    for (const sinceTurn of [0, 16, 31, 32, world.turn + 1]) {
+      expect(readWorldFacts(world, sinceTurn)).toEqual(readWorldFacts(world).filter(f => f.turn >= sinceTurn));
+    }
     expect(stableStringify(readWorldHistory(world))).toBe(originalHistory);
     expect(computeWorldHash(world as never)).toBe(originalHash);
     expect(validateWorldArchiveIntegrity(world)).toEqual([]);

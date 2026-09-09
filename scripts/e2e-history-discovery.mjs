@@ -45,13 +45,23 @@ try {
     assert.deepEqual(errors, []);
     assert.equal(await page.evaluate(() => JSON.parse(window.render_game_to_text()).deterministicWorldHash), hash);
     assert(!/已故 · 已故|配角|长远所重/.test(text));
-    const evidence = inspector.locator('.observer-person-story button').first();
-    if (await evidence.count()) {
+    const beats = inspector.locator('.observer-person-story button');
+    for (let i = 0; i < await beats.count(); i++) {
+      const evidence = beats.nth(i);
+      await evidence.scrollIntoViewIfNeeded();
       await evidence.click();
+      await page.locator('#observer-causal-drawer').waitFor();
       await page.waitForTimeout(400);
-      await page.screenshot({ path: `${dir}/${label}-evidence.png`, fullPage: true });
+      await page.screenshot({ path: `${dir}/${label}-evidence-${i}.png`, fullPage: true });
       await page.keyboard.press('Escape');
+      await page.locator('#observer-causal-drawer').waitFor({ state: 'hidden' });
     }
+    await inspector.getByRole('tab', { name: '生平', exact: true }).click();
+    await inspector.getByRole('button', { name: '读完整人物传', exact: true }).click();
+    await page.waitForTimeout(400);
+    await page.screenshot({ path: `${dir}/${label}-full-biography.png`, fullPage: true });
+    assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
+    assert.equal(await page.evaluate(() => JSON.parse(window.render_game_to_text()).deterministicWorldHash), hash);
     assert.deepEqual(errors, []);
     await page.close();
   }

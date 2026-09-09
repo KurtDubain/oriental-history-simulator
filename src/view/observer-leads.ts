@@ -199,7 +199,7 @@ function projectSituationLead(world: WorldState, situation: SituationState, reso
   return {
     id: `lead-situation:${situation.id}`,
     label: WAR_SITUATION_TYPES.has(situation.type) ? '军争' : '朝局',
-    question: choice.primarySceneId.startsWith('scene:war:') ? choice.recentChange.slice(choice.recentChange.lastIndexOf(' · ') + 3) : situationHeadline(world, item, situation, resolvedEcho),
+    question: choice.primarySceneId.startsWith('scene:') ? choice.recentChange.replace(/^.*?季 · /u, '') : situationHeadline(world, item, situation, resolvedEcho),
     evidence: choice.evidence,
     target,
     overlay: WAR_SITUATION_TYPES.has(situation.type) ? 'war' : 'political',

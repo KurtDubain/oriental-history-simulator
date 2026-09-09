@@ -90,9 +90,7 @@ function unique(values: readonly string[]): string[] {
   return [...new Set(values)].sort(stableCompare);
 }
 
-function compactNumber(value: number): string {
-  return new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(value);
-}
+const compactNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format;
 
 function characterName(world: WorldState, id: string): string {
   return world.characters.find((item) => item.id === id)?.name ?? '未载人物';
@@ -646,7 +644,8 @@ function militaryFactTouchesSituation(fact: SimulationFact, situation: Situation
     return characters.has(fact.payload.actorId) || armies.has(fact.payload.targetArmyId);
   }
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
-    return characters.has(fact.payload.holderId) || Boolean(fact.payload.armyId && armies.has(fact.payload.armyId));
+    return situation.participants.coreCharacterIds.includes(fact.payload.holderId)
+      || Boolean(fact.payload.armyId && armies.has(fact.payload.armyId));
   }
   return false;
 }

@@ -146,6 +146,25 @@ function lowSupplyBattleFact(world: WorldState): Extract<SimulationFact, { kind:
 }
 
 describe('observer story leads', () => {
+  it('does not answer one general’s military story with a supporting character’s unrelated throne appointment', () => {
+    const world = worldAt(12), army = world.armies[0], core = army.commanderId;
+    const other = world.characters.find(c => c.id !== core && c.polityId === army.polityId)!;
+    const situation = { ...world.situationSystem.situations[0], id: 'situation-bound-subject', type: 'military_power_crisis' as const,
+      status: 'open' as const, phase: 'critical' as const, visibility: 100, startedTurn: world.turn, lastUpdatedTurn: world.turn,
+      participants: { ...world.situationSystem.situations[0].participants, coreCharacterIds: [core],
+        supportingCharacterIds: [other.id], opposingCharacterIds: [], armyIds: [army.id], polityIds: [army.polityId] } };
+    const proper = appointmentFact(world, 'fact_subject_1', 'appointment_started', '军团主帅', core, army.id);
+    const unrelated = { ...proper, id: 'fact_subject_2', importance: 5 as const,
+      payload: { ...proper.payload, officeKind: '君主' as const, holderId: other.id, armyId: null } };
+    world.facts = [proper, unrelated];
+    world.situationSystem.situations = [situation];
+    const scenes = projectSituationHistoricalScenes(world, situation);
+    expect(scenes.some(s => s.sourceFactIds.includes(unrelated.id))).toBe(false);
+    const lead = deriveObserverLeads(world).find(l => l.situationId === situation.id)!;
+    expect(lead.question).toContain(world.characters.find(c => c.id === core)!.name);
+    expect(lead.primarySourceFactIds).toContain(proper.id);
+    expect(lead.evidence.join('')).not.toContain('出任于洛阳君主');
+  });
   it('does not manufacture an opening question before a Situation or current Fact exists', () => {
     const world = createWorld('当世三问-如实留空');
 

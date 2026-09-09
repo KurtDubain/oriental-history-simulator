@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import { computeWorldHash, createWorld, serializeWorld } from '../sim';
-import type { BattleFact } from '../sim/facts';
+import type { BattleFact, SimulationFact } from '../sim/facts';
 import type { WorldState } from '../sim/types';
 import { projectPersonStoryArc } from './person-story-arc';
 
@@ -66,6 +66,78 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it('joins adjacent gains and the later collapse, retaining each fact without crediting national victories as personal combat', () => {
+    const world = createWorld('不绑定姓名的兴亡');
+    const person = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;
+    const other = world.characters.find(p => p.polityId !== person.polityId && world.armies.some(a => a.commanderId === p.id))!;
+    const base = battleFact(world, person.id, 'last-battle', 30, 150);
+    const place = world.regions.find(r => r.id === base.regionIds[0])!;
+    const neighbor = world.regions.find(r => place.neighbors.includes(r.id))!;
+    world.offices.push({ id: 'reign', holderId: person.id, polityId: person.polityId, kind: '君主', rank: 100,
+      armyId: null, regionId: place.id, appointedTurn: 10, endedTurn: 30, active: false });
+    const gains = [place, neighbor].map((r,i): SimulationFact => ({ ...base, id: `gain-${i}`, turn: 20+i,
+      kind: 'territory_control_changed', actorIds: [other.id], regionIds: [r.id], sourceFactIds: [`victory-${i}`],
+      payload: { warId: 'expansion', regionId: r.id, previousControllerId: other.polityId,
+        nextControllerId: person.polityId, reason: 'battle_capture' } }));
+    const losses = gains.map((f,i): SimulationFact => ({ ...f, id: `loss-${i}`, turn: 27+i,
+      kind: 'territory_control_changed', sourceFactIds: [`defeat-${i}`], payload: { warId: base.payload.warId,
+        regionId: f.regionIds[0], previousControllerId: person.polityId, nextControllerId: other.polityId, reason: 'battle_capture' } }));
+    base.payload.attackerWon = false;
+    world.facts.push(...gains, ...losses, base, { ...base, id: 'death', kind: 'character_death', sourceFactIds: [base.id],
+      payload: { characterId: person.id, cause: 'battle', age: person.age, role: person.role, health: person.health, diseaseId: null, battleFactId: base.id } });
+    person.alive = false;
+    const before = serializeWorld(world), arc = projectPersonStoryArc(world, person);
+    expect(arc.map(b => b.title)).toContain(`${person.name}任内连取${place.name}、${neighbor.name}`);
+    const campaign = arc.find(b => b.title.includes('任内连取'))!;
+    expect(campaign.title).toBe(`${person.name}任内连取${place.name}、${neighbor.name}`);
+    expect(campaign.summary).not.toContain('本人参战');
+    expect(campaign.sourceFactIds).toEqual(['gain-0','gain-1','victory-0','victory-1']);
+    expect(arc.at(-1)?.title).toContain(`${place.name}、${neighbor.name}先后失守`);
+    expect(arc.at(-1)?.sourceFactIds).toEqual(expect.arrayContaining(['loss-0','loss-1','defeat-0','defeat-1',base.id,'death']));
+    expect(serializeWorld(world)).toBe(before);
+    world.facts.reverse();
+    expect(projectPersonStoryArc(world, person)).toEqual(arc);
+  });
+
+  it('merges a witnessed founding with its throne appointment, not the former ruler in actorIds', () => {
+    const world = createWorld('起兵身份并非人物姓名');
+    const person = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;
+    const former = world.characters.find(p => p.id === world.polities.find(n => n.id === person.polityId)!.rulerId)!;
+    const base = battleFact(world, person.id, 'base', 20, 10);
+    world.offices.push({ id: 'founder-seat', holderId: person.id, polityId: 'founded-polity', kind: '君主', rank: 100,
+      armyId: null, regionId: base.regionIds[0], appointedTurn: 20, endedTurn: null, active: true });
+    const fact = { ...base, id: 'founder-office', kind: 'appointment_started' as const, sourceFactIds: [],
+      payload: { appointmentId: 'founder-seat', action: 'started' as const, officeKind: '君主' as const,
+        holderId: person.id, polityId: 'founded-polity', regionId: base.regionIds[0], armyId: null, fleetId: null, rank: 100 } };
+    world.facts.push(fact);
+    world.history.push({ ...base, id: 'founding', kind: 'rebellion', actorIds: [former.id, person.id],
+      title: `${person.name}据边城起兵`, summary: '建立新国', sourceFactIds: [], evidence: [], situationIds: [],
+      stateDeltas: [{ entityType: 'polity', entityId: 'founded-polity', field: 'alive', before: false, after: true }] });
+    const arc = projectPersonStoryArc(world, person), founding = arc.find(b => b.sourceEventIds.includes('founding'))!;
+    expect(founding.title).toContain('据边城起兵');
+    expect(founding.sourceFactIds).toContain(fact.id);
+    expect(arc.filter(b => b.sourceFactIds.includes(fact.id))).toHaveLength(1);
+    expect(projectPersonStoryArc(world, former).some(b => b.title.includes('起兵'))).toBe(false);
+  });
+
+  it('joins a normal same-quarter transfer without pretending dismissal, but retains a sourced purge', () => {
+    const world = createWorld('任职转换不等于失势');
+    const p = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;
+    const base = battleFact(world, p.id, 'base', 24, 10);
+    const ended = { ...base, id: 'transfer-end', kind: 'appointment_ended' as const,
+      payload: { appointmentId: 'old-seat', action: 'ended' as const, officeKind: '地方长官' as const,
+        holderId: p.id, polityId: p.polityId, regionId: base.regionIds[0], armyId: null, fleetId: null, rank: 55 } };
+    const started = { ...ended, id: 'transfer-start', kind: 'appointment_started' as const,
+      payload: { ...ended.payload, action: 'started' as const, officeKind: '军团主帅' as const, rank: 70 } };
+    world.facts.push(ended, started);
+    const arc = projectPersonStoryArc(world, p);
+    expect(arc).toHaveLength(1);
+    expect(arc[0].title).toContain('由地方长官转任军团主帅');
+    expect(arc[0].sourceFactIds).toEqual(['transfer-end', 'transfer-start']);
+    ended.sourceFactIds = ['purge-source'];
+    expect(projectPersonStoryArc(world, p).some(b => b.phase === 'setback')).toBe(true);
+  });
+
   it('keeps accession and a sourced capital capture above repeated late victories, without crediting the absent ruler', () => {
     const world = createWorld('重要转折非固定人生');
     const person = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;
@@ -90,7 +162,10 @@ describe('person story arc', () => {
     const arc = projectPersonStoryArc(world, person);
     expect(arc.some(b => b.title === `${person.name}登位`)).toBe(true);
     expect(arc.find(b => b.sourceEventIds.includes('capital_event'))?.title).toContain('参战，攻克');
-    expect(projectPersonStoryArc(world, ruler).find(b => b.sourceEventIds.includes('capital_event'))?.title).toBe('任内国事：旧国失都');
+    const national = projectPersonStoryArc(world, ruler).find(b => b.sourceEventIds.includes('capital_event'))!;
+    expect(national.title).toContain('任内国事：攻取');
+    expect(national.phase).toBe('battle');
+    expect(national.title).not.toContain('参战');
     expect(serializeWorld(world)).toBe(before);
     world.facts.reverse(); world.history.reverse();
     expect(projectPersonStoryArc(world, person)).toEqual(arc);

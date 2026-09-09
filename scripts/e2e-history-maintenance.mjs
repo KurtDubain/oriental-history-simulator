@@ -18,7 +18,7 @@ try {
       const close = page.locator('[data-inspector-close]');
       if (await close.isVisible()) await close.click();
       const state = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
-      const dir = `${root}/battle-browser/${name}`;
+      const dir = `${process.argv[2] ?? `${root}/battle-browser`}/${name}`;
       await mkdir(dir, { recursive: true });
       await page.screenshot({ path: `${dir}/${label}-quarter.png`, fullPage: true });
       const story = state.interface.quarterPulse.stories.find(s => s.title.includes('接连3战'));
