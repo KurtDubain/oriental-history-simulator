@@ -517,9 +517,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
           title: story.title,
           summary: story.summary,
           importance: story.importance,
-          destination: story.kind === 'situation'
-            ? { kind: 'situation', id: story.situationId }
-            : story.eventId
+          destination: story.eventId
               ? { kind: 'event', id: story.eventId }
               : { kind: 'record', id: story.id },
           sourceFactIds: story.sourceFactIds,

@@ -16,6 +16,19 @@ import type {
 
 const KEY_SEPARATOR = '\u241f';
 
+/** Shared record constructors; no scoring or additional state lives here. */
+export function situationIndexRef(entityType: string, entityId: string, field: string,
+  value: string | number | boolean | null): SituationEvidenceRef {
+  return { kind: 'index', entityType, entityId, field, value };
+}
+
+export function makeSituationSignal(key: string, role: SituationSignal['role'], contribution: number,
+  refs: readonly SituationEvidenceRef[], sourceFactIds: readonly string[] = [], maximumSources = 6,
+): SituationSignal & { sourceFactIds: readonly string[] } {
+  return { key, role, contribution: Math.round(clamp(contribution, -30, 30) * 10) / 10,
+    refs: refs.slice(0, 4), sourceFactIds: [...new Set(sourceFactIds.filter(Boolean))].sort(stableCompare).slice(0, maximumSources) };
+}
+
 const SIGNAL_ROLE_ORDER: Record<SituationSignal['role'], number> = {
   structural: 0,
   trigger: 1,

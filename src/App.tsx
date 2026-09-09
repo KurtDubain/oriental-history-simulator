@@ -1192,6 +1192,9 @@ export function App() {
       : null
   ), [selectedSituationId, situationWorkbenchOpen, world]);
   const focusedWar = useMemo(() => world && focusedWarId ? projectWarGroups(world, focusedWarId) : null, [focusedWarId, world]);
+  useEffect(() => {
+    if (!historicalView && focusedWarId && !world?.wars.some(w => w.id === focusedWarId && w.active)) setFocusedWarId(null);
+  }, [focusedWarId, historicalView, world]);
   const rosterDirectory = useMemo(() => (
     world && (activeView === 'people' || activeView === 'powers')
       ? projectRosterDirectory(world, observerSettings.watchlist)
@@ -2050,7 +2053,6 @@ export function App() {
             stories={quarterPulseProjection.stories}
             compact={running || (compactRosterDossier && Boolean(inspector || (focusedWar && overlay === 'war')))}
             onSelectEvent={selectQuarterEvent}
-            onSelectSituation={handleOpenSituationWorkbench}
             onSelectLedger={selectQuarterLedger}
           />
 

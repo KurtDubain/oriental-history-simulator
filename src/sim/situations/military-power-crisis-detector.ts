@@ -1,3 +1,4 @@
+import { makeSituationSignal as makeSignal, situationIndexRef as indexRef } from "./candidate-registry";
 import type {
   ArmyState,
   CharacterState,
@@ -49,7 +50,6 @@ const MAX_PARTICIPANT_ARMIES = 4;
 const MAX_SUPPORTERS = 6;
 const MAX_OPPONENTS = 4;
 const MAX_SOURCE_FACTS = 6;
-const MAX_SIGNAL_REFS = 4;
 
 type CommandRole = 'commander' | 'deputy';
 
@@ -71,60 +71,27 @@ export interface MilitaryPowerCrisisIndex {
 }
 
 export interface MilitaryPowerCrisisSignal extends SituationSignal {
-  label: string;
-  evidence: string;
   sourceFactIds: readonly string[];
 }
 
 export interface MilitaryPowerCrisisWatchSignal extends SituationWatchSignal {
-  label: string;
 }
 
-export interface MilitaryPowerCrisisStartSnapshot {
-  turn: number;
-  actorId: string;
-  polityId: string;
-  primaryArmyId: string | null;
-  commandRole: CommandRole;
-  soldiersInReach: number;
-  politySoldiers: number;
-  ambition: number;
-  loyalty: number;
-  centralAuthority: number;
-  rulerTrust: number | null;
-  rulerGrievance: number | null;
-  familyMobilization: number;
-}
-
-/**
- * Extended, human-auditable detector output. The base fields are consumed by
- * the Situation reducer; the aliases keep the detector independently
- * inspectable while Phase B UI/projector work is still in progress.
- */
+/** Detector observations keep their exact source refs; presentation is projected elsewhere. */
 export interface MilitaryPowerCrisisCandidate extends SituationCandidateObservation {
   type: typeof MILITARY_POWER_CRISIS_TYPE;
   candidateKey: string;
-  title: string;
   hasExecutableActor: boolean;
   participants: SituationParticipants;
   executableActorIds: readonly string[];
   signals: readonly MilitaryPowerCrisisSignal[];
-  structureSignals: readonly MilitaryPowerCrisisSignal[];
-  triggerSignals: readonly MilitaryPowerCrisisSignal[];
-  inhibitorSignals: readonly MilitaryPowerCrisisSignal[];
   sourceFactIds: readonly string[];
   nextWatch: MilitaryPowerCrisisWatchSignal;
-  nextWatchSignal: MilitaryPowerCrisisWatchSignal;
-  startSnapshot: MilitaryPowerCrisisStartSnapshot;
   possibleOutcomes: readonly SituationOutcomeOption[];
 }
 
 function clamp(value: number, minimum = 0, maximum = 100): number {
   return Math.max(minimum, Math.min(maximum, value));
-}
-
-function rounded(value: number): number {
-  return Math.round(value * 10) / 10;
 }
 
 function stableCompare(left: string, right: string): number {
@@ -139,37 +106,8 @@ function relationKey(sourceId: string, targetId: string): string {
   return `${sourceId}->${targetId}`;
 }
 
-function indexRef(
-  entityType: string,
-  entityId: string,
-  field: string,
-  value: string | number | boolean | null,
-): SituationEvidenceRef {
-  return { kind: 'index', entityType, entityId, field, value };
-}
-
 function factRefs(factIds: readonly string[]): SituationEvidenceRef[] {
   return uniqueSorted(factIds, MAX_SOURCE_FACTS).map((factId) => ({ kind: 'fact', factId }));
-}
-
-function makeSignal(
-  key: string,
-  role: SituationSignalRole,
-  contribution: number,
-  label: string,
-  evidence: string,
-  refs: readonly SituationEvidenceRef[],
-  sourceFactIds: readonly string[] = [],
-): MilitaryPowerCrisisSignal {
-  return {
-    key,
-    role,
-    contribution: rounded(clamp(contribution, -30, 30)),
-    label,
-    evidence,
-    refs: refs.slice(0, MAX_SIGNAL_REFS),
-    sourceFactIds: uniqueSorted(sourceFactIds, MAX_SOURCE_FACTS),
-  };
 }
 
 function sortedMap<T extends { id: string }>(items: readonly T[]): Map<string, T> {
@@ -349,13 +287,11 @@ function possibleOutcomes(
 }
 
 function buildResolutionCandidate(
-  context: { turn: number; facts: readonly SimulationFact[]; index: Readonly<MilitaryPowerCrisisIndex> },
   fact: SimulationFact,
   actor: CharacterState,
   polity: PolityState,
   outcomeKey: 'actor_died' | 'command_removed',
   primaryArmyId: string | null,
-  commandRole: CommandRole,
 ): MilitaryPowerCrisisCandidate {
   const scopeKey = `${polity.id}:${actor.id}`;
   const candidateKey = `${MILITARY_POWER_CRISIS_TYPE}:${scopeKey}`;
@@ -363,25 +299,17 @@ function buildResolutionCandidate(
     outcomeKey,
     'outcome',
     -30,
-    outcomeKey === 'actor_died' ? '军权主体死亡' : '军职已经解除',
-    outcomeKey === 'actor_died'
-      ? `${actor.name}死亡，已不能继续执行军令或控制军团`
-      : `${actor.name}的军职已由任命终止事实解除，且当前没有剩余陆军职位`,
     [{ kind: 'fact', factId: fact.id }],
     [fact.id],
   );
   const nextWatch: MilitaryPowerCrisisWatchSignal = {
     key: outcomeKey === 'actor_died' ? 'watch_command_succession' : 'watch_post_command_settlement',
-    label: outcomeKey === 'actor_died'
-      ? '观察军团由谁接掌，以及旧有军中与家族网络流向何处'
-      : '观察解除军职后是否出现安置、清洗、再任命或余部追随',
     refs: [{ kind: 'fact', factId: fact.id }],
   };
   return {
     type: MILITARY_POWER_CRISIS_TYPE,
     scopeKey,
     candidateKey,
-    title: `${actor.name}与${polity.shortName}军权`,
     pressure: 0,
     hasExecutableActor: false,
     participants: {
@@ -397,27 +325,8 @@ function buildResolutionCandidate(
     },
     executableActorIds: [],
     signals: [outcomeSignal],
-    structureSignals: [],
-    triggerSignals: [],
-    inhibitorSignals: [],
     sourceFactIds: [fact.id],
     nextWatch,
-    nextWatchSignal: nextWatch,
-    startSnapshot: {
-      turn: context.turn,
-      actorId: actor.id,
-      polityId: polity.id,
-      primaryArmyId,
-      commandRole,
-      soldiersInReach: 0,
-      politySoldiers: context.index.totalSoldiersByPolity.get(polity.id) ?? 0,
-      ambition: actor.ambition,
-      loyalty: actor.loyalty,
-      centralAuthority: polity.authority,
-      rulerTrust: null,
-      rulerGrievance: null,
-      familyMobilization: 0,
-    },
     possibleOutcomes: [],
     resolution: { outcomeKey, resultFactIds: [fact.id] },
     importance: Math.max(40, fact.importance * 20),
@@ -464,10 +373,6 @@ function buildCandidate(
     primary.role === 'commander' ? 'actual_army_command' : 'deputy_command_position',
     'capability',
     commandContribution,
-    primary.role === 'commander' ? '实际主帅军令' : '副将军中位置',
-    primary.role === 'commander'
-      ? `${actor.name}当前获${mainPositions.length}支军团实际拥戴，可影响${soldiersInReach}兵，占本国陆军${Math.round(armyShare * 100)}%`
-      : `${actor.name}是${primary.army.name}登记副将；副将经验${actor.deputyExperience}、战功${actor.merit}、声望${actor.renown}`,
     primary.role === 'commander'
       ? [
         indexRef('army', primary.army.id, 'allegiance.characterId', actor.id),
@@ -486,13 +391,11 @@ function buildCandidate(
   if (actor.ambition >= 50) {
     add(makeSignal(
       'high_ambition', 'structural', clamp((actor.ambition - 45) * 0.28, 0, 15),
-      '权位野心', `野心${actor.ambition}提高争取独立军令或抗拒削权的动机`,
       [indexRef('character', actor.id, 'ambition', actor.ambition)],
     ));
   } else {
     add(makeSignal(
       'low_ambition', 'inhibitor', -clamp((50 - actor.ambition) * 0.16, 1, 8),
-      '野心有限', `野心${actor.ambition}抑制夺取更高军权的动机`,
       [indexRef('character', actor.id, 'ambition', actor.ambition)],
     ));
   }
@@ -500,13 +403,11 @@ function buildCandidate(
   if (actor.loyalty <= 62) {
     add(makeSignal(
       'weak_loyalty', 'structural', clamp((68 - actor.loyalty) * 0.3, 1, 18),
-      '忠诚松动', `忠诚${actor.loyalty}降低服从朝廷与现有军令链的约束`,
       [indexRef('character', actor.id, 'loyalty', actor.loyalty)],
     ));
   } else {
     add(makeSignal(
       'strong_loyalty', 'inhibitor', -clamp((actor.loyalty - 58) * 0.22, 1, 10),
-      '忠诚约束', `忠诚${actor.loyalty}抑制拒令、割据和叛乱`,
       [indexRef('character', actor.id, 'loyalty', actor.loyalty)],
     ));
   }
@@ -514,13 +415,11 @@ function buildCandidate(
   if (polity.authority <= 60) {
     add(makeSignal(
       'weak_central_authority', 'structural', clamp((66 - polity.authority) * 0.32, 1, 20),
-      '中央权威不足', `中央权威${polity.authority}使召还、换帅与军饷控制更难执行`,
       [indexRef('polity', polity.id, 'authority', polity.authority)],
     ));
   } else {
     add(makeSignal(
       'strong_central_authority', 'inhibitor', -clamp((polity.authority - 56) * 0.22, 1, 11),
-      '中央仍能制军', `中央权威${polity.authority}提高召还、调任和制裁的可信度`,
       [indexRef('polity', polity.id, 'authority', polity.authority)],
     ));
   }
@@ -546,14 +445,6 @@ function buildCandidate(
     actorToRuler || rulerToActor ? 'ruler_court_relationship' : 'ruler_court_relationship_unrecorded',
     courtRelationshipRole,
     courtRelationshipContribution,
-    !actorToRuler && !rulerToActor
-      ? '君臣关系尚无记录'
-      : courtRelationshipContribution > 0
-        ? '君臣互疑'
-        : '君臣关系缓和',
-    !actorToRuler && !rulerToActor
-      ? '没有可核验的有向关系记录，因此不把未知关系计作敌意或信任'
-      : `将领对君主${actorToRuler ? `信任${actorToRuler.trust}、积怨${actorToRuler.grievance}` : '无记录'}；君主对将领${rulerToActor ? `信任${rulerToActor.trust}、畏惧${rulerToActor.fear}、积怨${rulerToActor.grievance}` : '无记录'}`,
     [
       ...(actorToRuler ? [
         indexRef('relationship', actorToRuler.id, 'trust', actorToRuler.trust),
@@ -576,8 +467,6 @@ function buildCandidate(
     const contribution = relationshipContribution(chainRelation) * 0.9;
     add(makeSignal(
       'chain_of_command_relationship', contribution > 0 ? 'trigger' : 'inhibitor', contribution,
-      contribution > 0 ? '主副将失和' : '主副将互信',
-      `对主帅信任${chainRelation.trust}、积怨${chainRelation.grievance}、感激${chainRelation.gratitude}`,
       [
         indexRef('relationship', chainRelation.id, 'trust', chainRelation.trust),
         indexRef('relationship', chainRelation.id, 'grievance', chainRelation.grievance),
@@ -597,7 +486,6 @@ function buildCandidate(
       const duePressure = order.dueTurn !== null && order.dueTurn <= context.turn + 4 ? 3 : 0;
       add(makeSignal(
         'active_military_order', 'structural', 3 + duePressure,
-        '生效军令', `${actor.name}仍须履行军令；其状态提供了可执行的服从或拒令节点`,
         [
           indexRef('commitment', order.id, 'status', order.status),
           indexRef('commitment', order.id, 'promiseeId', order.promiseeId),
@@ -608,7 +496,6 @@ function buildCandidate(
       hasBrokenOrder = true;
       add(makeSignal(
         'military_order_breached', 'trigger', clamp(17 - Math.max(0, context.turn - (order.resolvedTurn ?? context.turn)) * 0.7, 6, 17),
-        '近期拒令或背约', `${actor.name}已使军令承诺进入背约状态`,
         [
           indexRef('commitment', order.id, 'status', order.status),
           indexRef('commitment', order.id, 'resolvedTurn', order.resolvedTurn),
@@ -617,7 +504,6 @@ function buildCandidate(
     } else if (isPromisor && order.status === '履约' && recentResolution) {
       add(makeSignal(
         'military_order_fulfilled', 'inhibitor', -clamp(9 - Math.max(0, context.turn - (order.resolvedTurn ?? context.turn)) * 0.4, 2, 9),
-        '近期履行军令', `${actor.name}近期履约，提供了真实的服从证据`,
         [
           indexRef('commitment', order.id, 'status', order.status),
           indexRef('commitment', order.id, 'resolvedTurn', order.resolvedTurn),
@@ -626,7 +512,6 @@ function buildCandidate(
     } else if (!isPromisor && order.status === '背约' && recentResolution) {
       add(makeSignal(
         'subordinate_order_breached', 'trigger', 5,
-        '麾下军令链破裂', '麾下副将近期背约，主帅对军团的实际控制受到挑战',
         [
           indexRef('commitment', order.id, 'status', order.status),
           indexRef('commitment', order.id, 'promisorId', order.promisorId),
@@ -649,8 +534,6 @@ function buildCandidate(
     const contribution = clamp(battleFacts.length * 1.5 + (wins - losses) * 2.5, -6, 13);
     add(makeSignal(
       'recent_battle_record', contribution >= 0 ? 'trigger' : 'inhibitor', contribution,
-      contribution >= 0 ? '近期战功与军望' : '近期败绩',
-      `本季有${battleFacts.length}场可核验会战，${wins}胜${losses}负`,
       factRefs(battleFacts.map((item) => item.fact.id)),
       battleFacts.map((item) => item.fact.id),
     ));
@@ -666,14 +549,12 @@ function buildCandidate(
   if (endedAppointments.length > 0) {
     add(makeSignal(
       'recent_command_removed', 'trigger', 8,
-      '近期削去军职', '任命事实记录显示军职近期终止，可能触发拒绝召还、安抚或清洗',
       factRefs(endedAppointments.map((fact) => fact.id)),
       endedAppointments.map((fact) => fact.id),
     ));
   } else if (startedAppointments.length > 0) {
     add(makeSignal(
       'recent_command_granted', 'trigger', 4,
-      '近期授予军职', '任命事实记录显示军权刚刚扩大，朝廷与将领尚在重新校准关系',
       factRefs(startedAppointments.map((fact) => fact.id)),
       startedAppointments.map((fact) => fact.id),
     ));
@@ -686,8 +567,6 @@ function buildCandidate(
   const readinessContribution = clamp((readiness - 42) * 0.12, -6, 8);
   add(makeSignal(
     'army_operational_readiness', readinessContribution >= 0 ? 'capability' : 'inhibitor', readinessContribution,
-    readinessContribution >= 0 ? '军团具备行动能力' : '军团战备不足',
-    `相关军团综合战备${Math.round(readiness)}；战备只代表行动能力，不等同于个人忠诚`,
     [
       indexRef('army', primary.army.id, 'morale', primary.army.morale),
       indexRef('army', primary.army.id, 'training', primary.army.training),
@@ -708,7 +587,6 @@ function buildCandidate(
     const factionSupport = bestPoliticalFaction.power * bestPoliticalFaction.cohesion / 100;
     add(makeSignal(
       'military_network_support', 'capability', clamp(factionSupport * 0.13, 1, 13),
-      '政治网络支持', `${bestPoliticalFaction.name}权势${bestPoliticalFaction.power}、凝聚${bestPoliticalFaction.cohesion}`,
       [
         indexRef('faction', bestPoliticalFaction.id, 'power', bestPoliticalFaction.power),
         indexRef('faction', bestPoliticalFaction.id, 'cohesion', bestPoliticalFaction.cohesion),
@@ -722,12 +600,12 @@ function buildCandidate(
   if (familySupport.score >= 20) {
     add(makeSignal(
       'family_mobilization_capacity', 'capability', clamp((familySupport.score - 12) * 0.12, 1, 11),
-      '家族可动员支撑', familySupport.explanation, familySupport.refs,
+      familySupport.refs,
     ));
   } else {
     add(makeSignal(
       'weak_family_base', 'inhibitor', -clamp((25 - familySupport.score) * 0.16, 1, 6),
-      '家族支撑有限', `${familySupport.explanation}；这不是家族已经表态支持的证据`, familySupport.refs,
+      familySupport.refs,
     ));
   }
 
@@ -769,14 +647,12 @@ function buildCandidate(
     if (activeExecutableOrder) {
       return {
         key: 'watch_military_order_resolution',
-        label: '观察这道军令会被履行、拒绝，还是随升迁而解除',
         refs: [indexRef('commitment', activeExecutableOrder.id, 'status', activeExecutableOrder.status)],
       } satisfies MilitaryPowerCrisisWatchSignal;
     }
     if (primary.role === 'deputy') {
       return {
         key: 'watch_independent_command',
-        label: '观察副将是否获得独立军令、积累新战功或与主帅失和',
         refs: [
           indexRef('army', primary.army.id, 'commanderId', primary.army.commanderId),
           indexRef('army', primary.army.id, 'deputyCommanderId', primary.army.deputyCommanderId),
@@ -787,7 +663,6 @@ function buildCandidate(
     if (polity.authority <= 60 || rulerToActor) {
       return {
         key: 'watch_recall_or_refusal',
-        label: '观察朝廷是否召还、调任或安抚主帅，以及主帅是否服从',
         refs: [
           indexRef('polity', polity.id, 'authority', polity.authority),
           indexRef('army', primary.army.id, 'commanderId', primary.army.commanderId),
@@ -797,7 +672,6 @@ function buildCandidate(
     }
     return {
       key: 'watch_command_and_army_support',
-      label: '观察军职是否变化，以及战功、政治网络和家族可动员支撑是否继续扩大',
       refs: [
         indexRef('army', primary.army.id, 'commanderId', primary.army.commanderId),
         indexRef('character', actor.id, 'merit', actor.merit),
@@ -811,33 +685,13 @@ function buildCandidate(
     type: MILITARY_POWER_CRISIS_TYPE,
     scopeKey,
     candidateKey,
-    title: `${actor.name}与${polity.shortName}军权`,
     pressure,
     hasExecutableActor,
     participants,
     executableActorIds: hasExecutableActor ? [actor.id] : [],
     signals,
-    structureSignals,
-    triggerSignals,
-    inhibitorSignals,
     sourceFactIds,
     nextWatch,
-    nextWatchSignal: nextWatch,
-    startSnapshot: {
-      turn: context.turn,
-      actorId: actor.id,
-      polityId: polity.id,
-      primaryArmyId: primary.army.id,
-      commandRole: primary.role,
-      soldiersInReach,
-      politySoldiers,
-      ambition: actor.ambition,
-      loyalty: actor.loyalty,
-      centralAuthority: polity.authority,
-      rulerTrust: actorToRuler?.trust ?? null,
-      rulerGrievance: actorToRuler?.grievance ?? null,
-      familyMobilization: Math.round(familySupport.score),
-    },
     possibleOutcomes: possibleOutcomes(pressure, actor, polity, hasExecutableActor, hasBrokenOrder),
     importance: Math.round(clamp(35 + pressure * 0.65)),
     visibility: Math.round(clamp(30 + pressure * 0.55 + (sourceFactIds.length > 0 ? 8 : 0))),
@@ -900,13 +754,11 @@ function detectMilitaryPowerCrisis(
       ))
       .sort((left, right) => right.appointedTurn - left.appointedTurn || stableCompare(left.id, right.id))[0];
     candidates.push(buildResolutionCandidate(
-      context,
       fact,
       actor,
       polity,
       'actor_died',
       lastMilitaryOffice?.armyId ?? null,
-      lastMilitaryOffice?.kind === '军团副将' ? 'deputy' : 'commander',
     ));
     observedScopes.add(scopeKey);
   }
@@ -921,13 +773,11 @@ function detectMilitaryPowerCrisis(
     const scopeKey = `${polity.id}:${actor.id}`;
     if (observedScopes.has(scopeKey) || positionsByActor.has(scopeKey)) continue;
     candidates.push(buildResolutionCandidate(
-      context,
       fact,
       actor,
       polity,
       'command_removed',
       fact.payload.armyId,
-      fact.payload.officeKind === '军团副将' ? 'deputy' : 'commander',
     ));
     observedScopes.add(scopeKey);
   }

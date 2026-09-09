@@ -196,9 +196,9 @@ describe('military power crisis detector', () => {
     expect(candidate.signals.flatMap((signal) => signal.refs).every((ref) => (
       ref.kind === 'fact' || ref.kind === 'index'
     ))).toBe(true);
-    expect(candidate.structureSignals.some((signal) => signal.key === 'actual_army_command')).toBe(true);
-    expect(candidate.structureSignals.some((signal) => signal.key === 'military_network_support')).toBe(true);
-    expect(candidate.structureSignals.some((signal) => signal.key === 'family_mobilization_capacity')).toBe(true);
+    expect(candidate.signals.filter(signal => signal.role === 'structural' || signal.role === 'capability').some((signal) => signal.key === 'actual_army_command')).toBe(true);
+    expect(candidate.signals.filter(signal => signal.role === 'structural' || signal.role === 'capability').some((signal) => signal.key === 'military_network_support')).toBe(true);
+    expect(candidate.signals.filter(signal => signal.role === 'structural' || signal.role === 'capability').some((signal) => signal.key === 'family_mobilization_capacity')).toBe(true);
   });
 
   it('separates structural pressure from loyalty, authority and relationship inhibition', () => {
@@ -221,13 +221,13 @@ describe('military power crisis detector', () => {
 
     const suppressed = candidateFor(suppressedWorld, suppressedActor.id);
     expect(suppressed.pressure).toBeLessThan(riskyCandidate.pressure - 35);
-    expect(suppressed.inhibitorSignals.map((signal) => signal.key)).toEqual(expect.arrayContaining([
+    expect(suppressed.signals.filter(signal => signal.role === 'inhibitor').map((signal) => signal.key)).toEqual(expect.arrayContaining([
       'low_ambition',
       'strong_loyalty',
       'strong_central_authority',
       'ruler_court_relationship',
     ]));
-    expect(riskyCandidate.triggerSignals.some((signal) => signal.key === 'ruler_court_relationship')).toBe(true);
+    expect(riskyCandidate.signals.filter(signal => signal.role === 'trigger').some((signal) => signal.key === 'ruler_court_relationship')).toBe(true);
   });
 
   it('does not mark a deputy critical-capable without a real order, then exposes refusal as an executable next step', () => {
@@ -288,9 +288,9 @@ describe('military power crisis detector', () => {
     const withOrder = candidateFor(world, actor.id);
     expect(withOrder.hasExecutableActor).toBe(true);
     expect(withOrder.executableActorIds).toEqual([actor.id]);
-    expect(withOrder.structureSignals.some((signal) => signal.key === 'active_military_order')).toBe(true);
-    expect(withOrder.nextWatchSignal.key).toBe('watch_military_order_resolution');
-    expect(withOrder.nextWatchSignal.refs).toContainEqual(expect.objectContaining({
+    expect(withOrder.signals.filter(signal => signal.role === 'structural' || signal.role === 'capability').some((signal) => signal.key === 'active_military_order')).toBe(true);
+    expect(withOrder.nextWatch.key).toBe('watch_military_order_resolution');
+    expect(withOrder.nextWatch.refs).toContainEqual(expect.objectContaining({
       kind: 'index', entityType: 'commitment', entityId: order.id, field: 'status', value: '生效',
     }));
   });
@@ -316,7 +316,7 @@ describe('military power crisis detector', () => {
 
     const currentBattle = battleFact(prepared.world, prepared.actor, prepared.polity, prepared.army);
     const withFact = candidateFor(prepared.world, prepared.actor.id, [currentBattle]);
-    expect(withFact.triggerSignals.some((signal) => signal.key === 'recent_battle_record')).toBe(true);
+    expect(withFact.signals.filter(signal => signal.role === 'trigger').some((signal) => signal.key === 'recent_battle_record')).toBe(true);
     expect(withFact.sourceFactIds).toContain(currentBattle.id);
     expect(withFact.signals.flatMap((signal) => signal.refs)).toContainEqual({
       kind: 'fact', factId: currentBattle.id,

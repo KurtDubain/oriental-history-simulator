@@ -344,7 +344,7 @@ describe('inheritance crisis detector', () => {
     expect(candidate.signals.flatMap((signal) => signal.refs).every((ref) => (
       ref.kind === 'index' || (ref.kind === 'fact' && ref.factId === fact.id)
     ))).toBe(true);
-    expect(candidate.structureSignals.map((signal) => signal.key)).toEqual(expect.arrayContaining([
+    expect(candidate.signals.filter(signal => signal.role === 'structural' || signal.role === 'capability').map((signal) => signal.key)).toEqual(expect.arrayContaining([
       'ruler_mortality_exposure',
       'competing_legal_claims',
       'weak_dynastic_legitimacy',
@@ -352,8 +352,8 @@ describe('inheritance crisis detector', () => {
       'consort_clan_pressure',
       'claimant_military_support',
     ]));
-    expect(candidate.startSnapshot.legalCandidateCount).toBeGreaterThanOrEqual(3);
-    expect(candidate.startSnapshot.leadingCandidateId).toBeTruthy();
+    expect(candidate.signals.flatMap(signal => signal.refs).flatMap(ref => ref.kind === 'index' && ref.field === 'legalCandidateCount' ? [ref.value] : [])[0]).toBeGreaterThanOrEqual(3);
+    expect(candidate.signals.flatMap(signal => signal.refs).flatMap(ref => ref.kind === 'index' && ref.field === 'leadingCandidateId' ? [ref.value] : [])[0]).toBeTruthy();
   });
 
   it('keeps a healthy ruler and one clear legal heir below a contested succession', () => {
@@ -366,9 +366,9 @@ describe('inheritance crisis detector', () => {
     const clear = candidateFor(clearWorld, clearPolity.id);
 
     expect(clear.pressure).toBeLessThan(riskyCandidate.pressure - 45);
-    expect(clear.startSnapshot.legalCandidateCount).toBe(1);
-    expect(clear.startSnapshot.leadingCandidateId).toBe(heir.id);
-    expect(clear.inhibitorSignals.map((signal) => signal.key)).toEqual(expect.arrayContaining([
+    expect(clear.signals.flatMap(signal => signal.refs).flatMap(ref => ref.kind === 'index' && ref.field === 'legalCandidateCount' ? [ref.value] : [])[0]).toBe(1);
+    expect(clear.signals.flatMap(signal => signal.refs).flatMap(ref => ref.kind === 'index' && ref.field === 'leadingCandidateId' ? [ref.value] : [])[0]).toBe(heir.id);
+    expect(clear.signals.filter(signal => signal.role === 'inhibitor').map((signal) => signal.key)).toEqual(expect.arrayContaining([
       'ruler_health_stable',
       'clear_legal_successor',
       'strong_dynastic_legitimacy',
@@ -414,7 +414,7 @@ describe('inheritance crisis detector', () => {
     const candidate = candidateFor(prepared.world, prepared.polity.id);
     expect(candidate.executableActorIds).toContain(prepared.first.id);
     expect(candidate.participants.fleetIds).toContain(fleet.id);
-    expect(candidate.structureSignals.some((signal) => (
+    expect(candidate.signals.filter(signal => signal.role === 'structural' || signal.role === 'capability').some((signal) => (
       signal.key === 'claimant_military_support'
       && signal.refs.some((ref) => ref.kind === 'index' && ref.entityType === 'fleet')
     ))).toBe(true);
@@ -442,7 +442,7 @@ describe('inheritance crisis detector', () => {
     const currentFact = appointmentFact(prepared);
     const withCurrent = candidateFor(prepared.world, prepared.polity.id, [currentFact]);
     expect(withCurrent.sourceFactIds).toContain(currentFact.id);
-    expect(withCurrent.triggerSignals.some((signal) => signal.key === 'current_succession_evidence')).toBe(true);
+    expect(withCurrent.signals.filter(signal => signal.role === 'trigger').some((signal) => signal.key === 'current_succession_evidence')).toBe(true);
 
     const stale = { ...currentFact, id: `${currentFact.id}:stale`, turn: prepared.world.turn - 1 };
     expect(candidateFor(prepared.world, prepared.polity.id, [stale])).toEqual(baseline);
@@ -554,7 +554,7 @@ describe('inheritance crisis detector', () => {
     expect(index.expectedRegentByPolity.get(prepared.polity.id)).toBe(prepared.first.id);
 
     const candidate = candidateFor(prepared.world, prepared.polity.id, [appointmentFact(prepared)]);
-    expect(candidate.startSnapshot.leadingCandidateId).toBe(prepared.second.id);
+    expect(candidate.signals.flatMap(signal => signal.refs).flatMap(ref => ref.kind === 'index' && ref.field === 'leadingCandidateId' ? [ref.value] : [])[0]).toBe(prepared.second.id);
     expect(candidate.participants.supportingCharacterIds).toContain(prepared.first.id);
     expect(candidate.participants.opposingCharacterIds).not.toContain(prepared.first.id);
     expect(candidate.possibleOutcomes.find((outcome) => outcome.key === 'regency_established')?.confidence)
@@ -770,7 +770,7 @@ describe('inheritance crisis detector', () => {
       predecessor.id,
       intermediateSuccessor.id,
     ]));
-    expect(resolution.nextWatchSignal.key).toBe('watch_successor_states');
+    expect(resolution.nextWatch.key).toBe('watch_successor_states');
 
     const destroyedWorld = structuredClone(prepared.world);
     const destroyedPolity = destroyedWorld.polities.find((item) => item.id === prepared.polity.id) as PolityState;

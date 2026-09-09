@@ -1,6 +1,8 @@
 import { stableHash, stableStringify } from './random';
 import { computeWorldHash } from './world-hash';
 import type { WorldState } from './types';
+import { decodeArchiveBlock } from './archive/codec';
+import { buildArchiveIndexes } from './archive/metadata';
 import { validateWorld } from './invariants';
 import { migrateV01SocialState } from './v02';
 import { createV03LifeSystems } from './v03-life';
@@ -119,7 +121,12 @@ function migrateLegacyFacts(world: WorldState, boundary: LegacyArchiveBoundary):
 }
 
 export function serializeWorld(world: WorldState): string {
-  return stableStringify(world);
+  if (!world.archiveSystem?.blocks.length) return stableStringify(world);
+  // Indexes repeat IDs already authenticated inside each compressed block.
+  // Residency and every authoritative byte stay untouched in the live world.
+  return stableStringify({ ...world, archiveSystem: { ...world.archiveSystem,
+    blocks: world.archiveSystem.blocks.map(({ indexes: _indexes, ...block }) => block),
+  } });
 }
 
 export function deserializeWorld(serialized: string): WorldState {
@@ -135,6 +142,9 @@ export function deserializeWorld(serialized: string): WorldState {
   if (originalVersion !== 1 && originalVersion !== 2 && originalVersion !== 3 && originalVersion !== 4 && originalVersion !== 5) throw new Error(`不支持的存档版本 ${String(rawWorld.schemaVersion)}`);
   const world = parsed as unknown as WorldState;
   if (world.hash !== computeWorldHash(world)) throw new Error('存档哈希校验失败，内容可能已损坏或被篡改');
+  for (const block of world.archiveSystem?.blocks ?? []) {
+    if (!Object.prototype.hasOwnProperty.call(block, 'indexes')) block.indexes = buildArchiveIndexes(decodeArchiveBlock(block));
+  }
   if (originalVersion >= 4) {
     if (!Array.isArray(world.facts)) {
       throw new Error('事实档案摘要校验失败，内容可能已损坏或被篡改');

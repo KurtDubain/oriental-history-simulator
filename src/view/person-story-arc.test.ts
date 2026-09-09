@@ -66,6 +66,48 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it('joins accession and destroyed-state dismissal without consuming a later independent dismissal', () => {
+    const world = createWorld('同一人生结算链');
+    const person = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;
+    const base = battleFact(world, person.id, 'source', 20, 10);
+    const office = { ...base, id: 'accession-seat', kind: 'appointment_started' as const,
+      payload: { action: 'started' as const, appointmentId: 'reign', holderId: person.id, polityId: person.polityId,
+        officeKind: '君主' as const, rank: 100, regionId: base.regionIds[0], armyId: null, fleetId: null } };
+    const end = { ...office, id: 'kingdom-end', turn: 40, kind: 'appointment_ended' as const, payload: { ...office.payload, action: 'ended' as const } };
+    world.offices.push({ id:'reign', holderId:person.id, polityId:person.polityId, kind:'君主',rank:100,
+      regionId:base.regionIds[0],armyId:null,appointedTurn:20,endedTurn:40,active:false });
+    world.facts.push(office,end);
+    world.history.push({ ...base, id:'accession',kind:'succession',title:`${person.name}获拥立`,summary:'承接君位',evidence:[],situationIds:[],sourceFactIds:[office.id] },
+      { ...base,id:'extinction',turn:40,kind:'polity_eliminated',title:'故国灭亡',summary:'故国退出，君位结束',evidence:[],situationIds:[],sourceFactIds:[],
+        stateDeltas:[{entityType:'polity',entityId:person.polityId,field:'alive',before:true,after:false}] });
+    const arc=projectPersonStoryArc(world,person);
+    const accession=arc.find(b=>b.sourceEventIds.includes('accession'))!;
+    expect(accession.title).toContain('登位');
+    expect(accession.primaryFactId).toBe(office.id);
+    expect(arc.filter(b=>b.sourceFactIds.includes(office.id))).toHaveLength(1);
+    const exit=arc.find(b=>b.sourceEventIds.includes('extinction'))!;
+    expect(exit.sourceFactIds).toContain(end.id);
+    expect(exit.primaryEventId).toBe('extinction');
+    expect(arc.filter(b=>b.sourceFactIds.includes(end.id))).toHaveLength(1);
+  });
+
+  it('retains a late military change after several early capital victories without inventing a new role', () => {
+    const world = createWorld('长军旅不是四场早战');
+    const person=world.characters.find(p=>world.armies.some(a=>a.commanderId===p.id))!;
+    for(let i=0;i<7;i++) {
+      const battle=battleFact(world,person.id,`career-battle-${i}`,12+i*16,200+i*100);
+      battle.payload.warId=`career-war-${i}`;
+      battle.payload.targetRegionId=world.regions[i].id;
+      battle.regionIds=[world.regions[i].id];
+      world.facts.push(battle);
+    }
+    const arc=projectPersonStoryArc(world,person);
+    expect(arc.length).toBeLessThanOrEqual(5);
+    expect(arc.some(b=>b.sourceFactIds.includes('career-battle-6'))).toBe(true);
+    expect(arc.some(b=>b.sourceFactIds.includes('career-battle-0'))).toBe(true);
+    expect(arc.map(b=>b.sourceFactIds).flat().every(id=>world.facts.some(f=>f.id===id))).toBe(true);
+  });
+
   it('joins adjacent gains and the later collapse, retaining each fact without crediting national victories as personal combat', () => {
     const world = createWorld('不绑定姓名的兴亡');
     const person = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;

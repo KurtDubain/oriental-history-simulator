@@ -83,9 +83,9 @@ describe('restoreWorldSession', () => {
       historyCount: world.history.length,
     }).toEqual({
       turn: 12,
-      hash: 'b0d8d6abef09fa30',
-      factDigest: 'ce6a3d4b845bdd5d',
-      historyDigest: '99423b53dea2c8ff',
+      hash: 'b69d4b8a2832aadf',
+      factDigest: '213412675cbc6b00',
+      historyDigest: '24cdf3c98609c373',
       factCount: 443,
       historyCount: 284,
     });

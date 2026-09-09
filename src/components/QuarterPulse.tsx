@@ -12,7 +12,6 @@ export interface QuarterPulseProps {
   report: TurnReport | null;
   stories: readonly QuarterPulseStory[];
   onSelectEvent: (id: string) => void;
-  onSelectSituation: (id: string) => void;
   onSelectLedger: (ledger: QuarterPulseLedger) => void;
   compact?: boolean;
 }
@@ -40,7 +39,6 @@ export function QuarterPulse({
   report,
   stories,
   onSelectEvent,
-  onSelectSituation,
   onSelectLedger,
   compact = false,
 }: QuarterPulseProps) {
@@ -133,27 +131,6 @@ export function QuarterPulse({
           <ol className="quarter-pulse__event-list">
             {visibleStories.map((story, index) => {
               const primary = index === 0;
-              if (story.kind === 'situation') return (
-                <li key={story.id} data-story-id={story.id} data-story-kind="situation" data-priority={primary ? 'primary' : undefined}>
-                  <button
-                    type="button"
-                    className="quarter-pulse__event quarter-pulse__situation"
-                    data-testid="quarter-pulse-situation"
-                    data-situation-id={story.situationId}
-                    data-kind={story.situationKind}
-                    data-basis={story.basis}
-                    aria-label={`${story.kindLabel}：${story.title}。${story.summary}。打开持续局势`}
-                    onClick={() => onSelectSituation(story.situationId)}
-                  >
-                    <span className="quarter-pulse__event-meta">
-                      <span className="quarter-pulse__situation-kind">{story.kindLabel}</span>
-                      <span>{story.typeLabel} · {story.threadTitle}</span>
-                    </span>
-                    <strong>{story.title}</strong>
-                    <span className="quarter-pulse__event-cause">{story.summary}<b aria-hidden="true">看卷 ›</b></span>
-                  </button>
-                </li>
-              );
               const content = <>
                 <span className="quarter-pulse__event-meta">
                   <span>{story.category}</span>

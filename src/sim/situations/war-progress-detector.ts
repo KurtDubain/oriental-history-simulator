@@ -1,3 +1,4 @@
+import { makeSituationSignal as makeSignal, situationIndexRef as indexRef } from "./candidate-registry";
 import type {
   ArmyState,
   CharacterState,
@@ -23,7 +24,6 @@ import type {
   SituationOutcomeOption,
   SituationParticipants,
   SituationSignal,
-  SituationSignalRole,
   SituationTemplate,
   SituationWatchSignal,
 } from './types';
@@ -56,7 +56,6 @@ const MIN_CRITICAL_DURATION = 4;
 const MAX_WAR_FACTS_PER_SCOPE = 16;
 const MAX_CANDIDATES = 24;
 const MAX_SOURCE_FACTS = 8;
-const MAX_SIGNAL_REFS = 4;
 const MAX_CORE_CHARACTERS = 6;
 const MAX_SUPPORTERS = 8;
 const MAX_PARTICIPANT_REGIONS = 8;
@@ -92,48 +91,21 @@ export interface WarProgressIndex {
 }
 
 export interface WarProgressSignal extends SituationSignal {
-  label: string;
-  evidence: string;
   sourceFactIds: readonly string[];
 }
 
 export interface WarProgressWatchSignal extends SituationWatchSignal {
-  label: string;
-}
-
-export interface WarProgressStartSnapshot {
-  turn: number;
-  warId: string;
-  attackerId: string;
-  defenderId: string;
-  durationTurns: number;
-  goal: WarState['goal'];
-  attackerScore: number;
-  defenderScore: number;
-  attackerRegionCount: number;
-  defenderRegionCount: number;
-  attackerSoldiers: number;
-  defenderSoldiers: number;
-  averageSupply: number | null;
-  recentBattleCount: number;
-  recentTerritoryChangeCount: number;
 }
 
 export interface WarProgressCandidate extends SituationCandidateObservation {
   type: typeof WAR_PROGRESS_TYPE;
   candidateKey: string;
-  title: string;
   hasExecutableActor: boolean;
   participants: SituationParticipants;
   executableActorIds: readonly string[];
   signals: readonly WarProgressSignal[];
-  structureSignals: readonly WarProgressSignal[];
-  triggerSignals: readonly WarProgressSignal[];
-  inhibitorSignals: readonly WarProgressSignal[];
   sourceFactIds: readonly string[];
   nextWatch: WarProgressWatchSignal;
-  nextWatchSignal: WarProgressWatchSignal;
-  startSnapshot: WarProgressStartSnapshot;
   possibleOutcomes: readonly SituationOutcomeOption[];
 }
 
@@ -164,38 +136,9 @@ function sortedMap<T extends { id: string }>(items: readonly T[]): Map<string, T
     .map((item) => [item.id, item]));
 }
 
-function indexRef(
-  entityType: string,
-  entityId: string,
-  field: string,
-  value: string | number | boolean | null,
-): SituationEvidenceRef {
-  return { kind: 'index', entityType, entityId, field, value };
-}
-
 function factRefs(factIds: readonly string[]): SituationEvidenceRef[] {
   return uniqueSorted(factIds, MAX_SOURCE_FACTS)
     .map((factId) => ({ kind: 'fact' as const, factId }));
-}
-
-function makeSignal(
-  key: string,
-  role: SituationSignalRole,
-  contribution: number,
-  label: string,
-  evidence: string,
-  refs: readonly SituationEvidenceRef[],
-  sourceFactIds: readonly string[] = [],
-): WarProgressSignal {
-  return {
-    key,
-    role,
-    contribution: rounded(clamp(contribution, -30, 30)),
-    label,
-    evidence,
-    refs: refs.slice(0, MAX_SIGNAL_REFS),
-    sourceFactIds: uniqueSorted(sourceFactIds, MAX_SOURCE_FACTS),
-  };
 }
 
 function warIdOfFact(fact: SimulationFact): string | null {
@@ -550,39 +493,51 @@ function buildActiveCandidate(
 
   const signals: WarProgressSignal[] = [];
   const add = (signal: WarProgressSignal): void => { signals.push(signal); };
-  add(makeSignal(
-    'ongoing_war', 'structural', 18,
-    '战争仍在持续', `${attacker.name}与${defender.name}的战争自第${war.startedTurn}季起仍处于进行状态`, [
+  add(makeSignal('ongoing_war',
+      'structural',
+      18,
+      [
       indexRef('war', war.id, 'active', war.active),
       indexRef('war', war.id, 'startedTurn', war.startedTurn),
       indexRef('war_fact_history', war.id, 'hasStartedFact', history.hasStartedFact),
       ...(currentDeclaration ? [{ kind: 'fact' as const, factId: currentDeclaration.id }] : []),
-    ], currentDeclaration ? [currentDeclaration.id] : [],
+    ],
+      currentDeclaration ? [currentDeclaration.id] : [],
+      8
   ));
-  add(makeSignal(
-    'opposing_belligerents', 'structural', 8,
-    '交战双方仍有国家载体', `${attacker.shortName}与${defender.shortName}均仍存续，并各自保有领土`, [
+  add(makeSignal('opposing_belligerents',
+      'structural',
+      8,
+      [
       indexRef('polity', attacker.id, 'alive', attacker.alive),
       indexRef('polity', defender.id, 'alive', defender.alive),
       indexRef('polity', attacker.id, 'controlledRegionCount', attacker.controlledRegionIds.length),
       indexRef('polity', defender.id, 'controlledRegionCount', defender.controlledRegionIds.length),
     ],
+      [],
+      8
   ));
-  add(makeSignal(
-    'war_goal_and_duration', 'structural', clamp(5 + duration * 1.35, 6, 19),
-    '战争目标与持续时间', `目标为“${war.goal}”，已经持续${duration}季；目标州域${war.targetRegionIds.length}处`, [
+  add(makeSignal('war_goal_and_duration',
+      'structural',
+      clamp(5 + duration * 1.35, 6, 19),
+      [
       indexRef('war', war.id, 'goal', war.goal),
       indexRef('war', war.id, 'durationTurns', duration),
       indexRef('war', war.id, 'targetRegionCount', war.targetRegionIds.length),
     ],
+      [],
+      8
   ));
   const scoreVolume = Math.abs(war.attackerScore) + Math.abs(war.defenderScore);
-  add(makeSignal(
-    'recorded_war_score', 'structural', clamp(scoreVolume * 0.12, 0, 9),
-    '战果正在累积', `当前战果为攻方${war.attackerScore}、守方${war.defenderScore}`, [
+  add(makeSignal('recorded_war_score',
+      'structural',
+      clamp(scoreVolume * 0.12, 0, 9),
+      [
       indexRef('war', war.id, 'attackerScore', war.attackerScore),
       indexRef('war', war.id, 'defenderScore', war.defenderScore),
     ],
+      [],
+      8
   ));
 
   if (
@@ -590,14 +545,17 @@ function buildActiveCandidate(
     && context.turn - history.startedFactTurn <= RECENT_DECLARATION_TURNS
   ) {
     const age = Math.max(0, context.turn - history.startedFactTurn);
-    add(makeSignal(
-      'recent_war_declaration', 'trigger', age === 0 ? 8 : 5,
-      '战争刚刚爆发', `开战事实确认双方、目标和战争理由；距今${age}季`, [
+    add(makeSignal('recent_war_declaration',
+      'trigger',
+      age === 0 ? 8 : 5,
+      [
         ...(currentDeclaration ? [{ kind: 'fact' as const, factId: currentDeclaration.id }] : [
           indexRef('war_fact_history', war.id, 'startedFactTurn', history.startedFactTurn),
         ]),
         indexRef('war', war.id, 'reason', war.reason),
-      ], currentDeclaration ? [currentDeclaration.id] : [],
+      ],
+      currentDeclaration ? [currentDeclaration.id] : [],
+      8
     ));
   }
   if (recentBattleCount > 0) {
@@ -606,103 +564,128 @@ function buildActiveCandidate(
       + fact.payload.defenders.reduce((inner, force) => inner + force.losses, 0)
       + fact.payload.militiaLosses
     ), 0);
-    add(makeSignal(
-      'recent_battles', 'trigger', clamp(10 + recentBattleCount * 3 + currentLosses / 2_500, 11, 20),
-      '近期发生实战', currentBattles.length > 0
-        ? `本季有${currentBattles.length}场战役，近${RECENT_OPERATION_TURNS + 1}季共${recentBattleCount}场；本季军民损失${currentLosses}`
-        : `战争事实索引确认近${RECENT_OPERATION_TURNS + 1}季有${recentBattleCount}场战役`, [
+    add(makeSignal('recent_battles',
+      'trigger',
+      clamp(10 + recentBattleCount * 3 + currentLosses / 2_500, 11, 20),
+      [
         ...(currentBattles.length > 0
           ? factRefs(currentBattles.map((fact) => fact.id))
           : [
             indexRef('war_fact_history', war.id, 'lastBattleTurn', history.lastBattleTurn),
             indexRef('war_fact_history', war.id, 'battleCount', history.battleCount),
           ]),
-      ], currentBattles.map((fact) => fact.id),
+      ],
+      currentBattles.map((fact) => fact.id),
+      8
     ));
   }
   if (recentTerritoryChangeCount > 0) {
-    add(makeSignal(
-      'recent_territory_changes', 'trigger', clamp(10 + recentTerritoryChangeCount * 4, 10, 20),
-      '战线改变了控制权', `近${RECENT_OPERATION_TURNS + 1}季有${recentTerritoryChangeCount}处州域因本战争转手`, [
+    add(makeSignal('recent_territory_changes',
+      'trigger',
+      clamp(10 + recentTerritoryChangeCount * 4, 10, 20),
+      [
         ...(currentTerritoryChanges.length > 0
           ? factRefs(currentTerritoryChanges.map((fact) => fact.id))
           : [
             indexRef('war_fact_history', war.id, 'lastTerritoryChangeTurn', history.lastTerritoryChangeTurn),
             indexRef('war_fact_history', war.id, 'territoryChangeCount', history.territoryChangeCount),
           ]),
-      ], currentTerritoryChanges.map((fact) => fact.id),
+      ],
+      currentTerritoryChanges.map((fact) => fact.id),
+      8
     ));
   }
   if (
     !hasRecentOperation
     && (history.startedFactTurn === null || context.turn - history.startedFactTurn > RECENT_DECLARATION_TURNS)
   ) {
-    add(makeSignal(
-      'quiet_front', 'inhibitor', -12,
-      '近期没有可核验的战线变化', `近${RECENT_OPERATION_TURNS + 1}季没有本战争的战役或领土控制 Fact`, [
+    add(makeSignal('quiet_front',
+      'inhibitor',
+      -12,
+      [
         indexRef('war_fact_history', war.id, 'lastBattleTurn', history.lastBattleTurn),
         indexRef('war_fact_history', war.id, 'lastTerritoryChangeTurn', history.lastTerritoryChangeTurn),
         indexRef('war', war.id, 'active', war.active),
       ],
+      [],
+      8
     ));
   }
 
   const averageWeariness = (attacker.warWeariness + defender.warWeariness) / 2;
   if (averageWeariness >= 20) {
-    add(makeSignal(
-      'war_weariness', 'structural', clamp((averageWeariness - 15) * 0.2, 1, 14),
-      '战争疲劳正在积累', `双方平均战争疲劳${Math.round(averageWeariness)}`, [
+    add(makeSignal('war_weariness',
+      'structural',
+      clamp((averageWeariness - 15) * 0.2, 1, 14),
+      [
         indexRef('polity', attacker.id, 'warWeariness', attacker.warWeariness),
         indexRef('polity', defender.id, 'warWeariness', defender.warWeariness),
       ],
+      [],
+      8
     ));
   }
   if (supply === null) {
-    add(makeSignal(
-      'no_field_army', 'inhibitor', -12,
-      '缺少可持续作战军团', '双方当前都没有仍保有兵力的陆军，战争无法进入持续高强度阶段', [
+    add(makeSignal('no_field_army',
+      'inhibitor',
+      -12,
+      [
         indexRef('war', war.id, 'combinedSoldiers', 0),
       ],
+      [],
+      8
     ));
   } else if (supply < 58) {
-    add(makeSignal(
-      'frontline_supply_strain', 'structural', clamp((62 - supply) * 0.22, 1, 12),
-      '前线补给承压', `参战双方现有军团按兵力加权的平均补给为${Math.round(supply)}`, armies.slice(0, 4).map((army) => (
+    add(makeSignal('frontline_supply_strain',
+      'structural',
+      clamp((62 - supply) * 0.22, 1, 12),
+      armies.slice(0, 4).map((army) => (
         indexRef('army', army.id, 'supply', army.supply)
       )),
+      [],
+      8
     ));
   } else {
-    add(makeSignal(
-      'frontline_supply_ready', 'capability', clamp((supply - 52) * 0.1, 1, 6),
-      '前线仍有补给能力', `参战双方现有军团按兵力加权的平均补给为${Math.round(supply)}`, armies.slice(0, 4).map((army) => (
+    add(makeSignal('frontline_supply_ready',
+      'capability',
+      clamp((supply - 52) * 0.1, 1, 6),
+      armies.slice(0, 4).map((army) => (
         indexRef('army', army.id, 'supply', army.supply)
       )),
+      [],
+      8
     ));
   }
   if (combinedSoldiers > 0) {
-    add(makeSignal(
-      'field_army_capacity', 'capability', clamp(3 + combinedSoldiers / 12_000, 3, 10),
-      '双方仍有野战能力', `攻方现有${attackerSoldiers}人、守方现有${defenderSoldiers}人`, [
+    add(makeSignal('field_army_capacity',
+      'capability',
+      clamp(3 + combinedSoldiers / 12_000, 3, 10),
+      [
         indexRef('polity', attacker.id, 'fieldSoldiers', attackerSoldiers),
         indexRef('polity', defender.id, 'fieldSoldiers', defenderSoldiers),
         ...armies.slice(0, 2).map((army) => indexRef('army', army.id, 'morale', army.morale)),
       ],
+      [],
+      8
     ));
   }
   if (criticalEligible) {
     const currentOperationalFact = [...currentBattles, ...currentTerritoryChanges]
       .sort((left, right) => stableCompare(left.id, right.id))
       .slice(-1)[0];
-    add(makeSignal(
-      'critical_operational_evidence', 'capability', 7,
-      '持续战争具备升级条件', `战争已持续${duration}季，近期战线 Fact、当前补给和可行动主帅同时存在`, [
+    add(makeSignal('critical_operational_evidence',
+      'capability',
+      7,
+      [
         ...(currentOperationalFact
           ? [{ kind: 'fact' as const, factId: currentOperationalFact.id }]
           : [indexRef('war_fact_history', war.id, 'lastOperationalTurn', lastOperationalTurn)]),
         indexRef('war', war.id, 'durationTurns', duration),
         indexRef('war', war.id, 'averageArmySupply', rounded(supply)),
         indexRef('war', war.id, 'executableCommanderCount', characters.executableActorIds.length),
-      ], currentOperationalFact ? [currentOperationalFact.id] : [],
+      ],
+      currentOperationalFact ? [currentOperationalFact.id] : [],
+      8
     ));
   }
 
@@ -718,7 +701,6 @@ function buildActiveCandidate(
     if (!hasRecentOperation) {
       return {
         key: 'watch_next_engagement',
-        label: '观察双方是否发生下一场战役，或有州域控制权转移',
         refs: [
           indexRef('war_fact_history', war.id, 'lastBattleTurn', history.lastBattleTurn),
           indexRef('war', war.id, 'active', war.active),
@@ -728,7 +710,6 @@ function buildActiveCandidate(
     if (supply !== null && supply < 58) {
       return {
         key: 'watch_frontline_supply',
-        label: '观察低补给军团会撤退、溃散，还是仍能改变战线',
         refs: armies.slice(0, 3).map((army) => indexRef('army', army.id, 'supply', army.supply)),
       };
     }
@@ -737,7 +718,6 @@ function buildActiveCandidate(
       .slice(-1)[0];
     return {
       key: 'watch_war_score_and_control',
-      label: '观察下一场战役是否扩大战果差距并改变目标州域控制权',
       refs: [
         indexRef('war', war.id, 'attackerScore', war.attackerScore),
         indexRef('war', war.id, 'defenderScore', war.defenderScore),
@@ -755,35 +735,13 @@ function buildActiveCandidate(
     type: WAR_PROGRESS_TYPE,
     scopeKey: war.id,
     candidateKey: `${WAR_PROGRESS_TYPE}:${war.id}`,
-    title: `${attacker.shortName}与${defender.shortName}战事`,
     pressure,
     hasExecutableActor: executableActorIds.length > 0,
     participants,
     executableActorIds,
     signals,
-    structureSignals: signals.filter((signal) => signal.role === 'structural' || signal.role === 'capability'),
-    triggerSignals: signals.filter((signal) => signal.role === 'trigger'),
-    inhibitorSignals: signals.filter((signal) => signal.role === 'inhibitor'),
     sourceFactIds,
     nextWatch,
-    nextWatchSignal: nextWatch,
-    startSnapshot: {
-      turn: context.turn,
-      warId: war.id,
-      attackerId: war.attackerId,
-      defenderId: war.defenderId,
-      durationTurns: duration,
-      goal: war.goal,
-      attackerScore: war.attackerScore,
-      defenderScore: war.defenderScore,
-      attackerRegionCount: attacker.controlledRegionIds.length,
-      defenderRegionCount: defender.controlledRegionIds.length,
-      attackerSoldiers,
-      defenderSoldiers,
-      averageSupply: supply === null ? null : rounded(supply),
-      recentBattleCount,
-      recentTerritoryChangeCount,
-    },
     possibleOutcomes: likelyOutcomes(war, attacker, defender, duration),
     importance: Math.round(clamp(38 + pressure * 0.62)),
     visibility: Math.round(clamp(36 + pressure * 0.55 + (sourceFactIds.length > 0 ? 8 : 0))),
@@ -791,26 +749,11 @@ function buildActiveCandidate(
   };
 }
 
-function resolutionLabel(result: WarEndResult): string {
-  const labels: Record<WarEndResult, string> = {
-    attacker_advantage: '攻方以优势结束战争',
-    defender_advantage: '守方以优势结束战争',
-    negotiated_peace: '双方议和停战',
-    attacker_destroyed: '攻方政权在战争中覆灭',
-    defender_destroyed: '守方政权在战争中覆灭',
-    attacker_dissolved: '攻方因继承断绝而解体',
-    defender_dissolved: '守方因继承断绝而解体',
-  };
-  return labels[result];
-}
-
 function buildResolutionCandidate(
   context: { turn: number; facts: readonly SimulationFact[]; index: Readonly<WarProgressIndex> },
   war: WarState,
   ended: WarEndedFact,
 ): WarProgressCandidate {
-  const attacker = context.index.politiesById.get(war.attackerId);
-  const defender = context.index.politiesById.get(war.defenderId);
   const currentWarFacts = context.facts.filter((fact): fact is WarProgressFact => (
     fact.turn === context.turn && isWarProgressFact(fact) && warIdOfFact(fact) === war.id
   ));
@@ -822,19 +765,17 @@ function buildResolutionCandidate(
   // war_ended is the atomic proof. Its own sourceFactIds retain the deeper
   // battle/territory chain without violating the current-turn-ref contract.
   const resultFactIds = [ended.id];
-  const outcomeSignal = makeSignal(
-    ended.payload.result,
-    'outcome',
-    -30,
-    resolutionLabel(ended.payload.result),
-    `${ended.payload.reason}；最终战果为攻方${ended.payload.attackerScore}、守方${ended.payload.defenderScore}，战争持续${ended.payload.durationTurns}季${ended.payload.indemnity > 0 ? `，赔款${ended.payload.indemnity}` : ''}`,
-    [
+  const outcomeSignal = makeSignal(ended.payload.result,
+      'outcome',
+      -30,
+      [
       { kind: 'fact', factId: ended.id },
       indexRef('war', war.id, 'active', war.active),
       indexRef('war', war.id, 'endedTurn', war.endedTurn),
       indexRef('war', war.id, 'scoreGap', ended.payload.attackerScore - ended.payload.defenderScore),
     ],
-    resultFactIds,
+      resultFactIds,
+      8
   );
   const nextWatch: WarProgressWatchSignal = {
     key: ended.payload.result === 'attacker_destroyed'
@@ -843,59 +784,22 @@ function buildResolutionCandidate(
       || ended.payload.result === 'defender_dissolved'
       ? 'watch_postwar_absorption'
       : 'watch_postwar_settlement',
-    label: ended.payload.result === 'attacker_destroyed'
-      || ended.payload.result === 'defender_destroyed'
-      || ended.payload.result === 'attacker_dissolved'
-      || ended.payload.result === 'defender_dissolved'
-      ? '观察故国领土、军队、人物与家族如何进入新的政治秩序'
-      : '观察停战边界、赔款与双方战争疲劳是否真正稳定下来',
     refs: [
       { kind: 'fact', factId: ended.id },
       indexRef('war', war.id, 'active', war.active),
     ],
   };
-  const { armies } = forcesForWar(context.index, war, history);
-  const attackerArmies = armies.filter((army) => army.polityId === war.attackerId);
-  const defenderArmies = armies.filter((army) => army.polityId === war.defenderId);
-  const recentBattleCount = history.battleTurns.filter((turn) => (
-    context.turn - turn >= 0 && context.turn - turn <= RECENT_OPERATION_TURNS
-  )).length;
-  const recentTerritoryChangeCount = history.territoryChangeTurns.filter((turn) => (
-    context.turn - turn >= 0 && context.turn - turn <= RECENT_OPERATION_TURNS
-  )).length;
   return {
     type: WAR_PROGRESS_TYPE,
     scopeKey: war.id,
     candidateKey: `${WAR_PROGRESS_TYPE}:${war.id}`,
-    title: `${attacker?.shortName ?? war.attackerId}与${defender?.shortName ?? war.defenderId}战事`,
     pressure: 0,
     hasExecutableActor: false,
     participants,
     executableActorIds: [],
     signals: [outcomeSignal],
-    structureSignals: [],
-    triggerSignals: [],
-    inhibitorSignals: [],
     sourceFactIds: resultFactIds,
     nextWatch,
-    nextWatchSignal: nextWatch,
-    startSnapshot: {
-      turn: context.turn,
-      warId: war.id,
-      attackerId: war.attackerId,
-      defenderId: war.defenderId,
-      durationTurns: ended.payload.durationTurns,
-      goal: war.goal,
-      attackerScore: ended.payload.attackerScore,
-      defenderScore: ended.payload.defenderScore,
-      attackerRegionCount: attacker?.controlledRegionIds.length ?? 0,
-      defenderRegionCount: defender?.controlledRegionIds.length ?? 0,
-      attackerSoldiers: soldierTotal(attackerArmies),
-      defenderSoldiers: soldierTotal(defenderArmies),
-      averageSupply: averageSupply(armies) === null ? null : rounded(averageSupply(armies) as number),
-      recentBattleCount,
-      recentTerritoryChangeCount,
-    },
     possibleOutcomes: [],
     resolution: { outcomeKey: ended.payload.result, resultFactIds },
     importance: Math.max(60, ended.importance * 20),

@@ -7,7 +7,6 @@ import {
   projectQuarterPulse,
   selectQuarterPulseStories,
   type QuarterPulseEventStory,
-  type QuarterPulseSituationStory,
   type QuarterPulseStory,
 } from './quarter-pulse-stories';
 
@@ -32,30 +31,8 @@ function eventStory(
   };
 }
 
-function situationStory(
-  id: string,
-  importance: number,
-  patch: Partial<QuarterPulseSituationStory> = {},
-): QuarterPulseSituationStory {
-  return {
-    id: `situation:${id}`,
-    kind: 'situation',
-    title: `${id}升温`,
-    summary: `${id}的张力在本季发生明确变化。`,
-    importance,
-    sourceFactIds: [],
-    historyEventIds: [],
-    regionIds: [],
-    situationId: id,
-    situationKind: 'heated',
-    kindLabel: '升温',
-    basis: 'trend',
-    typeLabel: '军权危机',
-    threadTitle: id,
-    tension: importance,
-    delta: 10,
-    ...patch,
-  };
+function factStory(id: string, importance: number, patch: Partial<QuarterPulseEventStory> = {}): QuarterPulseEventStory {
+  return eventStory(`fact:${id}`, importance, { source: 'fact', ...patch });
 }
 
 function chronicleEvent(
@@ -106,12 +83,11 @@ describe('TRIM01 QuarterPulse story projection', () => {
     expect(world.facts).toEqual([fact]);
   });
 
-  it('ranks ordinary history and Situation changes in one normalized pool capped at three stories', () => {
+  it('ranks Chronicle and Fact scenes in one normalized pool capped at three stories', () => {
     const candidates: QuarterPulseStory[] = [
       eventStory('event-minor', 20),
       eventStory('event-three', 60),
-      situationStory('situation-eighty', 80, {
-        basis: 'phase',
+      factStory('situation-eighty', 80, {
         sourceFactIds: ['fact-situation-eighty'],
       }),
       eventStory('event-five', 100),
@@ -123,7 +99,7 @@ describe('TRIM01 QuarterPulse story projection', () => {
     expect(selected).toHaveLength(MAX_QUARTER_PULSE_STORIES);
     expect(selected.map((story) => story.id)).toEqual([
       'event-five',
-      'situation:situation-eighty',
+      'fact:situation-eighty',
       'event-three',
     ]);
   });
@@ -147,7 +123,7 @@ describe('TRIM01 QuarterPulse story projection', () => {
       historyEventIds: ['history-fact-winner'],
       regionIds: ['region-fact'],
     });
-    const factDuplicate = situationStory('fact-duplicate', 80, {
+    const factDuplicate = factStory('fact-duplicate', 80, {
       sourceFactIds: ['fact-shared', 'fact-situation'],
       historyEventIds: ['history-situation'],
       regionIds: ['region-situation'],
@@ -156,7 +132,7 @@ describe('TRIM01 QuarterPulse story projection', () => {
       sourceFactIds: ['fact-history-winner'],
       historyEventIds: ['history-shared', 'history-winner'],
     });
-    const historyDuplicate = situationStory('history-duplicate', 60, {
+    const historyDuplicate = factStory('history-duplicate', 60, {
       sourceFactIds: ['fact-history-duplicate'],
       historyEventIds: ['history-shared'],
     });
@@ -191,18 +167,12 @@ describe('TRIM01 QuarterPulse story projection', () => {
     });
   });
 
-  it('never uses a bare numerical trend to fill space after concrete events', () => {
-    const selected = selectQuarterPulseStories([
-      situationStory('trend-ninety', 90),
-      situationStory('trend-eighty', 80),
-      eventStory('event-three', 60),
-      eventStory('event-two', 40),
-    ]);
-
-    expect(selected.map((story) => story.id)).toEqual([
-      'event-three',
-      'event-two',
-    ]);
+  it('does not promote Situation pressure without a concrete current Fact or Event', () => {
+    const world = advanceWorld(createWorld('数值升降不算史事'));
+    const quiet = { ...world, facts: [], history: [], lastTurn: { ...world.lastTurn!, factIds: [], eventIds: [] } };
+    const before = JSON.stringify(quiet);
+    expect(projectQuarterPulse(quiet).stories).toEqual([]);
+    expect(JSON.stringify(quiet)).toBe(before);
   });
 
   it('requires a concrete military or court result instead of treating any anchored chronicle as main news', () => {

@@ -1,3 +1,4 @@
+import { makeSituationSignal as makeSignal, situationIndexRef as indexRef } from "./candidate-registry";
 import type { CourtActionResolvedFact, SimulationFact } from '../facts';
 import {
   calculateFactionPowerLedger,
@@ -17,7 +18,6 @@ import type {
   SituationOutcomeOption,
   SituationParticipants,
   SituationSignal,
-  SituationSignalRole,
   SituationTemplate,
   SituationWatchSignal,
 } from './types';
@@ -47,16 +47,6 @@ const MAX_SOURCE_FACTS = 8;
 const MAX_SUPPORTERS = 8;
 const MAX_OPPONENTS = 6;
 
-const CATEGORY_LABELS: Readonly<Record<PoliticalPowerCategory, string>> = {
-  central_office: '中枢席位',
-  regional_office: '地方任官',
-  military_command: '军令',
-  family_backing: '家门与财富',
-  member_renown: '人物声望',
-  alliance_support: '盟约与背书',
-  cohesion: '内部凝聚',
-};
-
 export interface CourtStruggleFactionIndex {
   faction: FactionState;
   ledger: FactionPowerLedger;
@@ -71,19 +61,15 @@ export interface CourtStruggleIndex {
 }
 
 export interface CourtStruggleSignal extends SituationSignal {
-  label: string;
-  evidence: string;
   sourceFactIds: readonly string[];
 }
 
 export interface CourtStruggleWatchSignal extends SituationWatchSignal {
-  label: string;
 }
 
 export interface CourtStruggleCandidate extends SituationCandidateObservation {
   type: typeof COURT_STRUGGLE_TYPE;
   candidateKey: string;
-  title: string;
   challengerFactionId: string;
   rulerFactionId: string | null;
   participants: SituationParticipants;
@@ -91,16 +77,11 @@ export interface CourtStruggleCandidate extends SituationCandidateObservation {
   signals: readonly CourtStruggleSignal[];
   sourceFactIds: readonly string[];
   nextWatch: CourtStruggleWatchSignal;
-  nextWatchSignal: CourtStruggleWatchSignal;
   possibleOutcomes: readonly SituationOutcomeOption[];
 }
 
 function clamp(value: number, minimum = 0, maximum = 100): number {
   return Math.max(minimum, Math.min(maximum, value));
-}
-
-function rounded(value: number): number {
-  return Math.round(value * 10) / 10;
 }
 
 function stableCompare(left: string, right: string): number {
@@ -117,37 +98,8 @@ function sortedMap<T extends { id: string }>(items: readonly T[]): Map<string, T
     .map((item) => [item.id, item]));
 }
 
-function indexRef(
-  entityType: string,
-  entityId: string,
-  field: string,
-  value: string | number | boolean | null,
-): SituationEvidenceRef {
-  return { kind: 'index', entityType, entityId, field, value };
-}
-
 function factRefs(factIds: readonly string[]): SituationEvidenceRef[] {
   return uniqueSorted(factIds, MAX_FACT_REFS).map((factId) => ({ kind: 'fact', factId }));
-}
-
-function makeSignal(
-  key: string,
-  role: SituationSignalRole,
-  contribution: number,
-  label: string,
-  evidence: string,
-  refs: readonly SituationEvidenceRef[],
-  sourceFactIds: readonly string[] = [],
-): CourtStruggleSignal {
-  return {
-    key,
-    role,
-    contribution: rounded(clamp(contribution, -30, 30)),
-    label,
-    evidence,
-    refs: refs.slice(0, MAX_FACT_REFS),
-    sourceFactIds: uniqueSorted(sourceFactIds, MAX_SOURCE_FACTS),
-  };
 }
 
 function categoryValues(ledger: FactionPowerLedger): Record<PoliticalPowerCategory, number> {
@@ -282,7 +234,6 @@ function courtActionSignal(
 ): CourtStruggleSignal | null {
   if (facts.length === 0) return null;
   let contribution = 0;
-  const details: string[] = [];
   for (const fact of facts) {
     const action = fact.payload.action;
     const scoreMargin = fact.payload.score - fact.payload.threshold;
@@ -293,19 +244,13 @@ function courtActionSignal(
     } else if (action === 'coup' || action === 'usurpation') {
       contribution += fact.payload.actorFactionId === challenger.faction.id ? 16 : -16;
     }
-    details.push(
-      `${action}（${fact.payload.reasonCode}，判定${rounded(fact.payload.score)}/${rounded(fact.payload.threshold)}）；`
-      + `结算后${challenger.faction.name}分类账总势${rounded(challenger.ledger.total)}`,
-    );
   }
-  return makeSignal(
-    'recent_court_action',
-    'trigger',
-    contribution,
-    '本季朝堂行动',
-    details.join('；'),
-    factRefs(facts.map((fact) => fact.id)),
-    facts.map((fact) => fact.id),
+  return makeSignal('recent_court_action',
+      'trigger',
+      contribution,
+      factRefs(facts.map((fact) => fact.id)),
+      facts.map((fact) => fact.id),
+      8
   );
 }
 
@@ -318,25 +263,21 @@ function relationSignal(
     if (fact.payload.relation === 'rivalry') contribution += fact.payload.action === 'formed' ? 7 : -4;
     else contribution += fact.payload.action === 'formed' ? 5 : -6;
   }
-  return makeSignal(
-    'recent_faction_relation',
-    'trigger',
-    contribution,
-    '派系关系变动',
-    facts.map((fact) => `${fact.payload.relation === 'alliance' ? '盟约' : '相争'}${fact.payload.action === 'formed' ? '形成' : '终止'}`).join('、'),
-    factRefs(facts.map((fact) => fact.id)),
-    facts.map((fact) => fact.id),
+  return makeSignal('recent_faction_relation',
+      'trigger',
+      contribution,
+      factRefs(facts.map((fact) => fact.id)),
+      facts.map((fact) => fact.id),
+      8
   );
 }
 
 function resourceFactSignal(facts: readonly SimulationFact[]): CourtStruggleSignal | null {
   if (facts.length === 0) return null;
   let contribution = 0;
-  const details: string[] = [];
   for (const fact of facts) {
     if (fact.kind === 'agency_support_resolved') {
       contribution += fact.payload.outcome === 'secured' ? 3 : fact.payload.outcome === 'refused' ? -2 : 0;
-      details.push(`支持争取${fact.payload.outcome}`);
     } else if (fact.kind === 'agency_intent_resolved') {
       contribution += fact.payload.institutionResponse === 'command_granted'
         ? 6
@@ -345,23 +286,18 @@ function resourceFactSignal(facts: readonly SimulationFact[]): CourtStruggleSign
           : fact.payload.institutionResponse === 'appeased'
             ? -2
             : 0;
-      details.push(`军令裁决为${fact.payload.institutionResponse}`);
     } else if (fact.kind === 'appointment_started') {
       contribution += fact.payload.officeKind === '军团主帅' || fact.payload.officeKind === '水师提督' ? 6 : 4;
-      details.push(`新任${fact.payload.officeKind}`);
     } else if (fact.kind === 'appointment_ended') {
       contribution -= fact.payload.officeKind === '军团主帅' || fact.payload.officeKind === '水师提督' ? 7 : 5;
-      details.push(`卸下${fact.payload.officeKind}`);
     }
   }
-  return makeSignal(
-    'recent_power_resource_change',
-    contribution >= 0 ? 'trigger' : 'inhibitor',
-    contribution,
-    '权势资源变动',
-    details.join('、'),
-    factRefs(facts.map((fact) => fact.id)),
-    facts.map((fact) => fact.id),
+  return makeSignal('recent_power_resource_change',
+      contribution >= 0 ? 'trigger' : 'inhibitor',
+      contribution,
+      factRefs(facts.map((fact) => fact.id)),
+      facts.map((fact) => fact.id),
+      8
   );
 }
 
@@ -413,10 +349,6 @@ function explicitResolution(
   return resolution
     ? { outcomeKey: resolution.outcomeKey, resultFactIds: [resolution.factId] }
     : null;
-}
-
-function ledgerResourceIds(ledger: FactionPowerLedger, category: PoliticalPowerCategory): string[] {
-  return ledger.categories.find((item) => item.category === category)?.resources.map((item) => item.id) ?? [];
 }
 
 function participantIds(
@@ -516,13 +448,12 @@ function categorySignal(
   coefficient: number,
 ): CourtStruggleSignal {
   const value = challenger.categoryValues[category];
-  return makeSignal(
-    key,
-    value > 0 ? 'structural' : 'inhibitor',
-    value * coefficient,
-    CATEGORY_LABELS[category],
-    `${challenger.faction.name}的${CATEGORY_LABELS[category]}为${rounded(value)}；来源为${ledgerResourceIds(challenger.ledger, category).join('、') || '无实际资源'}`,
-    [indexRef('faction_power_ledger', challenger.faction.id, category, value)],
+  return makeSignal(key,
+      value > 0 ? 'structural' : 'inhibitor',
+      value * coefficient,
+      [indexRef('faction_power_ledger', challenger.faction.id, category, value)],
+      [],
+      8
   );
 }
 
@@ -550,54 +481,52 @@ function buildCandidate(
     categorySignal(challenger, 'military_command', 'challenger_military_command', 0.8),
   ];
   const familyRenown = values.family_backing + values.member_renown;
-  signals.push(makeSignal(
-    'challenger_family_renown',
-    familyRenown > 0 ? 'structural' : 'inhibitor',
-    familyRenown * 0.25,
-    '家门与人物声望',
-    `${challenger.faction.name}家门支撑${rounded(values.family_backing)}、成员声望${rounded(values.member_renown)}`,
-    [
+  signals.push(makeSignal('challenger_family_renown',
+      familyRenown > 0 ? 'structural' : 'inhibitor',
+      familyRenown * 0.25,
+      [
       indexRef('faction_power_ledger', challenger.faction.id, 'family_backing', values.family_backing),
       indexRef('faction_power_ledger', challenger.faction.id, 'member_renown', values.member_renown),
     ],
+      [],
+      8
   ));
   signals.push(categorySignal(challenger, 'alliance_support', 'challenger_alliance_support', 0.65));
   signals.push(categorySignal(challenger, 'cohesion', 'challenger_cohesion', 0.55));
 
   const rulerPower = rulerFaction?.ledger.total ?? 0;
   const margin = challenger.ledger.total - rulerPower;
-  signals.push(makeSignal(
-    'challenger_power_margin',
-    margin >= 0 ? 'structural' : 'inhibitor',
-    clamp(margin * 0.34, -10, 12),
-    margin >= 0 ? '非君主派系居前' : '君主派系仍居前',
-    `${challenger.faction.name}分类账总势${challenger.ledger.total}，君主所属派系${rulerPower}，差额${margin >= 0 ? '+' : ''}${margin}`,
-    [
+  signals.push(makeSignal('challenger_power_margin',
+      margin >= 0 ? 'structural' : 'inhibitor',
+      clamp(margin * 0.34, -10, 12),
+      [
       indexRef('faction_power_ledger', challenger.faction.id, 'total', challenger.ledger.total),
       indexRef('faction_power_ledger', rulerFaction?.faction.id ?? polity.id, 'ruler_faction_total', rulerPower),
     ],
+      [],
+      8
   ));
   const authorityContribution = polity.authority <= 55
     ? clamp((60 - polity.authority) * 0.38, 1, 16)
     : -clamp((polity.authority - 52) * 0.22, 1, 10);
-  signals.push(makeSignal(
-    polity.authority <= 55 ? 'weak_court_authority' : 'strong_court_authority',
-    polity.authority <= 55 ? 'structural' : 'inhibitor',
-    authorityContribution,
-    polity.authority <= 55 ? '中央权威不足' : '中央权威仍强',
-    `${polity.shortName}中央权威${rounded(polity.authority)}、朝廷控制${rounded(polity.courtInfluence)}`,
-    [
+  signals.push(makeSignal(polity.authority <= 55 ? 'weak_court_authority' : 'strong_court_authority',
+      polity.authority <= 55 ? 'structural' : 'inhibitor',
+      authorityContribution,
+      [
       indexRef('polity', polity.id, 'authority', polity.authority),
       indexRef('polity', polity.id, 'courtInfluence', polity.courtInfluence),
     ],
+      [],
+      8
   ));
   const opposedToRuler = Boolean(rulerFaction && challenger.faction.rivalFactionIds.includes(rulerFaction.faction.id));
   if (opposedToRuler) {
-    signals.push(makeSignal(
-      'public_faction_rivalry', 'trigger', 7,
-      '与君主派系公开相争',
-      `${challenger.faction.name}与${rulerFaction?.faction.name ?? '君主派系'}已登记为相争关系`,
+    signals.push(makeSignal('public_faction_rivalry',
+      'trigger',
+      7,
       [indexRef('faction', challenger.faction.id, `rivalry:${rulerFaction?.faction.id ?? ''}`, true)],
+      [],
+      8
     ));
   }
   const actionSignal = courtActionSignal(courtFacts, challenger);
@@ -627,7 +556,6 @@ function buildCandidate(
   ], MAX_SOURCE_FACTS);
   const nextWatch: CourtStruggleWatchSignal = {
     key: 'watch_court_power_resources',
-    label: '观察下一项任免、军令、盟约、清洗或宫变如何改变双方真实权势根基',
     refs: [
       indexRef('faction_power_ledger', challenger.faction.id, 'central_office', values.central_office),
       indexRef('faction_power_ledger', challenger.faction.id, 'military_command', values.military_command),
@@ -639,7 +567,6 @@ function buildCandidate(
     type: COURT_STRUGGLE_TYPE,
     scopeKey: polity.id,
     candidateKey: `${COURT_STRUGGLE_TYPE}:${polity.id}`,
-    title: `${polity.shortName}朝权之争`,
     challengerFactionId: challenger.faction.id,
     rulerFactionId: rulerFaction?.faction.id ?? null,
     pressure,
@@ -648,7 +575,6 @@ function buildCandidate(
     signals,
     sourceFactIds,
     nextWatch,
-    nextWatchSignal: nextWatch,
     possibleOutcomes: possibleOutcomes(pressure, polity, leader, challenger),
     resolution,
     importance: clamp(45 + pressure * 0.5),

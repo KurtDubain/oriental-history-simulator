@@ -57,7 +57,6 @@ export type {
   WarProgressIndex,
   WarProgressResolutionOutcomeKey,
   WarProgressSignal,
-  WarProgressStartSnapshot,
   WarProgressWatchSignal,
 } from './war-progress-detector';
 export type {

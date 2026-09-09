@@ -1,3 +1,4 @@
+import { isContinuousRulerSeat } from '../sim/facts/projector';
 import type { MapOverlay } from '../components/WorldMap';
 import type { SituationPhase, SituationState } from '../sim/situations';
 import type { SimulationFact, WorldState } from '../sim/types';
@@ -226,7 +227,7 @@ function sameAppointmentSeat(left: SimulationFact, right: SimulationFact): boole
 }
 
 function isStoryFact(fact: SimulationFact, currentFacts: readonly SimulationFact[]): boolean {
-  if (!STORY_FACT_KINDS.has(fact.kind)) return false;
+  if (!STORY_FACT_KINDS.has(fact.kind) || isContinuousRulerSeat(fact, currentFacts)) return false;
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
     if (!HIGH_OFFICES.has(fact.payload.officeKind)) return false;
     return MAJOR_APPOINTMENT_OFFICES.has(fact.payload.officeKind) || currentFacts.some((other) => (

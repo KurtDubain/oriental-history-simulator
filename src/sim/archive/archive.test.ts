@@ -380,6 +380,26 @@ describe('self-contained world cold archive', () => {
     expect(validateWorldArchiveIntegrity(world)).toEqual([]);
   });
 
+  it('omits only rebuildable cold indexes in saves, authenticates the payload, and restores the exact history', () => {
+    let world = createWorld('冷卷索引不重复持久化');
+    for (let i=0;i<80;i++) world=advanceWorldDetailed(world).world;
+    const before=stableStringify(world), facts=readWorldFacts(world), history=readWorldHistory(world);
+    const packed=serializeWorld(world), raw=JSON.parse(packed);
+    expect(raw.archiveSystem.blocks.length).toBeGreaterThan(0);
+    expect(raw.archiveSystem.blocks[0]).not.toHaveProperty('indexes');
+    expect(packed.length).toBeLessThan(before.length);
+    expect(stableStringify(world)).toBe(before);
+    const restored=deserializeWorld(packed);
+    expect(restored.archiveSystem.blocks).toEqual(world.archiveSystem.blocks);
+    expect(readWorldFacts(restored)).toEqual(facts);
+    expect(readWorldHistory(restored)).toEqual(history);
+    expect(restored.hash).toBe(world.hash);
+    expect(advanceWorldDetailed(restored).world.hash).toBe(advanceWorldDetailed(world).world.hash);
+    expect(deserializeWorld(before).hash).toBe(world.hash);
+    raw.archiveSystem.blocks[0].payloadBase64='invalid';
+    expect(()=>deserializeWorld(JSON.stringify(raw))).toThrow();
+  }, 60_000);
+
   it('imports the original whole-Situation pin layout and repins it to live roots', () => {
     let world = createWorld('冷档案旧引用根兼容') as ArchiveWorldState;
     for (let turn = 0; turn < 80; turn += 1) world = advanceWorldDetailed(world as WorldState).world;

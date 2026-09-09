@@ -10,7 +10,8 @@ import {
 } from '.';
 import type { MapProfile } from './types';
 
-// Updated after the authorized balance rules; still a frozen replay chain.
+// Verified against two independent replays: migration no longer counts as succession;
+// the prior checkout has identical military states (continuity audit goldens.json).
 const GENERAL_GROUP_BASELINES = {
   "架构边界-入世": [
     [
@@ -34,49 +35,49 @@ const GENERAL_GROUP_BASELINES = {
       "2e2bd60da7284cee"
     ],
     [
-      "a3a14a50de9064e3",
+      "4312fa420c35f086",
       "5231c4de3543d0d9",
       "9b717e469f373039"
     ],
     [
-      "62333e73efc375e8",
+      "29fe44bbb618fb3a",
       "d3172db7fe33a3f3",
       "e4b2fd6e651de372"
     ],
     [
-      "811a06f645269275",
+      "3289d7ecfc59b1e2",
       "ce1c9ccd1b333715",
       "7d8ac69d98b10c85"
     ],
     [
-      "4285252ad6c02177",
+      "786e38714496b47a",
       "6b216d9989dcf984",
       "db97c45881847626"
     ],
     [
-      "20d6245c63768209",
+      "5c6692ea58c696e9",
       "0991841cf4308c9a",
       "dcce1145fff99a6f"
     ],
     [
-      "88f5d47adaf30298",
+      "9c31a84985afd2b9",
       "fc5a9c76fd289331",
       "8c414b3f0d7f4691"
     ],
     [
-      "91ea12765545162c",
-      "983cad9e68835525",
-      "81bc81b29d3f6210"
+      "eef74c42733a5384",
+      "5e04fcfe51ac555b",
+      "f4b91cecbd4920f4"
     ],
     [
-      "88eb4b4f1a8fbdd1",
-      "8bd308f8351f78ea",
-      "252ad42de501a8b0"
+      "3e463f5008fb1c80",
+      "37e42f2c9bf46769",
+      "10e1e0a8ec7e043b"
     ],
     [
-      "6aeaff264f7f4b97",
-      "24e6bc2dd14e6e8f",
-      "f123943739d5d584"
+      "b1a8469c4f137d00",
+      "b737806c89e825fd",
+      "2aa41f1ef1066259"
     ]
   ],
   "州县民生": [
@@ -101,49 +102,49 @@ const GENERAL_GROUP_BASELINES = {
       "f8fc93d93f0d8a92"
     ],
     [
-      "7dd08766ae61ea4e",
+      "c0d85349373fcd07",
       "adfec869390ed307",
       "5bab2faa0a5ad054"
     ],
     [
-      "16ecec6d7d8e8a95",
-      "85dfd5f27f45ff48",
-      "8ea2388e551da854"
+      "9bdec93d46b19d26",
+      "ec5a2fdef9f0c3ff",
+      "2682b9657d4294e1"
     ],
     [
-      "62b35bdc9332ef48",
-      "d2808bdc08203f58",
-      "88166e5032dac196"
+      "28737d4f5a229939",
+      "ac03df0fc8c83cdd",
+      "19fc6fc06ab1650f"
     ],
     [
-      "d166bd75eb6f09a1",
-      "dd559de9edc45e70",
-      "59ad0eb04d6a231d"
+      "075e72a1966902c9",
+      "965d6c126890031d",
+      "c0fab3ab98a85523"
     ],
     [
-      "b08850091a6523ef",
-      "601a36222d87fc57",
-      "0ba5b01b6bff270c"
+      "3a1fd535b496d7e1",
+      "ccaa45bc56c9aa8a",
+      "553d28544e2a456d"
     ],
     [
-      "1ba7ce68ea40d32a",
-      "72b3d93df1dbec88",
-      "642fc175ece535c7"
+      "5051df2d2a2c3393",
+      "77b2cbfdad644cfd",
+      "16ee68792121ffb3"
     ],
     [
-      "067901917a8f4e0f",
-      "54f1efc40b8db39f",
-      "fe155ae92e644cff"
+      "4bb0fc2f4b305ae3",
+      "97d1e25cdad7c582",
+      "88aa1ee2addf8bd1"
     ],
     [
-      "34f986811b6efaf9",
-      "8efcf24a3115aa47",
-      "338191b3ec465f5a"
+      "dc52689db0981470",
+      "12bc9393eccfc467",
+      "0be388cbf39f1fa6"
     ],
     [
-      "c28e2da8646a9ab1",
-      "0534542023ea14f5",
-      "b29feb053fabf2f6"
+      "8bb27b3ee5576593",
+      "619e4bb23dac2082",
+      "cb102ab4bb916c41"
     ]
   ]
 } as const;

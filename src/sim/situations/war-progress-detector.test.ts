@@ -309,7 +309,7 @@ describe('war progress detector', () => {
     expect(candidate.signals.flatMap((signal) => signal.refs).every((ref) => (
       ref.kind === 'fact' || ref.kind === 'index'
     ))).toBe(true);
-    expect(candidate.structureSignals.map((signal) => signal.key)).toEqual(expect.arrayContaining([
+    expect(candidate.signals.filter(signal => signal.role === 'structural' || signal.role === 'capability').map((signal) => signal.key)).toEqual(expect.arrayContaining([
       'ongoing_war',
       'opposing_belligerents',
       'war_goal_and_duration',

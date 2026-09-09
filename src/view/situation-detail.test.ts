@@ -5,7 +5,6 @@ import type { SituationState } from '../sim/situations';
 import {
   MAX_SITUATION_DETAIL_DELTAS,
   MAX_SITUATION_DETAIL_FACTS,
-  MAX_SITUATION_DETAIL_TIMELINE,
   MAX_SITUATION_DIRECTORY_RESOLVED,
   projectSituationDetail,
   projectSituationWorkbench,
@@ -27,13 +26,11 @@ function worldWithSituationResultEvidence(): WorldState {
 }
 
 function withoutOptionalHistoryLinks<T extends {
-  timeline: Array<{ historyEventIds: string[] }>;
   evidence: Array<{ historyEventIds: string[] }>;
   scenes: Array<{ historyEventIds: readonly string[] }>;
 }>(detail: T) {
   return {
     ...detail,
-    timeline: detail.timeline.map(({ historyEventIds: _historyEventIds, ...item }) => item),
     evidence: detail.evidence.map(({ historyEventIds: _historyEventIds, ...item }) => item),
     scenes: detail.scenes.map(({ historyEventIds: _historyEventIds, ...item }) => item),
   };
@@ -59,13 +56,10 @@ describe('Situation detail projection', () => {
       expect(detail.playerSummary.length).toBeGreaterThanOrEqual(1);
       expect(detail.playerSummary.length).toBeLessThanOrEqual(2);
       expect(`${detail.currentChange}${detail.playerSummary.join('')}`).not.toMatch(/military_power_crisis|inheritance_crisis|war_progress|court_power_struggle|situation_|持续张力|结构证据|推动因素|阶段转折/);
-      expect(detail.nextWatch).toMatch(/[\u3400-\u9fff]/u);
-      expect(detail.timeline.length).toBeLessThanOrEqual(MAX_SITUATION_DETAIL_TIMELINE);
       expect(detail.evidence.length).toBeLessThanOrEqual(MAX_SITUATION_DETAIL_FACTS);
       expect(detail.consequences.length).toBeLessThanOrEqual(MAX_SITUATION_DETAIL_DELTAS);
-      expect(detail.audit.situationId).toBe(situation.id);
-      expect(detail.audit.randomness).toContain('无');
-      expect(detail.audit.coverageNotes.join('')).toContain('不可倒推');
+      expect(detail.id).toBe(situation.id);
+      expect(detail.evidence.every(item => item.id && Array.isArray(item.sourceFactIds))).toBe(true);
     }
 
     const warSituation = world.situationSystem.situations.find((item) => item.type === 'war_progress');
@@ -136,11 +130,8 @@ describe('Situation detail projection', () => {
     expect(detail.playerSummary.join('')).toContain(polity.shortName || polity.name);
     expect(detail.playerSummary.join('')).toContain(factions[0].name);
     expect(detail.playerSummary.join('')).toMatch(/争夺任命与支持|争权|朝局/u);
-    expect(detail.playerSummary.join('')).not.toContain(detail.publicDrivers[0]?.label);
-    expect(detail.nextWatch).toContain('任免');
-    expect(detail.publicDrivers[0]?.label).toBe('实掌中枢官席');
-    expect(detail.audit.template?.type).toBe('court_power_struggle');
-    expect(detail.audit.possibleOutcomes.map((item) => item.label)).toEqual(['双方暂成妥协', '宫变夺位已成']);
+    expect(detail.playerSummary.join('')).not.toMatch(/57|29|实掌中枢官席/);
+    expect(detail.participants.find(group => group.key === 'factionIds')?.entities.map(item => item.id)).toEqual(factions.map(item => item.id));
   });
 
   it('uses Chronicle only for optional navigation links, never for story, outcome, or consequence truth', () => {
@@ -174,7 +165,7 @@ describe('Situation detail projection', () => {
     }, situation);
 
     expect(projected.evidence.flatMap((fact) => fact.historyEventIds)).not.toContain(hiddenEventId);
-    expect(projected.timeline.flatMap((item) => item.historyEventIds)).not.toContain(hiddenEventId);
+    expect(projected.scenes.flatMap((item) => item.historyEventIds)).not.toContain(hiddenEventId);
   });
 
   it('builds a truthful result-Fact closure and marks missing evidence instead of inventing it', () => {
@@ -214,15 +205,14 @@ describe('Situation detail projection', () => {
     expect(detail.currentChange).toMatch(/[㐀-鿿].*(受任|去职|之战|易手|去世|成婚|请|军令|支持)/u);
     expect(detail.consequences.length).toBeGreaterThan(0);
     expect(new Set(detail.consequences.map((item) => item.factId))).toEqual(new Set([resultFact.id]));
-    expect(detail.consequenceCoverage).toContain('直接');
 
     const missing = projectSituationDetail(world, {
       ...resolved,
       resolution: { ...resolved.resolution!, resultFactIds: ['fact_missing_result'] },
     });
     expect(missing.consequences).toEqual([]);
-    expect(missing.audit.missingFactIds).toContain('fact_missing_result');
-    expect(missing.consequenceCoverage).toContain('缺页');
+    expect(missing.outcome?.resultFactIds).toContain('fact_missing_result');
+    expect(missing.evidence.some(item => item.id === 'fact_missing_result')).toBe(false);
   });
 
   it('bounds the directory and deterministically retains only the newest resolved cases', () => {

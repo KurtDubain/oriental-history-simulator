@@ -2,9 +2,13 @@ import { describe, expect, it } from 'vitest';
 import { advanceWorldBy, computeWorldHash, createWorld, deserializeWorld, serializeWorld, stableHash } from '../sim';
 import { compactWorldArchive, readWorldFacts } from '../sim/archive';
 import type { BattleFact, SimulationFact } from '../sim/facts';
-import { projectHistoricalScenes } from './historical-scenes';
-import { isContinuousRulerSeat, personHistoryEvidence, projectPersonStoryArc } from './person-story-arc';
+import { projectHistoricalScenes, projectSituationHistoricalScenes, projectFactNarrative } from './historical-scenes';
+import { personHistoryEvidence, projectPersonStoryArc } from './person-story-arc';
+import { isContinuousRulerSeat, continuousRulerSeatIds } from '../sim/facts/projector';
 import { refreshObserverWatch, watchItemForSelection } from './observer-selection';
+import { projectSituationDetail } from './situation-detail';
+import { deriveObserverLeadProjection } from './observer-leads';
+import { toPersonExperienceRecords } from './person-dossier-adapter';
 
 function fixture() {
   const world = createWorld('历史表达受控');
@@ -30,6 +34,25 @@ function fixture() {
 }
 
 describe('same history, faithful reading', () => {
+  it('reads the T12 relocation history consistently through leads, cases and person archives', () => {
+    const world = advanceWorldBy(createWorld('寒江照铁-戌时'), 12);
+    const before = serializeWorld(world), facts = readWorldFacts(world);
+    const ids = continuousRulerSeatIds(facts);
+    expect(ids.size).toBeGreaterThan(0);
+    for (const s of world.situationSystem.situations.filter(s => s.type === 'inheritance_crisis')) {
+      expect(projectSituationHistoricalScenes(world,s,100).flatMap(s=>s.sourceFactIds).some(id=>ids.has(id))).toBe(false);
+      expect(projectSituationDetail(world,s).evidence.some(f=>ids.has(f.id))).toBe(false);
+    }
+    expect(deriveObserverLeadProjection(world).leads.flatMap(l=>l.primarySourceFactIds).some(id=>ids.has(id))).toBe(false);
+    for (const fact of facts.filter(f=>ids.has(f.id))) {
+      if (fact.kind !== 'appointment_ended' && fact.kind !== 'appointment_started') continue;
+      const person = world.characters.find(p=>p.id===fact.payload.holderId)!;
+      expect(projectFactNarrative(world,fact,ids.has(fact.id)).title).not.toMatch(/去职|卸任|退位/);
+      expect(projectPersonStoryArc(world,person).flatMap(b=>b.sourceFactIds)).not.toContain(fact.id);
+      expect(toPersonExperienceRecords(world,person).some(r=>r.id.endsWith(fact.id) && /去职|卸任|退位/.test(r.title))).toBe(false);
+    }
+    expect(serializeWorld(world)).toBe(before);
+  });
   it.each([[false, false, true], [true, false, false], [false, false, false]])('keeps the complete ordered battle sequence %j', (...wins) => {
     const { world, armies, battle, transfer } = fixture();
     const battles = wins.map((won, i) => battle(i, won));

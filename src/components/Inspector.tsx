@@ -1061,7 +1061,7 @@ function PersonInspector({ data, onOpenMind, mobileMindRequest = 0, ...actions }
       <div className="observer-embodiment-switch" data-active={actions.embodiment?.active || undefined}>
         <div>
           <strong>{actions.embodiment?.active ? '正从此人的位置看世事' : actions.embodiment?.activeCharacterName ? `当前以${actions.embodiment.activeCharacterName}入世` : '仍是历史观察者'}</strong>
-          <span>{actions.embodiment?.active ? '每季可替此人定下一件事' : '入世不会接管国家，只增加一次人物决定'}</span>
+          <span>{data.lifeStage === '已故' ? '此人已故，只能回看生平、关系和历史影响，不能进入当下行动。关注可继续追踪家族、旧部与后续史事。' : actions.embodiment?.active ? '每季可替此人定下一件事' : '入世不会接管国家，只增加一次人物决定'}</span>
         </div>
         {actions.embodiment?.active
           ? <button type="button" onClick={actions.onLeaveEmbodiment}>离开此人</button>

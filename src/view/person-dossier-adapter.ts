@@ -43,7 +43,8 @@ import {
   projectPersonPoliticalFocus,
   type PoliticalFocusLink,
 } from './political-focus';
-import { projectPersonStoryArc, personHistoricalOffice, personShortBiography, personHistoryEvidence, isContinuousRulerSeat } from './person-story-arc';
+import { projectPersonStoryArc, personHistoricalOffice, personShortBiography, personHistoryEvidence } from './person-story-arc';
+import { continuousRulerSeatIds } from '../sim/facts/projector';
 
 export type PersonInspectorProjection = PersonInspectorData & {
   politicalFocus: readonly PoliticalFocusLink[];
@@ -137,6 +138,7 @@ export function toPersonExperienceRecords(
   const history = (evidence?.events ?? world.history)
     .filter(isDefaultVisibleHistoryEvent);
   const facts = evidence?.facts ?? world.facts;
+  const continuations = evidence?.continuations ?? continuousRulerSeatIds(facts);
   const eventById = new Map(history.map((event) => [event.id, event]));
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
   const claimed = new Set<string>();
@@ -155,7 +157,7 @@ export function toPersonExperienceRecords(
   };
   const addEvent = (event: HistoryEvent, id = event.id) => {
     const sourceFacts = event.sourceFactIds.map(sourceId => factById.get(sourceId));
-    const relocation = sourceFacts.length > 0 && sourceFacts.every(f => f && isContinuousRulerSeat(f, facts));
+    const relocation = sourceFacts.length > 0 && sourceFacts.every(f => f && continuations.has(f.id));
     const continued = relocation ? sourceFacts.find(f => f?.kind === 'appointment_started') : undefined;
     if (relocation && !continued) return;
     const key = canonicalEventKey(event, factById);
@@ -227,7 +229,7 @@ export function toPersonExperienceRecords(
     .map((fact) => fact.payload.appointmentId));
   for (const fact of appointmentFacts) {
     if (knownFactIds.has(fact.id)) continue;
-    const continued = isContinuousRulerSeat(fact, appointmentFacts);
+    const continued = continuations.has(fact.id);
     if (continued && fact.kind === 'appointment_ended') continue;
     entries.push({
       turn: fact.turn,

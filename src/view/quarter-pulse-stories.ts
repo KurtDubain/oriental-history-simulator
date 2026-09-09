@@ -2,7 +2,6 @@ import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
 import { projectCoreImpacts, type CoreImpactProjection } from './core-impact-projection';
 import { toChronicleEvent } from './history-causal-adapter';
 import { projectHistoricalScenes } from './historical-scenes';
-import type { QuarterPulseSituationChange } from './quarter-pulse-situations';
 
 export const MAX_QUARTER_PULSE_STORIES = 3;
 
@@ -32,19 +31,7 @@ export interface QuarterPulseEventStory extends QuarterPulseStoryBase {
   source: 'fact' | 'chronicle';
 }
 
-export interface QuarterPulseSituationStory extends QuarterPulseStoryBase {
-  kind: 'situation';
-  situationId: string;
-  situationKind: QuarterPulseSituationChange['kind'];
-  kindLabel: QuarterPulseSituationChange['kindLabel'];
-  basis: QuarterPulseSituationChange['basis'];
-  typeLabel: string;
-  threadTitle: string;
-  tension: number;
-  delta: number;
-}
-
-export type QuarterPulseStory = QuarterPulseEventStory | QuarterPulseSituationStory;
+export type QuarterPulseStory = QuarterPulseEventStory;
 
 export interface QuarterPulseProjection {
   stories: readonly QuarterPulseStory[];
@@ -68,33 +55,14 @@ function normalizedImportance(value: number): number {
 }
 
 function storyPriority(story: QuarterPulseStory): number {
-  if (story.kind === 'event') return story.eventId ? (story.source === 'fact' ? 30 : 10) : 0;
-  const kindPriority = {
-    resolved: 4,
-    born: 3,
-    heated: 2,
-    cooled: 1,
-  }[story.situationKind];
-  const basisPriority = story.basis === 'lifecycle' ? 60 : story.basis === 'phase' ? 50 : 20;
-  return basisPriority + kindPriority;
-}
-
-function storyMagnitude(story: QuarterPulseStory): number {
-  return story.kind === 'situation' ? Math.abs(story.delta) : story.sourceFactIds.length;
+  return story.eventId ? (story.source === 'fact' ? 30 : 10) : 0;
 }
 
 function compareStories(left: QuarterPulseStory, right: QuarterPulseStory): number {
   return right.importance - left.importance
     || storyPriority(right) - storyPriority(left)
-    || storyMagnitude(right) - storyMagnitude(left)
+    || right.sourceFactIds.length - left.sourceFactIds.length
     || stableCompare(left.id, right.id);
-}
-
-function hasCurrentConcreteEvidence(story: QuarterPulseStory): boolean {
-  return story.kind === 'event'
-    || story.basis !== 'trend'
-    || story.sourceFactIds.length > 0
-    || story.historyEventIds.length > 0;
 }
 
 function sharesEvidence(left: QuarterPulseStory, right: QuarterPulseStory): boolean {
@@ -267,7 +235,7 @@ export function selectQuarterPulseStories(
       ]),
     } as QuarterPulseStory;
   });
-  const concrete = representatives.filter(hasCurrentConcreteEvidence).sort(compareStories);
+  const concrete = representatives.sort(compareStories);
   return concrete.slice(0, limit);
 }
 

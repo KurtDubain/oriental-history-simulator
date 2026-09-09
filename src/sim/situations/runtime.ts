@@ -82,7 +82,7 @@ const PHASE_LABEL: Record<SituationPhase, string> = {
   critical: '临界',
 };
 
-const SIGNAL_LABELS: Record<string, string> = {
+export const SITUATION_FACT_SIGNAL_LABELS: Readonly<Record<string, string>> = {
   actual_army_command: '实际掌军',
   deputy_command_position: '副将军中位置',
   force_concentration: '军力集中',
@@ -145,7 +145,7 @@ const SIGNAL_LABELS: Record<string, string> = {
   recent_power_resource_change: '权势资源变动',
 };
 
-const OUTCOME_LABELS: Readonly<Record<string, string>> = {
+export const SITUATION_FACT_OUTCOME_LABELS: Readonly<Record<string, string>> = {
   dissipated: '结构压力消退',
   actor_died: '军权主体死亡',
   command_removed: '军职已被解除',
@@ -174,7 +174,7 @@ const OUTCOME_LABELS: Readonly<Record<string, string>> = {
 };
 
 function outcomeLabel(outcomeKey: string | null): string {
-  return outcomeKey ? OUTCOME_LABELS[outcomeKey] ?? '局势已依事实结案' : '矛盾消散';
+  return outcomeKey ? SITUATION_FACT_OUTCOME_LABELS[outcomeKey] ?? '局势已依事实结案' : '矛盾消散';
 }
 
 function characterName(world: WorldState, id: string): string {
@@ -326,7 +326,7 @@ function emitSituationMilestone(
         role: '结构',
         weight: 0.35,
         evidence: leadingSignals.length > 0
-          ? leadingSignals.map((signal) => `${SIGNAL_LABELS[signal.key] ?? '其他结构信号'}${signal.contribution >= 0 ? '+' : ''}${signal.contribution.toFixed(1)}`).join('；')
+          ? leadingSignals.map((signal) => `${SITUATION_FACT_SIGNAL_LABELS[signal.key] ?? '其他结构信号'}${signal.contribution >= 0 ? '+' : ''}${signal.contribution.toFixed(1)}`).join('；')
           : `当前张力${Math.round(situation.tension)}`,
       },
       {

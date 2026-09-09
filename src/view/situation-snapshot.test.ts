@@ -195,16 +195,6 @@ describe('Situation observer snapshot', () => {
       phaseSinceTurn: 4,
       causalFactIds: ['fact_battle_5', 'fact_order_5'],
       milestoneFactIds: ['fact_battle_5'],
-      latestChange: {
-        turn: 5,
-        kind: 'phase_changed',
-        label: '阶段变化',
-        sourceFactIds: ['fact_battle_5'],
-      },
-      nextSignal: {
-        key: 'watch_recall_or_refusal',
-        factIds: ['fact_order_5'],
-      },
     });
     expect(item.title).toContain(world.characters[0].name);
     expect(item.title).toContain(world.polities[0].shortName || world.polities[0].name);
@@ -229,13 +219,9 @@ describe('Situation observer snapshot', () => {
     expect(item.evidence[0]).toMatchObject({
       key: 'weak_central_authority',
       label: '中央权威不足',
-      contribution: 14,
-      factIds: [],
     });
     expect(item.evidence[1]).toMatchObject({
       key: 'recent_battle_record',
-      contribution: 9,
-      factIds: ['fact_battle_5'],
       refs: [{ kind: 'fact', factId: 'fact_battle_5' }],
     });
     expect(item.evidence.length).toBeGreaterThanOrEqual(2);
@@ -331,16 +317,11 @@ describe('Situation observer snapshot', () => {
       type: 'inheritance_crisis',
       typeLabel: '君位承继',
       title: `${polity.shortName || polity.name}的君位承继`,
-      nextSignal: {
-        key: 'watch_heir_designation',
-        label: '观察统治家族是否出现合法候选人',
-      },
     });
     expect(item.evidence.map((entry) => entry.label)).toEqual([
       '合法继承人缺位',
       '中央难以执行继承安排',
     ]);
-    expect(item.nextSignal.label).not.toContain('watch_');
   });
 
   it('projects a war title from the exact WarState attack direction, not sorted participants', () => {
@@ -407,10 +388,6 @@ describe('Situation observer snapshot', () => {
       type: 'war_progress',
       typeLabel: '战事',
       title: `${attackerLabel}攻${defenderLabel}`,
-      nextSignal: {
-        key: 'watch_war_score_and_control',
-        label: '观察下一场战役是否扩大战果差距并改变州域控制权',
-      },
     });
     expect(item.title.indexOf(attackerLabel)).toBeLessThan(item.title.indexOf(defenderLabel));
     expect(item.evidence.map((entry) => entry.label)).toEqual([

@@ -14,7 +14,7 @@ try {
     const errors = [];
     page.on('pageerror', e => errors.push(String(e)));
     page.on('console', m => { if (m.type() === 'error') errors.push(m.text()); });
-    await page.goto('http://127.0.0.1:4174', { waitUntil: 'networkidle' });
+    await page.goto(process.env.HISTORY_DISCOVERY_E2E_URL ?? 'http://127.0.0.1:4174', { waitUntil: 'networkidle' });
     await page.locator('input[type=file]').setInputFiles(file);
     await page.locator('.world-map__canvas').waitFor({ timeout: 60000 });
     const hash = await page.evaluate(() => JSON.parse(window.render_game_to_text()).deterministicWorldHash);

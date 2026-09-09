@@ -1,3 +1,5 @@
+import { makeSituationSignal as makeSignal, situationIndexRef as indexRef } from "./candidate-registry";
+import { isContinuousRulerSeat } from '../facts/projector';
 import type {
   ArmyState,
   CharacterState,
@@ -21,7 +23,6 @@ import type {
   SituationOutcomeOption,
   SituationParticipants,
   SituationSignal,
-  SituationSignalRole,
   SituationTemplate,
   SituationWatchSignal,
 } from './types';
@@ -63,7 +64,6 @@ const MAX_PARTICIPANT_FAMILIES = 4;
 const MAX_PARTICIPANT_FACTIONS = 5;
 const MAX_PARTICIPANT_ARMIES = 4;
 const MAX_SOURCE_FACTS = 6;
-const MAX_SIGNAL_REFS = 4;
 
 export interface InheritanceClaimAssessment {
   characterId: string;
@@ -101,45 +101,21 @@ export interface InheritanceCrisisIndex {
 }
 
 export interface InheritanceCrisisSignal extends SituationSignal {
-  label: string;
-  evidence: string;
   sourceFactIds: readonly string[];
 }
 
 export interface InheritanceCrisisWatchSignal extends SituationWatchSignal {
-  label: string;
-}
-
-export interface InheritanceCrisisStartSnapshot {
-  turn: number;
-  polityId: string;
-  rulerId: string | null;
-  rulerAge: number | null;
-  rulerHealth: number | null;
-  legalCandidateCount: number;
-  credibleCandidateCount: number;
-  leadingCandidateId: string | null;
-  leadingClaimLegitimacy: number;
-  claimStrengthGap: number;
-  polityLegitimacy: number;
-  centralAuthority: number;
 }
 
 export interface InheritanceCrisisCandidate extends SituationCandidateObservation {
   type: typeof INHERITANCE_CRISIS_TYPE;
   candidateKey: string;
-  title: string;
   hasExecutableActor: boolean;
   participants: SituationParticipants;
   executableActorIds: readonly string[];
   signals: readonly InheritanceCrisisSignal[];
-  structureSignals: readonly InheritanceCrisisSignal[];
-  triggerSignals: readonly InheritanceCrisisSignal[];
-  inhibitorSignals: readonly InheritanceCrisisSignal[];
   sourceFactIds: readonly string[];
   nextWatch: InheritanceCrisisWatchSignal;
-  nextWatchSignal: InheritanceCrisisWatchSignal;
-  startSnapshot: InheritanceCrisisStartSnapshot;
   possibleOutcomes: readonly SituationOutcomeOption[];
 }
 
@@ -159,37 +135,8 @@ function uniqueSorted(values: readonly string[], maximum = Number.POSITIVE_INFIN
   return [...new Set(values.filter(Boolean))].sort(stableCompare).slice(0, maximum);
 }
 
-function indexRef(
-  entityType: string,
-  entityId: string,
-  field: string,
-  value: string | number | boolean | null,
-): SituationEvidenceRef {
-  return { kind: 'index', entityType, entityId, field, value };
-}
-
 function factRefs(factIds: readonly string[]): SituationEvidenceRef[] {
   return uniqueSorted(factIds, MAX_SOURCE_FACTS).map((factId) => ({ kind: 'fact', factId }));
-}
-
-function makeSignal(
-  key: string,
-  role: SituationSignalRole,
-  contribution: number,
-  label: string,
-  evidence: string,
-  refs: readonly SituationEvidenceRef[],
-  sourceFactIds: readonly string[] = [],
-): InheritanceCrisisSignal {
-  return {
-    key,
-    role,
-    contribution: rounded(clamp(contribution, -30, 30)),
-    label,
-    evidence,
-    refs: refs.slice(0, MAX_SIGNAL_REFS),
-    sourceFactIds: uniqueSorted(sourceFactIds, MAX_SOURCE_FACTS),
-  };
 }
 
 function sortedMap<T extends { id: string }>(items: readonly T[]): Map<string, T> {
@@ -464,7 +411,7 @@ function relevantCurrentFacts(
 ): SimulationFact[] {
   const actorIds = new Set([ruler.id, ...claims.map((claim) => claim.characterId)]);
   return facts.filter((fact) => {
-    if (fact.turn !== turn || fact.kind === 'situation_milestone') return false;
+    if (fact.turn !== turn || fact.kind === 'situation_milestone' || isContinuousRulerSeat(fact, facts)) return false;
     if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
       return fact.payload.polityId === polity.id && (
         fact.payload.officeKind === '君主' || actorIds.has(fact.payload.holderId)
@@ -579,7 +526,6 @@ function buildLiveCandidate(
   if (mortalityExposure >= 10) {
     add(makeSignal(
       'ruler_mortality_exposure', 'structural', clamp(mortalityExposure * 0.48, 2, 24),
-      '君主寿命风险', `${ruler.name}${ruler.age}岁、健康${ruler.health}，继承安排的时间窗口正在收窄`,
       [
         indexRef('character', ruler.id, 'age', ruler.age),
         indexRef('character', ruler.id, 'health', ruler.health),
@@ -588,7 +534,6 @@ function buildLiveCandidate(
   } else {
     add(makeSignal(
       'ruler_health_stable', 'inhibitor', -clamp((18 - mortalityExposure) * 0.45, 2, 8),
-      '君主体健', `${ruler.name}${ruler.age}岁、健康${ruler.health}，短期内仍有整合继承秩序的时间`,
       [
         indexRef('character', ruler.id, 'age', ruler.age),
         indexRef('character', ruler.id, 'health', ruler.health),
@@ -605,43 +550,39 @@ function buildLiveCandidate(
   if (legalClaims.length === 0) {
     add(makeSignal(
       'no_legal_successor', 'structural', 24,
-      '合法继承人缺位', '当前人物、家族与谱系索引中没有达到合法谱系门槛的在世候选人', poolRefs,
+      poolRefs,
     ));
   } else if (legalClaims.length >= 2 && claimGap < 22) {
     add(makeSignal(
       'competing_legal_claims', 'structural', clamp(8 + legalClaims.length * 3 + (22 - claimGap) * 0.22, 10, 21),
-      '合法主张相互竞争', `${legalClaims.length}名合法候选并存，领先者与次席综合差距仅${rounded(claimGap)}`, poolRefs,
+      poolRefs,
     ));
   } else {
     add(makeSignal(
       'clear_legal_successor', 'inhibitor', -clamp(7 + claimGap * 0.18, 7, 15),
-      '继承次序较清晰', `合法候选${legalClaims.length}名，领先者优势${rounded(claimGap)}`, poolRefs,
+      poolRefs,
     ));
   }
 
   if (polity.legitimacy < 58) {
     add(makeSignal(
       'weak_dynastic_legitimacy', 'structural', clamp((62 - polity.legitimacy) * 0.38, 2, 20),
-      '王朝合法性不足', `政权合法性${polity.legitimacy}，新君更难仅凭制度惯性获得承认`,
       [indexRef('polity', polity.id, 'legitimacy', polity.legitimacy)],
     ));
   } else {
     add(makeSignal(
       'strong_dynastic_legitimacy', 'inhibitor', -clamp((polity.legitimacy - 52) * 0.18, 2, 9),
-      '合法性约束争位', `政权合法性${polity.legitimacy}为既有继承秩序提供支撑`,
       [indexRef('polity', polity.id, 'legitimacy', polity.legitimacy)],
     ));
   }
   if (polity.authority < 55) {
     add(makeSignal(
       'weak_succession_enforcement', 'structural', clamp((60 - polity.authority) * 0.3, 2, 18),
-      '中央难以执行继承安排', `中央权威${polity.authority}，诏令、监国与换防的执行力有限`,
       [indexRef('polity', polity.id, 'authority', polity.authority)],
     ));
   } else {
     add(makeSignal(
       'strong_succession_enforcement', 'inhibitor', -clamp((polity.authority - 50) * 0.16, 2, 8),
-      '中央仍能维持次序', `中央权威${polity.authority}能够约束争位者并落实安排`,
       [indexRef('polity', polity.id, 'authority', polity.authority)],
     ));
   }
@@ -653,7 +594,7 @@ function buildLiveCandidate(
   if (dynastyCapacity < 48) {
     add(makeSignal(
       'weak_ruling_family_capacity', 'structural', clamp((54 - dynastyCapacity) * 0.22, 2, 12),
-      '统治家族组织力薄弱', `统治家族可核验的声望与政治影响合成${Math.round(dynastyCapacity)}`, rulingFamily ? [
+      rulingFamily ? [
         indexRef('family', rulingFamily.id, 'prestige', rulingFamily.prestige),
         indexRef('family', rulingFamily.id, 'politicalInfluence', rulingFamily.politicalInfluence),
       ] : [indexRef('polity', polity.id, 'rulingFamilyId', polity.rulingFamilyId)],
@@ -661,7 +602,7 @@ function buildLiveCandidate(
   } else {
     add(makeSignal(
       'strong_ruling_family_capacity', 'inhibitor', -clamp((dynastyCapacity - 42) * 0.12, 2, 8),
-      '统治家族仍可协调', `统治家族可核验的组织力${Math.round(dynastyCapacity)}`, [
+      [
         indexRef('family', rulingFamily?.id ?? polity.id, 'dynasticCapacity', Math.round(dynastyCapacity)),
       ],
     ));
@@ -672,7 +613,7 @@ function buildLiveCandidate(
   if (factionBacked.length >= 2) {
     add(makeSignal(
       'factional_succession_split', 'structural', clamp(6 + factionBacked.length * 3, 8, 16),
-      '派系分押不同候选', `${factionBacked.length}名候选分别拥有可核验派系支持`, [
+      [
         indexRef('succession_pool', polity.id, 'factionBackedCandidateCount', factionBacked.length),
         ...[...factionLeaders].sort(stableCompare).slice(0, 3).map((id) => {
           const faction = index.factions.find((item) => item.id === id);
@@ -698,7 +639,7 @@ function buildLiveCandidate(
         3,
         14,
       ),
-      '姻亲家族具备影响监国的资源', `${character?.name ?? strongestExternal.characterId}的婚姻家族与制度支撑足以影响继承安排`, [
+      [
         indexRef('character', strongestExternal.characterId, 'politicalClass', character?.politicalClass ?? null),
         indexRef('succession_claim', strongestExternal.characterId, 'familySupport', strongestExternal.familySupport),
         indexRef('succession_claim', strongestExternal.characterId, 'institutionalSupport', strongestExternal.institutionalSupport),
@@ -718,7 +659,7 @@ function buildLiveCandidate(
     const armedSupport = Math.max(strongest.militarySupport, strongest.navalSupport);
     add(makeSignal(
       'claimant_military_support', 'capability', clamp(armedSupport * 0.18, 3, 15),
-      '候选人掌握军方支持', `${index.charactersById.get(strongest.characterId)?.name ?? strongest.characterId}可触及本国约${Math.round(strongest.militarySupport)}%陆军、${Math.round(strongest.navalSupport)}%水师`, [
+      [
         indexRef('succession_claim', strongest.characterId, 'militarySupport', strongest.militarySupport),
         indexRef('succession_claim', strongest.characterId, 'navalSupport', strongest.navalSupport),
         ...strongest.supportingArmyIds.slice(0, 3).map((id) => {
@@ -740,7 +681,6 @@ function buildLiveCandidate(
   if (predecessorDeath) {
     add(makeSignal(
       'ruler_death_without_lawful_settlement', 'trigger', 24,
-      '君主死亡后交接尚未落定', '当季已有君主死亡事实，但尚缺完整的新旧君主任免事实，不能把权力交接判为结案',
       [{ kind: 'fact', factId: predecessorDeath.id }], [predecessorDeath.id],
     ));
   }
@@ -748,7 +688,6 @@ function buildLiveCandidate(
   if (nonDeathFacts.length > 0) {
     add(makeSignal(
       'current_succession_evidence', 'trigger', clamp(2 + nonDeathFacts.length * 1.2, 2, 9),
-      '本季权力网络发生变化', `本季有${nonDeathFacts.length}条任命、婚姻、战争或领土事实触及本政权与候选网络`,
       factRefs(nonDeathFacts.map((fact) => fact.id)), nonDeathFacts.map((fact) => fact.id),
     ));
   }
@@ -816,7 +755,6 @@ function buildLiveCandidate(
     if (mortalityExposure >= 35) {
       return {
         key: 'watch_ruler_health_and_succession',
-        label: '观察君主健康是否恶化，以及朝廷是否在死亡前形成可执行继承安排',
         refs: [
           indexRef('character', ruler.id, 'health', ruler.health),
           indexRef('polity', polity.id, 'rulerId', polity.rulerId),
@@ -827,7 +765,6 @@ function buildLiveCandidate(
     if (legalClaims.length === 0) {
       return {
         key: 'watch_heir_designation',
-        label: '观察统治家族是否出现合法候选，或官职、派系与军队是否共同拥立替代者',
         refs: [
           indexRef('succession_pool', polity.id, 'legalCandidateCount', 0),
           indexRef('polity', polity.id, 'rulingFamilyId', polity.rulingFamilyId),
@@ -836,7 +773,6 @@ function buildLiveCandidate(
     }
     return {
       key: 'watch_claimant_support_balance',
-      label: '观察领先候选与次席在家族、派系、官职和军队支持上的差距',
       refs: [
         indexRef('succession_pool', polity.id, 'leadingCandidateId', leading?.characterId ?? null),
         indexRef('succession_pool', polity.id, 'claimStrengthGap', rounded(claimGap)),
@@ -845,39 +781,17 @@ function buildLiveCandidate(
     } satisfies InheritanceCrisisWatchSignal;
   })();
   const sourceFactIds = uniqueSorted(signals.flatMap((signal) => signal.sourceFactIds), MAX_SOURCE_FACTS);
-  const structureSignals = signals.filter((signal) => signal.role === 'structural' || signal.role === 'capability');
-  const triggerSignals = signals.filter((signal) => signal.role === 'trigger');
-  const inhibitorSignals = signals.filter((signal) => signal.role === 'inhibitor');
   return {
     type: INHERITANCE_CRISIS_TYPE,
     scopeKey: polity.id,
     candidateKey: `${INHERITANCE_CRISIS_TYPE}:${polity.id}`,
-    title: `${polity.shortName}国继承秩序`,
     pressure,
     hasExecutableActor: executableActorIds.length > 0,
     participants,
     executableActorIds,
     signals,
-    structureSignals,
-    triggerSignals,
-    inhibitorSignals,
     sourceFactIds,
     nextWatch,
-    nextWatchSignal: nextWatch,
-    startSnapshot: {
-      turn: context.turn,
-      polityId: polity.id,
-      rulerId: ruler.id,
-      rulerAge: ruler.age,
-      rulerHealth: ruler.health,
-      legalCandidateCount: legalClaims.length,
-      credibleCandidateCount: credibleClaims.length,
-      leadingCandidateId: leading?.characterId ?? null,
-      leadingClaimLegitimacy: leading?.lineageLegitimacy ?? 0,
-      claimStrengthGap: rounded(claimGap),
-      polityLegitimacy: polity.legitimacy,
-      centralAuthority: polity.authority,
-    },
     possibleOutcomes: possibleOutcomes(pressure, polity, ruler, legalClaims.length, leading),
     importance: Math.round(clamp(35 + pressure * 0.65)),
     visibility: Math.round(clamp(32 + pressure * 0.54 + (sourceFactIds.length > 0 ? 8 : 0))),
@@ -886,7 +800,6 @@ function buildLiveCandidate(
 }
 
 function resolutionCandidate(
-  context: { turn: number; index: Readonly<InheritanceCrisisIndex> },
   polity: PolityState,
   facts: readonly SimulationFact[],
   outcomeKey: InheritanceResolutionOutcomeKey,
@@ -923,32 +836,6 @@ function resolutionCandidate(
     outcomeKey,
     'outcome',
     -30,
-    outcomeKey === 'orderly_succession'
-      ? '同宗继承已经完成'
-      : outcomeKey === 'regency_established'
-        ? '幼主与摄政秩序已经建立'
-        : outcomeKey === 'dynasty_replaced'
-          ? '君主死亡后发生王朝更替'
-          : outcomeKey === 'palace_transfer'
-            ? '宫廷内部权力交接完成'
-            : outcomeKey === 'usurpation'
-              ? '异姓新君已经夺位'
-              : outcomeKey === 'lineage_extinguished_and_absorbed'
-                ? '统治谱系断绝并被行政吸收'
-                : '政权在战争中覆灭',
-    outcomeKey === 'orderly_succession'
-      ? `${successor?.name ?? '继任者'}与${predecessor?.name ?? '先君'}同宗且具可核验合法谱系，君位已平稳交接`
-      : outcomeKey === 'regency_established'
-        ? `${successor?.name ?? '幼主'}尚未成年，但合法谱系与当前君位索引共同证明摄政阶段已经开始`
-      : outcomeKey === 'dynasty_replaced'
-          ? `${successor?.name ?? '新君'}在${predecessor?.name ?? '前君'}死亡后承接君位，但所属家族不同，王朝名号随之更替`
-          : outcomeKey === 'palace_transfer'
-            ? `${predecessor?.name ?? '前君'}仍在世时由同宗${successor?.name ?? '新君'}接位，任命终止与开始事实共同证明宫廷交接`
-            : outcomeKey === 'usurpation'
-              ? `${successor?.name ?? '新君'}已取得君位，但与${predecessor?.name ?? '前君'}所属家族不同，异姓夺位已经完成`
-              : outcomeKey === 'lineage_extinguished_and_absorbed'
-                ? `${polity.name}已失去政权存续状态，并由行政转移事实证明故国被其他政权吸收`
-                : `${polity.name}已失去政权存续状态，并由战争领土事实证明其国家载体被摧毁`,
     [
       ...factRefs(resultFactIds),
       indexRef(
@@ -974,43 +861,19 @@ function resolutionCandidate(
     key: outcomeKey === 'lineage_extinguished_and_absorbed' || outcomeKey === 'polity_destroyed'
       ? 'watch_successor_states'
       : 'watch_new_reign_consolidation',
-    label: outcomeKey === 'lineage_extinguished_and_absorbed' || outcomeKey === 'polity_destroyed'
-      ? '观察故国人物、家族、军队与领土转入哪些继承政权'
-      : '观察新君能否恢复合法性、中央权威并重新整合派系与军队',
     refs: signal.refs,
   };
   return {
     type: INHERITANCE_CRISIS_TYPE,
     scopeKey: polity.id,
     candidateKey: `${INHERITANCE_CRISIS_TYPE}:${polity.id}`,
-    title: `${polity.shortName}国继承秩序`,
     pressure: 0,
     hasExecutableActor: false,
     participants,
     executableActorIds: [],
     signals: [signal],
-    structureSignals: [],
-    triggerSignals: [],
-    inhibitorSignals: [],
     sourceFactIds: resultFactIds,
     nextWatch,
-    nextWatchSignal: nextWatch,
-    startSnapshot: {
-      turn: context.turn,
-      polityId: polity.id,
-      rulerId: successor?.id ?? null,
-      rulerAge: successor?.age ?? null,
-      rulerHealth: successor?.health ?? null,
-      legalCandidateCount: successor ? 1 : 0,
-      credibleCandidateCount: successor ? 1 : 0,
-      leadingCandidateId: successor?.id ?? null,
-      leadingClaimLegitimacy: successor && predecessor
-        ? lineageLegitimacy(successor, predecessor, predecessor.familyId)
-        : 0,
-      claimStrengthGap: 0,
-      polityLegitimacy: polity.legitimacy,
-      centralAuthority: polity.authority,
-    },
     possibleOutcomes: [],
     resolution: { outcomeKey, resultFactIds },
     importance: Math.max(60, leadingFact.importance * 20),
@@ -1110,7 +973,6 @@ function detectInheritanceCrisis(
       ? 'lineage_extinguished_and_absorbed'
       : 'polity_destroyed';
     results.push(resolutionCandidate(
-      context,
       polity,
       resolutionFacts,
       outcomeKey,
@@ -1145,7 +1007,7 @@ function detectInheritanceCrisis(
     // Death creates the crisis but does not by itself prove its settlement.
     // Require old-office end and new-office start in the same turn.
     if (resolutionFacts.length !== 3) continue;
-    results.push(resolutionCandidate(context, polity, resolutionFacts, outcomeKey, predecessor, successor));
+    results.push(resolutionCandidate(polity, resolutionFacts, outcomeKey, predecessor, successor));
     resolvedPolities.add(polity.id);
   }
 
@@ -1173,7 +1035,6 @@ function detectInheritanceCrisis(
     if (!predecessor || !successor?.alive) continue;
     const outcomeKey = classifyRulerTransfer(predecessor, successor, false);
     results.push(resolutionCandidate(
-      context,
       polity,
       [endedFact, startedFact],
       outcomeKey,

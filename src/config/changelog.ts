@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.7',
-  date: '2026-09-09',
-  title: '人物事业与战后余波',
+  version: '1.29.8',
+  date: '2026-09-10',
+  title: '君位迁驻与人生脉络',
   items: [
-    '连缀起兵、拓土与结局，区分亲历和任内国事；守军回应前线，高龄恢复渐缓。',
+    '迁驻不再误作退位；合并同源经历，保留晚期转折；百年存档减负，史实完整保留。',
   ],
 };
 

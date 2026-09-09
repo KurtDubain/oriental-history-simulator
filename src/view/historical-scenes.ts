@@ -1,3 +1,4 @@
+import { continuousRulerSeatIds, isContinuousRulerSeat } from '../sim/facts/projector';
 import type { HistoryEvent, SimulationFact, StateDelta, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations';
 import { findWorldFact, readWorldFacts, readWorldHistory } from '../sim/archive';
@@ -157,7 +158,7 @@ function deltaCopy(world: WorldState, delta: StateDelta): string | null {
   return null;
 }
 
-export function projectFactNarrative(world: WorldState, fact: SimulationFact): FactNarrative {
+export function projectFactNarrative(world: WorldState, fact: SimulationFact, continuing = isContinuousRulerSeat(fact, world.facts)): FactNarrative {
   if (fact.kind === 'war_started') {
     return {
       title: `${polityName(world, fact.payload.attackerId)}向${polityName(world, fact.payload.defenderId)}开战`,
@@ -209,7 +210,11 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact): F
   }
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
     const entering = fact.kind === 'appointment_started';
-    const place = fact.payload.regionId ? `于${regionName(world, fact.payload.regionId)}` : '';
+    if (continuing) return {
+      title: `${characterName(world, fact.payload.holderId)}君位迁驻`,
+      summary: `${characterName(world, fact.payload.holderId)}继续在位，${entering ? '迁至' : '迁离'}${fact.payload.regionId ? regionName(world, fact.payload.regionId) : '原驻地'}。`,
+    };
+    const place = fact.payload.regionId ? `${regionName(world, fact.payload.regionId)}的` : '';
     const army = fact.payload.armyId ? armyName(world, fact.payload.armyId) : null;
     return {
       title: `${characterName(world, fact.payload.holderId)}${entering ? '受任' : '去职'}`,
@@ -571,6 +576,7 @@ export function projectHistoricalScenes(
   const facts = [...new Map(inputFacts.map((fact) => [fact.id, fact])).values()]
     .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
   const availableFacts = readScope === 'all' ? readWorldFacts(world) : world.facts;
+  const continuations = continuousRulerSeatIds(availableFacts);
 
   // Identity actions are observer envelopes around an Agency domain Fact.
   // Let the concrete support/request scene own the story instead of showing a
@@ -619,7 +625,7 @@ export function projectHistoricalScenes(
 
   for (const fact of facts) {
     if (consumed.has(fact.id) || fact.kind === 'situation_milestone') continue;
-    scenes.push(sceneFromFacts(world, `scene:fact:${fact.id}`, [fact], projectFactNarrative(world, fact), '', readScope));
+    scenes.push(sceneFromFacts(world, `scene:fact:${fact.id}`, [fact], projectFactNarrative(world, fact, continuations.has(fact.id)), '', readScope));
   }
 
   return scenes
@@ -723,8 +729,9 @@ export function projectSituationHistoricalScenes(
     ...(situation.resolution?.resultFactIds ?? []),
   ]);
   const availableFacts = readScope === 'all' ? readWorldFacts(world) : world.facts;
+  const continuations = continuousRulerSeatIds(availableFacts);
   const selected = availableFacts.filter((fact) => {
-    if (fact.turn < situation.startedTurn || fact.turn > lastTurn) return false;
+    if (fact.turn < situation.startedTurn || fact.turn > lastTurn || continuations.has(fact.id)) return false;
     const linked = directIds.has(fact.id) || fact.sourceFactIds.some((id) => directIds.has(id));
     if (situation.type === 'war_progress') return warFactTouchesSituation(fact, situation.scopeKey);
     if (situation.type === 'military_power_crisis') {
