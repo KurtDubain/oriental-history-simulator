@@ -5,6 +5,7 @@ import type { BattleFact, SimulationFact } from '../sim/facts';
 import type { WorldState } from '../sim/types';
 import { projectPersonStoryArc } from './person-story-arc';
 import { toPersonInspector } from './person-dossier-adapter';
+import { projectRosterCollection } from './roster-adapter';
 
 function battleFact(
   world: WorldState,
@@ -67,6 +68,98 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it.each(['winner', 'loser', 'received', 'late-accession', 'early-death', 'unknown'] as const)(
+    'attributes elimination to the historical seat (%s), never final nationality', stance => {
+      const w=createWorld('灭国的立场来自任期');
+      const p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
+      const winner=p.polityId, loser=w.polities.find(x=>x.id!==winner)!.id;
+      const base=battleFact(w,p.id,'base',20,10), regionId=base.regionIds[0];
+      const losing=stance==='loser'||stance==='received';
+      const seat={id:'seat',holderId:p.id,polityId:losing?loser:winner,kind:'君主' as const,rank:100,
+        regionId,armyId:null,appointedTurn:stance==='late-accession'?20:10,endedTurn:null,active:true};
+      w.offices=stance==='unknown'?[]:[seat]; w.history=[];
+      const capture:SimulationFact={...base,id:'z-first',kind:'territory_control_changed',actorIds:[],
+        payload:{regionId,previousControllerId:loser,nextControllerId:winner,reason:'battle_capture',warId:'war'}};
+      const start:SimulationFact={...base,id:'a-later',kind:'appointment_started',payload:{appointmentId:'seat',action:'started',
+        holderId:p.id,polityId:winner,officeKind:'君主',rank:100,regionId,armyId:null,fleetId:null}};
+      const death:SimulationFact={...base,id:'not-a-number',kind:'character_death',payload:{characterId:p.id,
+        cause:'natural',age:70,health:0,diseaseId:null,role:'君主'}};
+      w.facts=stance==='late-accession'?[capture,start]:stance==='early-death'?[death,capture]:[capture];
+      if(stance==='received')w.offices.push({...seat,id:'later-seat',polityId:winner,appointedTurn:21});
+      w.history.push({...base,id:'elimination',kind:'polity_eliminated',title:'故国灭亡',summary:'故国失去最后领土，胜方接收人员。',
+        actorIds:[p.id],evidence:[],situationIds:[],sourceFactIds:[capture.id],stateDeltas:[
+          {entityType:'polity',entityId:winner,field:'capitalRegionId',before:'old',after:regionId},
+          {entityType:'polity',entityId:loser,field:'alive',before:true,after:false},
+          {entityType:'character',entityId:p.id,field:'polityId',before:loser,after:winner}]});
+      const body=serializeWorld(w),hash=computeWorldHash(w);
+      const arc=projectPersonStoryArc(w,p), beat=arc.find(b=>b.sourceEventIds.includes('elimination'));
+      if(['late-accession','early-death','unknown'].includes(stance))expect(beat).toBeUndefined();
+      else {
+        expect(beat?.phase).toBe(losing?'setback':'battle');
+        expect(beat?.title).toContain(losing?'任内亡国':'任内灭敌');
+        expect(beat?.primaryFactId).toBe(capture.id);
+        expect(beat?.primaryEventId).toBe('elimination');
+      }
+      if(stance==='late-accession') {
+        w.facts=[start,capture];
+        expect(projectPersonStoryArc(w,p).find(b=>b.sourceEventIds.includes('elimination'))?.phase).toBe('battle');
+        w.facts=[capture,start];
+      }
+      expect(computeWorldHash(w)).toBe(hash);expect(serializeWorld(w)).toBe(body);
+    });
+
+  it('discovers sustained careers and tragic reversals ahead of a lone death or isolated founding, with visible reasons', () => {
+    const w=createWorld('事业不是单条重要度');
+    const people=w.armies.slice(0,5).map(a=>w.characters.find(p=>p.id===a.commanderId)!);
+    const [career,tragic,founder,lone,governor]=people;
+    w.history=[]; w.facts=[]; w.offices=[]; w.turn=100;
+    const regions=w.regions.slice(0,4);
+    regions.forEach(r=>{r.neighbors=regions.filter(x=>x!==r).map(x=>x.id);});
+    for(const p of people) {
+      p.alive=false;p.influence=0;
+      const base=battleFact(w,p.id,`battle-${p.id}`,50,100);
+      base.payload.attackerWon=false;
+      if(p===governor) {
+        w.facts.push(...[20,30].map((turn):SimulationFact=>({...base,id:`relief-${turn}`,turn,importance:3,
+          kind:'local_governance_resolved',payload:{actorId:p.id,polityId:p.polityId,regionId:regions[0].id,
+            authorityId:p.id,action:'open_granary',outcome:'enacted',reasonCode:'measure_enacted',score:60,threshold:50,
+            pressure:80,foodSeasonsBefore:0.5,unrestBefore:80,unrestAfter:50,foodSpent:500,treasurySpent:100}})));
+        continue;
+      }
+      const death:SimulationFact={...base,id:`death-${p.id}`,kind:'character_death',sourceFactIds:[base.id],payload:{
+        characterId:p.id,cause:'battle',battleFactId:base.id,age:60,health:0,diseaseId:null,role:'主帅'}};
+      w.facts.push(base,death);
+      if(p===lone)continue;
+      w.offices.push({id:`seat-${p.id}`,holderId:p.id,polityId:p.polityId,kind:'君主',rank:100,armyId:null,
+        regionId:regions[0].id,appointedTurn:10,endedTurn:50,active:false});
+      w.history.push({...base,id:`founding-${p.id}`,turn:10,kind:'rebellion',title:'据地起兵',summary:'据地建立政权。',
+        evidence:[],situationIds:[],sourceFactIds:[],stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'alive',before:false,after:true}]});
+      if(p===founder)continue;
+      w.facts.push(...regions.map((r,i):SimulationFact=>({...base,id:`gain-${p.id}-${i}`,turn:20+i,kind:'territory_control_changed',
+        actorIds:[],regionIds:[r.id],payload:{regionId:r.id,previousControllerId:'enemy',nextControllerId:p.polityId,reason:'battle_capture',warId:'war'}})));
+      if(p===tragic)w.history.push({...base,id:'lost-capital',turn:40,kind:'capital_fall',title:'失去旧都',summary:'旧都失守。',evidence:[],
+        situationIds:[],sourceFactIds:[],stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'capitalRegionId',before:regions[0].id,after:regions[1].id}]});
+    }
+    const body=serializeWorld(w),hash=computeWorldHash(w);
+    const rows=projectRosterCollection(w,'people',{query:'',quickView:'deceased',filters:{},sort:'attention'}).items;
+    const index=(id:string)=>rows.findIndex(r=>r.id===id);
+    for(const p of [career,tragic])for(const smaller of [lone,founder])expect(index(p.id)).toBeLessThan(index(smaller.id));
+    expect(index(lone.id)).toBeGreaterThanOrEqual(0);
+    expect(index(governor.id)).toBeLessThan(index(lone.id));
+    expect(projectPersonStoryArc(w,lone).find(b=>b.title===rows[index(lone.id)].reason?.label)?.phase).toBe('ending');
+    for(const p of people) {
+      const arc=projectPersonStoryArc(w,p),reason=rows.find(r=>r.id===p.id)!.reason!;
+      expect(arc.length).toBeLessThanOrEqual(5);
+      expect(arc.some(b=>b.title===reason.label)).toBe(true);
+      for(const b of arc) {
+        expect(b.sourceFactIds.every(id=>w.facts.some(f=>f.id===id))).toBe(true);
+        expect(b.sourceEventIds.every(id=>w.history.some(e=>e.id===id))).toBe(true);
+        expect(new Set(b.sourceEventIds).size).toBe(b.sourceEventIds.length);
+      }
+    }
+    expect(computeWorldHash(w)).toBe(hash);expect(serializeWorld(w)).toBe(body);
+  });
+
   it.each(['character_death', 'appointment_ended'] as const)('uses stream order, not IDs, for same-quarter %s and later gains', kind => {
     const world = createWorld('同季先后不是编号');
     const person = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;

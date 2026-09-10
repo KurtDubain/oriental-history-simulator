@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.9',
+  version: '1.29.10',
   date: '2026-09-10',
-  title: '人物历史',
+  title: '故人发现',
   items: [
-    '修正归功、迁署、经历与卒地。',
+    '辨清兴亡，回看事业。',
   ],
 };
 

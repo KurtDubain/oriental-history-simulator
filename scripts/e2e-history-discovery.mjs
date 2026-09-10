@@ -26,6 +26,7 @@ try {
     await quickView.selectOption(view);
     const filterToggle = page.locator('[data-roster-filter-toggle]');
     if (await filterToggle.isVisible() && await filterToggle.getAttribute('aria-expanded') === 'true') await filterToggle.click();
+    await page.screenshot({ path: `${dir}/${label}-list-top.png`, fullPage: true });
     const row = (name ? page.locator('[data-roster-id]').filter({ hasText: name }) : page.locator('[data-roster-id]')).first();
     for (let i = 0; !await row.count() && i < 3; i++) {
       await page.getByRole('button', { name: /继续展卷/ }).click();
@@ -34,19 +35,24 @@ try {
     await page.waitForTimeout(400);
     assert.equal(await page.getByLabel('检索时人群像').inputValue(), '');
     await page.screenshot({ path: `${dir}/${label}-discovery.png`, fullPage: true });
+    const reason = await row.locator('..').locator('.roster-panel__reason strong').innerText();
     await row.click();
     const inspector = page.locator('.observer-inspector[data-kind="person"]');
     await inspector.waitFor();
     await page.waitForTimeout(400);
     await page.screenshot({ path: `${dir}/${label}-person.png`, fullPage: true });
     const text = await inspector.innerText();
-    await writeFile(`${dir}/${label}.json`, JSON.stringify({ text, state: JSON.parse(await page.evaluate(() => window.render_game_to_text())), errors }, null, 2));
+    const state = JSON.parse(await page.evaluate(() => window.render_game_to_text()));
+    assert(state.interface.selectedDetail.storyArc.some(beat => beat.title === reason));
+    assert(text.includes(reason), '名录理由必须在实际人物档案中可读');
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     assert.deepEqual(errors, []);
     assert.equal(await page.evaluate(() => JSON.parse(window.render_game_to_text()).deterministicWorldHash), hash);
     assert(!/已故 · 已故|配角|长远所重/.test(text));
     const beats = inspector.locator('.observer-person-story button');
-    for (let i = 0; i < await beats.count(); i++) {
+    const evidenceCount = await beats.count();
+    assert.equal(evidenceCount, state.interface.selectedDetail.storyArc.length);
+    for (let i = 0; i < evidenceCount; i++) {
       const evidence = beats.nth(i);
       await evidence.scrollIntoViewIfNeeded();
       await evidence.click();
@@ -55,6 +61,7 @@ try {
       await page.screenshot({ path: `${dir}/${label}-evidence-${i}.png`, fullPage: true });
       await page.keyboard.press('Escape');
       await page.locator('#observer-causal-drawer').waitFor({ state: 'hidden' });
+      assert.equal(await page.evaluate(() => JSON.parse(window.render_game_to_text()).deterministicWorldHash), hash);
     }
     await inspector.getByRole('tab', { name: '生平', exact: true }).click();
     await inspector.getByRole('button', { name: '读完整人物传', exact: true }).click();
@@ -63,6 +70,7 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     assert.equal(await page.evaluate(() => JSON.parse(window.render_game_to_text()).deterministicWorldHash), hash);
     assert.deepEqual(errors, []);
+    await writeFile(`${dir}/${label}.json`, JSON.stringify({ text, reason, state, hashAfter: hash, evidenceOpened: evidenceCount, errors }, null, 2));
     await page.close();
   }
 } finally { await browser.close(); }

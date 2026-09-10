@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.9',
+  version: '1.29.10',
   date: '2026-09-10',
-  title: '人物历史',
+  title: '故人发现',
   items: [
-    '修正归功、迁署、经历与卒地。',
+    '辨清兴亡，回看事业。',
   ],
 };
 

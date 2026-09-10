@@ -65,6 +65,14 @@ const phaseLabels: Record<PersonStoryPhase, string> = {
 };
 const unique = (values: readonly string[]) => [...new Set(values)].sort();
 
+/** Distinct territorial consequences in an already selected career; citations aren't achievements. */
+export function storyTerritories(ids: readonly string[], byId: ReadonlyMap<string, SimulationFact>) {
+  return new Set(ids.flatMap(id => {
+    const f = byId.get(id);
+    return f?.kind === 'territory_control_changed' ? [f.payload.regionId] : [];
+  }));
+}
+
 function mergeSources(target: Candidate, sources: readonly Candidate[]) {
   target.sourceFactIds = unique([...target.sourceFactIds, ...sources.flatMap(c => c.sourceFactIds)]);
   target.sourceEventIds = unique([...target.sourceEventIds, ...sources.flatMap(c => c.sourceEventIds)]);
@@ -95,7 +103,7 @@ function rootBattleId(fact: SimulationFact, byId: ReadonlyMap<string, Simulation
 function sourceEvents(events: readonly HistoryEvent[], factIds: readonly string[], primaryFactId: string) {
   const linked = events.filter((event) => event.sourceFactIds.some((id) => factIds.includes(id)));
   const primary = linked.find((event) => event.sourceFactIds.includes(primaryFactId)) ?? linked[0];
-  return { sourceFactIds: factIds, primaryFactId, sourceEventIds: unique(linked.map((event) => event.id)), primaryEventId: primary?.id ?? null };
+  return { sourceFactIds: factIds, primaryFactId, sourceEventIds: linked.map((event) => event.id), primaryEventId: primary?.id ?? null };
 }
 
 function episodeCandidate(world: WorldState, episodes: readonly BattleEpisode[], personId: string, events: readonly HistoryEvent[]): Candidate | null {
@@ -233,22 +241,23 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
     const legacyDeed = !event.sourceFactIds.length && event.actorIds.includes(person.id)
       && ['local_governance', 'naval_operation_aborted'].includes(event.kind);
     const capital = event.kind === 'capital_fall';
-    const loss = event.stateDeltas.find(d => d.entityType === 'polity' && (d.field === 'capitalRegionId'
-      || event.kind === 'polity_eliminated' && d.field === 'alive' && d.after === false));
+    const loss = event.stateDeltas.find(d => d.entityType === 'polity' && (capital ? d.field === 'capitalRegionId'
+      : event.kind === 'polity_eliminated' && d.field === 'alive' && d.after === false));
     const oldCapitalId = loss?.before;
     const transfers = event.sourceFactIds.map(id => byId.get(id)).filter(f => f?.kind === 'territory_control_changed');
     const defeated = reignAt(event.turn, event.sourceFactIds).some(o => o.polityId === loss?.entityId);
-    const victorious = reignAt(event.turn, transfers.map(f => f!.id)).some(o => transfers.some(f => f?.kind === 'territory_control_changed'
-      && f.payload.nextControllerId === o.polityId && f.payload.previousControllerId === loss?.entityId));
+    const victorious = !defeated && reignAt(event.turn, transfers.map(f => f!.id)).some(o => transfers.some(f =>
+      f!.payload.nextControllerId === o.polityId && f!.payload.previousControllerId === loss?.entityId));
     const capture = capital ? [...episodes.values()].find(e => e.battle.turn === event.turn
       && e.battle.payload.targetRegionId === oldCapitalId && battleSide(e.battle, person.id)?.won
       && event.sourceFactIds.some(id => { const f = byId.get(id); return f && rootBattleId(f, byId) === e.battle.id; })) : undefined;
     if (!founded && !accession && !legacyDeed && !((capital || event.kind === 'polity_eliminated') && (defeated || victorious || capture))) continue;
     const battle = capture?.battle;
     const place = world.regions.find(r => r.id === oldCapitalId)?.name ?? '旧都';
-    const polityName = world.polities.find(p => p.id === founded?.entityId)?.name ?? '新政权';
+    const polityName = world.polities.find(p => p.id === (founded?.entityId ?? loss?.entityId))?.name ?? '该国';
     const title = founded ? `${event.title}，建立${polityName}` : accession ? `${person.name}登位` : legacyDeed ? event.title
-      : battle ? `${person.name}参战，攻克${place}` : `任内国事：${victorious ? capital ? `攻取${place}` : `${world.polities.find(p => p.id === loss?.entityId)?.name ?? '敌国'}覆亡` : event.title}`;
+      : battle ? `${person.name}参战，攻克${place}` : capital ? `任内国事：${victorious ? `攻取${place}` : event.title}`
+        : `任内${victorious ? '灭敌' : '亡国'}：${polityName}`;
     const sourceFactIds = unique([...event.sourceFactIds, ...(battle ? [battle.id] : []), ...appointments.filter(f => f.turn === event.turn && (
       ((accession || founded) && (f.kind === 'appointment_started' && (f.payload.officeKind === '君主' || f.payload.polityId === founded?.entityId)
         || f.kind === 'appointment_ended' && !f.sourceFactIds.length && (accession && event.polityIds.includes(f.payload.polityId)
@@ -262,7 +271,7 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
       episode.priority = -1;
       if (!episode.title.startsWith(`${person.name}参战，攻克`)) episode.title = `${person.name}参战，攻克${place}`;
       else if (!episode.title.includes(place)) episode.title += `、${place}`;
-      episode.summary += ` ${historyTurnDate(event.turn).label}，${person.name}参战攻克${place}；${event.summary}`;
+      episode.summary += ` ${event.summary}`;
       episode.sourceFactIds = unique([...episode.sourceFactIds, ...sourceFactIds]);
       episode.sourceEventIds = unique([...episode.sourceEventIds, event.id]);
       continue;
@@ -274,12 +283,13 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
       && c.sourceFactIds.some(id => ['appointment_started','appointment_ended'].includes(byId.get(id)?.kind ?? '')));
     for (const c of settled) candidates.splice(candidates.indexOf(c), 1);
     candidates.push({ id: event.id, turn: event.turn, startTurn: departure?.turn, importance: event.importance,
-      priority: founded || accession ? -2 : battle || capital || event.kind === 'polity_eliminated' ? -1 : 1,
+      priority: founded || accession ? -2 : capital || event.kind === 'polity_eliminated' ? -1 : 1,
       phase: founded || accession || event.kind === 'local_governance' ? 'command' : battle || victorious ? 'battle' : 'setback',
       title, summary: `${departure ? `${departure.summary} 此后，` : ''}${event.summary}`.replace(/navop_\d+/g, '所记远征'),
-      sourceFactIds: unique([...sourceFactIds, ...settled.flatMap(c => c.sourceFactIds)]),
-      sourceEventIds: unique([...(departure ? [departure.id] : []), event.id, ...settled.flatMap(c => c.sourceEventIds)]),
+      sourceFactIds,
+      sourceEventIds: [...(departure ? [departure.id] : []), event.id],
       primaryEventId: event.id, primaryFactId: battle?.id ?? sourceFactIds[0] ?? null });
+    mergeSources(candidates.at(-1)!, settled);
   }
   // Territorial changes belong to a reign, not automatically to the ruler's sword.
   const campaigns: SimulationFact[][] = [];
@@ -302,7 +312,7 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
     const ids = unique(group.flatMap(f => [f.id, ...f.sourceFactIds]));
     const own = candidates.filter(c => c.phase === 'battle' && c.sourceFactIds.some(id => ids.includes(id)));
     const combined: Candidate = { id: group[0].id, startTurn: group[0].turn, turn: group.at(-1)!.turn, phase: 'battle', priority: -1,
-      title: `${person.name}任内连取${places.join('、')}${own.filter(c => c.sourceEventIds.some(id => events.some(e => e.id === id && e.kind === 'polity_eliminated'))).map(c => `，${c.title.replace('任内国事：', '')}`).join('')}`,
+      title: `${person.name}任内连取${places.join('、')}${own.filter(c => c.sourceEventIds.some(id => events.some(e => e.id === id && e.kind === 'polity_eliminated'))).map(c => `，${c.title}`).join('')}`,
       summary: `其在位期间，军队先后取得${places.join('、')}。${own.map(c => `${c.title}；${c.summary}`).join('')}`,
       importance: Math.max(...group.map(f => f.importance)), ...sourceEvents(events, ids, group.at(-1)!.id) };
     mergeSources(combined, own); candidates.push(combined);
@@ -375,10 +385,7 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
   const chosen: Candidate[] = [];
   const latest = [...pool].sort((a,b) => b.turn-a.turn)[0];
   const beginning = [...pool].sort((a,b) => (a.startTurn ?? a.turn)-(b.startTurn ?? b.turn))[0];
-  const gains = (c: Candidate) => new Set((c.phase === 'battle' ? c.sourceFactIds : []).flatMap(id => {
-    const f = byId.get(id); return f?.kind === 'territory_control_changed' && f.payload.reason === 'battle_capture'
-      ? [f.payload.regionId] : [];
-  })).size;
+  const gains = (c: Candidate) => c.phase === 'battle' ? storyTerritories(c.sourceFactIds, byId).size : 0;
   const peak = [...pool].sort((a,b) => gains(b)-gains(a) || a.priority-b.priority || b.importance-a.importance)[0];
   for (const item of [pool[0], peak, latest, ...pool.filter(c => c.priority < 0), beginning, ...pool]) {
     if (!item) continue;
