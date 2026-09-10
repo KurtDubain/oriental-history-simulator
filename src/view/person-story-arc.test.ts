@@ -68,6 +68,79 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it.each(['same-war', 'other-war', 'other-role', 'mixed-place', 'distant'] as const)('anchors a capital title and joins only a related defense (%s)', mode => {
+    const w=createWorld('经历主标题对应证据');
+    const p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
+    w.facts=[];w.history=[];w.offices=[];
+    const [a,b,c]=w.regions;
+    for(const r of [a,b,c])r.neighbors=[a,b,c].filter(x=>x!==r).map(x=>x.id);
+    const battles=[a,b,c].map((r,i)=>{
+      const f=battleFact(w,p.id,`attack-${i}`,10+i,100);
+      f.payload.targetRegionId=r.id;f.regionIds=[r.id];return f;
+    });
+    const capture:SimulationFact={...battles[1],id:'capture',kind:'territory_control_changed',sourceFactIds:[battles[1].id],
+      payload:{regionId:b.id,previousControllerId:'enemy',nextControllerId:p.polityId,reason:'battle_capture',warId:battles[1].payload.warId}};
+    const defense=battleFact(w,p.id,'defense',mode==='distant'?30:14,200);
+    defense.payload.targetRegionId=b.id;defense.regionIds=[b.id];
+    if(mode==='other-war')defense.payload.warId='another-war';
+    const allied={...defense.payload.attacker,kind:'army' as const};
+    if(mode==='other-role')allied.participants![0].role='member';
+    defense.payload.defenders=[allied,{...allied,armyId:'friend',participants:[]}];
+    defense.payload.attacker={...allied,armyId:'enemy',participants:[]};defense.payload.attackerWon=false;
+    w.facts.push(...battles,capture,defense);
+    if(mode==='mixed-place')w.facts.push({...defense,id:'elsewhere-defense',turn:15,regionIds:[a.id],payload:{...defense.payload,targetRegionId:a.id}});
+    w.history.push({...battles[0],id:'early-event',kind:'battle',title:'先前战役',summary:'先前战役',evidence:[],situationIds:[],sourceFactIds:[battles[0].id]},
+      {...battles[1],id:'capital-event',kind:'capital_fall',title:`敌国失去${b.name}`,summary:`${b.name}被攻克`,
+        evidence:[],situationIds:[],sourceFactIds:[capture.id],stateDeltas:[
+          {entityType:'polity',entityId:'enemy',field:'capitalRegionId',before:b.id,after:c.id}]});
+    const body=serializeWorld(w),hash=computeWorldHash(w),story=projectPersonStoryArc(w,p);
+    const beat=story.find(b=>b.sourceFactIds.includes(capture.id))!;
+    expect(beat.title).toContain(`攻克${b.name}`);
+    expect(beat.primaryFactId).toBe(battles[1].id);expect(beat.primaryEventId).toBe('capital-event');
+    expect(beat.sourceFactIds).toEqual(expect.arrayContaining(battles.map(b=>b.id)));
+    expect(beat.sourceEventIds).toContain('early-event');
+    expect(beat.sourceFactIds.includes(defense.id)).toBe(mode==='same-war');
+    if(mode==='same-war')expect(beat.summary).toContain('与同地友军一起击退来敌');
+    expect(serializeWorld(w)).toBe(body);expect(computeWorldHash(w)).toBe(hash);
+  });
+
+  it('keeps an evidenced costly setback among repeated captures, with Fact-only evidence usable', () => {
+    const w=createWorld('有代价的失利不被重复得胜淹没');
+    const p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
+    w.facts=[];w.history=[];w.offices=[];p.alive=false;
+    for(let i=0;i<7;i++){
+      const f=battleFact(w,p.id,`victory-${i}`,10+i*10,10);w.facts.push(f);
+      w.history.push({...f,id:`capital-${i}`,kind:'capital_fall',title:'敌都失守',summary:'敌都失守',evidence:[],situationIds:[],sourceFactIds:[f.id],
+        stateDeltas:[{entityType:'polity',entityId:'enemy',field:'capitalRegionId',before:f.payload.targetRegionId,after:'elsewhere'}]});
+    }
+    const loss=battleFact(w,p.id,'costly-defeat',65,1000);loss.payload.attackerWon=false;
+    loss.payload.attacker.participants![0].soldiersBefore=4000;
+    loss.payload.attacker.participants![0].soldiersAfter=3000;
+    w.facts.push(loss,{...loss,id:'death',turn:71,kind:'character_death',sourceFactIds:[],
+      payload:{characterId:p.id,age:80,cause:'natural',health:0,diseaseId:null,role:'将领'}});
+    const arc=projectPersonStoryArc(w,p),beat=arc.find(b=>b.sourceFactIds.includes(loss.id));
+    expect(arc.length).toBeLessThanOrEqual(5);expect(arc.at(-1)?.phase).toBe('ending');
+    expect(beat?.phase).toBe('setback');expect(beat?.primaryFactId).toBe(loss.id);expect(beat?.primaryEventId).toBeNull();
+    expect(beat?.summary).toContain('战损1000人');
+  });
+
+  it('does not let taking a capital overwrite a participant death or its primary evidence', () => {
+    const w=createWorld('获胜者同样可能阵亡'),p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
+    const battle=battleFact(w,p.id,'victory',10,100);
+    const death:SimulationFact={...battle,id:'death',kind:'character_death',sourceFactIds:[battle.id],
+      payload:{characterId:p.id,age:55,cause:'battle',health:0,diseaseId:null,role:p.role,battleFactId:battle.id}};
+    w.facts=[battle,death];w.offices=[];p.alive=false;
+    const event={...battle,evidence:[],situationIds:[],sourceFactIds:[battle.id]};
+    w.history=[{...event,id:'capital',kind:'capital_fall',title:'敌都失守',summary:'敌都失守',
+      stateDeltas:[{entityType:'polity',entityId:'enemy',field:'capitalRegionId',before:battle.payload.targetRegionId,after:'elsewhere'}]},
+      {...event,id:'death-event',kind:'character_death',title:'将领阵亡',summary:'将领阵亡',sourceFactIds:[death.id]}];
+    const ending=projectPersonStoryArc(w,p).at(-1)!;
+    expect(ending.phase).toBe('ending');expect(ending.title).toContain('阵亡');
+    expect(ending.primaryFactId).toBe(death.id);expect(ending.primaryEventId).toBe('death-event');
+    expect(ending.sourceEventIds).toEqual(expect.arrayContaining(['capital','death-event']));
+    expect(ending.sourceFactIds).toEqual(expect.arrayContaining([battle.id,death.id]));
+  });
+
   it.each(['winner', 'loser', 'received', 'late-accession', 'early-death', 'unknown'] as const)(
     'attributes elimination to the historical seat (%s), never final nationality', stance => {
       const w=createWorld('灭国的立场来自任期');

@@ -17,6 +17,19 @@ import {
 } from './index';
 import { applyFormationLosses, detachFormation } from './military/personal-forces';
 
+it('authenticates numeric-boolean legacy states without rewriting them or dropping live factions', () => {
+  const world = createWorld('旧生产布尔存档');
+  for (const p of world.polities) p.alive = Number(p.alive) as unknown as boolean;
+  for (const f of world.factions) f.active = Number(f.active) as unknown as boolean;
+  world.hash = computeWorldHash(world); // Fixture represents bytes authenticated by the old producer.
+  const body = serializeWorld(world), restored = deserializeWorld(body);
+  expect(serializeWorld(restored)).toBe(body);
+  expect(serializeWorld(advanceWorld(restored))).toBe(serializeWorld(advanceWorld(world)));
+  const tampered = JSON.parse(body);
+  tampered.polities[0].alive = false;
+  expect(() => deserializeWorld(JSON.stringify(tampered))).toThrow('存档哈希校验失败');
+});
+
 function stageFormationRebuild(world: WorldState, polityId: string): void {
   const capital = world.regions.find((region) => region.id === world.polities.find((polity) => polity.id === polityId)?.capitalRegionId);
   for (const army of world.armies.filter((item) => item.polityId === polityId)) {

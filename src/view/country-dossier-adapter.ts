@@ -38,7 +38,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     .filter((name): name is string => Boolean(name));
   const rulingFamily = family(world, item.rulingFamilyId);
   const factions = worldFactions(world)
-    .filter((faction) => faction.polityId === item.id && faction.active !== false)
+    .filter((faction) => faction.polityId === item.id && faction.active)
     .map((faction) => ({ faction, ledger: calculateFactionPowerLedger(world, faction) }))
     .sort((a, b) => b.ledger.total - a.ledger.total || a.faction.id.localeCompare(b.faction.id));
   const activeCourt = projectCourt(world, item.id, 'active');

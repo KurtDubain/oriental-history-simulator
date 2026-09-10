@@ -120,6 +120,21 @@ function idForOutcome(
 }
 
 describe('battle participant fate', () => {
+  it('raises only conditional death risk by at most eight percent, retaining the cap and wound curve', () => {
+    for (const role of ['commander', 'deputy', 'member'] as const) for (const lost of [0, .01, .2, .4, 1])
+      for (const won of [true, false]) for (const health of [35, 80, 100]) {
+        const p = { characterId: 'exposed', factionId: null, formationCommanderId: 'commander', role,
+          soldiersBefore: 1000, soldiersAfter: 1000 * (1-lost), losses: 1000 * lost };
+        const current = battleFateChances(p, won, health, 50, 50);
+        const position = role === 'commander' ? 1 : role === 'deputy' ? .6 : .25;
+        const danger = current.severity * lost * lost / (lost + .1);
+        const uncapped = danger * (.2 + position * .05 + (1-health/100)*.1);
+        expect(current.death).toBeCloseTo(Math.min(.055, uncapped * 1.08), 12);
+        expect(current.death).toBeGreaterThanOrEqual(Math.min(.055, uncapped));
+        expect(current.death).toBeLessThanOrEqual(Math.min(.055, uncapped) * 1.08);
+        expect(current.wound).toBeCloseTo(Math.min(.38, danger*(2.5+position*.4+(1-health/100)*.6)),12);
+      }
+  });
   it('turns an exposed wound into immediate withdrawal and fact-derived recovery', () => {
     const world = createWorld('参战者负伤');
     const { fact, commanderId, otherId } = battleForCommander(world);

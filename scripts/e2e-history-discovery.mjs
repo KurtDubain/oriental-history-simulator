@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 
 const dir = process.argv[2] ?? 'output/history-discovery-v1.29.5/browser';
 const file = process.argv[3] ?? 'output/playwright/revisit-v1294/1.portable.json';
 const name = process.argv[4] ?? '顾崇珩';
 const view = process.argv[5] ?? 'deceased';
+const expected = process.argv[6] ? JSON.parse(await readFile(process.argv[6], 'utf8')) : null;
 await mkdir(dir, { recursive: true });
 const browser = await chromium.launch();
 try {
@@ -51,6 +52,7 @@ try {
     assert(!/已故 · 已故|配角|长远所重/.test(text));
     const beats = inspector.locator('.observer-person-story button');
     const evidenceCount = await beats.count();
+    const landings = [];
     assert.equal(evidenceCount, state.interface.selectedDetail.storyArc.length);
     for (let i = 0; i < evidenceCount; i++) {
       const evidence = beats.nth(i);
@@ -58,6 +60,16 @@ try {
       await evidence.click();
       await page.locator('#observer-causal-drawer').waitFor();
       await page.waitForTimeout(400);
+      const beat = state.interface.selectedDetail.storyArc[i];
+      assert.equal(await page.locator('.observer-causal-layer').getAttribute('data-event-id'), beat.primaryEventId ?? beat.primaryFactId);
+      const landing = await page.locator('#observer-causal-drawer').innerText();
+      const anchor = expected?.anchors.find(a => a.title === beat.title);
+      if (expected) {
+        assert(anchor, `missing expected evidence for ${beat.title}`);
+        assert.equal(beat.primaryFactId, anchor.primaryFact.id);
+        if (anchor.primaryEvent) assert(landing.includes(anchor.primaryEvent.title));
+      }
+      landings.push({ title: beat.title, primaryEventId: beat.primaryEventId, primaryFactId: beat.primaryFactId, landing });
       await page.screenshot({ path: `${dir}/${label}-evidence-${i}.png`, fullPage: true });
       await page.keyboard.press('Escape');
       await page.locator('#observer-causal-drawer').waitFor({ state: 'hidden' });
@@ -70,7 +82,7 @@ try {
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth > innerWidth), false);
     assert.equal(await page.evaluate(() => JSON.parse(window.render_game_to_text()).deterministicWorldHash), hash);
     assert.deepEqual(errors, []);
-    await writeFile(`${dir}/${label}.json`, JSON.stringify({ text, reason, state, hashAfter: hash, evidenceOpened: evidenceCount, errors }, null, 2));
+    await writeFile(`${dir}/${label}.json`, JSON.stringify({ text, reason, state, hashAfter: hash, evidenceOpened: evidenceCount, landings, errors }, null, 2));
     await page.close();
   }
 } finally { await browser.close(); }

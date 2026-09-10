@@ -317,10 +317,10 @@ function agencyCommandChronicleDeltasAreValid(
 function agencyResolutionReasonIsCoherent(fact: AgencyIntentResolvedFact): boolean {
   const payload = fact.payload;
   const checks = new Map(payload.checks.map((check) => [check.kind, check]));
-  const permission = checks.get('permission')?.passed === true;
-  const resource = checks.get('resource')?.passed === true;
-  const relationship = checks.get('relationship')?.passed === true;
-  const risk = checks.get('risk')?.passed === true;
+  const permission = Boolean(checks.get('permission')?.passed);
+  const resource = Boolean(checks.get('resource')?.passed);
+  const relationship = Boolean(checks.get('relationship')?.passed);
+  const risk = Boolean(checks.get('risk')?.passed);
   if (payload.outcome === 'invalidated' && payload.reasonCode === 'permission_lost') return !permission && payload.institutionResponse === 'none';
   if (payload.outcome === 'deferred' && payload.reasonCode === 'insufficient_record') {
     return permission && !resource && payload.institutionResponse === 'none';

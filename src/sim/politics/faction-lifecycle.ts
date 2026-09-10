@@ -517,7 +517,7 @@ export function migrateFactionIdentityModel(world: WorldState, forceLegacyBounda
         .map((id) => world.characters.find((character) => character.id === id))
         .filter((character): character is CharacterState => Boolean(character?.alive && character.age >= 16 && character.polityId === legacy.polityId && !claimed.has(character.id)))
       : [];
-    const polityAlive = polity?.alive === true;
+    const polityAlive = Boolean(polity?.alive);
     if (legacy.active && polityAlive) {
       const leader = world.characters.find((character) => character.id === legacy.leaderId && character.alive && character.age >= 16 && character.polityId === legacy.polityId);
       if (leader && !claimed.has(leader.id) && !legalMembers.some((item) => item.id === leader.id)) legalMembers.unshift(leader);

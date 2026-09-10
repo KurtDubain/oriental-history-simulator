@@ -150,7 +150,8 @@ export default defineConfig({
       // Vite emits ES modules; declaring that boundary lets Terser remove
       // top-level-only scaffolding consistently across local and Vercel Node.
       module: true,
-      compress: { ecma: 2020, passes: 5, pure_getters: true, booleans_as_integers: true, keep_fargs: false, unsafe_arrows: true, unsafe_comps: true },
+      // JSON and authenticated world/Facts distinguish booleans from 0/1.
+      compress: { ecma: 2020, passes: 5, pure_getters: true, booleans_as_integers: false, keep_fargs: false, unsafe_arrows: true, unsafe_comps: true },
       mangle: { toplevel: true },
       format: { ecma: 2020, comments: false },
     },

@@ -102,7 +102,7 @@ function rootBattleId(fact: SimulationFact, byId: ReadonlyMap<string, Simulation
 
 function sourceEvents(events: readonly HistoryEvent[], factIds: readonly string[], primaryFactId: string) {
   const linked = events.filter((event) => event.sourceFactIds.some((id) => factIds.includes(id)));
-  const primary = linked.find((event) => event.sourceFactIds.includes(primaryFactId)) ?? linked[0];
+  const primary = linked.find((event) => event.sourceFactIds.includes(primaryFactId));
   return { sourceFactIds: factIds, primaryFactId, sourceEventIds: linked.map((event) => event.id), primaryEventId: primary?.id ?? null };
 }
 
@@ -131,7 +131,7 @@ function episodeCandidate(world: WorldState, episodes: readonly BattleEpisode[],
     phase: death ? 'ending' : wound || !side.won ? 'setback' : 'battle',
     title: `${places.join('、')}${episodes.length > 1 ? '连番' : ''}${side.stance}${side.won ? '得胜' : '受挫'}${death ? '，阵亡' : wound ? '，负伤退营' : ''}`,
     summary, importance: Math.max(...allFacts.map(f => f.importance)),
-    priority: death ? 0 : wound || loss >= .3 || places.length > 1 ? 2 : 4,
+    priority: death ? 0 : wound || !side.won && loss >= .2 || places.length > 1 ? 2 : 4,
     ...sourceEvents(events, ids, primary),
   };
 }
@@ -232,7 +232,7 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
   // Accession and capital relocation are authoritative Chronicle changes, not battle participation.
   for (const event of events) {
     const founded = event.kind === 'rebellion' ? event.stateDeltas.find(d => d.entityType === 'polity'
-      && d.field === 'alive' && d.before === false && d.after === true && reignAt(event.turn).some(o => o.polityId === d.entityId)) : undefined;
+      && d.field === 'alive' && (d.before === false || d.before === 0) && d.after && reignAt(event.turn).some(o => o.polityId === d.entityId)) : undefined;
     const accession = event.stateDeltas.some(d => d.field === 'rulerId' && d.after === person.id)
       || event.kind === 'succession' && (event.sourceFactIds.some(id => {
         const f = byId.get(id); return f?.kind === 'appointment_started' && f.payload.officeKind === '君主' && f.payload.holderId === person.id;
@@ -242,7 +242,7 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
       && ['local_governance', 'naval_operation_aborted'].includes(event.kind);
     const capital = event.kind === 'capital_fall';
     const loss = event.stateDeltas.find(d => d.entityType === 'polity' && (capital ? d.field === 'capitalRegionId'
-      : event.kind === 'polity_eliminated' && d.field === 'alive' && d.after === false));
+      : event.kind === 'polity_eliminated' && d.field === 'alive' && (d.after === false || d.after === 0)));
     const oldCapitalId = loss?.before;
     const transfers = event.sourceFactIds.map(id => byId.get(id)).filter(f => f?.kind === 'territory_control_changed');
     const defeated = reignAt(event.turn, event.sourceFactIds).some(o => o.polityId === loss?.entityId);
@@ -268,9 +268,12 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
       )).map(f => f.id)]);
     const episode = battle && candidates.find(c => c.sourceFactIds.includes(battle.id));
     if (episode) {
-      episode.priority = -1;
-      if (!episode.title.startsWith(`${person.name}参战，攻克`)) episode.title = `${person.name}参战，攻克${place}`;
-      else if (!episode.title.includes(place)) episode.title += `、${place}`;
+      if (episode.phase === 'battle') {
+        episode.priority = -1;
+        episode.title = `${person.name}参战，攻克${place}`;
+        episode.primaryEventId = event.id;
+        episode.primaryFactId = battle.id;
+      }
       episode.summary += ` ${event.summary}`;
       episode.sourceFactIds = unique([...episode.sourceFactIds, ...sourceFactIds]);
       episode.sourceEventIds = unique([...episode.sourceEventIds, event.id]);
@@ -290,6 +293,31 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
       sourceEventIds: [...(departure ? [departure.id] : []), event.id],
       primaryEventId: event.id, primaryFactId: battle?.id ?? sourceFactIds[0] ?? null });
     mergeSources(candidates.at(-1)!, settled);
+  }
+  // A recent capture followed by defending that same place in the same war is
+  // one career stage. A different war, role, defeat or wound stays separate.
+  for (const defense of [...candidates]) {
+    const battles = defense.sourceFactIds.map(id => byId.get(id)).filter((f): f is BattleFact => f?.kind === 'battle')
+      .sort((a,b) => evidence.order.get(a.id)! - evidence.order.get(b.id)!);
+    if (!battles.length || defense.phase !== 'battle') continue;
+    const first = battles[0], place = first.payload.targetRegionId, role = battleSide(first, person.id)!.participant.role;
+    if (!battles.every(b => {
+      const side = battleSide(b, person.id)!;
+      return b.payload.targetRegionId === place && side.stance === '守阵' && side.won && side.participant.role === role;
+    })) continue;
+    const attack = candidates.find(c => c !== defense && c.phase === 'battle' && c.turn <= first.turn && first.turn - c.turn <= 4
+      && c.sourceFactIds.some(id => {
+        const f = byId.get(id); return f?.kind === 'territory_control_changed' && f.payload.regionId === place
+          && f.payload.warId === first.payload.warId && f.payload.reason === 'battle_capture';
+      }) && c.sourceFactIds.some(id => {
+        const f = byId.get(id); return f?.kind === 'battle' && f.payload.targetRegionId === place
+          && battleSide(f, person.id)?.participant.role === role && battleSide(f, person.id)?.stance === '进兵';
+      }));
+    if (!attack) continue;
+    attack.summary += ` 随后在${world.regions.find(r => r.id === place)?.name ?? '当地'}参与${battles.length}次守战，${battles.some(b => b.payload.defenders.length > 1) ? '与同地友军一起' : ''}击退来敌。`;
+    attack.startTurn ??= attack.turn; attack.turn = defense.turn;
+    mergeSources(attack, [defense]);
+    candidates.splice(candidates.indexOf(defense), 1);
   }
   // Territorial changes belong to a reign, not automatically to the ruler's sword.
   const campaigns: SimulationFact[][] = [];
@@ -312,8 +340,8 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
     const ids = unique(group.flatMap(f => [f.id, ...f.sourceFactIds]));
     const own = candidates.filter(c => c.phase === 'battle' && c.sourceFactIds.some(id => ids.includes(id)));
     const combined: Candidate = { id: group[0].id, startTurn: group[0].turn, turn: group.at(-1)!.turn, phase: 'battle', priority: -1,
-      title: `${person.name}任内连取${places.join('、')}${own.filter(c => c.sourceEventIds.some(id => events.some(e => e.id === id && e.kind === 'polity_eliminated'))).map(c => `，${c.title}`).join('')}`,
-      summary: `其在位期间，军队先后取得${places.join('、')}。${own.map(c => `${c.title}；${c.summary}`).join('')}`,
+      title: `${person.name}任内连取${places.length > 3 ? `${places.at(-1)}等${places.length}地` : places.join('、')}`,
+      summary: `其在位期间，军队先后取得${places.join('、')}。${own.map(c => c.summary).join('')}`,
       importance: Math.max(...group.map(f => f.importance)), ...sourceEvents(events, ids, group.at(-1)!.id) };
     mergeSources(combined, own); candidates.push(combined);
     for (const c of own) candidates.splice(candidates.indexOf(c), 1);
@@ -387,7 +415,8 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
   const beginning = [...pool].sort((a,b) => (a.startTurn ?? a.turn)-(b.startTurn ?? b.turn))[0];
   const gains = (c: Candidate) => c.phase === 'battle' ? storyTerritories(c.sourceFactIds, byId).size : 0;
   const peak = [...pool].sort((a,b) => gains(b)-gains(a) || a.priority-b.priority || b.importance-a.importance)[0];
-  for (const item of [pool[0], peak, latest, ...pool.filter(c => c.priority < 0), beginning, ...pool]) {
+  const setback = pool.find(c => c.phase === 'setback' && c.priority <= 2);
+  for (const item of [pool[0], peak, setback, latest, ...pool.filter(c => c.priority < 0), beginning, ...pool]) {
     if (!item) continue;
     if (chosen.length >= (terminal ? 4 : 5)) break;
     if (chosen.some(entry => entry.title === item.title || entry.sourceFactIds.some(id => item.sourceFactIds.includes(id)))) continue;

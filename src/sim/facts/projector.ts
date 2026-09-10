@@ -9,7 +9,7 @@ export function isContinuousAppointment(fact: SimulationFact, context: readonly 
     if (other.turn !== fact.turn) continue;
     if (other.kind === 'character_death' && other.payload.characterId === seat.holderId) return false;
     if (other.stateDeltas.some(d => d.entityType === 'polity' && d.entityId === seat.polityId
-      && (d.field === 'alive' && d.after === false || d.field === 'rulerId' && d.before !== d.after))) return false;
+      && (d.field === 'alive' && (d.after === false || d.after === 0) || d.field === 'rulerId' && d.before !== d.after))) return false;
     if (other.kind === 'court_action_resolved' && other.payload.polityId === seat.polityId
       && ['coup', 'usurpation'].includes(other.payload.action)) return false;
     if ((other.kind !== 'appointment_started' && other.kind !== 'appointment_ended')

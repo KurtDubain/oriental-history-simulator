@@ -42,7 +42,7 @@ export function battleFateChances(
   // with severity² and another fractional power. Negligible losses remain negligible.
   const danger = severity * loss * loss / (loss + .1);
   return {
-    death: clamp(danger * (.2 + role * .05 + (1 - health / 100) * .1), 0, .055),
+    death: clamp(danger * (.2 + role * .05 + (1 - health / 100) * .1) * 1.08, 0, .055),
     wound: clamp(danger * (2.5 + role * .4 + (1 - health / 100) * .6), 0, .38),
     severity,
     exposure: exposureLabel(severity),

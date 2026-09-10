@@ -563,10 +563,10 @@ function familyItems(context: ProjectionContext): RosterItem[] {
     return {
       id: item.id,
       title: item.name,
-      subtitle: `${polity(context.world, item.polityId)?.name ?? '无属'} · ${item.active === false ? '谱系已绝' : `家主 ${character(context.world, item.headId)?.name ?? '未定'}`}`,
+      subtitle: `${polity(context.world, item.polityId)?.name ?? '无属'} · ${!item.active ? '谱系已绝' : `家主 ${character(context.world, item.headId)?.name ?? '未定'}`}`,
       meta: `${item.memberIds.length} 人 · 家望 ${Math.round(item.prestige)}`,
       accent: polity(context.world, item.polityId)?.color,
-      alert: Boolean(watched?.reason.kind === 'watched-alert') || item.active === false || !headAlive,
+      alert: Boolean(watched?.reason.kind === 'watched-alert') || !item.active || !headAlive,
       reason: attention.reason,
       discovery: {
         quickViews: [],
