@@ -1,7 +1,8 @@
+import { toPersonInspector } from '../src/view/person-dossier-adapter';
 import { mkdirSync, writeFileSync, readFileSync } from 'node:fs';
 import { advanceWorld, createWorld, deserializeWorld, serializeWorld, readWorldFacts, readWorldHistory, validateWorld } from '../src/sim';
 import { encodeWorldFile } from '../src/persistence/storage';
-import { personHistoryEvidence, projectPersonStoryArc, personShortBiography } from '../src/view/person-story-arc';
+import { personHistoryEvidence, projectPersonStoryArc } from '../src/view/person-story-arc';
 import { deriveObserverLeadProjection } from '../src/view/observer-leads';
 const dir = process.argv[2], frozen = process.argv[3];
 mkdirSync(dir, { recursive: true });
@@ -19,7 +20,7 @@ const measure = () => {
     archiveFields: Object.fromEntries(Object.entries(world.archiveSystem).map(([k,v])=>[k,bytes(v)])),
     facts: facts.length, history: history.length, wars: world.wars.length, battles: facts.filter(f=>f.kind==='battle').length,
     errors: validateWorld(world),
-    people: people.map(p => ({ id:p!.id,name:p!.name,beats:projectPersonStoryArc(world,p!,evidence),short:personShortBiography(world,p!,projectPersonStoryArc(world,p!,evidence)) })) };
+    people: people.map(p => ({ id:p!.id,name:p!.name,beats:projectPersonStoryArc(world,p!,evidence),short:toPersonInspector(world,p!).summary })) };
   points.push(record); writeFileSync(`${dir}/T${world.turn}.json`,JSON.stringify(record,null,2));
   writeFileSync(`${dir}/T${world.turn}.world.json`,body);
   try { const portable=encodeWorldFile(body); const restored=deserializeWorld(JSON.stringify(JSON.parse(portable).world));

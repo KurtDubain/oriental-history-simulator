@@ -1,4 +1,4 @@
-import { continuousRulerSeatIds } from '../sim/facts/projector';
+import { continuousAppointmentIds } from '../sim/facts/projector';
 import type { SituationState } from '../sim/situations';
 import type { SimulationFact } from '../sim/facts/types';
 import type { DeltaValue, StateDelta, WorldState } from '../sim/types';
@@ -412,7 +412,7 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
     ))
     .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
   const evidenceSelection = evidenceFacts(situation, milestoneFacts, allFacts);
-  const continuations = continuousRulerSeatIds(allFacts);
+  const continuations = continuousAppointmentIds(allFacts);
   const evidence = evidenceSelection.facts
     .filter((fact) => fact.kind !== 'situation_milestone' && !continuations.has(fact.id))
     .map((fact) => projectFact(world, fact, historyByFact));

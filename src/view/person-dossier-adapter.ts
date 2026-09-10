@@ -43,8 +43,8 @@ import {
   projectPersonPoliticalFocus,
   type PoliticalFocusLink,
 } from './political-focus';
-import { projectPersonStoryArc, personHistoricalOffice, personShortBiography, personHistoryEvidence } from './person-story-arc';
-import { continuousRulerSeatIds } from '../sim/facts/projector';
+import { projectPersonStoryArc, personHistoryEvidence } from './person-story-arc';
+import { continuousAppointmentIds } from '../sim/facts/projector';
 
 export type PersonInspectorProjection = PersonInspectorData & {
   politicalFocus: readonly PoliticalFocusLink[];
@@ -104,20 +104,6 @@ function biographySource(
     : null;
 }
 
-function appointmentSummary(world: WorldState, item: CharacterState, fact: Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }>): string {
-  const owner = polity(world, fact.payload.polityId)?.name ?? '所属政权';
-  const scope = fact.payload.armyId
-    ? world.armies.find((army) => army.id === fact.payload.armyId)?.name ?? '所部军团'
-    : fact.payload.fleetId
-      ? world.fleets.find((fleet) => fleet.id === fact.payload.fleetId)?.name ?? '所部水师'
-      : fact.payload.regionId
-        ? region(world, fact.payload.regionId)?.name ?? '地方官署'
-        : '中枢官署';
-  return fact.kind === 'appointment_started'
-    ? `${item.name}受${owner}任为${fact.payload.officeKind}，职掌系于${scope}。`
-    : `${item.name}卸下${owner}${fact.payload.officeKind}之职，原职掌系于${scope}。`;
-}
-
 /**
  * Projects a person's dated record from sources that explicitly name that
  * person. Biography prose is presentation data, so every linked entry is
@@ -138,7 +124,7 @@ export function toPersonExperienceRecords(
   const history = (evidence?.events ?? world.history)
     .filter(isDefaultVisibleHistoryEvent);
   const facts = evidence?.facts ?? world.facts;
-  const continuations = evidence?.continuations ?? continuousRulerSeatIds(facts);
+  const continuations = evidence?.continuations ?? continuousAppointmentIds(facts);
   const eventById = new Map(history.map((event) => [event.id, event]));
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
   const claimed = new Set<string>();
@@ -167,7 +153,7 @@ export function toPersonExperienceRecords(
     const battle = event.sourceFactIds.map((factId) => factById.get(factId))
       .find((fact) => fact?.kind === 'battle' && factNamesCharacter(fact, item.id));
     entries.push({ turn: event.turn, record: continued?.kind === 'appointment_started'
-      ? { ...eventArchiveRecord(event), id, title: '君位移驻', summary: `${item.name}仍在位，君位驻地改为${region(world, continued.payload.regionId)?.name ?? '新驻地'}。` }
+      ? { ...eventArchiveRecord(event), id, ...projectFactNarrative(world, continued, true) }
       : battleRecord(battle, { ...eventArchiveRecord(event), id }) });
     knownEventIds.add(event.id);
     if (event.kind !== 'world_created') event.sourceFactIds.forEach((factId) => knownFactIds.add(factId));
@@ -236,8 +222,7 @@ export function toPersonExperienceRecords(
       record: {
         id: `${item.id}:experience:${fact.id}`,
         date: turnLabel(fact.turn),
-        title: continued ? '君位移驻' : fact.kind === 'appointment_started' ? `就任${fact.payload.officeKind}` : `卸任${fact.payload.officeKind}`,
-        summary: continued ? `${item.name}仍在位，君位驻地改为${region(world, fact.payload.regionId)?.name ?? '新驻地'}。` : appointmentSummary(world, item, fact),
+        ...projectFactNarrative(world, fact, continued),
         eventId: null,
         importance: fact.importance,
       },
@@ -866,7 +851,12 @@ export function toPersonInspector(
   item: CharacterState,
 ): PersonInspectorProjection {
   const owner = polity(world, item.polityId);
-  const home = region(world, item.locationRegionId);
+  const inspectorFacts = item.alive ? world.facts : personHistoryEvidence(world).facts;
+  const death = !item.alive ? inspectorFacts.find(f => f.kind === 'character_death' && f.payload.characterId === item.id) : undefined;
+  const deathBattle = death?.kind === 'character_death' && death.payload.battleFactId
+    ? inspectorFacts.find(f => f.id === death.payload.battleFactId) : undefined;
+  const deathPlace = deathBattle?.kind === 'battle' ? deathBattle.payload.targetRegionId : death?.regionIds[0];
+  const home = region(world, deathPlace ?? item.locationRegionId);
   const personFamily = family(world, item.familyId);
   const commandRequest = toPersonCommandRequestView(world, item.id);
   const powerPosition = calculateCharacterPowerPosition(world, item.id);
@@ -907,7 +897,6 @@ export function toPersonInspector(
   const formation = personalForce?.formationId
     ? world.armies.find((army) => army.id === personalForce.formationId)
     : undefined;
-  const inspectorFacts = item.alive ? world.facts : personHistoryEvidence(world).facts;
   const latestBattle = [...inspectorFacts].reverse().find((fact) => fact.kind === 'battle' && (
     fact.payload.attacker.participants?.some((participant) => participant.characterId === item.id)
     || fact.payload.defenders.some((defender) => defender.participants?.some((participant) => participant.characterId === item.id))
@@ -932,11 +921,13 @@ export function toPersonInspector(
     name: item.name,
     age: item.age,
     gender: item.sex,
-    role: item.alive ? item.role : `生前曾任${personHistoricalOffice(world, item)}`,
+    role: item.alive ? item.role : `生前曾任${world.offices.filter(o => o.holderId === item.id)
+      .sort((a,b) => b.rank-a.rank || a.appointedTurn-b.appointedTurn)[0]?.kind ?? '未见任官记载'}`,
     lifeStage: item.lifeStage,
     politicalClass: item.politicalClass,
     tier: item.tier,
     origin: home?.name,
+    originLabel: item.alive ? '所在' : deathPlace ? death?.kind === 'character_death' && death.payload.cause === 'battle' ? '阵亡地' : '卒地' : '最后所在',
     family: personFamily?.name ?? `${item.familyName}氏`,
     familyId: personFamily?.id ?? null,
     polity: owner?.name,
@@ -980,7 +971,7 @@ export function toPersonInspector(
         : null,
     } : undefined,
     politicalFocus: projectPersonPoliticalFocus(world, item),
-    summary: personShortBiography(world, item, storyArc),
+    summary: storyArc.map(b => `${b.dateLabel}，${b.title}。`).join('') || `${item.name}尚无重要经历见于记载。`,
   };
 }
 

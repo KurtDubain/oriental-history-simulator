@@ -1,8 +1,8 @@
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { deserializeWorld, readWorldFacts, serializeWorld } from '../src/sim';
-import { projectPersonStoryArc, personShortBiography } from '../src/view/person-story-arc';
+import { projectPersonStoryArc } from '../src/view/person-story-arc';
 import { projectRosterDirectory } from '../src/view/roster-adapter';
-import { toPersonExperienceRecords } from '../src/view/person-dossier-adapter';
+import { toPersonExperienceRecords, toPersonInspector } from '../src/view/person-dossier-adapter';
 import { projectHistoricalScenes } from '../src/view/historical-scenes';
 
 const dir = process.argv[2] ?? 'output/history-maintenance-v1.29.5/frozen';
@@ -21,7 +21,7 @@ for (const [label, file, names] of [
     const began = performance.now(), story = projectPersonStoryArc(world, p);
     return { name, id: p.id, alive: p.alive, elapsedMs: performance.now() - began,
       reason: roster.find(r => r.id === p.id)?.reason,
-      biography: personShortBiography(world, p, story), story,
+      biography: toPersonInspector(world, p).summary, story,
       chronological: toPersonExperienceRecords(world, p),
     };
   });

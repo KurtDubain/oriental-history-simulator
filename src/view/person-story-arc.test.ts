@@ -4,6 +4,7 @@ import { computeWorldHash, createWorld, serializeWorld } from '../sim';
 import type { BattleFact, SimulationFact } from '../sim/facts';
 import type { WorldState } from '../sim/types';
 import { projectPersonStoryArc } from './person-story-arc';
+import { toPersonInspector } from './person-dossier-adapter';
 
 function battleFact(
   world: WorldState,
@@ -66,6 +67,65 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it.each(['character_death', 'appointment_ended'] as const)('uses stream order, not IDs, for same-quarter %s and later gains', kind => {
+    const world = createWorld('同季先后不是编号');
+    const person = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;
+    const base = battleFact(world, person.id, 'battle-source', 20, 100);
+    world.offices = [{ id:'reign', holderId:person.id, polityId:person.polityId, kind:'君主', rank:100,
+      armyId:null, regionId:base.regionIds[0], appointedTurn:10, endedTurn:20, active:false }];
+    const places = world.regions.slice(0,3);
+    places.forEach(r => { r.neighbors = places.filter(p => p !== r).map(p => p.id); });
+    const gains = places.map((r,i): SimulationFact => ({ ...base, id:`z-capture-${i}`, turn:i<2?19:20,
+      kind:'territory_control_changed', actorIds:[], regionIds:[r.id], sourceFactIds:[],
+      payload:{regionId:r.id,previousControllerId:'enemy',nextControllerId:person.polityId,reason:'battle_capture',warId:'campaign'} }));
+    const exit: SimulationFact = kind === 'character_death' ? { ...base,id:'a-exit',kind,
+      regionIds:[places[2].id], payload:{characterId:person.id,cause:'battle',battleFactId:base.id,age:70,health:0,diseaseId:null,role:'君主'} }
+      : { ...base,id:'a-exit',kind,payload:{appointmentId:'reign',action:'ended',holderId:person.id,
+        polityId:person.polityId,officeKind:'君主',rank:100,regionId:base.regionIds[0],armyId:null,fleetId:null} };
+    world.facts = [...gains.slice(0,2),exit,gains[2]];
+    person.alive = kind !== 'character_death';
+    const before = serializeWorld(world), hash = computeWorldHash(world);
+    const arc = projectPersonStoryArc(world,person);
+    expect(arc.flatMap(b=>b.sourceFactIds)).not.toContain(gains[2].id);
+    expect(arc.flatMap(b=>b.sourceFactIds)).toEqual(expect.arrayContaining(gains.slice(0,2).map(f=>f.id)));
+    if (!person.alive) {
+      person.locationRegionId = places[0].id;
+      const view = toPersonInspector(world,person);
+      expect(view.origin).toBe(places[2].name);
+      expect(view.originLabel).toBe('阵亡地');
+      person.locationRegionId = world.armies.find(a=>a.commanderId===person.id)!.regionId;
+    }
+    expect(computeWorldHash(world)).toBe(hash);
+    expect(serializeWorld(world)).toBe(before);
+    world.facts = [...gains,exit];
+    expect(projectPersonStoryArc(world,person).flatMap(b=>b.sourceFactIds)).toContain(gains[2].id);
+  });
+
+  it('preserves the largest career phase across truces before an ordinary beginning', () => {
+    const world=createWorld('事业峰值不按姓名');
+    const p=world.characters.find(p=>world.armies.some(a=>a.commanderId===p.id))!;
+    const base=battleFact(world,p.id,'base',20,10);
+    world.offices=[{id:'reign',holderId:p.id,polityId:p.polityId,kind:'君主',rank:100,armyId:null,
+      regionId:base.regionIds[0],appointedTurn:20,endedTurn:null,active:true}];
+    const regions=world.regions.slice(0,7);
+    regions.forEach((r,i)=>{r.neighbors=regions.filter((_,j)=>Math.abs(i-j)===1).map(r=>r.id);});
+    const captures=regions.map((r,i):SimulationFact=>({...base,id:`peak-${i}`,turn:i?80+i:60,actorIds:[],regionIds:[r.id],
+      kind:'territory_control_changed',sourceFactIds:[],payload:{regionId:r.id,previousControllerId:'enemy',
+        nextControllerId:p.polityId,warId:i?'second-war':'first-war',reason:'battle_capture'}}));
+    world.facts.push(...captures);
+    for(let i=0;i<8;i++) {
+      const b=battleFact(world,p.id,`late-${i}`,100+i*10,100);
+      b.payload.warId=`unrelated-${i}`;
+      world.facts.push(b);
+    }
+    const arc=projectPersonStoryArc(world,p), peak=arc.find(b=>b.sourceFactIds.includes('peak-0'))!;
+    expect(arc.length).toBeLessThanOrEqual(5);
+    expect(peak.sourceFactIds).toEqual(expect.arrayContaining(captures.map(f=>f.id)));
+    expect(peak.title).toContain('任内');
+    expect(peak.title).not.toContain('亲自');
+    expect(arc.some(b=>b.sourceFactIds.includes('late-7'))).toBe(true);
+  });
+
   it('joins accession and destroyed-state dismissal without consuming a later independent dismissal', () => {
     const world = createWorld('同一人生结算链');
     const person = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;
@@ -77,6 +137,9 @@ describe('person story arc', () => {
     world.offices.push({ id:'reign', holderId:person.id, polityId:person.polityId, kind:'君主',rank:100,
       regionId:base.regionIds[0],armyId:null,appointedTurn:20,endedTurn:40,active:false });
     world.facts.push(office,end);
+    const former = { ...office,id:'former-office-end',kind:'appointment_ended' as const,
+      payload:{...office.payload,action:'ended' as const,officeKind:'宰辅' as const,appointmentId:'old-post'} };
+    world.facts.push(former);
     world.history.push({ ...base, id:'accession',kind:'succession',title:`${person.name}获拥立`,summary:'承接君位',evidence:[],situationIds:[],sourceFactIds:[office.id] },
       { ...base,id:'extinction',turn:40,kind:'polity_eliminated',title:'故国灭亡',summary:'故国退出，君位结束',evidence:[],situationIds:[],sourceFactIds:[],
         stateDeltas:[{entityType:'polity',entityId:person.polityId,field:'alive',before:true,after:false}] });
@@ -84,6 +147,8 @@ describe('person story arc', () => {
     const accession=arc.find(b=>b.sourceEventIds.includes('accession'))!;
     expect(accession.title).toContain('登位');
     expect(accession.primaryFactId).toBe(office.id);
+    expect(accession.sourceFactIds).toContain(former.id);
+    expect(arc.filter(b=>b.sourceFactIds.includes(former.id))).toHaveLength(1);
     expect(arc.filter(b=>b.sourceFactIds.includes(office.id))).toHaveLength(1);
     const exit=arc.find(b=>b.sourceEventIds.includes('extinction'))!;
     expect(exit.sourceFactIds).toContain(end.id);
@@ -152,13 +217,19 @@ describe('person story arc', () => {
       payload: { appointmentId: 'founder-seat', action: 'started' as const, officeKind: '君主' as const,
         holderId: person.id, polityId: 'founded-polity', regionId: base.regionIds[0], armyId: null, fleetId: null, rank: 100 } };
     world.facts.push(fact);
+    const old = { ...fact,id:'former-governor',kind:'appointment_ended' as const,
+      payload:{...fact.payload,action:'ended' as const,officeKind:'地方长官' as const,polityId:person.polityId} };
+    world.facts.push(old);
     world.history.push({ ...base, id: 'founding', kind: 'rebellion', actorIds: [former.id, person.id],
       title: `${person.name}据边城起兵`, summary: '建立新国', sourceFactIds: [], evidence: [], situationIds: [],
-      stateDeltas: [{ entityType: 'polity', entityId: 'founded-polity', field: 'alive', before: false, after: true }] });
+      stateDeltas: [{ entityType: 'polity', entityId: 'founded-polity', field: 'alive', before: false, after: true },
+        {entityType:'character',entityId:person.id,field:'polityId',before:person.polityId,after:'founded-polity'}] });
     const arc = projectPersonStoryArc(world, person), founding = arc.find(b => b.sourceEventIds.includes('founding'))!;
     expect(founding.title).toContain('据边城起兵');
     expect(founding.sourceFactIds).toContain(fact.id);
     expect(arc.filter(b => b.sourceFactIds.includes(fact.id))).toHaveLength(1);
+    expect(founding.sourceFactIds).toContain(old.id);
+    expect(arc.filter(b=>b.sourceFactIds.includes(old.id))).toHaveLength(1);
     expect(projectPersonStoryArc(world, former).some(b => b.title.includes('起兵'))).toBe(false);
   });
 

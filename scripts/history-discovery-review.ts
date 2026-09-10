@@ -1,9 +1,10 @@
+import { toPersonInspector } from '../src/view/person-dossier-adapter';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { advanceWorld, createWorld, deserializeWorld, serializeWorld, readWorldFacts, readWorldHistory } from '../src/sim';
 import { encodeWorldFile } from '../src/persistence/storage';
 import { projectRosterDirectory, projectRosterCollection } from '../src/view/roster-adapter';
 import { createRosterDiscoveryState } from '../src/view/roster-discovery';
-import { projectPersonStoryArc, personShortBiography } from '../src/view/person-story-arc';
+import { projectPersonStoryArc } from '../src/view/person-story-arc';
 
 const dir = process.argv[2] ?? 'output/history-discovery-v1.29.5/after';
 mkdirSync(dir, { recursive: true });
@@ -16,9 +17,9 @@ for (let i = 0; i < 8; i++) {
   const deceased = projectRosterCollection(world, 'people', state).items;
   const full = { ...world, facts: readWorldFacts(world), history: readWorldHistory(world) };
   const people = world.characters.map(p => {
-    const story = projectPersonStoryArc(full, p, 'active');
+    const story = projectPersonStoryArc(full, p);
     return { id: p.id, name: p.name, polity: p.polityId, alive: p.alive, reason: roster.find(r => r.id === p.id)?.reason,
-      deceasedRank: deceased.findIndex(r => r.id === p.id) + 1, story, biography: personShortBiography(world, p, story) };
+      deceasedRank: deceased.findIndex(r => r.id === p.id) + 1, story, biography: toPersonInspector(world, p).summary };
   });
   if (serializeWorld(world) !== before) throw new Error('Observation mutated save');
   writeFileSync(`${dir}/${i}.reading.json`, JSON.stringify({ hash: world.hash, people }));

@@ -1,6 +1,7 @@
+import { toPersonInspector } from '../src/view/person-dossier-adapter';
 import { readFileSync, mkdirSync, writeFileSync } from 'node:fs';
 import { deserializeWorld, serializeWorld, readWorldFacts, readWorldHistory } from '../src/sim';
-import { projectPersonStoryArc, personShortBiography } from '../src/view/person-story-arc';
+import { projectPersonStoryArc } from '../src/view/person-story-arc';
 import { projectRosterDirectory } from '../src/view/roster-adapter';
 
 const dir = process.argv[2]; mkdirSync(dir, { recursive: true });
@@ -16,7 +17,7 @@ for (const [label, file, names] of [
   const result = { hash: world.hash, coldMs, people: names.map(name => {
     const p = world.characters.find(p => p.name === name)!;
     const story = projectPersonStoryArc(world, p);
-    return { name, id: p.id, polity: p.polityId, story, biography: personShortBiography(world, p, story),
+    return { name, id: p.id, polity: p.polityId, story, biography: toPersonInspector(world, p).summary,
       reason: collection.items.find(i => i.id === p.id)?.reason,
       offices: world.offices.filter(o => o.holderId === p.id),
       facts: facts.filter(f => f.actorIds.includes(p.id)),

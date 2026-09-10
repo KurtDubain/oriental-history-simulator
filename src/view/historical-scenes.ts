@@ -1,4 +1,4 @@
-import { continuousRulerSeatIds, isContinuousRulerSeat } from '../sim/facts/projector';
+import { continuousAppointmentIds, isContinuousAppointment } from '../sim/facts/projector';
 import type { HistoryEvent, SimulationFact, StateDelta, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations';
 import { findWorldFact, readWorldFacts, readWorldHistory } from '../sim/archive';
@@ -158,7 +158,7 @@ function deltaCopy(world: WorldState, delta: StateDelta): string | null {
   return null;
 }
 
-export function projectFactNarrative(world: WorldState, fact: SimulationFact, continuing = isContinuousRulerSeat(fact, world.facts)): FactNarrative {
+export function projectFactNarrative(world: WorldState, fact: SimulationFact, continuing = isContinuousAppointment(fact, world.facts)): FactNarrative {
   if (fact.kind === 'war_started') {
     return {
       title: `${polityName(world, fact.payload.attackerId)}向${polityName(world, fact.payload.defenderId)}开战`,
@@ -211,14 +211,15 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact, co
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
     const entering = fact.kind === 'appointment_started';
     if (continuing) return {
-      title: `${characterName(world, fact.payload.holderId)}君位迁驻`,
-      summary: `${characterName(world, fact.payload.holderId)}继续在位，${entering ? '迁至' : '迁离'}${fact.payload.regionId ? regionName(world, fact.payload.regionId) : '原驻地'}。`,
+      title: `${characterName(world, fact.payload.holderId)}${fact.payload.officeKind}迁驻`,
+      summary: `仍任${fact.payload.officeKind}，${entering ? '迁至' : '迁离'}${fact.payload.regionId ? regionName(world, fact.payload.regionId) : '原驻地'}。`,
     };
     const place = fact.payload.regionId ? `${regionName(world, fact.payload.regionId)}的` : '';
-    const army = fact.payload.armyId ? armyName(world, fact.payload.armyId) : null;
+    const army = fact.payload.armyId ? armyName(world, fact.payload.armyId)
+      : fact.payload.fleetId ? world.fleets.find(f => f.id === fact.payload.fleetId)?.name ?? '旧日水师' : null;
     return {
-      title: `${characterName(world, fact.payload.holderId)}${entering ? '受任' : '去职'}`,
-      summary: `${entering ? '出任' : '卸下'}${army ? `${army}` : place}${fact.payload.officeKind}，政令出自${polityName(world, fact.payload.polityId)}。`,
+      title: `${characterName(world, fact.payload.holderId)}${entering ? '受任' : '去职'} · ${fact.payload.officeKind}`,
+      summary: `${entering ? '出任' : '卸下'}${army || place}${fact.payload.officeKind}，政令出自${polityName(world, fact.payload.polityId)}。`,
     };
   }
   if (fact.kind === 'character_wounded') {
@@ -576,7 +577,7 @@ export function projectHistoricalScenes(
   const facts = [...new Map(inputFacts.map((fact) => [fact.id, fact])).values()]
     .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
   const availableFacts = readScope === 'all' ? readWorldFacts(world) : world.facts;
-  const continuations = continuousRulerSeatIds(availableFacts);
+  const continuations = continuousAppointmentIds(availableFacts);
 
   // Identity actions are observer envelopes around an Agency domain Fact.
   // Let the concrete support/request scene own the story instead of showing a
@@ -729,7 +730,7 @@ export function projectSituationHistoricalScenes(
     ...(situation.resolution?.resultFactIds ?? []),
   ]);
   const availableFacts = readScope === 'all' ? readWorldFacts(world) : world.facts;
-  const continuations = continuousRulerSeatIds(availableFacts);
+  const continuations = continuousAppointmentIds(availableFacts);
   const selected = availableFacts.filter((fact) => {
     if (fact.turn < situation.startedTurn || fact.turn > lastTurn || continuations.has(fact.id)) return false;
     const linked = directIds.has(fact.id) || fact.sourceFactIds.some((id) => directIds.has(id));

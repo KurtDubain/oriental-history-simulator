@@ -4,7 +4,7 @@ import { compactWorldArchive, readWorldFacts } from '../sim/archive';
 import type { BattleFact, SimulationFact } from '../sim/facts';
 import { projectHistoricalScenes, projectSituationHistoricalScenes, projectFactNarrative } from './historical-scenes';
 import { personHistoryEvidence, projectPersonStoryArc } from './person-story-arc';
-import { isContinuousRulerSeat, continuousRulerSeatIds } from '../sim/facts/projector';
+import { isContinuousAppointment, continuousAppointmentIds } from '../sim/facts/projector';
 import { refreshObserverWatch, watchItemForSelection } from './observer-selection';
 import { projectSituationDetail } from './situation-detail';
 import { deriveObserverLeadProjection } from './observer-leads';
@@ -37,7 +37,7 @@ describe('same history, faithful reading', () => {
   it('reads the T12 relocation history consistently through leads, cases and person archives', () => {
     const world = advanceWorldBy(createWorld('寒江照铁-戌时'), 12);
     const before = serializeWorld(world), facts = readWorldFacts(world);
-    const ids = continuousRulerSeatIds(facts);
+    const ids = continuousAppointmentIds(facts);
     expect(ids.size).toBeGreaterThan(0);
     for (const s of world.situationSystem.situations.filter(s => s.type === 'inheritance_crisis')) {
       expect(projectSituationHistoricalScenes(world,s,100).flatMap(s=>s.sourceFactIds).some(id=>ids.has(id))).toBe(false);
@@ -128,9 +128,9 @@ describe('same history, faithful reading', () => {
       polityId: base.payload.attacker.polityId, regionId: world.regions[0].id, armyId: null, fleetId: null, rank: 100 } };
     const started: SimulationFact = { ...office, id: 'office_new_fact', kind: 'appointment_started',
       payload: { ...office.payload, action: 'started', appointmentId: 'office_new', regionId: world.regions[1].id } };
-    expect(isContinuousRulerSeat(office, [office, started])).toBe(true);
-    expect(isContinuousRulerSeat(office, [office, { ...started, payload: { ...started.payload, regionId: office.payload.regionId } }])).toBe(false);
-    expect(isContinuousRulerSeat(office, [office, started, { ...started, id: 'intervening', payload: { ...started.payload, holderId: 'other' } }])).toBe(false);
+    expect(isContinuousAppointment(office, [office, started])).toBe(true);
+    expect(isContinuousAppointment(office, [office, { ...started, payload: { ...started.payload, regionId: office.payload.regionId } }])).toBe(false);
+    expect(isContinuousAppointment(office, [office, started, { ...started, id: 'intervening', payload: { ...started.payload, holderId: 'other' } }])).toBe(false);
   });
 
   it('refreshes saved watch descriptions without changing identity or alert intent', () => {

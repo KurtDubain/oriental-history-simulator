@@ -1,5 +1,5 @@
 import { makeSituationSignal as makeSignal, situationIndexRef as indexRef } from "./candidate-registry";
-import { isContinuousRulerSeat } from '../facts/projector';
+import { isContinuousAppointment } from '../facts/projector';
 import type {
   ArmyState,
   CharacterState,
@@ -411,7 +411,7 @@ function relevantCurrentFacts(
 ): SimulationFact[] {
   const actorIds = new Set([ruler.id, ...claims.map((claim) => claim.characterId)]);
   return facts.filter((fact) => {
-    if (fact.turn !== turn || fact.kind === 'situation_milestone' || isContinuousRulerSeat(fact, facts)) return false;
+    if (fact.turn !== turn || fact.kind === 'situation_milestone' || ((fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') && fact.payload.officeKind === '君主' && isContinuousAppointment(fact, facts))) return false;
     if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
       return fact.payload.polityId === polity.id && (
         fact.payload.officeKind === '君主' || actorIds.has(fact.payload.holderId)

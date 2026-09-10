@@ -699,9 +699,9 @@ describe('person experience attribution', () => {
       const records = toPersonArchive(world, holder).records;
       expect(records).toContainEqual(expect.objectContaining({
         id: recordId,
-        title: `就任${appointment.payload.officeKind}`,
+        title: `${holder.name}受任 · ${appointment.payload.officeKind}`,
       }));
-      expect(records.find((record) => record.id === recordId)?.summary).toContain(holder.name);
+      expect(records.find((record) => record.id === recordId)?.summary).toContain(appointment.payload.officeKind);
     }
 
     const marriage = world.facts.find((fact) => fact.kind === 'marriage');

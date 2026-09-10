@@ -1,8 +1,9 @@
+import { toPersonInspector } from '../src/view/person-dossier-adapter';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { createWorld, advanceWorld, advanceWorldDetailed, readWorldFacts, serializeWorld, deserializeWorld, validateWorld } from '../src/sim';
 import { encodeWorldFile } from '../src/persistence/storage';
 import { canApproachTarget, executableWarTarget } from '../src/sim/military/orders';
-import { projectPersonStoryArc, personShortBiography } from '../src/view/person-story-arc';
+import { projectPersonStoryArc } from '../src/view/person-story-arc';
 import { projectRosterDirectory } from '../src/view/roster-adapter';
 
 // Registered before rule changes. These are hold-outs, not plot or casualty quotas.
@@ -58,7 +59,7 @@ for (const [index, seed] of seeds.entries()) {
   const coldRosterMs = performance.now() - begin;
   const stories = world.characters.filter(p => !p.alive).map(p => ({ id: p.id, name: p.name,
     reason: roster.find(r => r.id === p.id)?.reason, story: projectPersonStoryArc(world, p),
-    biography: personShortBiography(world, p, projectPersonStoryArc(world, p)),
+    biography: toPersonInspector(world, p).summary,
   }));
   writeFileSync(`${dir}/${index}.json`, JSON.stringify({ seed, profile, hash: world.hash, peak,
     final: world.polities.filter(p => p.alive).map(p => ({ name: p.name, regions: p.controlledRegionIds.length })),

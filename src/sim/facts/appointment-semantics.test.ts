@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { advanceWorld, createWorld } from '../index';
 import type { AppointmentEndedFact, AppointmentStartedFact, SimulationFact } from './types';
-import { isContinuousRulerSeat } from './projector';
+import { isContinuousAppointment } from './projector';
 import { detectInheritanceCrisisCandidates } from '../situations/inheritance-crisis-detector';
 
 const ended: AppointmentEndedFact = { id: 'end', turn: 4, year: 2, season: '春', kind: 'appointment_ended',
@@ -11,19 +11,28 @@ const started: AppointmentStartedFact = { ...ended, id: 'start', kind: 'appointm
   payload: { ...ended.payload, action: 'started', appointmentId: 'seat-new', regionId: 'new' } };
 
 describe('continuous ruler appointment semantics', () => {
+  it('also recognizes a chancellor relocation, but not an independently sourced removal', () => {
+    const end = { ...ended, payload: { ...ended.payload, officeKind: '宰辅' as const } };
+    const start = { ...started, payload: { ...started.payload, officeKind: '宰辅' as const } };
+    expect(isContinuousAppointment(end, [end, start])).toBe(true);
+    const dismissal = { ...end, sourceFactIds: ['purge'] };
+    expect(isContinuousAppointment(dismissal, [dismissal, start])).toBe(false);
+    expect(isContinuousAppointment(start, [dismissal, start])).toBe(false);
+    expect(isContinuousAppointment(end, [end])).toBe(false);
+  });
   it('classifies a same-turn relocation in either fact order without mutating evidence', () => {
     const facts = [ended, started], before = JSON.stringify(facts);
     for (const fact of facts) {
-      expect(isContinuousRulerSeat(fact, facts)).toBe(true);
-      expect(isContinuousRulerSeat(fact, [...facts].reverse())).toBe(true);
+      expect(isContinuousAppointment(fact, facts)).toBe(true);
+      expect(isContinuousAppointment(fact, [...facts].reverse())).toBe(true);
     }
     expect(JSON.stringify(facts)).toBe(before);
   });
   it('retains unpaired dismissal, a later reappointment, another ruler, death, coup and destruction', () => {
-    expect(isContinuousRulerSeat(ended, [ended])).toBe(false);
-    expect(isContinuousRulerSeat(ended, [ended, { ...started, turn: 5 }])).toBe(false);
-    expect(isContinuousRulerSeat(ended, [ended, { ...started, payload: { ...started.payload, regionId: 'old' } }])).toBe(false);
-    expect(isContinuousRulerSeat(ended, [ended, started, { ...started, id: 'usurper', payload: { ...started.payload, holderId: 'other' } }])).toBe(false);
+    expect(isContinuousAppointment(ended, [ended])).toBe(false);
+    expect(isContinuousAppointment(ended, [ended, { ...started, turn: 5 }])).toBe(false);
+    expect(isContinuousAppointment(ended, [ended, { ...started, payload: { ...started.payload, regionId: 'old' } }])).toBe(false);
+    expect(isContinuousAppointment(ended, [ended, started, { ...started, id: 'usurper', payload: { ...started.payload, holderId: 'other' } }])).toBe(false);
     const boundaries: SimulationFact[] = [
       { ...ended, id: 'death', kind: 'character_death', payload: { characterId: 'ruler', cause: 'natural', age: 80, health: 0, role: '君主', diseaseId: null } },
       { ...ended, id: 'succession', stateDeltas: [{ entityType: 'polity', entityId: 'state', field: 'rulerId', before: 'ruler', after: 'other' }] },
@@ -34,7 +43,7 @@ describe('continuous ruler appointment semantics', () => {
         rulerBeforeId: 'ruler', rulerAfterId: 'other', affectedFactionIds: [], removedMemberIds: [],
       } },
     ];
-    for (const boundary of boundaries) expect(isContinuousRulerSeat(ended, [ended, started, boundary])).toBe(false);
+    for (const boundary of boundaries) expect(isContinuousAppointment(ended, [ended, started, boundary])).toBe(false);
   });
   it('excludes relocation from current succession evidence but retains independent pressure in the natural T12 world', () => {
     let world = createWorld('寒江照铁-戌时', 'private-v03');
@@ -42,7 +51,8 @@ describe('continuous ruler appointment semantics', () => {
     for (let i = 0; i < 12; i++) {
       world = advanceWorld(world);
       const facts = world.facts.filter(f => f.turn === world.lastTurn!.turn);
-      const relocations = facts.filter(f => isContinuousRulerSeat(f, facts));
+      const relocations = facts.filter(f => (f.kind === 'appointment_ended' || f.kind === 'appointment_started')
+        && f.payload.officeKind === '君主' && isContinuousAppointment(f, facts));
       pairs += relocations.filter(f => f.kind === 'appointment_ended').length;
       const candidates = detectInheritanceCrisisCandidates({ ...world, turn: world.lastTurn!.turn }, facts);
       for (const candidate of candidates) {
