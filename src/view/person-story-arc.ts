@@ -61,7 +61,7 @@ interface BattleEpisode {
 }
 
 const phaseLabels: Record<PersonStoryPhase, string> = {
-  command: '掌事', battle: '战阵', setback: '失势', ending: '结局',
+  command: '掌事', battle: '战阵', setback: '受挫', ending: '结局',
 };
 const unique = (values: readonly string[]) => [...new Set(values)].sort();
 

@@ -62,7 +62,7 @@ describe('NAR01/NAR02 concrete historical scenes', () => {
       fact.turn === battle.turn
       && (
         fact.id === battle.id
-        || (fact.kind === 'territory_control_changed' && fact.payload.warId === battle.payload.warId)
+        || (fact.kind === 'territory_control_changed' && fact.sourceFactIds.includes(battle.id))
       )
     ));
     const withChronicle = projectHistoricalScenes(world, related, 1)[0];

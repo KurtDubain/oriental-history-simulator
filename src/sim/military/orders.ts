@@ -242,12 +242,22 @@ export function canApproachTarget(world: WorldState, army: ArmyState, targetId: 
 function defendedWarGoal(world: WorldState, army: ArmyState, war: WarState): string | null {
   const allowed = new Set([army.polityId]);
   const enemies = world.armies.filter(a => a.polityId === enemyIdFor(war, army.polityId) && !a.embarkedOperationId);
+  const capitalId = world.polities.find(p => p.id === army.polityId)?.capitalRegionId;
   return world.regions.filter(region => region.controllerId === army.polityId
     && (war.targetRegionIds.includes(region.id) || enemies.some(a => region.neighbors.includes(a.regionId))))
     .map((region) => ({ region, distance: pathLength(world, army, region.id, allowed),
       threatened: enemies.some(a => region.neighbors.includes(a.regionId)) }))
     .filter(({ distance }) => Number.isFinite(distance))
+    .map(candidate => ({ ...candidate, covered: world.armies.some(other => other.id !== army.id
+      && other.polityId === army.polityId && !other.embarkedOperationId && other.soldiers > 0 && other.supply >= 30 && other.morale >= 28
+      // A distant promise must not make a nearer army abandon an actual guard post.
+      && (other.regionId === candidate.region.id && (other.order.kind === 'hold' || other.order.status !== 'active'
+        || other.order.targetRegionId === candidate.region.id) || other.order.kind === 'reinforce' && other.order.status === 'active'
+        && other.order.warId === war.id && other.order.targetRegionId === candidate.region.id
+        && pathLength(world, other, candidate.region.id, allowed) <= candidate.distance)) }))
     .sort((left, right) => Number(right.threatened) - Number(left.threatened)
+      || Number(left.covered) - Number(right.covered)
+      || Number(right.region.id === capitalId) - Number(left.region.id === capitalId)
       || left.distance - right.distance || stableCompare(left.region.id, right.region.id))[0]?.region.id ?? null;
 }
 

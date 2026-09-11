@@ -120,6 +120,18 @@ function idForOutcome(
 }
 
 describe('battle participant fate', () => {
+  it('does not expose a sovereign merely named in the battle actors', () => {
+    const world = createWorld('不在阵中的君主');
+    const { fact } = battleForCommander(world);
+    const ruler = world.characters.find(c => c.id === world.polities.find(p => p.id === fact.payload.attacker.polityId)!.rulerId)!;
+    fact.payload.attacker.participants = fact.payload.attacker.participants!.filter(p => p.characterId !== ruler.id);
+    fact.actorIds.push(ruler.id);
+    const before = structuredClone(ruler);
+    const context = createTurnContext(world);
+    resolveBattleFates(world, context, fact, emitEvent(world, context));
+    expect(ruler).toEqual(before);
+    expect(context.facts.filter(f => (f.kind === 'character_wounded' || f.kind === 'character_death') && f.payload.characterId === ruler.id)).toEqual([]);
+  });
   it('raises only conditional death risk by at most eight percent, retaining the cap and wound curve', () => {
     for (const role of ['commander', 'deputy', 'member'] as const) for (const lost of [0, .01, .2, .4, 1])
       for (const won of [true, false]) for (const health of [35, 80, 100]) {

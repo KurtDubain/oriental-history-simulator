@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.12',
+  version: '1.29.13',
   date: '2026-09-11',
-  title: '旧卷续写',
+  title: '守望有据',
   items: [
-    '精简可还原的存档副本，说明保存失败与上次保存点；校正经历日期和叙述顺序。',
+    '驻防兼顾眼前威胁与友军覆盖；普通战败、负伤标作受挫，不误称失势。',
   ],
 };
 

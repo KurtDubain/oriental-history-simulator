@@ -30,6 +30,45 @@ function factContext(world: WorldState): FactTurnBuffer {
   };
 }
 
+function defensiveCoverageFixture() {
+  const world=createWorld('可见威胁与守军覆盖');world.turn=10;
+  const [capital,near,enemy,far]=world.regions;
+  const own=world.polities[0],foe=world.polities[1];own.capitalRegionId=capital.id;
+  world.regions=[capital,near,enemy,far];
+  for(const r of [capital,near,far])r.controllerId=own.id;enemy.controllerId=foe.id;
+  capital.neighbors=[near.id,enemy.id];near.neighbors=[capital.id,enemy.id,far.id];enemy.neighbors=[capital.id,near.id];far.neighbors=[near.id];
+  own.controlledRegionIds=[capital.id,near.id,far.id];foe.controlledRegionIds=[enemy.id];
+  const originals=world.armies.slice(0,3);world.armies=originals;
+  for(const [i,a] of originals.entries()){a.polityId=i===2?foe.id:own.id;a.regionId=i===2?enemy.id:near.id;a.supply=100;a.morale=80;a.embarkedOperationId=null;
+    a.order={...a.order,kind:'hold',warId:null,targetRegionId:a.regionId,issuedTurn:0,status:'active'};}
+  const war:WarState={id:'visible-front',kind:'interstate',attackerId:foe.id,defenderId:own.id,startedTurn:1,endedTurn:null,active:true,attackerScore:0,defenderScore:0,reason:'边境威胁',lastBattleTurn:1,goal:'边境',targetRegionIds:[capital.id],exhaustion:0};
+  world.wars=[war];return {world,capital,near,enemy,far,army:originals[0],other:originals[1]};
+}
+
+describe('defensive coverage from current information',()=>{
+  it('sends one reachable army toward the threatened capital without moving it instantly or duplicating the order',()=>{
+    const {world,capital,near,army,other}=defensiveCoverageFixture();
+    planArmyOrders(world,factContext(world));
+    expect(army.order).toMatchObject({kind:'reinforce',targetRegionId:capital.id});
+    expect(other.order).toMatchObject({kind:'hold',targetRegionId:near.id});
+    expect(army.regionId).toBe(near.id);expect(armyOrderIsExecutable(army,'visible-front',world.turn)).toBe(false);
+    const orders=world.armies.map(a=>a.order);planArmyOrders(world,factContext(world));expect(world.armies.map(a=>a.order)).toEqual(orders);
+  });
+  it('keeps the actual capital guard in place and uses the other army for the uncovered nearby threat',()=>{
+    const {world,capital,near,army,other}=defensiveCoverageFixture();army.regionId=capital.id;
+    planArmyOrders(world,factContext(world));expect(army.order.targetRegionId).toBe(capital.id);expect(other.order.targetRegionId).toBe(near.id);
+  });
+  it.each(['low-supply','low-morale','blocked','no-visible-enemy'] as const)('does not manufacture a rescue when %s',mode=>{
+    const {world,capital,near,army,enemy}=defensiveCoverageFixture();
+    if(mode==='low-supply')army.supply=10;if(mode==='low-morale')army.morale=10;
+    if(mode==='blocked')near.neighbors=near.neighbors.filter(id=>id!==capital.id);
+    if(mode==='no-visible-enemy'){world.armies=world.armies.filter(a=>a.regionId!==enemy.id);world.wars[0].targetRegionIds=[near.id];}
+    planArmyOrders(world,factContext(world));
+    if(mode.startsWith('low-'))expect(army.order.reasonCode).toBe('low_readiness');
+    else expect(army.order.targetRegionId).not.toBe(capital.id);
+  });
+});
+
 function schema4MilitaryFixture(source: WorldState): Record<string, unknown> {
   const legacy = JSON.parse(serializeWorld(source)) as Record<string, unknown>;
   legacy.schemaVersion = 4;

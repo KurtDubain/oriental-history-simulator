@@ -396,8 +396,9 @@ describe('self-contained world cold archive', () => {
     expect(stableStringify(world)).toBe(before);
     const restored=deserializeWorld(packed);
     expect(restored.archiveSystem.blocks).toEqual(world.archiveSystem.blocks);
-    expect(readWorldFacts(restored)).toEqual(facts);
-    expect(readWorldHistory(restored)).toEqual(history);
+    // JSON has no distinct negative zero; compare the complete canonical bodies, not Object.is(-0, 0).
+    expect(stableStringify(readWorldFacts(restored))).toBe(stableStringify(facts));
+    expect(stableStringify(readWorldHistory(restored))).toBe(stableStringify(history));
     expect(restored.hash).toBe(world.hash);
     expect(stableStringify(restored)).toBe(before);
     const changed=JSON.parse(packed);

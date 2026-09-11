@@ -151,7 +151,7 @@ describe('person story arc', () => {
       payload:{characterId:p.id,age:80,cause:'natural',health:0,diseaseId:null,role:'将领'}});
     const arc=projectPersonStoryArc(w,p),beat=arc.find(b=>b.sourceFactIds.includes(loss.id));
     expect(arc.length).toBeLessThanOrEqual(5);expect(arc.at(-1)?.phase).toBe('ending');
-    expect(beat?.phase).toBe('setback');expect(beat?.primaryFactId).toBe(loss.id);expect(beat?.primaryEventId).toBeNull();
+    expect(beat?.phase).toBe('setback');expect(beat?.phaseLabel).toBe('受挫');expect(beat?.primaryFactId).toBe(loss.id);expect(beat?.primaryEventId).toBeNull();
     expect(beat?.summary).toContain('战损1000人');
   });
 
