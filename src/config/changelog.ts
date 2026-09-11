@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.13',
+  version: '1.29.14',
   date: '2026-09-11',
-  title: '守望有据',
+  title: '转折入眼',
   items: [
-    '驻防兼顾眼前威胁与友军覆盖；普通战败、负伤标作受挫，不误称失势。',
+    '本季重大变化不再被旧线索遮住；起兵建国与领土易手分明，集结人数与兵力分开表达。',
   ],
 };
 

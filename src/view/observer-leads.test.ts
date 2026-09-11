@@ -8,7 +8,8 @@ import {
   deriveObserverLeadProjection,
   deriveObserverLeads,
 } from './observer-leads';
-import { projectSituationHistoricalScenes } from './historical-scenes';
+import { playerHistoryText, projectHistoricalScenes, projectSituationHistoricalScenes } from './historical-scenes';
+import { projectQuarterPulse } from './quarter-pulse-stories';
 
 function worldAt(turn: number, seed = '春战副将'): WorldState {
   let world = createWorld(seed);
@@ -146,6 +147,95 @@ function lowSupplyBattleFact(world: WorldState): Extract<SimulationFact, { kind:
 }
 
 describe('observer story leads', () => {
+  function turningWorld() {
+    const world = worldAt(12), report = world.lastTurn!, actor = world.characters[0];
+    const [parent, next] = world.polities, region = world.regions[0];
+    const transfer: Extract<SimulationFact, { kind: 'territory_control_changed' }> = {
+      id: 'turning-transfer', turn: report.turn, year: report.year, season: report.season,
+      kind: 'territory_control_changed', category: '政治', importance: 5, actorIds: [actor.id],
+      polityIds: [parent.id, next.id], regionIds: [region.id], causes: [], sourceFactIds: [],
+      stateDeltas: [{ entityType: 'region', entityId: region.id, field: 'controllerId', before: parent.id, after: next.id }],
+      payload: { regionId: region.id, previousControllerId: parent.id, nextControllerId: next.id, reason: 'rebellion', warId: 'turning-war' },
+    };
+    const declaration: Extract<SimulationFact, { kind: 'war_started' }> = { ...transfer, id: 'turning-declaration', kind: 'war_started',
+      payload: { warId: 'turning-war', warKind: 'rebellion', attackerId: next.id, defenderId: parent.id,
+        goal: '独立', targetRegionIds: [region.id], reason: '地方脱离' } };
+    const event = { id: 'turning-event', turn: report.turn, year: report.year, season: report.season,
+      kind: 'rebellion', category: '政治' as const, importance: 5 as const,
+      title: `${actor.name}据${region.name}起兵`, summary: `${actor.name}建立${next.name}。`,
+      sourceFactIds: [declaration.id, transfer.id], actorIds: [actor.id], polityIds: [parent.id, next.id],
+      regionIds: [region.id], causes: [], evidence: [], stateDeltas: transfer.stateDeltas, situationIds: [] };
+    world.facts = [declaration, transfer]; world.history = [event];
+    world.lastTurn = { ...report, factIds: world.facts.map(f => f.id), eventIds: [event.id] };
+    world.situationSystem.situations = world.situationSystem.situations.filter(s => s.status === 'open').slice(0, 3);
+    return { world, transfer, declaration, event };
+  }
+
+  it('lets a directly recorded founding outrank full ongoing slots, once, with matching quarter evidence', () => {
+    const { world, transfer, declaration, event } = turningWorld();
+    const before = serializeWorld(world), hash = world.hash;
+    const ongoing = deriveObserverLeads({ ...world, lastTurn: null });
+    expect(ongoing).toHaveLength(3);
+    const leads = deriveObserverLeads(world), quarter = projectQuarterPulse(world);
+    expect(leads[0].question).toBe(event.title);
+    expect(leads[0].target).toEqual({ kind: 'person', id: event.actorIds[0] });
+    expect(leads[0].primarySourceFactIds).toEqual(expect.arrayContaining([transfer.id, declaration.id]));
+    expect(leads.filter(l => l.primarySourceFactIds.includes(transfer.id))).toHaveLength(1);
+    expect(leads.slice(1).some(l => ongoing.some(o => o.situationId === l.situationId))).toBe(true);
+    expect(quarter.stories[0]).toMatchObject({ title: event.title, eventId: event.id });
+    expect(quarter.stories.filter(s => s.sourceFactIds.includes(transfer.id))).toHaveLength(1);
+    expect(serializeWorld(world)).toBe(before); expect(world.hash).toBe(hash);
+    expect(deriveObserverLeads({ ...world, facts: [...world.facts].reverse() })).toEqual(leads);
+  });
+
+  it('does not infer founding from a shared quarter or region, nor swallow an independent occupation', () => {
+    const { world, transfer, event } = turningWorld();
+    const unrelated = { ...transfer, id: 'independent-transfer', payload: { ...transfer.payload, reason: 'battle_capture' as const, warId: 'other-war' } };
+    world.facts.push(unrelated);
+    const scenes = projectHistoricalScenes(world, world.facts, 10, 'active');
+    expect(scenes.find(s => s.title === event.title)?.sourceFactIds).not.toContain(unrelated.id);
+    expect(scenes.find(s => s.sourceFactIds.includes(unrelated.id))?.title).toContain('易手');
+    world.history = [{ ...event, sourceFactIds: [unrelated.id] }];
+    expect(projectHistoricalScenes(world, [unrelated], 10, 'active').every(s => !s.title.includes('起兵'))).toBe(true);
+  });
+
+  it('retains the stable ongoing selection in an ordinary quarter, while meaningful military orders still compete', () => {
+    const { world } = turningWorld(), army = world.armies[0];
+    const ordinary = deriveObserverLeads({ ...world, lastTurn: null });
+    const order: Extract<SimulationFact, { kind: 'army_order_changed' }> = { ...world.facts[0], id: 'actual-retreat', kind: 'army_order_changed',
+      importance: 4, payload: { armyId: army.id, polityId: army.polityId, previous: { ...army.order, kind: 'advance' },
+        next: { ...army.order, kind: 'retreat', targetRegionId: army.regionId, reasonCode: 'low_readiness' } },
+      stateDeltas: [{ entityType: 'army', entityId: army.id, field: 'order', before: 'advance', after: 'retreat' }] };
+    world.history = []; world.facts = [order]; world.lastTurn = { ...world.lastTurn!, factIds: [order.id], eventIds: [] };
+    expect(deriveObserverLeads(world).some(l => l.primarySourceFactIds.includes(order.id))).toBe(true);
+    world.facts = [{ ...order, importance: 2, stateDeltas: [] }];
+    expect(deriveObserverLeads(world).map(l => l.situationId)).toEqual(ordinary.map(l => l.situationId));
+  });
+
+  it('does not consume an independent death, accession or dissolution just because founding happens nearby', () => {
+    const { world, event } = turningWorld();
+    const person = world.characters[2], army = world.armies[0];
+    const death: Extract<SimulationFact, { kind: 'character_death' }> = { ...world.facts[0], id: 'independent-death', kind: 'character_death',
+      payload: { characterId: person.id, age: person.age, role: '君主', health: 0, diseaseId: null, cause: 'natural' } };
+    const appointment = { ...appointmentFact(world, 'independent-accession', 'appointment_started', '军团主帅', person.id, army.id),
+      turn: world.lastTurn!.turn, importance: 5 as const, payload: { ...appointmentFact(world, 'seat', 'appointment_started', '军团主帅', person.id, army.id).payload, officeKind: '君主' as const },
+      stateDeltas: [{ entityType: 'office' as const, entityId: 'seat', field: 'active', before: false, after: true }] };
+    for (const fact of [death, appointment]) {
+      const input = { ...world, facts: [...world.facts, fact], lastTurn: { ...world.lastTurn!, factIds: [...world.lastTurn!.factIds, fact.id] } };
+      expect(deriveObserverLeads(input).some(l => l.primarySourceFactIds.includes(fact.id))).toBe(true);
+    }
+    world.history.push({ ...event, id: 'independent-dissolution', kind: 'polity_eliminated', title: '旧国灭亡', sourceFactIds: [] });
+    world.lastTurn!.eventIds.push('independent-dissolution');
+    expect(projectQuarterPulse(world).stories.some(s => s.title === '旧国灭亡')).toBe(true);
+  });
+
+  it('distinguishes participants from soldiers without rewriting the stored army-raised event', () => {
+    const { world } = turningWorld();
+    const text = '甲在乙集结1人部曲，共7000人。';
+    expect(playerHistoryText(world, text)).toBe('甲在乙集结1名军政人物的部曲，共7000名士兵。');
+    expect(playerHistoryText(world, '甲集结3人部曲，共9100人。')).toContain('3名军政人物的部曲，共9100名士兵');
+    expect(text).toBe('甲在乙集结1人部曲，共7000人。');
+  });
   it('does not answer one general’s military story with a supporting character’s unrelated throne appointment', () => {
     const world = worldAt(12), army = world.armies[0], core = army.commanderId;
     const other = world.characters.find(c => c.id !== core && c.polityId === army.polityId)!;

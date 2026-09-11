@@ -35,6 +35,7 @@ export function playerHistoryText(world: WorldState, text: string): string {
       ...world.regions, ...world.polities, ...world.fleets].find((item) => item.id === id)?.name
     ?? (id.startsWith('c_') ? '一位旧识' : '旧日所属')
   )).replace(/具名出生是人口群体中的叙事标记，不重复增加州域人口。/g, '')
+    .replace(/集结(\d+)人部曲，共(\d+)人/g, '集结$1名军政人物的部曲，共$2名士兵')
     .replace(/，承诺转化为可追溯的信任记忆|；这次回应已经进入双方关系与军令审查|；此承诺可因履职而完成，也可因抗命而破裂/g, '')
     .replace(/经职位、支持与风险审查后获准/g, '获朝廷准许')
     .replace(/(?:进入|见于)事实档案/g, '留下记载').replace(/可核验|可查证|，身后身份记为[^。]+/g, '')
@@ -578,6 +579,19 @@ export function projectHistoricalScenes(
     .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
   const availableFacts = readScope === 'all' ? readWorldFacts(world) : world.facts;
   const continuations = continuousAppointmentIds(availableFacts);
+
+  // A recorded founding owns its direct declaration and transfer, not other events at the same place.
+  for (const event of (readScope === 'all' ? readWorldHistory(world) : world.history)) {
+    if (event.kind !== 'rebellion' || !event.sourceFactIds.some(id => inputIds.has(id))) continue;
+    const chain = availableFacts.filter(f => f.turn === event.turn && event.sourceFactIds.includes(f.id));
+    if (!chain.some(f => inputIds.has(f.id)) || !chain.some(f => f.kind === 'territory_control_changed'
+      && f.payload.reason === 'rebellion' && event.polityIds.includes(f.payload.nextControllerId))) continue;
+    chain.forEach(f => consumed.add(f.id));
+    scenes.push({ ...sceneFromFacts(world, `scene:event:${event.id}`, chain,
+      { title: playerHistoryText(world, event.title), summary: playerHistoryText(world, event.summary) }, '', readScope),
+      actorIds: event.actorIds, sourceFactIds: unique([...chain.map(f => f.id), ...event.sourceFactIds]),
+      historyEventIds: [...new Set([event.id, ...factHistoryIds(world, new Set(event.sourceFactIds), readScope)])], importance: event.importance });
+  }
 
   // Identity actions are observer envelopes around an Agency domain Fact.
   // Let the concrete support/request scene own the story instead of showing a

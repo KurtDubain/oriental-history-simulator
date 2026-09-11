@@ -136,7 +136,7 @@ function currentFactStories(world: WorldState, coreImpactFactIds: ReadonlySet<st
         const fact = factById.get(id);
         return reportFactIds.has(id) && fact?.turn === report.turn;
       }));
-      const historyEventIds = uniqueSorted(scene.historyEventIds.filter((id) => {
+      const historyEventIds = uniqueInOrder(scene.historyEventIds.filter((id) => {
         const event = historyById.get(id);
         return reportEventIds.has(id) && event?.turn === report.turn;
       }));

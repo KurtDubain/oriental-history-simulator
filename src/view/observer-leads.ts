@@ -3,7 +3,7 @@ import type { MapOverlay } from '../components/WorldMap';
 import type { SituationPhase, SituationState } from '../sim/situations';
 import type { SimulationFact, WorldState } from '../sim/types';
 import { projectCoreImpacts } from './core-impact-projection';
-import { participantBattleHeadline, projectFactNarrative, projectSituationHistoricalScenes, readableParticipant, type HistoricalScene } from './historical-scenes';
+import { participantBattleHeadline, projectFactNarrative, projectHistoricalScenes, projectSituationHistoricalScenes, readableParticipant, type HistoricalScene } from './historical-scenes';
 import {
   projectSituationSnapshotItem,
   situationOutcomeLabel,
@@ -252,16 +252,17 @@ function targetForFact(world: WorldState, fact: SimulationFact): ObserverLeadTar
   return regionId ? { kind: 'region', id: regionId } : null;
 }
 
-function projectFactLead(world: WorldState, fact: SimulationFact): ObserverLead | null {
-  const target = targetForFact(world, fact);
+function projectFactLead(world: WorldState, fact: SimulationFact, scene?: HistoricalScene): ObserverLead | null {
+  const founder = scene?.id.startsWith('scene:event:') && world.characters.find(c => c.id === scene.actorIds[0]);
+  const target: ObserverLeadTarget | null = founder ? { kind: 'person', id: founder.id } : targetForFact(world, fact);
   if (!target) return null;
-  const narrative = projectFactNarrative(world, fact);
+  const narrative = scene ?? projectFactNarrative(world, fact);
   const context = [
     ...fact.actorIds.map((id) => world.characters.find((item) => item.id === id)?.name),
     ...fact.polityIds.map((id) => world.polities.find((item) => item.id === id)?.shortName),
     ...fact.regionIds.map((id) => world.regions.find((item) => item.id === id)?.name),
   ].filter((label, index, all): label is string => Boolean(label) && all.indexOf(label) === index).slice(0, 3);
-  const war = WAR_FACT_KINDS.has(fact.kind) || (fact.kind === 'character_death' && fact.payload.cause === 'battle');
+  const war = !scene?.id.startsWith('scene:event:') && (WAR_FACT_KINDS.has(fact.kind) || (fact.kind === 'character_death' && fact.payload.cause === 'battle'));
   const question = fact.kind === 'battle'
     ? `${world.characters.find((item) => item.id === fact.payload.attacker.commanderId)?.name ?? '攻方主将'}在${world.regions.find((item) => item.id === fact.payload.targetRegionId)?.name ?? '战地'}${fact.payload.attackerWon ? '击退守军' : '进攻受阻'}`
     : narrative.title;
@@ -280,8 +281,8 @@ function projectFactLead(world: WorldState, fact: SimulationFact): ObserverLead 
     startedLabel: null,
     trackingTurns: 1,
     recentChange: null,
-    primarySceneId: `scene:fact:${fact.id}`,
-    primarySourceFactIds: [fact.id],
+    primarySceneId: scene?.id ?? `scene:fact:${fact.id}`,
+    primarySourceFactIds: scene?.sourceFactIds ?? [fact.id],
   };
 }
 
@@ -306,20 +307,10 @@ function projectAppointmentTransferLead(world: WorldState, left: AppointmentFact
   };
 }
 
-function coveredFactIds(situations: readonly SituationState[]): Set<string> {
-  return new Set(situations.flatMap((situation) => [
-    ...situation.causalFactIds,
-    ...situation.milestoneFactIds,
-    ...(situation.resolution?.resultFactIds ?? []),
-    ...situation.recentChanges.flatMap((change) => change.sourceFactIds),
-  ]));
-}
-
 export function deriveObserverLeads(world: WorldState): ObserverLead[] {
   const open = world.situationSystem.situations
     .filter((item) => item.status === 'open' && item.visibility >= OBSERVER_LEAD_VISIBILITY_THRESHOLD)
     .sort(compareSituations);
-  const selectedSituations: SituationState[] = [];
   const leads: ObserverLead[] = [];
   const usedSceneIds = new Set<string>();
   const usedPrimaryFacts = new Set<string>();
@@ -333,11 +324,37 @@ export function deriveObserverLeads(world: WorldState): ObserverLead[] {
     const lead = projectSituationLead(world, situation, resolvedEcho, choice);
     if (!lead) return;
     leads.push(lead);
-    selectedSituations.push(situation);
     usedSceneIds.add(choice.primarySceneId);
     choice.primarySourceFactIds.forEach((id) => usedPrimaryFacts.add(id));
   };
+  const currentIds = new Set(world.lastTurn?.factIds);
+  const currentFacts = world.facts.filter(f => currentIds.has(f.id));
+  const scenes = projectHistoricalScenes(world, currentFacts, currentFacts.length, 'active');
+  const facts = currentFacts.filter(f => isStoryFact(f, currentFacts))
+    .sort((a, b) => b.importance - a.importance || stableCompare(a.id, b.id));
+  let appointmentSelected = false;
+  const appendFact = (fact: SimulationFact) => {
+    const appointment = fact.kind === 'appointment_started' || fact.kind === 'appointment_ended';
+    if (leads.length >= 3 || appointment && appointmentSelected || usedPrimaryFacts.has(fact.id)) return;
+    const counterpart = appointment ? currentFacts.find((other): other is AppointmentFact => (
+      other.id !== fact.id && other.kind !== fact.kind && sameAppointmentSeat(fact, other))) : undefined;
+    const lead = counterpart ? projectAppointmentTransferLead(world, fact as AppointmentFact, counterpart)
+      : projectFactLead(world, fact, scenes.find(s => s.sourceFactIds.includes(fact.id)));
+    if (!lead || usedSceneIds.has(lead.primarySceneId) || lead.primarySourceFactIds.some(id => usedPrimaryFacts.has(id))) return;
+    leads.push(lead); usedSceneIds.add(lead.primarySceneId);
+    lead.primarySourceFactIds.forEach(id => usedPrimaryFacts.add(id));
+    if (appointment) appointmentSelected = true;
+  };
+  // Only important, settled changes interrupt the stable ordering of ongoing stories.
+  for (const fact of facts.filter(f => f.importance >= 4 && (f.kind === 'battle' || f.kind === 'character_death'
+    || f.stateDeltas.some(d => d.before !== d.after)))) {
+    if (leads.length >= 3) break;
+    const ongoing = open.find(s => situationChoices(world, s, projectSituationSnapshotItem(s, world))[0]?.primarySourceFactIds.includes(fact.id));
+    if (ongoing) appendSituation(ongoing, false);
+    else appendFact(fact);
+  }
   for (const situation of open) {
+    if (leads.length >= 3 || leads.some(lead => lead.situationId === situation.id)) continue;
     appendSituation(situation, false);
     if (leads.length >= 3) break;
   }
@@ -356,31 +373,7 @@ export function deriveObserverLeads(world: WorldState): ObserverLead[] {
     }
   }
 
-  if (leads.length < 3 && world.lastTurn) {
-    const currentFactIds = new Set(world.lastTurn.factIds);
-    const covered = coveredFactIds(selectedSituations);
-    const currentFacts = world.facts.filter((fact) => currentFactIds.has(fact.id));
-    const facts = currentFacts
-      .filter((fact) => !covered.has(fact.id) && isStoryFact(fact, currentFacts))
-      .sort((left, right) => right.importance - left.importance || stableCompare(left.id, right.id));
-    let appointmentSelected = false;
-    for (const fact of facts) {
-      const appointment = fact.kind === 'appointment_started' || fact.kind === 'appointment_ended';
-      if ((appointment && appointmentSelected) || usedPrimaryFacts.has(fact.id)) continue;
-      const counterpart = appointment ? currentFacts.find((other): other is AppointmentFact => (
-        other.id !== fact.id && other.kind !== fact.kind && sameAppointmentSeat(fact, other)
-      )) : undefined;
-      const lead = counterpart ? projectAppointmentTransferLead(world, fact as AppointmentFact, counterpart) : projectFactLead(world, fact);
-      if (lead && !usedSceneIds.has(lead.primarySceneId)
-        && lead.primarySourceFactIds.every((id) => !usedPrimaryFacts.has(id))) {
-        leads.push(lead);
-        usedSceneIds.add(lead.primarySceneId);
-        lead.primarySourceFactIds.forEach((id) => usedPrimaryFacts.add(id));
-        if (appointment) appointmentSelected = true;
-      }
-      if (leads.length >= 3) break;
-    }
-  }
+  for (const fact of facts) appendFact(fact);
   return leads.slice(0, 3);
 }
 
