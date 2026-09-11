@@ -80,6 +80,7 @@ import {
   renameWorldSlot,
   saveWorld,
   saveWorldToSlot,
+  saveFailureMessage,
   type WorldSaveSummary,
 } from './persistence/storage';
 import {
@@ -444,7 +445,7 @@ export function App() {
       ),
       onSaved: () => setHasSave(true),
       onError: (error) => {
-        setToast(playerErrorMessage(error, '本地史册保存失败。'));
+        setToast(saveFailureMessage(error, coordinator.getState().lastSavedTurn));
       },
     });
     autosaveCoordinatorRef.current = coordinator;
@@ -668,7 +669,7 @@ export function App() {
       await refreshWorldSaves();
       setToast(`已将第 ${current.year} 年${current.season}的世界写入本地史册。`);
     } catch (error) {
-      setToast(playerErrorMessage(error, '本地史册保存失败，当前世界未受影响。'));
+      setToast(saveFailureMessage(error, autosaveCoordinatorRef.current?.getState().lastSavedTurn));
     }
   }, [refreshWorldSaves, resetAutosaveCoordinator]);
 
@@ -724,7 +725,7 @@ export function App() {
       downloadWorld(serializeWorld(validCurrent), `沧衡纪_${validCurrent.seed}_第${validCurrent.year}年${validCurrent.season}.json`);
       setToast('已将完整世界、随机种子与因果史册导出。');
     } catch (error) {
-      setToast(playerErrorMessage(error, '世界未通过完整校验，无法导出。'));
+      setToast(saveFailureMessage(error, autosaveCoordinatorRef.current?.getState().lastSavedTurn).replace('当前进度未保存', '未生成导出文件'));
     }
   }, []);
 

@@ -36,6 +36,8 @@ describe('CausalDrawer reading layer', () => {
     expect(markup).not.toContain('人物选择');
     expect(markup).not.toContain('裁决结果');
     expect(markup).toContain('接着看这些人');
+    expect(markup).not.toContain('人物还可从其处入世');
+    expect(markup).toContain('回看生平、关系与后续影响');
     expect(markup.indexOf('此事为何发生？')).toBeLessThan(markup.indexOf('接着看这些人'));
     expect(markup).not.toContain('史事溯因');
     expect(markup).toContain('<details class="observer-causal-drawer__consequence"><summary>详细依据 · 记录变化</summary>');

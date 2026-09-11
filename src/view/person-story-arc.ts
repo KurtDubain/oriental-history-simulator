@@ -122,7 +122,7 @@ function episodeCandidate(world: WorldState, episodes: readonly BattleEpisode[],
   const ids = unique(allFacts.map(f => f.id)), primary = turning?.id ?? focus.battle.id;
   const p = side.participant;
   let summary = episodes.length === 1
-    ? `此役战前${p.soldiersBefore}人，战损${p.losses}人，战后${p.soldiersAfter}人。`
+    ? `${places[0]}战前本部${p.soldiersBefore}人，战损${p.losses}人，余${p.soldiersAfter}人。`
     : `沿${places.join('、')}先后参战${episodes.length}次，记录战损累计${episodes.reduce((n,e) => n + battleSide(e.battle, personId)!.participant.losses, 0)}人；最近一战战前${p.soldiersBefore}人，战后${p.soldiersAfter}人。`;
   if (wound?.kind === 'character_wounded') summary += ` 负伤退出行营，休养至第${wound.payload.recoveryUntilTurn ?? wound.turn + 2}季。`;
   if (ended.length) summary += ` 同季卸下${unique(ended.map(f => f.payload.officeKind)).join('、')}。`;
@@ -166,7 +166,8 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
   const facts = (evidence.actors.get(person.id) ?? [])
     .filter((fact) => fact.kind !== 'battle' || battleSide(fact, person.id))
     .sort((left, right) => left.turn - right.turn);
-  const events = [...new Set([...(evidence.actorEvents.get(person.id) ?? []), ...evidence.capitalEvents])];
+  const relevantEvents = new Set([...(evidence.actorEvents.get(person.id) ?? []), ...evidence.capitalEvents]);
+  const events = evidence.events.filter(e => relevantEvents.has(e));
   const byId = evidence.byId;
   const appointments = facts.filter((f): f is Extract<SimulationFact, {kind:'appointment_started'|'appointment_ended'}> =>
     (f.kind === 'appointment_started' || f.kind === 'appointment_ended') && f.payload.holderId === person.id);
@@ -338,10 +339,16 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
   for (const group of campaigns.filter(g => g.length > 1)) {
     const places = [...new Set(group.flatMap(f => f.regionIds))].map(id => world.regions.find(r => r.id === id)?.name ?? '失名州郡');
     const ids = unique(group.flatMap(f => [f.id, ...f.sourceFactIds]));
-    const own = candidates.filter(c => c.phase === 'battle' && c.sourceFactIds.some(id => ids.includes(id)));
-    const combined: Candidate = { id: group[0].id, startTurn: group[0].turn, turn: group.at(-1)!.turn, phase: 'battle', priority: -1,
+    // A citation can be background. Absorb only actual battles tied to these transfers.
+    const battles = new Set(group.map(f => rootBattleId(f, byId)).filter(Boolean));
+    const own = candidates.filter(c => c.phase === 'battle' && c.sourceFactIds.some(id => battles.has(id) || group.some(f => f.id === id)))
+      .sort((a,b) => (a.startTurn ?? a.turn)-(b.startTurn ?? b.turn)
+        || (evidence.order.get(a.primaryFactId ?? '') ?? 0)-(evidence.order.get(b.primaryFactId ?? '') ?? 0));
+    const combined: Candidate = { id: group[0].id,
+      startTurn: Math.min(group[0].turn, ...own.map(c => c.startTurn ?? c.turn)),
+      turn: Math.max(group.at(-1)!.turn, ...own.map(c => c.turn)), phase: 'battle', priority: -1,
       title: `${person.name}任内连取${places.length > 3 ? `${places.at(-1)}等${places.length}地` : places.join('、')}`,
-      summary: `其在位期间，军队先后取得${places.join('、')}。${own.map(c => c.summary).join('')}`,
+      summary: `任内军队取得${places.join('、')}。${own.map(c => c.summary).join('')}`,
       importance: Math.max(...group.map(f => f.importance)), ...sourceEvents(events, ids, group.at(-1)!.id) };
     mergeSources(combined, own); candidates.push(combined);
     for (const c of own) candidates.splice(candidates.indexOf(c), 1);

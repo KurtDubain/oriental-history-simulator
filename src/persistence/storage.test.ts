@@ -7,9 +7,27 @@ import {
   normalizeWorldSlot,
   readWorldFile,
   summarizeWorldSave,
+  saveFailureMessage,
+  MAX_IMPORT_BYTES,
 } from './storage';
 
 describe('portable V1 world files', () => {
+  it('keeps capacity, storage and integrity failures distinct and names the last durable season', () => {
+    expect(saveFailureMessage(new RangeError('史册容量超过十六兆上限。'),480)).toContain('容量超限，当前进度未保存');
+    expect(saveFailureMessage(new Error('quota error'),480)).toContain('本地存储故障');
+    expect(saveFailureMessage(new Error('存档哈希校验失败'),480)).toContain('校验未通过');
+    expect(saveFailureMessage(new Error('World invariant violation: invalid reference'),480)).toContain('校验未通过');
+    expect(saveFailureMessage(new Error('人物履历来源缺失，存档无法还原'),480)).toContain('校验未通过');
+    expect(saveFailureMessage(null,480)).toContain('第121年春');
+    expect(saveFailureMessage(null)).not.toContain('最近成功');
+    expect(saveFailureMessage(null)).toContain('原存档未被覆盖');
+  });
+
+  it('also bounds the outer export file, not just the world body', () => {
+    const body=JSON.stringify({text:'x'.repeat(MAX_IMPORT_BYTES-30)});
+    expect(new TextEncoder().encode(body).byteLength).toBeLessThan(MAX_IMPORT_BYTES);
+    expect(()=>encodeWorldFile(body)).toThrow(/容量/);
+  });
   it('round-trips a 50-year chronicle without double-encoding the world', async () => {
     const world = advanceWorldBy(createWorld('五十年导出'), 200);
     const encoded = encodeWorldFile(serializeWorld(world));

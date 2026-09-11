@@ -68,6 +68,37 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it('expands a partly overlapping reign campaign only to actual actions, not early background citations', () => {
+    const w=createWorld('跨年战役阶段'),p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
+    const [a,b,c]=w.regions;for(const r of [a,b,c])r.neighbors=[a,b,c].filter(x=>x!==r).map(x=>x.id);
+    w.offices=[{id:'reign',holderId:p.id,polityId:p.polityId,kind:'君主',rank:100,regionId:a.id,armyId:null,appointedTurn:0,endedTurn:null,active:true}];
+    w.history=[];w.facts=[];
+    const battles=[a,b,c].map((r,i)=>{const f=battleFact(w,p.id,['z','q','a'][i],7+i,10);f.payload.targetRegionId=r.id;f.regionIds=[r.id];return f;});
+    const background:SimulationFact={...battles[0],id:'background',turn:0,actorIds:[],kind:'war_started',payload:{warId:'war',warKind:'interstate',attackerId:p.polityId,defenderId:'enemy',goal:'征服',targetRegionIds:[a.id],reason:'边境争夺'}};
+    battles[0].sourceFactIds=[background.id];w.facts.push(background,...battles);
+    for(let i=0;i<2;i++)w.facts.push({...battles[i],id:`capture-${i}`,kind:'territory_control_changed',sourceFactIds:[battles[i].id],
+      payload:{regionId:[a,b][i].id,previousControllerId:'enemy',nextControllerId:p.polityId,reason:'battle_capture',warId:battles[i].payload.warId}});
+    const body=serializeWorld(w),hash=computeWorldHash(w),beat=projectPersonStoryArc(w,p).find(b=>b.title.includes('任内连取'))!;
+    expect(beat.dateLabel).toBe('第 2 年 · 冬季至第 3 年 · 夏季');
+    expect(beat.summary).toContain(c.name);
+    expect(beat.sourceFactIds).toEqual(expect.arrayContaining(['z','q','a','capture-0','capture-1']));
+    expect(beat.primaryFactId).toBe('capture-1');
+    expect(serializeWorld(w)).toBe(body);expect(computeWorldHash(w)).toBe(hash);
+  });
+
+  it.each([false,true])('orders capital losses by the authoritative event stream even when only the later one names the ruler (same turn: %s)', sameTurn => {
+    const w=createWorld('失都迁驻顺序'),p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
+    const [a,b,c]=w.regions;w.history=[];w.facts=[];
+    w.offices=[{id:'reign',holderId:p.id,polityId:p.polityId,kind:'君主',rank:100,regionId:a.id,armyId:null,appointedTurn:0,endedTurn:null,active:true}];
+    const battle=battleFact(w,p.id,'fight',8,50);battle.actorIds=[];battle.payload.attacker.participants=[];
+    w.facts=[{...battle,id:'z-first',turn:sameTurn?8:7},{...battle,id:'a-second'}];
+    for(let i=0;i<2;i++)w.history.push({...battle,id:i?'a-later':'z-earlier',turn:sameTurn?8:7+i,kind:'capital_fall',
+      actorIds:i?[p.id]:[],title:`${[a,b][i].name}失守`,summary:`${[a,b][i].name}失守，迁往${[b,c][i].name}。`,
+      sourceFactIds:[w.facts[i].id],evidence:[],situationIds:[],stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'capitalRegionId',before:[a,b][i].id,after:[b,c][i].id}]});
+    const arc=projectPersonStoryArc(w,p);
+    const text=arc.map(b=>b.summary).join('');
+    expect(text.indexOf(`${a.name}失守`)).toBeLessThan(text.indexOf(`${b.name}失守`));
+  });
   it.each(['same-war', 'other-war', 'other-role', 'mixed-place', 'distant'] as const)('anchors a capital title and joins only a related defense (%s)', mode => {
     const w=createWorld('经历主标题对应证据');
     const p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
@@ -517,7 +548,7 @@ describe('person story arc', () => {
     expect(beat?.title).toContain('负伤退营');
     expect(beat?.sourceFactIds).toEqual(['fact_story_turn_battle', 'fact_story_wound']);
     expect(beat?.primaryFactId).toBe('fact_story_wound');
-    expect(beat?.summary).toContain('此役战前');
+    expect(beat?.summary).toContain('战前本部');
     expect(beat?.summary).toContain('退出行营');
     expect(story.length).toBeLessThanOrEqual(3);
   });

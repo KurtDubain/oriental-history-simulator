@@ -2,7 +2,7 @@ import { stableHash, stableStringify } from './random';
 import { computeWorldHash } from './world-hash';
 import type { WorldState } from './types';
 import { decodeArchiveBlock } from './archive/codec';
-import { buildArchiveIndexes } from './archive/metadata';
+import { buildArchiveIndexes, buildArchiveHistorySummary, buildImportantEventPreviews, buildTerritoryDeltas } from './archive/metadata';
 import { validateWorld } from './invariants';
 import { migrateV01SocialState } from './v02';
 import { createV03LifeSystems } from './v03-life';
@@ -21,6 +21,8 @@ import {
   createWorldArchiveState,
   normalizeWorldArchiveState,
   validateWorldArchiveIntegrity,
+  readWorldHistory,
+  readWorldFacts,
 } from './archive';
 
 function migrateV02Systems(world: WorldState): void {
@@ -122,11 +124,21 @@ function migrateLegacyFacts(world: WorldState, boundary: LegacyArchiveBoundary):
 
 export function serializeWorld(world: WorldState): string {
   if (!world.archiveSystem?.blocks.length) return stableStringify(world);
-  // Indexes repeat IDs already authenticated inside each compressed block.
-  // Residency and every authoritative byte stay untouched in the live world.
-  return stableStringify({ ...world, archiveSystem: { ...world.archiveSystem,
-    blocks: world.archiveSystem.blocks.map(({ indexes: _indexes, ...block }) => block),
-  } });
+  // Omit only exact, reconstructible copies; do not alter live residency or digests.
+  const events = new Map(readWorldHistory(world).map(e => [e.id, e]));
+  const facts = new Map(readWorldFacts(world).map(f => [f.id, f]));
+  const pins = new Set(world.archiveSystem.pinnedFactIds);
+  return stableStringify({ ...world,
+    facts: world.facts.filter(f => !pins.has(f.id) || stableStringify(f) !== stableStringify(facts.get(f.id))),
+    history: world.history.map(({ evidence, ...event }) => stableStringify(evidence) === stableStringify(event.causes.map(c => c.evidence))
+      ? event : { ...event, evidence }),
+    characters: world.characters.map(c => ({ ...c, biography: c.biography.map(({summary, ...b}) =>
+      b.eventId && events.get(b.eventId)?.summary === summary ? b : {...b, summary}) })),
+    archiveSystem: { ...world.archiveSystem,
+      blocks: world.archiveSystem.blocks.map(({ indexes: _indexes, historySummary: _summary,
+        importantEventPreviews: _previews, territoryDeltas: _territories, ...block }) => block),
+    },
+  });
 }
 
 export function deserializeWorld(serialized: string): WorldState {
@@ -143,7 +155,29 @@ export function deserializeWorld(serialized: string): WorldState {
   const world = parsed as unknown as WorldState;
   if (world.hash !== computeWorldHash(world)) throw new Error('存档哈希校验失败，内容可能已损坏或被篡改');
   for (const block of world.archiveSystem?.blocks ?? []) {
-    if (!Object.prototype.hasOwnProperty.call(block, 'indexes')) block.indexes = buildArchiveIndexes(decodeArchiveBlock(block));
+    const payload = decodeArchiveBlock(block);
+    if (!Object.hasOwn(block, 'indexes')) block.indexes = buildArchiveIndexes(payload);
+    if (!Object.hasOwn(block, 'historySummary')) block.historySummary = buildArchiveHistorySummary(payload.history);
+    if (!Object.hasOwn(block, 'importantEventPreviews')) block.importantEventPreviews = buildImportantEventPreviews(payload.history);
+    if (!Object.hasOwn(block, 'territoryDeltas')) block.territoryDeltas = buildTerritoryDeltas(payload.facts);
+  }
+  if (world.archiveSystem?.blocks.length) {
+    const facts = new Map(readWorldFacts(world).map(f => [f.id, f]));
+    const active = new Map(world.facts.map(f => [f.id, f]));
+    const pins = new Set(world.archiveSystem.pinnedFactIds);
+    world.facts = [...pins].map(id => {
+      const fact = active.get(id) ?? facts.get(id);
+      if (!fact) throw new Error('事实来源缺失，存档无法还原');
+      return fact;
+    }).concat(world.facts.filter(f => !pins.has(f.id)));
+    for (const event of world.history) if (!Object.hasOwn(event, 'evidence')) event.evidence = event.causes.map(c => c.evidence);
+    const events = new Map(readWorldHistory(world).map(e => [e.id, e]));
+    for (const character of world.characters) for (const entry of character.biography) {
+      if (Object.hasOwn(entry, 'summary')) continue;
+      const source = entry.eventId && events.get(entry.eventId);
+      if (!source) throw new Error('人物履历来源缺失，存档无法还原');
+      entry.summary = source.summary;
+    }
   }
   if (originalVersion >= 4) {
     if (!Array.isArray(world.facts)) {

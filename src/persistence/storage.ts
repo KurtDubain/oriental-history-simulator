@@ -65,8 +65,14 @@ function payloadByteLength(payload: string): number {
 
 function assertPayloadWithinLimit(payload: string): void {
   if (payloadByteLength(payload) > MAX_IMPORT_BYTES) {
-    throw new Error('V1 世界存档不能超过 16MB。');
+    throw new RangeError('史册容量超过十六兆上限。');
   }
+}
+
+export function saveFailureMessage(error: unknown, savedTurn = 0): string {
+  const message = error instanceof Error ? error.message : '';
+  const reason = /容量|16MB/.test(message) ? '史册容量超限' : /校验|哈希|损坏|来源缺失|invariant|JSON/.test(message) ? '史册校验未通过' : '本地存储故障';
+  return `${reason}，当前进度未保存。${savedTurn > 0 ? `本局最近成功保存于第${Math.floor(savedTurn / 4) + 1}年${['春','夏','秋','冬'][savedTurn % 4]}。` : ''}原存档未被覆盖，请勿关闭页面。`;
 }
 
 function isEngineVersion(value: unknown): value is SaveEngineVersion {
@@ -247,12 +253,14 @@ export function summarizeWorldSave(
 
 export function encodeWorldFile(payload: string): string {
   assertPayloadWithinLimit(payload);
-  return JSON.stringify({
+  const encoded = JSON.stringify({
     schemaVersion: 1,
     savedAt: new Date().toISOString(),
     engineVersion: '1.0.0',
     world: JSON.parse(payload) as unknown,
   });
+  assertPayloadWithinLimit(encoded);
+  return encoded;
 }
 
 function namedSlotStorageKey(slot: string): string {
@@ -416,7 +424,7 @@ export function downloadWorld(payload: string, filename: string): void {
 
 export async function readWorldFile(file: File): Promise<string> {
   if (file.size > MAX_IMPORT_BYTES) {
-    throw new Error('V1 世界存档不能超过 16MB。');
+    throw new RangeError('史册容量超过十六兆上限。');
   }
   const raw = await file.text();
   const parsed: unknown = JSON.parse(raw);

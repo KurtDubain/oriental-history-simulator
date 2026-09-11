@@ -380,13 +380,18 @@ describe('self-contained world cold archive', () => {
     expect(validateWorldArchiveIntegrity(world)).toEqual([]);
   });
 
-  it('omits only rebuildable cold indexes in saves, authenticates the payload, and restores the exact history', () => {
+  it('omits only exact duplicate prose, cold pins and metadata, then authenticates the restored history', () => {
     let world = createWorld('冷卷索引不重复持久化');
     for (let i=0;i<80;i++) world=advanceWorldDetailed(world).world;
     const before=stableStringify(world), facts=readWorldFacts(world), history=readWorldHistory(world);
     const packed=serializeWorld(world), raw=JSON.parse(packed);
     expect(raw.archiveSystem.blocks.length).toBeGreaterThan(0);
     expect(raw.archiveSystem.blocks[0]).not.toHaveProperty('indexes');
+    expect(raw.archiveSystem.blocks[0]).not.toHaveProperty('historySummary');
+    expect(raw.archiveSystem.blocks[0]).not.toHaveProperty('importantEventPreviews');
+    expect(raw.archiveSystem.blocks[0]).not.toHaveProperty('territoryDeltas');
+    expect(raw.facts.every((f: SimulationFact) => !world.archiveSystem.pinnedFactIds.includes(f.id))).toBe(true);
+    expect(raw.history.some((e: HistoryEvent) => !Object.hasOwn(e, 'evidence'))).toBe(true);
     expect(packed.length).toBeLessThan(before.length);
     expect(stableStringify(world)).toBe(before);
     const restored=deserializeWorld(packed);
@@ -394,6 +399,14 @@ describe('self-contained world cold archive', () => {
     expect(readWorldFacts(restored)).toEqual(facts);
     expect(readWorldHistory(restored)).toEqual(history);
     expect(restored.hash).toBe(world.hash);
+    expect(stableStringify(restored)).toBe(before);
+    const changed=JSON.parse(packed);
+    changed.history.at(-1).summary += '伪造';
+    expect(()=>deserializeWorld(JSON.stringify(changed))).toThrow(/校验/);
+    const missing=JSON.parse(packed);
+    missing.characters[0].biography[0].eventId='missing';
+    delete missing.characters[0].biography[0].summary;
+    expect(()=>deserializeWorld(JSON.stringify(missing))).toThrow(/来源缺失/);
     expect(advanceWorldDetailed(restored).world.hash).toBe(advanceWorldDetailed(world).world.hash);
     expect(deserializeWorld(before).hash).toBe(world.hash);
     raw.archiveSystem.blocks[0].payloadBase64='invalid';

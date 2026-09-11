@@ -58,12 +58,13 @@ try {
   for (const input of (process.env.OHS_COMPAT_FILES ?? '').split(',').filter(Boolean)) {
     const text = readFileSync(input, 'utf8'), serialized = stableStringify(JSON.parse(text).world);
     const source = deserializeWorld(serialized);
-    assert(serializeWorld(source) === serialized, 'import must not rewrite an authenticated snapshot');
+    const compact = serializeWorld(source);
+    assert.equal(stableStringify(deserializeWorld(compact)), stableStringify(source), 'wire compaction must restore every authenticated value');
     const page = await browser.newPage();
     await page.goto(url, { waitUntil: 'networkidle' });
     await page.locator('input[type=file]').setInputFiles(input);
     await page.locator('.world-map__canvas').waitFor({ timeout: 60000 });
-    assert(await exported(page, `import-${results.length}`) === serialized);
+    assert(await exported(page, `import-${results.length}`) === compact);
     const next = advanceWorld(source);
     await page.getByRole('button', { name: '推进至下一季', exact: true }).click();
     await page.waitForFunction(t => JSON.parse(window.render_game_to_text()).time.turn === t, next.turn);

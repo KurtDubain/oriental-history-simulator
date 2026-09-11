@@ -204,7 +204,7 @@ export function CausalDrawer({
           {event.subjects?.length ? (
             <section className="observer-causal-subjects observer-causal-subjects--next" aria-label="接着查看相关人物、家族与政权">
               <span><UsersRound size={13} aria-hidden="true" />接着看这些人</span>
-              <p>打开档案可关注后续；人物还可从其处入世。</p>
+              <p>打开档案可回看生平、关系与后续影响。</p>
               <div>
                 {event.subjects.map((subject) => (
                   <button key={`${subject.kind}-${subject.id}`} type="button" onClick={() => onSelectSubject?.(subject.kind, subject.id)}>
