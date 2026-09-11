@@ -1,0 +1,33 @@
+[
+  {
+    "key": "wounded",
+    "personId": "c_085",
+    "factId": "fact_0000674",
+    "seed": "乱世一将",
+    "turn": 33,
+    "hash": "3ca7e74d94f6b45f",
+    "name": "宇文维珩",
+    "sha256": "a41bff97d9fd952d0f8954901c60777822476e41152682a7343c2877bb20f595"
+  },
+  {
+    "key": "returned",
+    "personId": "c_085",
+    "factId": "fact_0000674",
+    "seed": "乱世一将",
+    "turn": 64,
+    "hash": "3ca9495daa6cdae7",
+    "name": "宇文维珩",
+    "sha256": "65ad8f4a993c33e63d6dc482323f368b34506e6ae5c6b6115208480f5544aa2b"
+  },
+  {
+    "key": "deceased",
+    "personId": "c_049",
+    "factId": "fact_0001036",
+    "eventId": "event_001074",
+    "seed": "霜河归雁-留验寅",
+    "turn": 52,
+    "hash": "c168e59149b6e9a0",
+    "name": "高德和",
+    "sha256": "540d30c9db3b64a5e68cfe29de82ed06030482bbfe267069517dd69daa9967a1"
+  }
+]

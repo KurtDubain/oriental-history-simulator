@@ -1636,7 +1636,6 @@ export function App() {
       return;
     }
     playback.pause();
-    setOverlay(lead.overlay);
     setSelection(lead.target);
     navigation.goToView('world');
   }, [clearRosterDossier, handleOpenSituationWorkbench, navigation, playback]);
@@ -1745,7 +1744,6 @@ export function App() {
     const current = worldRef.current;
     const situation = current?.situationSystem.situations.find((item) => item.id === situationId);
     if (!situation) return;
-    setFocusedWarId(situation.type === 'war_progress' ? situation.scopeKey : null); if (situation.type === 'war_progress') setOverlay('war');
     navigation.replaceTopLayer({ kind: 'situations', situationId });
   }, [navigation]);
   const handleCancelWorldStart = useCallback(() => {

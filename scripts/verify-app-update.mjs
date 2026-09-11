@@ -3,7 +3,8 @@ import { mkdir, readFile } from 'node:fs/promises';
 import { chromium } from 'playwright';
 import { preview } from 'vite';
 
-const APP_URL = 'http://127.0.0.1:4176';
+const PORT = Number(process.env.APP_UPDATE_E2E_PORT ?? 4176);
+const APP_URL = `http://127.0.0.1:${PORT}`;
 const PACKAGE_VERSION = JSON.parse(await readFile('package.json', 'utf8')).version;
 const ARTIFACT_DIR = `output/app-update-v${PACKAGE_VERSION}`;
 
@@ -27,7 +28,7 @@ assert.equal(appFallbackPattern.test('/history'), true, '普通应用路径必�
 await mkdir(ARTIFACT_DIR, { recursive: true });
 const server = await preview({
   logLevel: 'error',
-  preview: { host: '127.0.0.1', port: 4176, strictPort: true },
+  preview: { host: '127.0.0.1', port: PORT, strictPort: true },
 });
 const browser = await chromium.launch();
 

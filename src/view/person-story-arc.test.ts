@@ -430,6 +430,43 @@ describe('person story arc', () => {
     expect(projectPersonStoryArc(world, former).some(b => b.title.includes('起兵'))).toBe(false);
   });
 
+  it('joins a witnessed same-rank formation transfer, retaining both references and real removals', () => {
+    const world = createWorld('同职换营事实边界');
+    const p = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;
+    const base = battleFact(world, p.id, 'base', 24, 10);
+    const ended = { ...base, id: 'old-seat-end', kind: 'appointment_ended' as const,
+      causes: [{ label: '职位失配', role: '条件' as const, weight: 1, evidence: '旧编队副将席位结束' }],
+      payload: { appointmentId: 'old-seat', action: 'ended' as const, officeKind: '军团副将' as const,
+        holderId: p.id, polityId: p.polityId, regionId: null, armyId: world.armies[0].id, fleetId: null, rank: 48 } };
+    const started = { ...ended, id: 'new-seat-start', kind: 'appointment_started' as const,
+      causes: [{ label: '任职依据', role: '结构' as const, weight: 1, evidence: '新编队实际副将' }],
+      payload: { ...ended.payload, action: 'started' as const, appointmentId: 'new-seat', armyId: world.armies[1].id } };
+    world.facts = [ended, started]; world.history = [];
+    const before = serializeWorld(world), hash = computeWorldHash(world);
+    const arc = projectPersonStoryArc(world,p);
+    expect(arc).toHaveLength(1); expect(arc[0].title).toContain(`调任${world.armies[1].name}副将`);
+    expect(arc[0].primaryFactId).toBe(started.id);
+    expect(new Set(arc[0].sourceFactIds)).toEqual(new Set([ended.id,started.id]));
+    expect(serializeWorld(world)).toBe(before); expect(computeWorldHash(world)).toBe(hash);
+    for (const alternate of [
+      { ...started, payload: {...started.payload,polityId:'another-polity'} },
+      { ...started, payload: {...started.payload,rank:40} },
+      { ...started, sourceFactIds:['independent-appointment'] },
+      { ...started, turn:25 },
+    ]) { world.facts=[ended,alternate]; expect(projectPersonStoryArc(world,p).some(b=>b.title.includes('去职'))).toBe(true); }
+    world.facts=[{...ended,sourceFactIds:['dismissal']},started];
+    expect(projectPersonStoryArc(world,p).some(b=>b.title.includes('去职'))).toBe(true);
+    world.facts=[started,ended]; expect(projectPersonStoryArc(world,p).some(b=>b.title.includes('去职'))).toBe(true);
+    world.facts=[ended]; expect(projectPersonStoryArc(world,p)[0].title).toContain('去职');
+    world.facts=[ended,started,{...base,id:'death',kind:'character_death',payload:{characterId:p.id,cause:'natural',age:80,health:0,role:p.role,diseaseId:null}}];
+    expect(projectPersonStoryArc(world,p).some(b=>b.title.includes('调任'))).toBe(false);
+    world.facts=[ended,started];
+    world.history=[{id:'destruction',turn:24,year:7,season:'春',kind:'polity_eliminated',category:'政治',importance:5,
+      actorIds:[p.id],polityIds:[p.polityId],regionIds:[],title:'原政权灭亡',summary:'原政权灭亡',causes:[],evidence:[],sourceFactIds:[],situationIds:[],
+      stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'alive',before:true,after:false}]}];
+    expect(projectPersonStoryArc(world,p).some(b=>b.title.includes('调任'))).toBe(false);
+  });
+
   it('joins a normal same-quarter transfer without pretending dismissal, but retains a sourced purge', () => {
     const world = createWorld('任职转换不等于失势');
     const p = world.characters.find(p => world.armies.some(a => a.commanderId === p.id))!;

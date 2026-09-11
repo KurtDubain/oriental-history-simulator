@@ -7,8 +7,8 @@ const PORT = Number(process.env.SELF_EVOLUTION_E2E_PORT ?? 4199);
 const APP_URL = process.env.SELF_EVOLUTION_E2E_URL ?? `http://127.0.0.1:${PORT}`;
 const VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const ARTIFACT_DIR = `output/self-evolution-v${VERSION}`;
-// Continuous throne relocation classification; two replays and unchanged military state verified.
-const EXPECTED_T12_HASH = 'b69d4b8a2832aadf';
+// v1.29.15 production + two source replays agree; no simulation change in release closure.
+const EXPECTED_T12_HASH = '8f0806124ba4c505';
 const SCENARIOS = [
   { slug: 'desktop-1440x900', viewport: { width: 1440, height: 900 }, mobile: false },
   { slug: 'mobile-390x844', viewport: { width: 390, height: 844 }, mobile: true },
@@ -21,6 +21,12 @@ const server = process.env.SELF_EVOLUTION_E2E_URL ? null : await createServer({
 
 function readState(page) {
   return page.evaluate(() => JSON.parse(window.render_game_to_text()));
+}
+
+async function openCases(page) {
+  const toggle=page.getByTestId('observer-leads-mobile-toggle');
+  if(await toggle.isVisible() && await toggle.getAttribute('aria-expanded')!=='true') await toggle.click();
+  await page.locator('[data-situation-workbench-trigger="true"]').click();
 }
 
 async function setEightTimes(page, mobile) {
@@ -61,7 +67,7 @@ async function openAndCloseCurrentStory(page, mobile, artifactPrefix) {
   await page.screenshot({ path: `${ARTIFACT_DIR}/${artifactPrefix}-reading.png`, fullPage: false });
 
   const situationClose = page.locator('.situation-workbench__close');
-  const inspectorClose = page.locator('[data-inspector-close]');
+  const inspectorClose = page.locator('[data-inspector-close]:visible, .observer-inspector__mobile-quicklook footer button:last-child:visible').first();
   await Promise.race([
     situationClose.waitFor({ state: 'visible' }),
     inspectorClose.waitFor({ state: 'visible' }),
@@ -158,6 +164,36 @@ try {
     await page.getByRole('button', { name: '暂停演变' }).click();
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-t12.png`, fullPage: false });
 
+    // Temporary war reading keeps the live map; explicitly asking for its map is navigation.
+    await page.locator('[data-map-zoom-in="true"]').click();
+    await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.mapViewport.zoom >= 1.34);
+    const originalMap = await readState(page);
+    await openCases(page);
+    await page.locator('.situation-workbench__directory-toggle').click();
+    await page.locator('.situation-workbench__directory button[data-situation-id]').filter({hasText:/战事/}).first().click();
+    await page.locator('.situation-workbench__war-map').waitFor();
+    await page.screenshot({path:`${ARTIFACT_DIR}/${scenario.slug}-war-reading.png`});
+    await page.locator('.situation-workbench__close').click();
+    assert.equal((await readState(page)).interface.overlay,originalMap.interface.overlay);
+    assert.deepEqual((await readState(page)).interface.mapViewport,originalMap.interface.mapViewport);
+    await openCases(page);
+    if (!await page.locator('.situation-workbench__war-map').isVisible()) {
+      await page.locator('.situation-workbench__directory-toggle').click();
+      await page.locator('.situation-workbench__directory button[data-situation-id]').filter({hasText:/战事/}).first().click();
+    }
+    await page.locator('.situation-workbench__war-map').click();
+    await page.getByTestId('war-focus-summary').waitFor();
+    assert.equal((await readState(page)).interface.overlay,'war');
+    await page.screenshot({path:`${ARTIFACT_DIR}/${scenario.slug}-explicit-war-map.png`});
+    await page.getByRole('button',{name:'退出战局聚焦'}).click();
+    const chosenMap=await readState(page);
+    await openCases(page);
+    await page.locator('.situation-workbench__close').click();
+    assert.equal((await readState(page)).interface.overlay,'war','明确选择战局后不可用旧叠层覆盖');
+    assert.deepEqual((await readState(page)).interface.mapViewport,chosenMap.interface.mapViewport);
+    assert.equal((await readState(page)).playback.running,false);
+    await page.screenshot({path:`${ARTIFACT_DIR}/${scenario.slug}-explicit-war-returned.png`});
+
     process.stdout.write(`${scenario.slug}: T0→T12 自动停表 0 次，hash ${secondRun.current.deterministicWorldHash}\n`);
     await context.close();
   }
@@ -172,9 +208,13 @@ try {
     await watchedPage.getByRole('button', { name: '推进至下一季' }).click();
     await watchedPage.waitForFunction((expected) => JSON.parse(window.render_game_to_text()).time.turn === expected, turn);
   }
-  const watch = watchedPage.locator('[data-testid="observer-lead"][data-situation-id] [data-testid="observer-lead-watch"]').first();
-  await watch.click();
+  // A real war may be in the directory without occupying this quarter's three headlines.
+  await openCases(watchedPage);
+  await watchedPage.locator('.situation-workbench__directory-toggle').click();
+  await watchedPage.locator('.situation-workbench__directory button[data-situation-id]').filter({hasText:/战事/}).first().click();
+  await watchedPage.locator('.situation-workbench__watch').click();
   await watchedPage.waitForFunction(() => JSON.parse(window.render_game_to_text()).observer.watchedCount === 1);
+  await watchedPage.locator('.situation-workbench__close').click();
   await setEightTimes(watchedPage, false);
   await watchedPage.getByRole('button', { name: '继续演变' }).click();
   let watchedState = await readState(watchedPage);

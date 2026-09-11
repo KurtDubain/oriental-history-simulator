@@ -1,190 +1,158 @@
 import assert from 'node:assert/strict';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { gunzipSync } from 'node:zlib';
+import { createHash } from 'node:crypto';
 import { chromium } from 'playwright';
 import { createServer } from 'vite';
+import { createWorld, advanceWorld, deserializeWorld, serializeWorld, readWorldFacts, readWorldHistory, validateWorld } from '../src/sim';
 
 const PORT = Number(process.env.PERSON_FATE_E2E_PORT ?? 4212);
 const externalUrl = process.env.PERSON_FATE_E2E_URL;
 const appUrl = externalUrl ?? `http://127.0.0.1:${PORT}`;
 const version = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const artifactDir = `output/person-fate-e2e-v${version}`;
-const seed = '乱世一将';
+const fixtureRoot = new URL('./fixtures/person-fate/', import.meta.url);
+const fixtures = JSON.parse(await readFile(new URL('manifest.json', fixtureRoot), 'utf8'));
 const scenarios = [
   { slug: 'desktop-1440x900', viewport: { width: 1440, height: 900 } },
   { slug: 'mobile-390x844', viewport: { width: 390, height: 844 } },
 ];
-
-async function snapshot(page) {
-  return page.evaluate(() => JSON.parse(window.render_game_to_text()));
-}
-
-async function advance(page, turn) {
-  await page.getByRole('button', { name: '推进至下一季', exact: true }).evaluate((button) => button.click());
-  await page.waitForFunction((previous) => JSON.parse(window.render_game_to_text()).time.turn === previous + 1, turn);
-}
-
-async function openPerson(page, name, id = null) {
-  const before = await snapshot(page);
-  const panel = page.locator('.roster-panel[data-roster-scope="people"]');
-  if (before.interface.view === 'people' && !await panel.isVisible().catch(() => false)) {
-    const back = page.locator('[data-inspector-close]');
-    if (await back.count()) await back.first().evaluate((button) => button.click());
-  }
-  if (!await panel.isVisible().catch(() => false)) {
-    await page.locator('[data-observer-view="people"]').evaluate((button) => button.click());
-  }
-  const roster = panel;
-  await roster.waitFor();
+const snapshot = page => page.evaluate(() => JSON.parse(window.render_game_to_text()));
+async function openPerson(page, name, id) {
+  const close = page.locator('[data-inspector-close]');
+  if (await close.isVisible()) await close.click();
+  await page.locator('[data-observer-view="people"]').click();
   await page.getByLabel('检索时人群像').fill(name);
-  const row = roster.locator('[data-roster-id]').filter({ hasText: name }).first();
-  await row.waitFor();
-  const personId = await row.getAttribute('data-roster-id');
-  await row.click();
-  await page.waitForFunction((expected) => {
-    const current = JSON.parse(window.render_game_to_text());
-    return current.interface.selected?.kind === 'person' && current.interface.selected.id === expected;
-  }, personId);
-  return { inspector: page.locator('.observer-inspector[data-kind="person"]'), personId };
+  await page.locator(`[data-roster-id="${id}"]`).click();
+  const inspector = page.locator('.observer-inspector[data-kind="person"]');
+  await inspector.waitFor();
+  assert.equal((await snapshot(page)).interface.selectedDetail.id, id);
+  return inspector;
 }
-
-function namedStory(state, expression, people) {
-  const story = state.interface.quarterPulse.stories.find((item) => expression.test(`${item.title} ${item.summary}`));
-  if (!story) return null;
-  const person = [...people.values()].find((item) => `${story.title} ${story.summary}`.includes(item.name));
-  if (person) return { ...person, story };
-  const name = story.title.match(/^(.+?)(?:负伤|受创|阵亡|战死)/u)?.[1]?.trim();
-  return name ? { id: null, name, story } : null;
+async function evidenceRoundtrip(page, eventId, baseline, path) {
+  await page.locator('.observer-causal-layer').waitFor();
+  assert.equal(await page.locator('.observer-causal-layer').getAttribute('data-event-id'), eventId);
+  await page.screenshot({path});
+  await page.keyboard.press('Escape');
+  await page.locator('.observer-causal-layer').waitFor({state:'hidden'});
+  const after = await snapshot(page);
+  assert.equal(after.deterministicWorldHash, baseline.deterministicWorldHash);
+  assert.equal(after.playback.running, false);
+  assert.deepEqual(after.interface.mapViewport, baseline.interface.mapViewport);
 }
-
-await mkdir(artifactDir, { recursive: true });
-const server = externalUrl ? null : await createServer({
-  root: new URL('..', import.meta.url).pathname,
-  logLevel: 'error',
-  server: { host: '127.0.0.1', port: PORT, strictPort: true },
-});
-if (server) await server.listen();
-
-const browser = await chromium.launch({ headless: true });
-const results = [];
+async function verifyDeparted(page, person, world) {
+  const inspector = await openPerson(page, person.name, person.id);
+  const detail = (await snapshot(page)).interface.selectedDetail;
+  assert.equal(detail.alive, false);
+  const arc = detail.storyArc;
+  assert.ok(arc.length >= 1 && arc.length <= 5);
+  assert.equal(arc.at(-1).phase, 'ending');
+  const facts = new Set(readWorldFacts(world).map(f=>f.id)), events = new Set(readWorldHistory(world).map(e=>e.id));
+  for (const beat of arc) {
+    assert.ok(beat.sourceFactIds.length || beat.sourceEventIds.length);
+    assert.ok(beat.sourceFactIds.every(id=>facts.has(id)) && beat.sourceEventIds.every(id=>events.has(id)));
+  }
+  assert.equal(detail.militaryForce.status, '已解散');
+  return inspector;
+}
+await mkdir(artifactDir, {recursive:true});
+const server = externalUrl ? null : await createServer({logLevel:'error',server:{host:'127.0.0.1',port:PORT,strictPort:true}});
+await server?.listen();
+const browser = await chromium.launch({headless:true}), results=[];
 try {
   for (const scenario of scenarios) {
-    const page = await browser.newPage({ viewport: scenario.viewport, hasTouch: scenario.viewport.width <= 840 });
-    const errors = [];
-    page.on('console', (message) => { if (message.type() === 'error') errors.push(`console: ${message.text()}`); });
-    page.on('pageerror', (error) => errors.push(`page: ${String(error)}`));
-    await page.addInitScript(() => {
-      localStorage.setItem('canghai-map-primer-complete-v1', '1');
-      localStorage.setItem('canghai-observer-interface-settings-v1', JSON.stringify({
-        version: 2,
-        motion: 'reduced', mapAtmosphere: true, interfaceDensity: 'comfortable',
-      }));
-    });
-    await page.goto(appUrl, { waitUntil: 'networkidle' });
-    await page.getByLabel('世界种子').fill(seed);
+    const page = await browser.newPage({viewport:scenario.viewport,hasTouch:scenario.viewport.width<840});
+    const errors=[];
+    page.on('console',m=>{if(m.type()==='error'){errors.push(m.text());console.error(m.text());}});
+    page.on('pageerror',e=>{errors.push(String(e));console.error(String(e));});
+    await page.goto(appUrl,{waitUntil:'networkidle'});
+    await page.getByLabel('世界种子').fill('乱世一将');
     await page.locator('#start-world').click();
-    await page.waitForSelector('.world-map__canvas');
-
-    let current = await snapshot(page);
-    const people = new Map(current.mapObjects.personalForces.map((force) => [force.ownerId, { id: force.ownerId, name: force.name }]));
-    const wounded = new Map();
-    let woundCapture = null;
-    let recoveryCapture = null;
-    let battleDeath = null;
-    while (current.time.turn < 64) {
-      await advance(page, current.time.turn);
-      current = await snapshot(page);
-      for (const force of current.mapObjects.personalForces) people.set(force.ownerId, { id: force.ownerId, name: force.name });
-
-      const wound = namedStory(current, /负伤/u, people);
-      if (wound && ![...wounded.values()].some((record) => record.name === wound.name)) {
-        const opened = await openPerson(page, wound.name, wound.id);
-        const record = { ...wound, id: opened.personId, observedTurn: current.time.turn };
-        wounded.set(opened.personId, record);
-        if (!woundCapture) {
-          await opened.inspector.waitFor();
-          const selected = await snapshot(page);
-          assert.match(selected.interface.selectedDetail.militaryForce?.status ?? '', /休养/u, `${scenario.slug} 负伤者应显示休养处境`);
-          assert.match(selected.interface.selectedDetail.militaryForce?.formation ?? '', /退离/u, `${scenario.slug} 负伤者应退出行营`);
-          await page.screenshot({ path: `${artifactDir}/${scenario.slug}-wounded-resting.png`, fullPage: false });
-          woundCapture = { id: opened.personId, name: wound.name, turn: current.time.turn, story: wound.story };
-        }
-      }
-      for (const record of wounded.values()) {
-        const opened = await openPerson(page, record.name, record.id);
-        const selected = await snapshot(page);
-        if (current.time.turn === record.observedTurn + 1) assert.doesNotMatch(selected.interface.selectedDetail.militaryForce?.formation ?? '', /^(自领|随)/u, `${scenario.slug} 负伤后下一季不得照常参战`);
-        const returned = /^(自领|随)/u.test(selected.interface.selectedDetail.militaryForce?.formation ?? '');
-        if (!recoveryCapture && returned && current.time.turn > record.observedTurn + 1) {
-          assert.doesNotMatch(selected.interface.selectedDetail.militaryForce?.status ?? '', /休养/u, `${scenario.slug} 复出后不应仍标作休养`);
-          await opened.inspector.scrollIntoViewIfNeeded();
-          await page.screenshot({ path: `${artifactDir}/${scenario.slug}-returned-to-service.png`, fullPage: false });
-          recoveryCapture = { id: record.id, name: record.name, turn: current.time.turn, formation: selected.interface.selectedDetail.militaryForce?.formation };
-        }
-      }
-      battleDeath ??= namedStory(current, /阵亡|战死/u, people);
-    }
-
-    if (!recoveryCapture) {
-      await page.locator('[data-map-zoom-in="true"]').evaluate((button) => button.click());
-      await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).interface.mapViewport.lod !== 'overview');
-      current = await snapshot(page);
-      const activeParticipants = current.mapObjects.armies.flatMap((army) => army.participants ?? []);
-      for (const person of activeParticipants.filter((item, index, values) => values.findIndex((other) => other.id === item.id) === index)) {
-        const opened = await openPerson(page, person.name, person.id);
-        const detail = (await snapshot(page)).interface.selectedDetail;
-        const experiencedWound = detail.storyArc?.some((beat) => /负伤|受创/u.test(`${beat.title} ${beat.summary}`));
-        if (!experiencedWound || !/^(自领|随)/u.test(detail.militaryForce?.formation ?? '')) continue;
-        await opened.inspector.scrollIntoViewIfNeeded();
-        await page.screenshot({ path: `${artifactDir}/${scenario.slug}-returned-to-service.png`, fullPage: false });
-        recoveryCapture = { id: person.id, name: person.name, turn: current.time.turn, formation: detail.militaryForce?.formation };
-        break;
+    await page.locator('.world-map__canvas').waitFor();
+    // Natural replay has no death, wound or comeback quota. Every checkpoint must agree.
+    let source=createWorld('乱世一将');
+    for(let turn=1;turn<=64;turn++) {
+      source=advanceWorld(source);
+      await page.getByRole('button',{name:'推进至下一季',exact:true}).click();
+      await page.waitForFunction(t=>JSON.parse(window.render_game_to_text()).time.turn===t,turn);
+      assert.equal((await snapshot(page)).deterministicWorldHash,source.hash);
+      const wounds=source.facts.filter(f=>f.kind==='character_wounded');
+      for(const army of source.armies) for(const id of army.participantIds) {
+        assert.ok(!wounds.some(f=>f.payload.characterId===id && f.payload.recoveryUntilTurn>source.turn), '休养期不可作为在役参战者');
       }
     }
-
-    assert.ok(woundCapture, `${scenario.slug} 六十四季应能观察到一次有来源的负伤`);
-    assert.ok(recoveryCapture, `${scenario.slug} 应能观察到至少一名伤员休养后复出`);
-
-    assert.ok(battleDeath, `${scenario.slug} 应能从当季变化或史册发现一名战死者`);
-    const departed = await openPerson(page, battleDeath.name, battleDeath.id);
-    await departed.inspector.waitFor();
-    let selected = await snapshot(page);
-    assert.equal(selected.interface.selectedDetail.alive, false, `${scenario.slug} 战死者档案应保留死亡状态`);
-    const arc = selected.interface.selectedDetail.storyArc;
-    assert.ok(Array.isArray(arc) && arc.length >= 1 && arc.length <= 5, `${scenario.slug} 故人生平应为一至五段真实经历，不强制补满`);
-    assert.equal(arc.at(-1)?.phase, 'ending', `${scenario.slug} 故人生平最后一段必须是结局`);
-    assert.ok(arc.every((beat) => beat.sourceFactIds.length || beat.sourceEventIds.length), `${scenario.slug} 每段生平必须有真实 Fact 或兼容史事来源`);
-    assert.equal(selected.interface.selectedDetail.militaryForce?.status, '已解散', `${scenario.slug} 故人档案应保留最后军势而非现役军势`);
-    await departed.inspector.scrollIntoViewIfNeeded();
-    await page.screenshot({ path: `${artifactDir}/${scenario.slug}-deceased-story.png`, fullPage: false });
-
-    const living = [...people.values()].find((person) => person.id !== battleDeath.id
-      && current.mapObjects.personalForces.some((force) => force.ownerId === person.id));
-    assert.ok(living);
-    await openPerson(page, living.name, living.id);
-    await openPerson(page, battleDeath.name, battleDeath.id);
-    selected = await snapshot(page);
-    assert.equal(selected.interface.selectedDetail.id, departed.personId, `${scenario.slug} 离开后仍应按姓名重新找到故人`);
-    await writeFile(`${artifactDir}/${scenario.slug}-final-state.json`, JSON.stringify(selected, null, 2));
-
-    const layout = await page.evaluate(() => ({ viewport: innerWidth, document: document.documentElement.scrollWidth }));
-    assert.ok(layout.document <= layout.viewport + 1, `${scenario.slug} 页面不得横向溢出`);
-    assert.deepEqual(errors, [], `${scenario.slug} 不得出现 console/page error`);
-    results.push({ scenario: scenario.slug, woundCapture, recoveryCapture, battleDeath: battleDeath.name,
-      storyBeats: arc.length, finalHash: current.deterministicWorldHash });
+    assert.deepEqual(validateWorld(source),[]);
+    const deaths=readWorldFacts(source).filter(f=>f.kind==='character_death' && f.payload.cause==='battle');
+    for(const death of deaths) {
+      const person=source.characters.find(c=>c.id===death.payload.characterId);
+      await verifyDeparted(page,person,source); // Not all deaths belong in the top-three news.
+    }
+    results.push({scenario:scenario.slug,natural64Hash:source.hash,naturalBattleDeaths:deaths.length});
     await page.close();
+
+    // Frozen complete natural histories guarantee UI coverage even in a quiet natural run.
+    for(const fixture of fixtures) {
+      const buffer=gunzipSync(Buffer.from(await readFile(new URL(`${fixture.key}.json.gz.base64`,fixtureRoot),'utf8'),'base64'));
+      assert.equal(createHash('sha256').update(buffer).digest('hex'),fixture.sha256);
+      const world=deserializeWorld(JSON.stringify(JSON.parse(buffer.toString()).world)), body=serializeWorld(world);
+      assert.equal(world.hash,fixture.hash); assert.deepEqual(validateWorld(world),[]);
+      const fact=readWorldFacts(world).find(f=>f.id===fixture.factId);
+      assert.equal(fact.payload.characterId,fixture.personId);
+      const p=await browser.newPage({viewport:scenario.viewport,hasTouch:scenario.viewport.width<840});
+      p.on('console',m=>{if(m.type()==='error')errors.push(m.text());});p.on('pageerror',e=>errors.push(String(e)));
+      await p.goto(appUrl,{waitUntil:'networkidle'});
+      await p.locator('input[type=file]').setInputFiles({name:'frozen.json',mimeType:'application/json',buffer});
+      await p.locator('.world-map__canvas').waitFor({timeout:60000});
+      await p.locator('.observer-toast').waitFor({state:'hidden'});
+      assert.equal((await snapshot(p)).deterministicWorldHash,fixture.hash);
+      if(fixture.key==='deceased') {
+        assert.equal(fact.kind,'character_death'); assert.equal(fact.payload.cause,'battle');
+        const event=readWorldHistory(world).find(e=>e.id===fixture.eventId);
+        assert.ok(event.sourceFactIds.includes(fact.id));
+        const baseline=await snapshot(p);
+        await p.locator(`[data-testid="quarter-pulse-event"][data-event-id="${fixture.eventId}"]`).click();
+        await evidenceRoundtrip(p,fixture.eventId,baseline,`${artifactDir}/${scenario.slug}-death-card-evidence.png`);
+        const person=world.characters.find(c=>c.id===fixture.personId);
+        const inspector=await verifyDeparted(p,person,world);
+        await p.screenshot({path:`${artifactDir}/${scenario.slug}-deceased-story.png`});
+        const selected=await snapshot(p), ending=selected.interface.selectedDetail.storyArc.at(-1);
+        await inspector.locator('.observer-person-story button').filter({hasText:ending.title}).click();
+        await evidenceRoundtrip(p,ending.primaryEventId??ending.primaryFactId,selected,`${artifactDir}/${scenario.slug}-person-ending-evidence.png`);
+        await openPerson(p,person.name,person.id);
+        assert.equal((await snapshot(p)).interface.selectedDetail.alive,false);
+      } else {
+        assert.equal(fact.kind,'character_wounded');
+        await openPerson(p,fixture.name,fixture.personId);
+        const detail=(await snapshot(p)).interface.selectedDetail;
+        if(fixture.key==='wounded') {
+          assert.match(detail.militaryForce.status,/休养/);assert.match(detail.militaryForce.formation,/退离/);
+          await p.screenshot({path:`${artifactDir}/${scenario.slug}-wounded-resting.png`});
+          await p.locator('[data-inspector-close]').click();
+          await p.getByRole('button',{name:'推进至下一季',exact:true}).click();
+          await p.waitForFunction(t=>JSON.parse(window.render_game_to_text()).time.turn===t,fixture.turn+1);
+          assert.equal((await snapshot(p)).deterministicWorldHash,advanceWorld(world).hash);
+          await openPerson(p,fixture.name,fixture.personId);
+          assert.doesNotMatch((await snapshot(p)).interface.selectedDetail.militaryForce.formation,/^(自领|随)/);
+        } else {
+          assert.match(detail.militaryForce.formation,/^(自领|随)/);assert.doesNotMatch(detail.militaryForce.status,/休养/);
+          assert.ok(fact.payload.recoveryUntilTurn<=world.turn);
+          await p.screenshot({path:`${artifactDir}/${scenario.slug}-returned-to-service.png`});
+        }
+      }
+      assert.equal(serializeWorld(world),body);
+      assert.ok(await p.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1));
+      await writeFile(`${artifactDir}/${scenario.slug}-${fixture.key}-state.json`,JSON.stringify(await snapshot(p),null,2));
+      await p.close();
+    }
+    assert.deepEqual(errors,[]);
   }
-  assert.deepEqual(results[0].woundCapture, results[1].woundCapture, '桌面与移动端必须重放同一负伤事实');
-  assert.deepEqual(results[0].recoveryCapture, results[1].recoveryCapture, '桌面与移动端必须重放同一复出过程');
-  assert.equal(results[0].battleDeath, results[1].battleDeath, '桌面与移动端必须发现同一战死者');
-  assert.equal(results[0].finalHash, results[1].finalHash, '两种视口观察不得改变世界演化');
-  console.log(JSON.stringify({ version, seed, results, failures: [] }, null, 2));
-} catch (error) {
-  for (const [index, page] of browser.contexts().flatMap(context => context.pages()).entries()) {
-    await page.screenshot({ path: `${artifactDir}/failure-${index}.png`, fullPage: true });
-    await writeFile(`${artifactDir}/failure-${index}.txt`, await page.locator('body').innerText());
+  assert.equal(results[0].natural64Hash,results[1].natural64Hash);
+  await writeFile(`${artifactDir}/result.json`,JSON.stringify({version,results,fixtures,errors:[]},null,2));
+  console.log(JSON.stringify({version,results,paths:['wound-rest-next-quarter','return-to-service','death-card','deceased-roster','ending-evidence-return']},null,2));
+} catch(error) {
+  for(const [i,page] of browser.contexts().flatMap(c=>c.pages()).entries()) {
+    await page.screenshot({path:`${artifactDir}/failure-${i}.png`,fullPage:true});
+    await writeFile(`${artifactDir}/failure-${i}.txt`,await page.locator('body').innerText());
   }
   throw error;
-} finally {
-  await browser.close();
-  if (server) await server.close();
-}
+} finally {await browser.close();await server?.close();}

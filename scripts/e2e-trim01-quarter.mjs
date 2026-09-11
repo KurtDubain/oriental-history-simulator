@@ -183,6 +183,8 @@ async function assertHistoryLayer(page, scenario, expected, baseline, detail) {
 async function assertTouchTarget(locator, scenario, detail) {
   if (scenario.viewport.width > ROSTER_DOSSIER_MAX_WIDTH) return;
   await locator.scrollIntoViewIfNeeded();
+  // Read hit geometry after an explicit, completed scroll (not during CSS smooth scrolling).
+  await locator.evaluate(element => element.scrollIntoView({block:'center',inline:'nearest',behavior:'instant'}));
   await locator.evaluate(async (element) => {
     const layer = element.closest('[data-history-layer]') ?? element;
     await Promise.all(layer.getAnimations({ subtree: true }).map((animation) => animation.finished.catch(() => undefined)));
@@ -201,9 +203,11 @@ async function assertTouchTarget(locator, scenario, detail) {
       ok: rect.left >= 0 && rect.top >= 0 && rect.right <= innerWidth && rect.bottom <= innerHeight
         && Boolean(hit && (hit === element || element.contains(hit))),
       hit: hit?.closest('button')?.getAttribute('aria-label') ?? hit?.outerHTML.slice(0, 180) ?? null,
+      bounds: { left: rect.left, top: rect.top, right: rect.right, bottom: rect.bottom },
     };
   });
-  assert.equal(hitTest.ok, true, `${scenario.slug} ${detail}必须位于视口内且中心点可命中；命中 ${hitTest.hit}`);
+  if (!hitTest.ok) await locator.page().screenshot({path: `${ARTIFACT_DIR}/${scenario.slug}-hit-failure.png`});
+  assert.equal(hitTest.ok, true, `${scenario.slug} ${detail}必须位于视口内且中心点可命中；${JSON.stringify(hitTest)}`);
 }
 
 async function assertMapTouchControls(page, scenario) {
@@ -575,21 +579,10 @@ async function assertHighlightPulse(page, scenario, reportTurn, projected) {
     );
     return;
   }
-  const startedAt = Date.now();
-  await page.waitForFunction((turn) => {
-    const element = document.querySelector('.world-map');
-    return element?.getAttribute('data-quarter-highlight-epoch') === String(turn)
-      && element.getAttribute('data-quarter-highlight-active') === 'true';
-  }, reportTurn, { timeout: 1_500 });
-  const highlightedCount = Number(await map.getAttribute('data-highlighted-region-count'));
-  assert.ok(highlightedCount > 0, `${scenario.slug} 推进后必须短暂高亮至少一个相关州域`);
-
-  await page.waitForFunction((turn) => {
-    const element = document.querySelector('.world-map');
-    return element?.getAttribute('data-quarter-highlight-epoch') === String(turn)
-      && element.getAttribute('data-quarter-highlight-active') !== 'true';
-  }, reportTurn, { timeout: 2_500 });
-  const elapsed = Date.now() - startedAt;
+  await page.waitForFunction(turn => window.__quarterHighlights[turn]?.end != null,reportTurn,{timeout:2500});
+  const sample=await page.evaluate(turn=>window.__quarterHighlights[turn],reportTurn);
+  assert.ok(sample.count>0, `${scenario.slug} 推进后必须短暂高亮至少一个相关州域`);
+  const elapsed=sample.end-sample.start;
   assert.ok(
     elapsed >= 600 && elapsed <= 1_800,
     `${scenario.slug} 季度高亮应约一秒后消退，实际 ${elapsed}ms`,
@@ -849,6 +842,19 @@ async function createWorld(page, scenario) {
   await page.getByLabel('世界种子').fill('春战副将');
   await page.locator('#start-world').click();
   await page.waitForSelector('.world-map__canvas');
+  // Observe actual visible DOM lifetime, not the leftover time after projection assertions.
+  await page.evaluate(() => {
+    window.__quarterHighlights={};
+    const map=document.querySelector('.world-map');
+    new MutationObserver(()=>{
+      const epoch=map.getAttribute('data-quarter-highlight-epoch');
+      if(map.getAttribute('data-quarter-highlight-active')==='true') {
+        window.__quarterHighlights[epoch]??={start:performance.now(),count:Number(map.getAttribute('data-highlighted-region-count'))};
+      } else if(window.__quarterHighlights[epoch] && !window.__quarterHighlights[epoch].end) {
+        window.__quarterHighlights[epoch].end=performance.now();
+      }
+    }).observe(map,{attributes:true,attributeFilter:['data-quarter-highlight-epoch','data-quarter-highlight-active']});
+  });
   const initial = await snapshot(page);
   assert.equal(initial.time.turn, 0, `${scenario.slug} 应从未推进的新世界开始`);
   assert.equal(await page.getByTestId('quarter-pulse').getAttribute('data-story-count'), null);

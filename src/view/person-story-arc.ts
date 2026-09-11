@@ -357,11 +357,21 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
   for (const ended of appointments.filter(f => f.kind === 'appointment_ended' && f.payload.officeKind !== '君主')) {
     if (ended.sourceFactIds.length || injuryTurns.has(ended.turn)) continue;
     const started = appointments.find(f => f.kind === 'appointment_started' && f.turn === ended.turn
-      && f.payload.polityId === ended.payload.polityId && f.payload.officeKind !== ended.payload.officeKind);
+      && f.payload.polityId === ended.payload.polityId && !f.sourceFactIds.length
+      && (f.payload.officeKind !== ended.payload.officeKind || f.payload.rank === ended.payload.rank
+        && evidence.order.get(ended.id)! < evidence.order.get(f.id)!
+        && f.payload.armyId && ended.payload.armyId && f.payload.armyId !== ended.payload.armyId
+        && ended.causes.some(c => c.label === '职位失配') && f.causes.some(c => c.label === '任职依据')
+        && !facts.some(x => x.turn === ended.turn && x.kind === 'court_action_resolved'
+          && (x.payload.targetId === person.id || x.payload.polityId === ended.payload.polityId && ['coup', 'usurpation'].includes(x.payload.action)))
+        && !events.some(e => e.turn === ended.turn && e.kind === 'polity_eliminated'
+          && e.stateDeltas.some(d => d.entityId === ended.payload.polityId && d.field === 'alive' && !d.after))));
     const next = started && candidates.find(c => c.id === started.id), old = candidates.find(c => c.id === ended.id);
     if (!next || !old || started?.kind !== 'appointment_started') continue;
-    next.title = `${person.name}由${ended.payload.officeKind}转任${started.payload.officeKind}`;
-    next.summary = `${next.summary} 同季卸下${ended.payload.officeKind}。`;
+    const transfer = started.payload.officeKind === ended.payload.officeKind;
+    next.title = transfer ? `${person.name}调任${world.armies.find(a => a.id === started.payload.armyId)?.name ?? '新编队'}${started.payload.officeKind.replace('军团', '')}`
+      : `${person.name}由${ended.payload.officeKind}转任${started.payload.officeKind}`;
+    next.summary = `${next.summary} ${transfer ? `同季离开${world.armies.find(a => a.id === ended.payload.armyId)?.name ?? '原编队'}，职级未变` : `同季卸下${ended.payload.officeKind}`}。`;
     mergeSources(next, [old]);
     candidates.splice(candidates.indexOf(old), 1);
   }
