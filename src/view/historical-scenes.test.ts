@@ -5,9 +5,11 @@ import {
   computeWorldHash,
   createWorld,
   projectCharacterEmbodiedActions,
+  serializeWorld,
 } from '../sim';
 import { compactWorldArchive } from '../sim/archive';
-import type { SimulationFact } from '../sim/types';
+import type { HistoryEvent, SimulationFact } from '../sim/types';
+import { projectQuarterPulse } from './quarter-pulse-stories';
 import type { SituationState } from '../sim/situations';
 import {
   projectFactNarrative,
@@ -16,6 +18,55 @@ import {
 } from './historical-scenes';
 
 describe('NAR01/NAR02 concrete historical scenes', () => {
+  it('opens death itself before inheritance consequences, independent of record IDs and listing order', () => {
+    const world = advanceWorld(createWorld('主证据夹具')), person = world.characters[0], report = world.lastTurn!;
+    const death: Extract<SimulationFact, { kind: 'character_death' }> = {
+      id: 'death-subject', kind: 'character_death', turn: report.turn, year: report.year, season: report.season,
+      category: '政治', importance: 5, actorIds: [person.id], polityIds: [person.polityId], regionIds: [person.locationRegionId],
+      sourceFactIds: [], causes: [], stateDeltas: [{ entityType: 'character', entityId: person.id, field: 'alive', before: true, after: false }],
+      payload: { characterId: person.id, age: person.age, role: person.role, health: 20, diseaseId: world.pathogens[0].id, cause: 'disease' },
+    };
+    const event = (id: string, kind: string, sources = [death.id]): HistoryEvent => ({ ...death, id, kind,
+      title: id, summary: id, sourceFactIds: sources, situationIds: [], evidence: [] });
+    const own = event('middle-death', 'character_death'), family = event('z-family', 'family_inheritance'),
+      throne = event('a-throne', 'succession'), unrelated = event('same-place-death', 'character_death', ['unrelated-fact']);
+    world.facts = [death]; world.history = [family, unrelated, own, throne];
+    world.lastTurn = { ...report, factIds: [death.id], eventIds: world.history.map(e => e.id) };
+    for (const history of [world.history, [...world.history].reverse()]) {
+      const viewWorld = { ...world, history }, before = serializeWorld(viewWorld);
+      const scene = projectHistoricalScenes(viewWorld, [death], 3, 'active')[0];
+      expect(scene.historyEventIds[0]).toBe(own.id);
+      expect(new Set(scene.historyEventIds)).toEqual(new Set([own.id, family.id, throne.id]));
+      expect(projectQuarterPulse(viewWorld).stories.find(s => s.sourceFactIds.includes(death.id))?.eventId).toBe(own.id);
+      expect(serializeWorld(viewWorld)).toBe(before);
+    }
+    world.history = [];
+    expect(projectHistoricalScenes(world, [death], 3, 'active')[0].historyEventIds).toEqual([]);
+    death.payload.cause = 'battle'; death.payload.diseaseId = null;
+    const battleDeath = event('fallen-person', 'character_battle_death');
+    world.history = [family, battleDeath];
+    expect(projectHistoricalScenes(world, [death], 3, 'active')[0].historyEventIds).toEqual([battleDeath.id, family.id]);
+  });
+
+  it('distinguishes a battle subject from its casualty record and an appointment from its aftermath', () => {
+    const world = advanceWorldBy(createWorld('主证据战役夹具'), 8);
+    const battle = world.facts.find(f => f.kind === 'battle')!;
+    const event = (id: string, kind: string, fact: SimulationFact): HistoryEvent => ({ ...fact, id, kind,
+      title: id, summary: id, sourceFactIds: [fact.id], situationIds: [], evidence: [] });
+    const battleEvent = event('battle-subject', 'battle', battle), casualty = event('later-casualty', 'character_battle_death', battle);
+    world.history = [casualty, battleEvent];
+    expect(projectHistoricalScenes(world, [battle], 1, 'active')[0].historyEventIds).toEqual([battleEvent.id, casualty.id]);
+    const office = world.offices[0];
+    for (const kind of ['appointment_started', 'appointment_ended'] as const) {
+      const appointment: SimulationFact = { ...battle, id: kind, kind, sourceFactIds: [], payload: {
+        appointmentId: office.id, action: kind === 'appointment_started' ? 'started' : 'ended', officeKind: office.kind,
+        holderId: office.holderId, polityId: office.polityId, regionId: office.regionId, armyId: office.armyId, fleetId: null, rank: office.rank } };
+      const own = event('seat-change', 'appointment', appointment), aftermath = event('later-support', 'faction_relation_changed', appointment);
+      world.facts = [appointment]; world.history = [aftermath, own];
+      expect(projectHistoricalScenes(world, [appointment], 1, 'active')[0].historyEventIds).toEqual([own.id, aftermath.id]);
+    }
+  });
+
   it('joins support, request, court response and direct consequences into one traceable scene', () => {
     // Projection contract: a recorded request and response, not a quota for a seed's life story.
     const world = createWorld('军令来源链夹具');

@@ -119,12 +119,18 @@ function factHistoryIds(
   world: WorldState,
   factIds: ReadonlySet<string>,
   readScope: HistoricalSceneReadScope,
+  subject?: SimulationFact,
 ): string[] {
   const history = readScope === 'all' ? readWorldHistory(world) : world.history;
-  return history
-    .filter((event) => isDefaultVisibleHistoryEvent(event) && event.sourceFactIds.some((id) => factIds.has(id)))
-    .sort((left, right) => right.turn - left.turn || stableCompare(right.id, left.id))
-    .map((event) => event.id);
+  const linked = history.filter(event => isDefaultVisibleHistoryEvent(event) && event.sourceFactIds.some(id => factIds.has(id)));
+  const kinds: readonly (string | undefined)[] = subject?.kind === 'character_death' ? ['character_death', 'character_battle_death']
+    : subject?.kind === 'character_wounded' ? ['notable_person_wounded', 'observer_protection_triggered']
+    : subject?.kind === 'war_started' ? ['war_declared'] : subject?.kind === 'war_ended' ? ['peace']
+    : subject?.kind === 'appointment_started' || subject?.kind === 'appointment_ended' ? ['appointment'] : [subject?.kind];
+  // The subject's own record leads; later inheritance/casualty consequences remain accessible.
+  const primary = subject && linked.find(event => event.turn === subject.turn
+    && event.sourceFactIds.includes(subject.id) && kinds.includes(event.kind));
+  return [...(primary ? [primary.id] : []), ...linked.filter(event => event !== primary).map(event => event.id)];
 }
 
 function deltaCopy(world: WorldState, delta: StateDelta): string | null {
@@ -440,6 +446,7 @@ function sceneFromFacts(
   narrative: FactNarrative,
   result = '',
   readScope: HistoricalSceneReadScope = 'all',
+  subject: SimulationFact = facts[0]!,
 ): HistoricalScene {
   const ordered = [...facts].sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
   const latest = ordered.at(-1) as SimulationFact;
@@ -455,7 +462,7 @@ function sceneFromFacts(
     result: cleanResult,
     shortText: `${narrative.title}：${summary}${cleanResult ? ` ${cleanResult}` : ''}`,
     sourceFactIds: [...factIds].sort(stableCompare),
-    historyEventIds: factHistoryIds(world, factIds, readScope),
+    historyEventIds: factHistoryIds(world, factIds, readScope, subject),
     actorIds: unique(ordered.flatMap((fact) => fact.actorIds)),
     polityIds: unique(ordered.flatMap((fact) => fact.polityIds)),
     regionIds: unique(ordered.flatMap((fact) => fact.regionIds)),
@@ -493,7 +500,7 @@ function agencyScene(
     return sceneFromFacts(world, `scene:agency:${actorId}:${anchor.turn}:${anchor.id}`, facts, {
       title: narrative.title,
       summary: `${supportClause}；${actor}眼下仍未正式递交军令请求。`,
-    }, '', readScope);
+    }, '', readScope, anchor);
   }
   const resolutionCopy = resolution ? projectFactNarrative(world, resolution) : null;
   const requestClause = `${actor}随后向${polityName(world, submitted?.payload.polityId ?? resolution?.payload.polityId ?? anchor.polityIds[0] ?? '')}朝廷请领${army}军令`;
@@ -503,7 +510,7 @@ function agencyScene(
   return sceneFromFacts(world, `scene:agency:${actorId}:${submitted?.payload.goalId ?? resolution?.payload.goalId ?? anchor.id}`, facts, {
     title: resolutionCopy?.title ?? `${actor}正式请掌${army}`,
     summary,
-  }, result, readScope);
+  }, result, readScope, anchor);
 }
 
 function warScene(
@@ -536,9 +543,9 @@ function warScene(
     const result = transfers.filter(f => !used.has(f.id)).map(f => projectFactNarrative(world, f).summary).join(' ');
     return sceneFromFacts(world, `scene:war:${key}`, facts, {
       title: `${regionName(world, battles[0]!.payload.targetRegionId)}${battles.length > 1 ? `接连${battles.length}战${transfers.length ? `，此后归${polityName(world, transfers.at(-1)!.payload.nextControllerId)}` : ''}` : '之战'}`, summary,
-    }, result, readScope);
+    }, result, readScope, battles[0]);
   }
-  return sceneFromFacts(world, `scene:war:${key}`, facts, base, '', readScope);
+  return sceneFromFacts(world, `scene:war:${key}`, facts, base, '', readScope, anchor);
 }
 
 function warKey(fact: SimulationFact): string | null {

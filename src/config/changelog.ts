@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.14',
+  version: '1.29.15',
   date: '2026-09-11',
-  title: '转折入眼',
+  title: '证据归本',
   items: [
-    '本季重大变化不再被旧线索遮住；起兵建国与领土易手分明，集结人数与兵力分开表达。',
+    '史事卡片先打开所述事件，继承与伤亡等关联后果仍可追查。',
   ],
 };
 
