@@ -877,9 +877,6 @@
     height: calc(100dvh - 24px);
   }
 
-  .situation-workbench__body {
-    grid-template-columns: 190px minmax(0, 1fr);
-  }
 }
 
 @media (min-width: 761px) and (max-width: 840px) {

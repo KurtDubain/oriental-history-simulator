@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.16',
+  version: '1.29.17',
   date: '2026-09-11',
-  title: '阅毕归图',
+  title: '展卷如常',
   items: [
-    '阅读后保留原地图，平板触控更稳妥；同职换营合为一次调任。',
+    '平板史卷展开完整正文；战争关注验证不再依赖首页固定排序。',
   ],
 };
 

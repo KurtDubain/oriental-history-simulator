@@ -635,27 +635,30 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   await page.waitForSelector('.world-map__canvas');
 
   const turn4 = await advanceTo(page, SITUATION_WATCH_TURN);
-  const lead = turn4.observer.focusLeads.find((item) => item.situationType === SITUATION_WATCH_TYPE);
-  assert.ok(lead?.situationId, '冻结种子 T4 的天下矛盾必须由真实 Situation 承载');
-  const watchedSituationId = lead.situationId;
+  const war = turn4.observer.situations.open.find((item) => item.type === SITUATION_WATCH_TYPE);
+  assert.ok(war, '关注交互必须先有真实的开放战争，不要求它占据首页推荐');
+  const watchedSituationId = war.id;
   assert.match(watchedSituationId, /^situation_\d+$/, '冻结种子应使用稳定的局势身份，不依赖其他检测器的全局排号');
   const turn4Situation = situationFromSnapshot(turn4, watchedSituationId);
   assert.equal(turn4Situation?.status, 'open');
   assert.equal(turn4Situation?.type, 'war_progress', '关注项必须是同一条真实战争进程');
 
-  const leadRow = page.locator(
-    `[data-testid="observer-lead"][data-situation-id="${watchedSituationId}"]`,
-  );
-  await leadRow.waitFor();
-  const watchButton = leadRow.locator('[data-testid="observer-lead-watch"]');
+  async function openWatchedWar() {
+    await page.locator('[data-situation-workbench-trigger="true"]').click();
+    await page.locator('.situation-workbench__directory-toggle').click();
+    await page.locator(`.situation-workbench__directory [data-situation-id="${watchedSituationId}"]`).click();
+    await waitForSnapshot(page, (current, id) => current.observer.selectedSituationId === id, watchedSituationId);
+  }
+  await openWatchedWar();
+  const watchButton = page.locator('.situation-workbench__watch');
   await watchButton.waitFor();
-  assert.equal(await watchButton.getAttribute('data-watch-kind'), 'situation');
-  assert.equal(await watchButton.getAttribute('data-watch-key'), `situation:${watchedSituationId}`);
+  assert.equal(await page.locator('.situation-workbench-layer').getAttribute('data-situation-id'), watchedSituationId);
   const hashBeforeWatch = turn4.deterministicWorldHash;
   await watchButton.click();
   const watched = await waitForSnapshot(page, (current) => current.observer.watchedCount === 1);
   assert.equal(watched.deterministicWorldHash, hashBeforeWatch, '关注 Situation 只能改变观察者设置');
   assert.equal(await watchButton.getAttribute('aria-pressed'), 'true');
+  await page.locator('.situation-workbench__close').click();
 
   await page.waitForFunction(({ seed, situationId, contentVersion }) => {
     const raw = localStorage.getItem(`canghai-observer-desk-v1:${encodeURIComponent(contentVersion)}:${encodeURIComponent(seed)}`);
@@ -670,7 +673,7 @@ async function exerciseSituationWatchAndPause(browserInstance) {
   assert.deepEqual(
     stored.watchlist.map((item) => ({ kind: item.kind, id: item.id })),
     [{ kind: 'situation', id: watchedSituationId }],
-    '当世三问的关注项必须存 Situation ID，不得存代理人物或政权',
+    '战争阅读的关注项必须存 Situation ID，不得存代理人物或政权',
   );
 
   const deskTrigger = page.locator('button[data-observer-desk-trigger="true"]');
@@ -731,11 +734,11 @@ async function exerciseSituationWatchAndPause(browserInstance) {
     await restoredInspectorClose.click();
     await page.waitForSelector('.observer-inspector', { state: 'detached' });
   }
-  const restoredWatchButton = page.locator(
-    `[data-testid="observer-lead"][data-situation-id="${watchedSituationId}"] [data-testid="observer-lead-watch"]`,
-  );
+  await openWatchedWar();
+  const restoredWatchButton = page.locator('.situation-workbench__watch');
   await restoredWatchButton.waitFor();
   assert.equal(await restoredWatchButton.getAttribute('aria-pressed'), 'true');
+  await page.locator('.situation-workbench__close').click();
 
   await page.getByRole('button', { name: '8 倍速推演' }).click();
   await page.getByRole('button', { name: /^(开始|继续)演变$/ }).click();
