@@ -1522,10 +1522,25 @@ export function processV02Politics(world: WorldState, context: V02TurnContext, e
       ))
       .map((character) => {
         const brokerState = currentPowerBrokers.get(character.id) as CurrentPowerBrokerState;
+        let faction = world.factions.find((item) => item.id === brokerState.factionId);
+        // Follow only reciprocal mergers with the same leader and origin Fact.
+        // These existing lineage links survive cold archival; a split is not continuity.
+        const seen = new Set<string>();
+        while (faction && !faction.active && faction.endedReason === 'merged' && !seen.has(faction.id)) {
+          seen.add(faction.id);
+          const prior = faction;
+          const successor = world.factions.find((item) => prior.successorFactionIds.includes(item.id)
+            && item.predecessorFactionIds.includes(prior.id) && item.polityId === brokerState.polityId
+            && prior.leaderId === character.id && item.leaderId === character.id
+            && Boolean(prior.endedFactId) && item.originFactId === prior.endedFactId);
+          if (!successor) break;
+          faction = successor;
+        }
+        if (faction) brokerState.factionId = faction.id;
         return {
           character,
           brokerState,
-          faction: world.factions.find((faction) => faction.id === brokerState.factionId),
+          faction,
         };
       })
       .filter(({ character, faction }) => (

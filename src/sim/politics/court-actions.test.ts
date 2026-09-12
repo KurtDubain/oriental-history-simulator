@@ -26,6 +26,7 @@ import {
 import type { CourtActionKind } from '../facts';
 import { changeFactionRelation } from './faction-lifecycle';
 import { detectCourtStruggleCandidates } from '../situations/court-struggle-detector';
+import { readWorldFacts } from '../archive';
 
 const COURT_MARKERS = new Set(['成为权臣', '权臣失势', '遭到清洗', '发动政变']);
 
@@ -528,6 +529,59 @@ describe('POL06 court actions use the concrete political power account', () => {
     expect(candidate?.resolution).toEqual({ outcomeKey: 'power_broker_fell', resultFactIds: [fact.id] });
     expect(after.characters.find((item) => item.id === leader.id)?.biography.some((item) => item.kind === '权臣失势')).toBe(true);
     expect(validateWorld(after).filter((violation) => violation.code.startsWith('fact.court-'))).toEqual([]);
+  });
+
+  it.each(['continued', 'new-leader', 'lost-roots', 'unrelated-origin'] as const)('checks actual power after a merger: %s', mode => {
+    const prepared = prepareCourtWorld('POL-合并载体夹具', 'power_broker_formed', 0);
+    let world = advanceWorld(prepared.world);
+    const old = world.factions.find(f => f.id === prepared.factionId)!;
+    const leader = world.characters.find(c => c.id === prepared.leaderId)!;
+    const before = structuredClone(old);
+    const next = structuredClone(old);
+    next.id = `fac_${String(++world.counters.faction).padStart(4, '0')}`;
+    next.origin = 'merged'; next.predecessorFactionIds = [old.id]; next.successorFactionIds = [];
+    next.formedTurn = world.turn - 1; next.lastLifecycleTurn = world.turn - 1;
+    if (mode === 'new-leader') next.leaderId = next.memberIds.find(id => id !== leader.id)!;
+    old.active = false; old.endedTurn = world.turn - 1; old.endedReason = 'merged'; old.successorFactionIds = [next.id];
+    world.factions.push(next);
+    for (const c of world.characters.filter(c => old.memberIds.includes(c.id))) c.factionId = next.id;
+    const snapshot = (f: FactionState) => ({ factionId:f.id, name:f.name, leaderId:f.leaderId,
+      coreMemberIds:f.coreMemberIds, memberCount:f.memberIds.length, agenda:f.agenda, active:f.active });
+    const merge = emitSimulationFact(world, priorFactContext(world), {kind:'faction_lifecycle',category:'政治',importance:3,
+      actorIds:[leader.id],polityIds:[old.polityId],regionIds:[],causes:[{label:'合并',role:'结果',weight:1,evidence:'原成员共同组成新派'}],stateDeltas:[],sourceFactIds:[],
+      payload:{transition:'merged',reasonCode:'allied_union',polityId:old.polityId,affectedFactionIds:[old.id,next.id],
+        createdFactionIds:[next.id],endedFactionIds:[old.id],previousLeaderId:null,nextLeaderId:next.leaderId,
+        before:[snapshot(before)],after:[snapshot(old),snapshot(next)]}});
+    old.endedFactId = merge.id; next.originFactId = mode === 'unrelated-origin' ? null : merge.id;
+    next.lifecycle = [{turn:world.turn-1,transition:'merged',reasonCode:'allied_union',factId:merge.id,relatedFactionIds:[old.id]}];
+    world.lastTurn?.factIds.push(merge.id);
+    if (mode === 'lost-roots') {
+      for (const c of world.characters.filter(c => next.memberIds.includes(c.id))) {
+        c.influence=0;c.renown=0;c.governedRegionId=null;c.commandingArmyId=null;
+      }
+      for(const family of world.families){family.prestige=0;family.politicalInfluence=0;family.wealth=0;}
+      for(const office of world.offices.filter(o=>next.memberIds.includes(o.holderId))){office.active=false;office.endedTurn=world.turn;}
+      next.cohesion=0;
+    }
+    const factsBefore = new Set(world.facts.map(f=>f.id));
+    world.hash=computeWorldHash(world);world=advanceWorld(world);
+    const actions=world.facts.filter(f=>!factsBefore.has(f.id)&&f.kind==='court_action_resolved'
+      && f.payload.action==='power_broker_fell'&&f.payload.targetId===leader.id);
+    if(mode!=='continued'){expect(actions).toHaveLength(1);return;}
+    expect(actions).toEqual([]);
+    expect(world.characters.find(c=>c.id===leader.id)!.biography.some(b=>b.kind==='权臣失势')).toBe(false);
+    const changes=world.facts.filter(f=>!factsBefore.has(f.id));
+    expect(detectCourtStruggleCandidates(world,changes).some(c=>c.resolution?.outcomeKey==='power_broker_fell')).toBe(false);
+    expect(world.relationships.filter(r=>r.sourceId===leader.id).flatMap(r=>r.memories)
+      .some(m=>m.kind==='竞争'&&m.summary.includes('退出权力中枢'))).toBe(false);
+    const roundtrip=deserializeWorld(serializeWorld(world));
+    expect(serializeWorld(advanceWorld(roundtrip))).toBe(serializeWorld(advanceWorld(world)));
+    // Merger lineage stays authoritative when its Fact moves into a cold block.
+    world=advanceWorldBy(world,100);
+    expect(world.archiveSystem.blocks.length).toBeGreaterThan(0);
+    const after=advanceWorld(deserializeWorld(serializeWorld(world)));
+    expect(readWorldFacts(after).filter(f=>f.kind==='court_action_resolved'&&f.payload.action==='power_broker_formed'
+      &&f.payload.initiatorId===leader.id)).toHaveLength(1);
   });
 
   it('does not carry a power-broker tenure into another polity', () => {

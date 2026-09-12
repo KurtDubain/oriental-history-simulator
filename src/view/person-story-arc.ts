@@ -88,12 +88,18 @@ function battleSide(fact: BattleFact, characterId: string) {
 
 function rootBattleId(fact: SimulationFact, byId: ReadonlyMap<string, SimulationFact>, seen = new Set<string>()): string | null {
   if (fact.kind === 'battle') return fact.id;
-  if ((fact.kind === 'character_wounded' || fact.kind === 'character_death') && fact.payload.battleFactId) return fact.payload.battleFactId;
+  // Only direct same-quarter battle settlement belongs to a battle episode.
+  // Agency/court/Situation citations are historical reasons, not settlement.
+  if (!['character_wounded', 'character_death', 'appointment_ended', 'territory_control_changed'].includes(fact.kind)) return null;
+  if ((fact.kind === 'character_wounded' || fact.kind === 'character_death') && fact.payload.battleFactId) {
+    const battle = byId.get(fact.payload.battleFactId);
+    return battle?.kind === 'battle' && battle.turn === fact.turn ? battle.id : null;
+  }
   if (seen.has(fact.id)) return null;
   seen.add(fact.id);
   for (const sourceId of fact.sourceFactIds) {
     const source = byId.get(sourceId);
-    if (!source) continue;
+    if (!source || source.turn !== fact.turn) continue;
     const root = rootBattleId(source, byId, seen);
     if (root) return root;
   }
@@ -428,12 +434,12 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
   const pool = candidates.filter((item) => item !== terminal).sort((left, right) => left.priority - right.priority
     || right.importance - left.importance || right.turn - left.turn);
   const chosen: Candidate[] = [];
-  const latest = [...pool].sort((a,b) => b.turn-a.turn)[0];
+  const latest = pool.filter(c => c.priority <= 2).sort((a,b) => b.turn-a.turn)[0];
   const beginning = [...pool].sort((a,b) => (a.startTurn ?? a.turn)-(b.startTurn ?? b.turn))[0];
   const gains = (c: Candidate) => c.phase === 'battle' ? storyTerritories(c.sourceFactIds, byId).size : 0;
   const peak = [...pool].sort((a,b) => gains(b)-gains(a) || a.priority-b.priority || b.importance-a.importance)[0];
   const setback = pool.find(c => c.phase === 'setback' && c.priority <= 2);
-  for (const item of [pool[0], peak, setback, latest, ...pool.filter(c => c.priority < 0), beginning, ...pool]) {
+  for (const item of [pool[0], peak, ...pool.filter(c => c.phase === 'command' && c.priority <= 1), setback, latest, ...pool.filter(c => c.priority < 0), beginning, ...pool]) {
     if (!item) continue;
     if (chosen.length >= (terminal ? 4 : 5)) break;
     if (chosen.some(entry => entry.title === item.title || entry.sourceFactIds.some(id => item.sourceFactIds.includes(id)))) continue;

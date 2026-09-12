@@ -278,7 +278,9 @@ function warForArmy(world: WorldState, army: ArmyState): WarState | null {
 function retreatTarget(world: WorldState, army: ArmyState): string {
   const polity = world.polities.find((candidate) => candidate.id === army.polityId);
   const allowed = new Set([army.polityId]);
-  return world.regions
+  const enemies = world.wars.filter(w => w.active && [w.attackerId,w.defenderId].includes(army.polityId))
+    .map(w => enemyIdFor(w,army.polityId));
+  const candidates = world.regions
     .filter((region) => region.controllerId === army.polityId)
     .map((region) => ({
       region,
@@ -288,7 +290,17 @@ function retreatTarget(world: WorldState, army: ArmyState): string {
     }))
     .filter((candidate) => Number.isFinite(candidate.distance))
     .sort((left, right) => right.score - left.score || left.distance - right.distance
-      || stableCompare(left.region.id, right.region.id))[0]?.region.id ?? army.regionId;
+      || stableCompare(left.region.id, right.region.id));
+  const safe = candidates.filter(c => c.region.food >= army.soldiers && !world.armies.some(other =>
+    enemies.includes(other.polityId) && !other.embarkedOperationId && other.soldiers > 0
+    && (other.regionId === c.region.id || c.region.neighbors.includes(other.regionId))));
+  const best = safe[0] ?? candidates[0];
+  const current = (army.order.kind === 'retreat' || army.order.kind === 'hold' && army.order.reasonCode === 'low_readiness') && army.order.status === 'active'
+    ? safe.find(c => c.region.id === army.order.targetRegionId) : undefined;
+  // Don't lose a marching quarter over a small food-score fluctuation. A longer
+  // detour must also justify its extra steps; lost/blocked/threatened posts never stick.
+  if (current && best && best.score - current.score <= 12 + Math.max(0, best.distance-current.distance) * 2) return current.region.id;
+  return best?.region.id ?? army.regionId;
 }
 
 function closestEnemyArmy(world: WorldState, army: ArmyState, war: WarState) {

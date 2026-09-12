@@ -19,7 +19,7 @@ import {
 } from '../archive';
 import { markLawfulCommandTransfer, recordArmyMovement, syncArmyPersonnelLocations } from './authority';
 import { applyFormationLosses, distributeFormationGain } from './personal-forces';
-import { armyOrderIsExecutable, issueAmphibiousArmyOrder, planArmyOrders } from './orders';
+import { armyOrderIsExecutable, armyOrderPath, issueAmphibiousArmyOrder, planArmyOrders } from './orders';
 
 function factContext(world: WorldState): FactTurnBuffer {
   return {
@@ -46,6 +46,38 @@ function defensiveCoverageFixture() {
 }
 
 describe('defensive coverage from current information',()=>{
+  it('keeps a reachable retreat destination across small food changes, but replans a lost, blocked, hungry or threatened post',()=>{
+    for(const mode of ['stable','lost','blocked','hungry','threatened','better']){
+      const {world,capital,near,far,enemy,army}=defensiveCoverageFixture();
+      // Two safe recovery posts; capital bonus is balanced by the old post's defenses.
+      enemy.neighbors=[];world.armies.find(a=>a.regionId===enemy.id)!.regionId=enemy.id;
+      capital.neighbors=[near.id];far.neighbors=[near.id];near.neighbors=[capital.id,far.id,enemy.id];
+      for(const r of [capital,near,far]){r.food=r.population;r.defense=0;}
+      far.defense=23;army.morale=24;army.order={...army.order,kind:'retreat',warId:'visible-front',targetRegionId:far.id,
+        issuedTurn:2,issuerId:army.commanderId,reasonCode:'low_readiness'};
+      const issued=army.order.issuedTurn;
+      if(mode==='lost')far.controllerId=enemy.controllerId;
+      if(mode==='blocked')near.neighbors=near.neighbors.filter(id=>id!==far.id);
+      if(mode==='hungry')far.food=0;
+      if(mode==='threatened')far.neighbors.push(enemy.id);
+      if(mode==='better')capital.defense=20;
+      for(let t=10;t<=13;t++){
+        world.turn=t;capital.food=capital.population*(t%2?1.2:1);
+        planArmyOrders(world,factContext(world));
+        if(mode==='stable'){
+          expect(army.order.targetRegionId).toBe(far.id);expect(army.order.issuedTurn).toBe(issued);
+          expect(armyOrderPath(world,army)).toEqual([near.id,far.id]);expect(armyOrderIsExecutable(army,'visible-front',t)).toBe(true);
+        }else expect(army.order.targetRegionId).not.toBe(far.id);
+        expect(army.regionId).toBe(near.id); // Planning never moves or teleports.
+      }
+      if(mode==='stable'){
+        army.regionId=far.id;world.turn++;planArmyOrders(world,factContext(world));
+        expect(army.order.kind).toBe('hold');const arrived=army.order.issuedTurn;
+        capital.food=capital.population*1.2;world.turn++;planArmyOrders(world,factContext(world));
+        expect(army.order).toMatchObject({kind:'hold',targetRegionId:far.id,issuedTurn:arrived});
+      }
+    }
+  });
   it('sends one reachable army toward the threatened capital without moving it instantly or duplicating the order',()=>{
     const {world,capital,near,army,other}=defensiveCoverageFixture();
     planArmyOrders(world,factContext(world));

@@ -590,6 +590,43 @@ describe('person story arc', () => {
     expect(story.length).toBeLessThanOrEqual(3);
   });
 
+  it.each([8, 31])('does not treat a command request citing a past battle as battle settlement at T%s', turn => {
+    const world=createWorld('因果背景不是战后结算');
+    const p=world.characters.find(p=>world.armies.some(a=>a.commanderId===p.id))!;
+    const battle=battleFact(world,p.id,'root',8,200),office=world.offices.find(o=>o.holderId===p.id)!;
+    const request:SimulationFact={...battle,id:'request',turn,kind:'agency_intent_submitted',sourceFactIds:[battle.id],
+      payload:{actorId:p.id,goalId:'goal',goalType:'secure_independent_command',goalCreatedTurn:turn,planId:'plan',planStepId:'step',
+        action:'request_independent_command',attemptOrdinal:1,targetArmyId:office.armyId!,polityId:p.polityId,
+        currentCommanderId:p.id,appointingAuthorityId:world.polities.find(n=>n.id===p.polityId)!.rulerId}};
+    const ended:SimulationFact={...battle,id:'handoff',turn,kind:'appointment_ended',sourceFactIds:[request.id],
+      payload:{appointmentId:office.id,action:'ended',officeKind:office.kind,holderId:p.id,polityId:p.polityId,
+        regionId:office.regionId,armyId:office.armyId,fleetId:office.fleetId ?? null,rank:office.rank}};
+    world.facts=[battle,request,ended];world.history=[];
+    const body=serializeWorld(world),hash=computeWorldHash(world),story=projectPersonStoryArc(world,p);
+    const fight=story.find(b=>b.sourceFactIds.includes(battle.id))!;
+    expect(fight.sourceFactIds).not.toContain(ended.id);expect(fight.summary).not.toContain('卸下');
+    expect(story.find(b=>b.primaryFactId===ended.id)?.sourceFactIds).toContain(ended.id);
+    expect(world.facts.find(f=>f.id==='handoff')?.sourceFactIds).toEqual(['request']);
+    expect(serializeWorld(world)).toBe(body);expect(computeWorldHash(world)).toBe(hash);
+  });
+
+  it('keeps a genuine political career before a routine late transfer without adding slots',()=>{
+    const world=createWorld('掌权与普通调营');const p=world.characters.find(p=>world.armies.some(a=>a.commanderId===p.id))!;
+    const base=battleFact(world,p.id,'battle-0',4,150),army=world.armies.find(a=>a.commanderId===p.id)!;
+    world.facts=[base,...[12,20,28,36].map(t=>battleFact(world,p.id,`battle-${t}`,t,150))];world.history=[];
+    world.facts.push({...base,id:'power',turn:55,kind:'court_action_resolved',importance:3,
+      payload:{action:'power_broker_formed',polityId:p.polityId,actorFactionId:p.factionId,targetFactionId:null,
+        initiatorId:p.id,targetId:world.polities.find(n=>n.id===p.polityId)!.rulerId,reasonCode:'multi_resource_dominance',
+        score:70,threshold:66,rulerBeforeId:p.id,rulerAfterId:p.id,affectedFactionIds:[p.factionId!],removedMemberIds:[]}});
+    const seat={appointmentId:'old',action:'ended' as const,officeKind:'军团副将' as const,holderId:p.id,
+      polityId:p.polityId,regionId:army.regionId,armyId:army.id,fleetId:null,rank:55};
+    world.facts.push({...base,id:'old',turn:206,kind:'appointment_ended',importance:1,payload:seat},
+      {...base,id:'new',turn:206,kind:'appointment_started',importance:1,payload:{...seat,appointmentId:'new',action:'started',armyId:world.armies[1].id}});
+    const beats=projectPersonStoryArc(world,p);expect(beats.length).toBeLessThanOrEqual(5);
+    expect(beats.some(b=>b.primaryFactId==='power')).toBe(true);
+    expect(beats.some(b=>b.title.includes('调任'))).toBe(false);
+  });
+
   it('keeps a battle death and its same-seat cleanup in one evidence-owned ending', () => {
     const world = createWorld('人物结局同源归并');
     const person = world.characters.find((item) => world.armies.some((army) => army.commanderId === item.id))!;
