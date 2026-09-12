@@ -4,7 +4,7 @@ import { computeWorldHash, createWorld, serializeWorld } from '../sim';
 import type { BattleFact, SimulationFact } from '../sim/facts';
 import type { WorldState } from '../sim/types';
 import { projectPersonStoryArc } from './person-story-arc';
-import { toPersonInspector } from './person-dossier-adapter';
+import { toPersonInspector, toPersonExperienceRecords } from './person-dossier-adapter';
 import { projectRosterCollection } from './roster-adapter';
 
 function battleFact(
@@ -68,6 +68,99 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it('keeps the ruler’s own late reversals ahead of indirect court turnover, but keeps the broker’s real career', () => {
+    const w=createWorld('本人转折与间接掌事'),p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
+    const broker=w.characters.find(c=>c.id!==p.id)!,base=battleFact(w,p.id,'base',10,10),[a,b,c]=w.regions;
+    w.facts=[];w.history=[];p.alive=false;
+    w.offices=[{id:'reign',holderId:p.id,polityId:p.polityId,kind:'君主',rank:100,regionId:a.id,armyId:null,appointedTurn:10,endedTurn:90,active:false}];
+    const h={...base,evidence:[],situationIds:[],sourceFactIds:[]};
+    w.history.push({...h,id:'accession',kind:'succession',title:'获拥立',summary:'承接君位',stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'rulerId',before:broker.id,after:p.id}]});
+    for(const [i,t] of [20,30,40,50].entries())w.facts.push({...base,id:'court-'+i,turn:t,importance:5,kind:'court_action_resolved',actorIds:[p.id,broker.id],
+      payload:{action:'power_broker_fell',polityId:p.polityId,actorFactionId:null,targetFactionId:null,initiatorId:p.id,targetId:broker.id,
+        reasonCode:'lost_dominance',score:40,threshold:60,rulerBeforeId:p.id,rulerAfterId:p.id,affectedFactionIds:[],removedMemberIds:[]}});
+    w.history.push({...h,id:'lost-1',turn:60,kind:'capital_fall',title:'旧都失守',summary:'旧都失守，中枢迁往新城。',
+      stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'capitalRegionId',before:a.id,after:b.id}]},
+      {...h,id:'lost-2',turn:80,kind:'capital_fall',title:'新城再失',summary:'再失中枢驻地。',
+      stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'capitalRegionId',before:b.id,after:c.id}]});
+    w.facts.push({...base,id:'death',turn:90,kind:'character_death',payload:{characterId:p.id,cause:'natural',age:80,health:0,diseaseId:null,role:'君主'}});
+    const body=serializeWorld(w),hash=computeWorldHash(w),story=projectPersonStoryArc(w,p);
+    expect(story.length).toBeLessThanOrEqual(5);
+    expect(story.flatMap(b=>b.sourceEventIds)).toEqual(expect.arrayContaining(['lost-1','lost-2']));
+    expect(projectPersonStoryArc(w,broker).some(b=>b.sourceFactIds.includes('court-0'))).toBe(true);
+    expect(serializeWorld(w)).toBe(body);expect(computeWorldHash(w)).toBe(hash);
+  });
+
+  it.each(['continuous','war','truce','defeat','pause'].flatMap(mode=>[false,true].map(personal=>({mode,personal}))))('uses actual boundaries for a reign campaign ($mode, personal=$personal)',({mode,personal})=>{
+    const w=createWorld('任内军队行动边界'),p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
+    const regions=w.regions.slice(0,4);for(const r of regions)r.neighbors=regions.filter(x=>x!==r).map(x=>x.id);
+    w.offices=[{id:'reign',holderId:p.id,polityId:p.polityId,kind:'君主',rank:100,regionId:regions[0].id,armyId:null,appointedTurn:0,endedTurn:null,active:true}];
+    w.facts=[];w.history=[];
+    for(let i=0;i<4;i++){
+      const t=10+i+(mode==='pause'&&i>=2?10:0),b=battleFact(w,p.id,'fight-'+i,t,10);
+      b.payload.targetRegionId=regions[i].id;b.regionIds=[regions[i].id];
+      if(!personal){b.actorIds=[];b.payload.attacker.participants=[];}
+      if(mode==='war'&&i>=2)b.payload.warId='second-front';
+      if(i===2&&mode==='truce')w.facts.push({...b,id:'peace',kind:'war_ended',payload:{warId:b.payload.warId,attackerId:p.polityId,defenderId:'enemy',result:'negotiated_peace',
+        winnerId:null,loserId:null,reason:'停战',durationTurns:2,attackerScore:0,defenderScore:0,indemnity:0}});
+      if(i===2&&mode==='defeat'){const loss=battleFact(w,p.id,'intervening-loss',t,1000);loss.payload.attackerWon=false;w.facts.push(loss);}
+      w.facts.push(b,{...b,id:'gain-'+i,kind:'territory_control_changed',sourceFactIds:[b.id],payload:{warId:b.payload.warId,reason:'battle_capture',
+        regionId:regions[i].id,previousControllerId:'enemy',nextControllerId:p.polityId}});
+    }
+    const body=serializeWorld(w),story=projectPersonStoryArc(w,p),gains=story.filter(b=>b.sourceFactIds.includes('gain-0')||b.sourceFactIds.includes('gain-2'));
+    expect(gains).toHaveLength(mode==='continuous'?1:2);
+    expect(gains.every(b=>b.title.includes('任内')&&!b.summary.includes('战前'))).toBe(true);
+    expect(gains.flatMap(b=>b.sourceFactIds)).toEqual(expect.arrayContaining(['gain-0','gain-1','gain-2','gain-3']));
+    expect(serializeWorld(w)).toBe(body);
+  });
+
+  it('retains a late personal recapture and capital loss ahead of a routine faction role',()=>{
+    const w=createWorld('晚年亲自复城'),p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!,base=battleFact(w,p.id,'base',10,10);
+    const [a,b,c]=w.regions;w.history=[];w.facts=[];p.alive=false;
+    w.offices=[{id:'reign',holderId:p.id,polityId:p.polityId,kind:'君主',rank:100,regionId:a.id,armyId:null,appointedTurn:0,endedTurn:90,active:false}];
+    for(const [i,t] of [20,40,79,88].entries())w.facts.push({...base,id:'routine-'+i,turn:t,kind:'faction_lifecycle',payload:{
+      transition:'leader_changed',reasonCode:'成员推举',polityId:p.polityId,previousLeaderId:'other',nextLeaderId:p.id,
+      affectedFactionIds:[w.factions[0].id],createdFactionIds:[],endedFactionIds:[],before:[],after:[]}} as SimulationFact);
+    const h={...base,evidence:[],situationIds:[]};
+    w.history.push({...h,id:'accession',kind:'succession',title:'登位',summary:'承接君位',stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'rulerId',before:'other',after:p.id}]},
+      {...h,id:'lost',turn:80,kind:'capital_fall',title:'旧都失守',summary:'迁往新驻地',sourceFactIds:['lost-place'],stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'capitalRegionId',before:a.id,after:b.id}]},
+      {...h,id:'lost-again',turn:86,kind:'capital_fall',title:'再失新都',summary:'迁往余地',stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'capitalRegionId',before:b.id,after:c.id}]});
+    const fight=battleFact(w,p.id,'recapture-battle',82,300);fight.regionIds=[a.id];fight.payload.targetRegionId=a.id;
+    w.facts.push({...base,id:'lost-place',turn:80,kind:'territory_control_changed',payload:{regionId:a.id,
+      previousControllerId:p.polityId,nextControllerId:'enemy',reason:'battle_capture',warId:fight.payload.warId}},fight,{...fight,id:'recapture',kind:'territory_control_changed',sourceFactIds:[fight.id],payload:{regionId:a.id,
+      previousControllerId:'enemy',nextControllerId:p.polityId,reason:'battle_capture',warId:fight.payload.warId}},
+      {...base,id:'death',turn:90,kind:'character_death',payload:{characterId:p.id,cause:'natural',health:0,age:80,role:'君主',diseaseId:null}});
+    const arc=projectPersonStoryArc(w,p);
+    expect(arc.length).toBeLessThanOrEqual(5);
+    expect(arc.flatMap(b=>b.sourceFactIds)).toContain('recapture');
+    expect(arc.flatMap(b=>b.sourceEventIds)).toContain('lost-again');
+    const recovered=arc.find(b=>b.sourceFactIds.includes('recapture'))!;
+    expect(recovered.summary).toContain('本部');expect(recovered.title).toContain('夺回');
+    expect(recovered.sourceFactIds).toContain('lost-place');expect(recovered.sourceEventIds).toContain('lost');
+    expect(recovered.primaryFactId).toBe(fight.id);
+    // A later loss in the same season cannot make the preceding attack a recapture.
+    const lost=w.facts.find(f=>f.id==='lost-place')!;lost.turn=fight.turn;
+    w.facts=w.facts.filter(f=>f!==lost);w.facts.push(lost);w.history.find(e=>e.id==='lost')!.turn=fight.turn;
+    expect(projectPersonStoryArc(w,p).some(b=>b.title.includes('夺回'))).toBe(false);
+  });
+
+  it('merges the exact accession appointment into complete biography, retaining regency and distinct returns',()=>{
+    const w=createWorld('完整生平同源登位'),p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!,base=battleFact(w,p.id,'base',10,10);
+    p.biography=[];w.history=[];w.offices=[];
+    const seat:SimulationFact={...base,id:'seat',kind:'appointment_started',payload:{appointmentId:'office',action:'started',officeKind:'君主',
+      holderId:p.id,polityId:p.polityId,regionId:base.regionIds[0],armyId:null,fleetId:null,rank:100}};
+    w.facts=[seat,{...seat,id:'later-return',turn:30,payload:{...seat.payload,appointmentId:'return'}}];
+    w.history=[{...base,id:'regency',kind:'regency',title:'幼年继位，由成年亲族监国',summary:'亲族承担摄政。',
+      sourceFactIds:[],evidence:[],situationIds:[],stateDeltas:[{entityType:'polity',entityId:p.polityId,field:'rulerId',before:'former',after:p.id}]}];
+    const body=serializeWorld(w),records=toPersonExperienceRecords(w,p);
+    expect(records.filter(r=>r.date==='第 3 年 · 秋')).toHaveLength(1);
+    expect(records.find(r=>r.eventId==='regency')?.title).toContain('监国');
+    expect(records.some(r=>r.id.endsWith('later-return'))).toBe(true);
+    const beat=projectPersonStoryArc(w,p).find(b=>b.primaryEventId==='regency')!;
+    expect(beat.sourceFactIds).toContain(seat.id);expect(beat.primaryFactId).toBe(seat.id);
+    expect(serializeWorld(w)).toBe(body);
+    w.history[0]={...w.history[0],kind:'local_governance',stateDeltas:[],title:'地方施政'};
+    expect(toPersonExperienceRecords(w,p).filter(r=>r.date==='第 3 年 · 秋')).toHaveLength(2);
+  });
   it('expands a partly overlapping reign campaign only to actual actions, not early background citations', () => {
     const w=createWorld('跨年战役阶段'),p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
     const [a,b,c]=w.regions;for(const r of [a,b,c])r.neighbors=[a,b,c].filter(x=>x!==r).map(x=>x.id);
@@ -298,7 +391,7 @@ describe('person story arc', () => {
     expect(projectPersonStoryArc(world,person).flatMap(b=>b.sourceFactIds)).toContain(gains[2].id);
   });
 
-  it('preserves the largest career phase across truces before an ordinary beginning', () => {
+  it('preserves the largest continuous career phase without folding in another war', () => {
     const world=createWorld('事业峰值不按姓名');
     const p=world.characters.find(p=>world.armies.some(a=>a.commanderId===p.id))!;
     const base=battleFact(world,p.id,'base',20,10);
@@ -315,9 +408,10 @@ describe('person story arc', () => {
       b.payload.warId=`unrelated-${i}`;
       world.facts.push(b);
     }
-    const arc=projectPersonStoryArc(world,p), peak=arc.find(b=>b.sourceFactIds.includes('peak-0'))!;
+    const arc=projectPersonStoryArc(world,p), peak=arc.find(b=>b.sourceFactIds.includes('peak-1'))!;
     expect(arc.length).toBeLessThanOrEqual(5);
-    expect(peak.sourceFactIds).toEqual(expect.arrayContaining(captures.map(f=>f.id)));
+    expect(peak.sourceFactIds).toEqual(expect.arrayContaining(captures.slice(1).map(f=>f.id)));
+    expect(peak.sourceFactIds).not.toContain('peak-0');
     expect(peak.title).toContain('任内');
     expect(peak.title).not.toContain('亲自');
     expect(arc.some(b=>b.sourceFactIds.includes('late-7'))).toBe(true);

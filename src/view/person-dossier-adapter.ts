@@ -44,7 +44,7 @@ import {
   projectPersonPoliticalFocus,
   type PoliticalFocusLink,
 } from './political-focus';
-import { projectPersonStoryArc, personHistoryEvidence } from './person-story-arc';
+import { accessionAppointments, projectPersonStoryArc, personHistoryEvidence } from './person-story-arc';
 import { continuousAppointmentIds } from '../sim/facts/projector';
 
 export type PersonInspectorProjection = PersonInspectorData & {
@@ -125,6 +125,9 @@ export function toPersonExperienceRecords(
   const history = (evidence?.events ?? world.history)
     .filter(isDefaultVisibleHistoryEvent);
   const facts = evidence?.facts ?? world.facts;
+  const appointmentFacts = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }> => (
+    (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') && factNamesCharacter(fact, item.id)
+  ));
   const continuations = evidence?.continuations ?? continuousAppointmentIds(facts);
   const eventById = new Map(history.map((event) => [event.id, event]));
   const factById = new Map(facts.map((fact) => [fact.id, fact]));
@@ -158,11 +161,12 @@ export function toPersonExperienceRecords(
       : battleRecord(battle, { ...eventArchiveRecord(event), id }) });
     knownEventIds.add(event.id);
     if (event.kind !== 'world_created') event.sourceFactIds.forEach((factId) => knownFactIds.add(factId));
+    accessionAppointments(event, appointmentFacts).forEach(f => knownFactIds.add(f.id));
   };
   const eventsBySourceFactId = new Map<string, HistoryEvent[]>();
   for (const event of history) {
     if (!event.actorIds.includes(item.id)) continue;
-    for (const sourceFactId of event.sourceFactIds) {
+    for (const sourceFactId of new Set([...event.sourceFactIds, ...accessionAppointments(event, appointmentFacts).map(f => f.id)])) {
       const linked = eventsBySourceFactId.get(sourceFactId) ?? [];
       linked.push(event);
       eventsBySourceFactId.set(sourceFactId, linked);
@@ -175,7 +179,7 @@ export function toPersonExperienceRecords(
     const source = biographySource(item, fact, eventById, factById);
     if (!source) continue;
     const linkedFactEvents = source.fact
-      ? (eventsBySourceFactId.get(source.fact.id) ?? []).filter((event) => event.turn === fact.turn)
+      ? (eventsBySourceFactId.get(source.fact.id) ?? []).filter(event => event.turn === fact.turn)
       : [];
     const canonicalEvents = source.event ? [source.event] : linkedFactEvents;
     const canonicalEvent = canonicalEvents[0] ?? null;
@@ -207,10 +211,6 @@ export function toPersonExperienceRecords(
     }) });
   }
 
-  const appointmentFacts = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }> => (
-    (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended')
-    && factNamesCharacter(fact, item.id)
-  ));
   const startedAppointmentIds = new Set(appointmentFacts
     .filter((fact) => fact.kind === 'appointment_started')
     .map((fact) => fact.payload.appointmentId));

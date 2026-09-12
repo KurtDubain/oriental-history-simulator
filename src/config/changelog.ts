@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.22',
+  version: '1.29.23',
   date: '2026-09-12',
-  title: '困军循路，有粮方休',
+  title: '功业分章，转折有据',
   items: [
-    '低战备部队可沿安全粮路撤离休整，停战不再无条件中断撤离；进攻仍须具备战备。',
+    '人物传优先保留本人转折，战役按战争与行动边界分章，同源继位不再重复列出。',
   ],
 };
 
