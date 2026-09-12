@@ -28,6 +28,7 @@ import { canonicalEventKey, canonicalStoryKey, playerHistoryText, projectFactNar
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import {
   character,
+  birthTurnLabel,
   eventArchiveRecord,
   family,
   polity,
@@ -984,6 +985,9 @@ export function toPersonArchive(
   const personFamily = family(world, item.familyId);
   const records: ArchiveRecord[] = toPersonExperienceRecords(world, item);
   const relationships = inspector.relationships ?? [];
+  // V0.1 migration synthesized pre-boundary births from age, not a dated record.
+  const legacy = world.legacyArchiveBoundary;
+  const birth = legacy?.sourceSchemaVersion === 1 && item.birthTurn <= legacy.turn ? undefined : item.birthTurn;
   return {
     id: item.id,
     kind: 'person',
@@ -992,7 +996,7 @@ export function toPersonArchive(
     subtitle: `${owner?.name ?? '无属'} · ${inspector.role} · ${item.lifeStage ?? `${item.age}岁`}`,
     lead: inspector.summary ?? '',
     facts: [
-      { label: '生年', value: turnLabel(item.birthTurn ?? Math.max(0, world.turn - item.age * 4)) },
+      { label: '生年', value: birthTurnLabel(birth) },
       { label: '家族', value: inspector.family ?? '家世不详' }, { label: '阶层', value: item.politicalClass ?? '出身未详' },
       { label: '功绩', value: String(Math.round(item.merit ?? 0)) }, { label: '影响', value: String(Math.round(item.influence ?? item.renown)) },
       { label: '现职', value: item.alive ? item.role : '已故' },

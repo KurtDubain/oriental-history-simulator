@@ -6,7 +6,7 @@ import { preview } from 'vite';
 const PORT = Number(process.env.APP_UPDATE_E2E_PORT ?? 4176);
 const APP_URL = `http://127.0.0.1:${PORT}`;
 const PACKAGE_VERSION = JSON.parse(await readFile('package.json', 'utf8')).version;
-const ARTIFACT_DIR = `output/app-update-v${PACKAGE_VERSION}`;
+const ARTIFACT_DIR = process.env.APP_UPDATE_E2E_OUTPUT ?? `output/app-update-v${PACKAGE_VERSION}`;
 
 const deployed = JSON.parse(await readFile('dist/version.json', 'utf8'));
 assert.equal(deployed.version, PACKAGE_VERSION);

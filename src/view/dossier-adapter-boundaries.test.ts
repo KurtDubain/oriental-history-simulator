@@ -26,8 +26,38 @@ import {
   toPersonInspector,
 } from './person-dossier-adapter';
 import { familyRoster, militaryRoster, peopleRoster, polityRoster } from './roster-adapter';
+import { birthTurnLabel, turnLabel } from './dossier-adapter-shared';
 
 describe('dossier adapter boundaries', () => {
+  it.each([
+    [-184, '纪年前 46 年 · 春'], [-128, '纪年前 32 年 · 春'],
+    [-5, '纪年前 2 年 · 冬'], [-4, '纪年前 1 年 · 春'], [-1, '纪年前 1 年 · 冬'],
+    [0, '第 1 年 · 春'], [3, '第 1 年 · 冬'], [4, '第 2 年 · 春'],
+    [undefined, '不详'], [NaN, '不详'], [0.5, '不详'],
+  ])('formats birth quarter %s without a year zero', (turn, label) => {
+    expect(birthTurnLabel(turn)).toBe(label);
+    expect(turnLabel(-4)).toBe('第 1 年 · 春'); // Ordinary event dates are unchanged.
+  });
+
+  it('never infers a deceased person’s birth from the current year and age at death', () => {
+    const world = createWorld('生年证据');
+    const person = world.characters[0];
+    person.alive = false; person.age = 35; person.deathTurn = 11; world.turn = 400;
+    delete (person as { birthTurn?: number }).birthTurn;
+    const before = serializeWorld(world);
+    expect(toPersonArchive(world, person).facts.find(f => f.label === '生年')?.value).toBe('不详');
+    expect(serializeWorld(world)).toBe(before);
+    person.birthTurn = -128;
+    expect(toPersonArchive(world, person).facts.find(f => f.label === '生年')?.value).toBe('纪年前 32 年 · 春');
+    world.legacyArchiveBoundary = { sourceSchemaVersion: 1, turn: 100, historyEventCount: 0, historyDigest: '' };
+    expect(toPersonArchive(world, person).facts.find(f => f.label === '生年')?.value).toBe('不详');
+    world.legacyArchiveBoundary.sourceSchemaVersion = 3;
+    expect(toPersonArchive(world, person).facts.find(f => f.label === '生年')?.value).toBe('纪年前 32 年 · 春');
+    world.legacyArchiveBoundary.sourceSchemaVersion = 1;
+    person.birthTurn = 101; // A real birth after the legacy import is not hidden.
+    person.alive = true; person.deathTurn = null; person.age = 74;
+    expect(toPersonArchive(world, person).facts.find(f => f.label === '生年')?.value).toBe('第 26 年 · 夏');
+  });
   it('keeps each domain projection independently importable behind the compatibility barrel', () => {
     const world = createWorld('档案职责边界');
     const before = serializeWorld(world);

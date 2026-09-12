@@ -1,4 +1,4 @@
-import { stableHash, stableStringify } from './random';
+import { stableCompare, stableHash, stableStringify } from './random';
 import { computeWorldHash } from './world-hash';
 import type { WorldState } from './types';
 import { decodeArchiveBlock } from './archive/codec';
@@ -125,8 +125,22 @@ function migrateLegacyFacts(world: WorldState, boundary: LegacyArchiveBoundary):
 export function serializeWorld(world: WorldState): string {
   if (!world.archiveSystem?.blocks.length) return stableStringify(world);
   // Omit only exact, reconstructible copies; do not alter live residency or digests.
-  const events = new Map(readWorldHistory(world).map(e => [e.id, e]));
-  const facts = new Map(readWorldFacts(world).map(f => [f.id, f]));
+  // Read both chains in one pass: separate full readers thrash the bounded decode
+  // cache. Preserve their first-occurrence precedence (legacy, cold, then hot).
+  const events = new Map<string, WorldState['history'][number]>();
+  const facts = new Map<string, SimulationFact>();
+  const add = <T extends { id: string }>(map: Map<string, T>, records: readonly T[]) => {
+    for (const record of records) if (!map.has(record.id)) map.set(record.id, record);
+  };
+  const legacyCount = world.legacyArchiveBoundary?.historyEventCount ?? 0;
+  add(events, world.history.slice(0, legacyCount));
+  for (const block of [...world.archiveSystem.blocks].sort((a, b) => a.fromTurn - b.fromTurn || stableCompare(a.id, b.id))) {
+    const payload = decodeArchiveBlock(block);
+    add(events, payload.history);
+    if (block.throughTurn >= 0) add(facts, payload.facts.filter(f => f.turn >= 0));
+  }
+  add(events, world.history.slice(legacyCount));
+  add(facts, world.facts.filter(f => f.turn >= 0));
   const pins = new Set(world.archiveSystem.pinnedFactIds);
   return stableStringify({ ...world,
     facts: world.facts.filter(f => !pins.has(f.id) || stableStringify(f) !== stableStringify(facts.get(f.id))),

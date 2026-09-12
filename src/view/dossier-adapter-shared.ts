@@ -56,6 +56,14 @@ export function turnLabel(turn: number) {
   return `第 ${Math.floor(safeTurn / 4) + 1} 年 · ${SEASON_NAMES[safeTurn % 4]}`;
 }
 
+/** Births can predate the chronicle; an age alone does not establish a quarter. */
+export function birthTurnLabel(turn: number | undefined): string {
+  if (turn === undefined || !Number.isSafeInteger(turn)) return '不详';
+  return turn < 0
+    ? `纪年前 ${-Math.floor(turn / 4)} 年 · ${SEASON_NAMES[((turn % 4) + 4) % 4]}`
+    : turnLabel(turn);
+}
+
 export function sourceEventIdForFact(world: WorldState, factId: string): string | null {
   return [...world.history]
     .filter((event) => isDefaultVisibleHistoryEvent(event) && event.sourceFactIds.includes(factId))

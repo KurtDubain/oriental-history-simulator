@@ -413,11 +413,9 @@ export class AutosaveCoordinator {
           this.clock.now(),
           this.lastWriteAt + this.minWriteIntervalMs,
         );
-      if (writeAt <= this.clock.now()) {
-        void this.flush('turn-interval');
-      } else {
-        this.scheduleAt(writeAt, 'turn-interval');
-      }
+      // Even an eligible save is queued, not serialized inside the world commit.
+      // Explicit lifecycle flushes still bypass this timer and await durability.
+      this.scheduleAt(writeAt, 'turn-interval');
       return;
     }
     this.scheduleAt(this.latest.dirtyAt + this.idleDelayMs, 'idle');

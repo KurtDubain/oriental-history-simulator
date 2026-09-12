@@ -122,6 +122,8 @@ describe('AutosaveCoordinator', () => {
         return 'T8';
       },
     });
+    expect(serialized).toEqual([]);
+    clock.advance(0);
     await coordinator.whenSettled();
 
     expect(serialized).toEqual([8]);
@@ -147,6 +149,39 @@ describe('AutosaveCoordinator', () => {
     await coordinator.whenSettled();
     expect(save).toHaveBeenCalledTimes(1);
     expect(save.mock.calls[0]?.[1]).toEqual({ generation: 1, turn: 1, reason: 'idle' });
+  });
+
+  it('coalesces eligible snapshots before serialization and reports success only after the write', async () => {
+    const clock = new FakeClock(), gate = deferred();
+    const serialize = vi.fn(() => 'latest'), saved = vi.fn();
+    const save = vi.fn(() => gate.promise);
+    const coordinator = new AutosaveCoordinator({ clock, save, onSaved: saved });
+    const stale = vi.fn(() => 'stale');
+    coordinator.markDirty({ turn: 8, serialize: stale });
+    coordinator.markDirty({ turn: 9, serialize });
+    expect(serialize).not.toHaveBeenCalled();
+    clock.advance(0);
+    expect(stale).not.toHaveBeenCalled();
+    expect(serialize).toHaveBeenCalledTimes(1);
+    expect(saved).not.toHaveBeenCalled();
+    expect(coordinator.getState().lastSavedTurn).toBe(0);
+    gate.resolve(); await coordinator.whenSettled();
+    expect(coordinator.getState().lastSavedTurn).toBe(9);
+    expect(saved).toHaveBeenCalledTimes(1);
+  });
+
+  it('cancels a queued old world when disposed and lets a lifecycle flush claim the pending save', async () => {
+    const clock = new FakeClock(), old = vi.fn(() => 'old'), save = vi.fn();
+    const coordinator = new AutosaveCoordinator({ clock, save });
+    coordinator.markDirty({ turn: 8, serialize: old });
+    coordinator.dispose(); clock.advance(10_000);
+    expect(old).not.toHaveBeenCalled(); expect(save).not.toHaveBeenCalled();
+    const next = new AutosaveCoordinator({ clock, save });
+    next.markDirty({ turn: 8, serialize: () => 'new' });
+    expect((await next.flush('background')).status).toBe('saved');
+    clock.advance(10_000); await next.whenSettled();
+    expect(save).toHaveBeenCalledTimes(1);
+    expect(save.mock.calls[0]).toEqual(['new', { generation: 1, turn: 8, reason: 'background' }]);
   });
 
   it('does not let continuous dirty updates postpone an eligible write deadline', async () => {

@@ -6,7 +6,7 @@ import { createServer } from 'vite';
 const PORT = Number(process.env.FUX01_E2E_PORT ?? 4186);
 const APP_URL = `http://127.0.0.1:${PORT}`;
 const PACKAGE_VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
-const ARTIFACT_DIR = `output/fux01-mobile-e2e-v${PACKAGE_VERSION}`;
+const ARTIFACT_DIR = process.env.FUX01_E2E_OUTPUT ?? `output/fux01-mobile-e2e-v${PACKAGE_VERSION}`;
 
 const ALL_SCENARIOS = Object.freeze([
   {
@@ -311,9 +311,10 @@ async function swipeQuickLook(page, dispatch, direction, baseline, scenario) {
 }
 
 function clusterCandidates(snapshot, geometry, metrics) {
-  return snapshot.mapObjects.regions
-    .filter((region) => geometry.regionSites[region.id])
-    .map((region) => ({ id: region.id, point: screenPoint(metrics, geometry.regionSites[region.id], false) }))
+  return snapshot.mapObjects.personClusters
+    .map((cluster) => ({ id: cluster.regionId, point: screenPoint(metrics, {
+      x: cluster.position[0], y: cluster.position[1],
+    }, false) }))
     .filter(({ point }) => (
       point.x >= metrics.canvas.x + 28
       && point.x <= metrics.canvas.x + metrics.canvas.width - 28
@@ -481,6 +482,15 @@ async function runScenario(browser, scenario) {
     const region = await touchFirstExact(page, clusterCandidates(snapshot, geometry, metrics), 'region', scenario);
     const selectedRegionId = region.interface.selected.id;
     const regionQuick = await assertQuickLook(page, 'region', baseline, scenario);
+    await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-region-quick.png`, fullPage: true });
+    const selectedCamera = (await state(page)).interface.mapViewport;
+    await page.locator('[data-map-zoom-out="true"]').tap();
+    assert.ok((await state(page)).interface.mapViewport.zoom < selectedCamera.zoom, '地区速览中缩小按钮必须真实生效');
+    await page.locator('[data-map-reset="true"]').tap();
+    await assertLod(page, 'overview', baseline, `${scenario.slug} 速览归位`);
+    await page.locator('[data-map-zoom-in="true"]').tap();
+    await assertLod(page, 'regional', baseline, `${scenario.slug} 速览放大`);
+    assert.equal((await state(page)).interface.selected.id, selectedRegionId, '缩放不得改变选中地区');
     await swipeQuickLook(page, dispatch, 'up', baseline, scenario);
     await swipeQuickLook(page, dispatch, 'down', baseline, scenario);
     await tapBlankToClose(page, baseline, scenario);
@@ -541,7 +551,7 @@ async function runScenario(browser, scenario) {
     await page.screenshot({ path: `${ARTIFACT_DIR}/${scenario.slug}-failure.png`, fullPage: true }).catch(() => undefined);
     await writeFile(
       `${ARTIFACT_DIR}/${scenario.slug}-failure.json`,
-      `${JSON.stringify({ error: String(error), browserErrors: errors }, null, 2)}\n`,
+      `${JSON.stringify({ error: String(error), browserErrors: errors, state: await state(page) }, null, 2)}\n`,
     );
     throw error;
   } finally {

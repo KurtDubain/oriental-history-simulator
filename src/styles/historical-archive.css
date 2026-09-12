@@ -498,6 +498,10 @@
     min-width: 108px;
   }
 
+  [data-history-scope="person"] .history-archive__facts > div:first-child {
+    min-width: 148px;
+  }
+
   .history-archive__article {
     padding-right: 14px;
     padding-left: 14px;

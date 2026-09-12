@@ -414,6 +414,40 @@ describe('self-contained world cold archive', () => {
     expect(()=>deserializeWorld(JSON.stringify(raw))).toThrow();
   }, 60_000);
 
+  it('keeps the exact wire body with more blocks than the decode cache and divergent hot copies', () => {
+    const world = createWorld('保存单次冷卷遍历');
+    const source = incrementallyCompactedWorld(192);
+    world.archiveSystem = source.archiveSystem!;
+    world.history = source.history;
+    world.facts = source.facts;
+    expect(world.archiveSystem.blocks.length).toBeGreaterThan(4);
+    const cold = decodeArchiveBlock(world.archiveSystem.blocks[0]);
+    const event = cold.history[0], fact = cold.facts[0];
+    world.facts.push({ ...fact, importance: 5 });
+    world.archiveSystem.pinnedFactIds.push(fact.id);
+    world.history.push({ ...event, summary: '热点正文不同，不能替代冷卷' });
+    world.characters[0].biography = [{ ...world.characters[0].biography[0], eventId: event.id, summary: event.summary }];
+    // A legacy prefix has precedence over duplicate cold records.
+    world.history.unshift({ ...event, summary: '旧纪年前缀' });
+    world.legacyArchiveBoundary = { sourceSchemaVersion: 3, turn: 0, historyEventCount: 1, historyDigest: '' };
+    world.archiveSystem.blocks.reverse();
+    const before = stableStringify(world);
+    const events = new Map(readWorldHistory(world).map(e => [e.id, e]));
+    const facts = new Map(readWorldFacts(world).map(f => [f.id, f]));
+    const pins = new Set(world.archiveSystem.pinnedFactIds);
+    const reference = stableStringify({ ...world,
+      facts: world.facts.filter(f => !pins.has(f.id) || stableStringify(f) !== stableStringify(facts.get(f.id))),
+      history: world.history.map(({ evidence, ...e }) => stableStringify(evidence) === stableStringify(e.causes.map(c => c.evidence)) ? e : { ...e, evidence }),
+      characters: world.characters.map(c => ({ ...c, biography: c.biography.map(({ summary, ...b }) => b.eventId && events.get(b.eventId)?.summary === summary ? b : { ...b, summary }) })),
+      archiveSystem: { ...world.archiveSystem, blocks: world.archiveSystem.blocks.map(({ indexes, historySummary, importantEventPreviews, territoryDeltas, ...b }) => b) },
+    });
+    clearWorldArchiveDecodeCache();
+    expect(serializeWorld(world)).toBe(reference);
+    expect(serializeWorld(world)).toBe(reference);
+    expect(archiveDecodeCacheEntryCount()).toBeLessThanOrEqual(4);
+    expect(stableStringify(world)).toBe(before);
+  });
+
   it('imports the original whole-Situation pin layout and repins it to live roots', () => {
     let world = createWorld('冷档案旧引用根兼容') as ArchiveWorldState;
     for (let turn = 0; turn < 80; turn += 1) world = advanceWorldDetailed(world as WorldState).world;
