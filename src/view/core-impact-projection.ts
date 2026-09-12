@@ -107,13 +107,15 @@ function lowReadinessImpacts(world: WorldState, facts: readonly SimulationFact[]
     const commander = world.characters.find((person) => person.id === army.commanderId);
     const previous = ORDER_LABELS[fact.payload.previous.kind];
     const next = ORDER_LABELS[fact.payload.next.kind];
+    const redirected = previous === next && fact.payload.previous.targetRegionId !== fact.payload.next.targetRegionId;
+    const destination = world.regions.find(r => r.id === fact.payload.next.targetRegionId)?.name;
     return [{
       id: `core-impact:order:${fact.id}`,
       turn: fact.turn,
       source: '粮食' as const,
       target: target('army', army.id),
       impact: '军令' as const,
-      summary: `${army.name}补给仅${Math.round(army.supply)}；${commander?.name ?? '主帅'}已将军令由${previous}改为${next}，军令事实明记缘由为军粮或军心不足。`,
+      summary: `${army.name}补给仅${Math.round(army.supply)}；${commander?.name ?? '主帅'}已${redirected && destination ? `改赴${destination}` : previous === next ? `重申${next}军令` : `将军令由${previous}改为${next}`}，缘由为军粮或军心不足。`,
       beforeAfter: { label: '军令', before: previous, after: next },
       sourceFactIds: unique([fact.id, ...fact.sourceFactIds]),
       sourceEventIds: eventIdsForFact(events, fact.id),

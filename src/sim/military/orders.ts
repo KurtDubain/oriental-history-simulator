@@ -275,11 +275,18 @@ function warForArmy(world: WorldState, army: ArmyState): WarState | null {
     .sort((left, right) => left.distance - right.distance || stableCompare(left.war.id, right.war.id))[0]?.war ?? null;
 }
 
+function suppliedRetreatPost(world: WorldState, army: ArmyState, regionId: string): boolean {
+  const region = world.regions.find(r => r.id === regionId);
+  return Boolean(region && region.controllerId === army.polityId && region.food >= army.soldiers
+    && !world.armies.some(other => !other.embarkedOperationId && other.soldiers > 0
+      && world.wars.some(w => w.active && [w.attackerId,w.defenderId].includes(army.polityId)
+        && enemyIdFor(w,army.polityId) === other.polityId)
+      && (other.regionId === region.id || region.neighbors.includes(other.regionId))));
+}
+
 function retreatTarget(world: WorldState, army: ArmyState): string {
   const polity = world.polities.find((candidate) => candidate.id === army.polityId);
   const allowed = new Set([army.polityId]);
-  const enemies = world.wars.filter(w => w.active && [w.attackerId,w.defenderId].includes(army.polityId))
-    .map(w => enemyIdFor(w,army.polityId));
   const candidates = world.regions
     .filter((region) => region.controllerId === army.polityId)
     .map((region) => ({
@@ -291,21 +298,23 @@ function retreatTarget(world: WorldState, army: ArmyState): string {
     .filter((candidate) => Number.isFinite(candidate.distance))
     .sort((left, right) => right.score - left.score || left.distance - right.distance
       || stableCompare(left.region.id, right.region.id));
-  const safe = candidates.filter(c => c.region.food >= army.soldiers && !world.armies.some(other =>
-    enemies.includes(other.polityId) && !other.embarkedOperationId && other.soldiers > 0
-    && (other.regionId === c.region.id || c.region.neighbors.includes(other.regionId))));
-  const best = safe[0] ?? candidates[0];
+  const safe = candidates.filter(c => suppliedRetreatPost(world, army, c.region.id));
+  // An exhausted formation needs the nearest recovery post, not a distant capital.
+  if (army.morale < 12 && army.food >= army.soldiers) return army.regionId;
+  const best = army.morale < 12 ? safe.sort((a,b) => a.distance-b.distance)[0] : safe[0] ?? candidates[0];
+  if (army.morale < 12 && best?.region.id === army.regionId) return army.regionId;
   const current = (army.order.kind === 'retreat' || army.order.kind === 'hold' && army.order.reasonCode === 'low_readiness') && army.order.status === 'active'
     ? safe.find(c => c.region.id === army.order.targetRegionId) : undefined;
-  if (current && best && army.recentMovement?.orderKind === 'retreat') {
+  if (current && best && (army.morale < 12 || army.recentMovement?.orderKind === 'retreat')) {
     const alternative = pathBetween(world, army.regionId, best.region.id, allowed);
     // Reissuing costs a marching quarter. A safe post stays our destination unless
     // the new route saves time after that delay, without retracing the last step.
-    if (best.distance + 1 >= current.distance || alternative?.[1] === army.recentMovement.fromRegionId) return current.region.id;
+    if (best.distance + 1 >= current.distance || army.recentMovement?.orderKind === 'retreat'
+      && alternative?.[1] === army.recentMovement.fromRegionId) return current.region.id;
   }
   // Don't lose a marching quarter over a small food-score fluctuation. A longer
   // detour must also justify its extra steps; lost/blocked/threatened posts never stick.
-  if (current && best && best.score - current.score <= 12 + Math.max(0, best.distance-current.distance) * 2) return current.region.id;
+  if (army.morale >= 12 && current && best && best.score - current.score <= 12 + Math.max(0, best.distance-current.distance) * 2) return current.region.id;
   return best?.region.id ?? army.regionId;
 }
 
@@ -352,13 +361,14 @@ function plan(kind: OrderPlan['kind'], army: ArmyState, input: {
 
 function desiredPlan(world: WorldState, army: ArmyState): OrderPlan {
   const war = warForArmy(world, army);
-  if (!war) return plan('hold', army, { targetRegionId: army.regionId, reasonCode: 'peace_garrison' });
-  if (army.supply < 30 || army.morale < 28) {
+  if ((army.supply < 30 || army.morale < 28) && (war || army.order.kind === 'retreat'
+    || army.food + (world.regions.find(r => r.id === army.regionId)?.food ?? 0) < army.soldiers)) {
     const targetRegionId = retreatTarget(world, army);
     return targetRegionId === army.regionId
-      ? plan('hold', army, { warId: war.id, targetRegionId, reasonCode: 'low_readiness' })
-      : plan('retreat', army, { warId: war.id, targetRegionId, reasonCode: 'low_readiness' });
+      ? plan('hold', army, { warId: war?.id, targetRegionId, reasonCode: 'low_readiness' })
+      : plan('retreat', army, { warId: war?.id, targetRegionId, reasonCode: 'low_readiness' });
   }
+  if (!war) return plan('hold', army, { targetRegionId: army.regionId, reasonCode: 'peace_garrison' });
   const defensiveGoalId = war.defenderId === army.polityId ? defendedWarGoal(world, army, war) : null;
   if (defensiveGoalId) {
     return defensiveGoalId === army.regionId
@@ -577,7 +587,18 @@ export function armyOrderPath(world: WorldState, army: ArmyState, authorizedStep
   return pathBetween(world, army.regionId, targetRegionId, new Set([army.polityId, enemyIdFor(war, army.polityId)]));
 }
 
-export function armyOrderIsExecutable(army: ArmyState, warId: string, turn: number): boolean {
+export function recoveryRetreatStep(world: WorldState, army: ArmyState, turn: number): string | null {
+  const order = army.order;
+  if (order.kind !== 'retreat' || order.reasonCode !== 'low_readiness' || army.embarkedOperationId
+    || army.lastMovedTurn === turn || order.issuerId !== army.commanderId
+    || !armyOrderIsExecutable(army, order.warId, turn) || army.morale >= 12 && order.warId !== null) return null;
+  const next = armyOrderPath(world, army)?.[1];
+  return next && suppliedRetreatPost(world, army, next) && suppliedRetreatPost(world, army, order.targetRegionId ?? '')
+    && world.routes.some(r => r.kind !== '海峡' && (r.fromRegionId === army.regionId && r.toRegionId === next
+      || r.toRegionId === army.regionId && r.fromRegionId === next)) ? next : null;
+}
+
+export function armyOrderIsExecutable(army: ArmyState, warId: string | null, turn: number): boolean {
   return army.order.warId === warId
     && army.order.kind !== 'hold'
     && army.order.status === 'active'

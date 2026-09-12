@@ -221,6 +221,21 @@ function scopedBattleFact(
 }
 
 describe('core military-political impact projection', () => {
+  it('names the new destination when a real retreat directive changes only its destination',()=>{
+    const world=openingWorld('撤退改赴目的地'),army=world.armies[0],from=world.regions[0],to=world.regions[1];
+    army.supply=0;
+    const {sourceFactId: _source,...directive}=army.order;
+    const previous={...directive,kind:'retreat' as const,targetRegionId:from.id,reasonCode:'low_readiness' as const};
+    const next={...previous,targetRegionId:to.id};
+    const f=emitSimulationFact(world,{...world.lastTurn!,facts:[]},{kind:'army_order_changed',category:'军事',importance:2,
+      actorIds:[army.commanderId],polityIds:[army.polityId],regionIds:[from.id,to.id],sourceFactIds:[],causes:[],
+      stateDeltas:[{entityType:'army',entityId:army.id,field:'order.targetRegionId',before:from.id,after:to.id}],
+      payload:{armyId:army.id,polityId:army.polityId,previous,next}});
+    world.lastTurn!.factIds.push(f.id);
+    const impact=projectCoreImpacts(world,{target:{kind:'army',id:army.id}}).find(i=>i.sourceFactIds.includes(f.id));
+    expect(impact?.summary).toContain(`改赴${to.name}`);expect(impact?.summary).not.toContain('撤退改为撤退');
+    expect(impact?.sourceFactIds).toContain(f.id);
+  });
   it('projects a real food collapse only after maintenance lowers readiness and the order resolver changes the command', () => {
     const staged = openingWorld('军政影响-断粮改令');
     const fixture = stageBorderWar(staged);

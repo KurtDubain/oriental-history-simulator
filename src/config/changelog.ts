@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.21',
+  version: '1.29.22',
   date: '2026-09-12',
-  title: '援军循路，改令有序',
+  title: '困军循路，有粮方休',
   items: [
-    '增援目标变化时，已生效军令可继续共同的安全路段；真正改道仍按新令执行。',
+    '低战备部队可沿安全粮路撤离休整，停战不再无条件中断撤离；进攻仍须具备战备。',
   ],
 };
 

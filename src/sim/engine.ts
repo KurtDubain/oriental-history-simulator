@@ -107,7 +107,7 @@ import {
   armyOrderIsExecutable,
   armyOrderPath,
   pathBetween,
-  planArmyOrders, executableWarTarget,
+  planArmyOrders, executableWarTarget, recoveryRetreatStep,
 } from './military/orders';
 import {
   createRebellionFactionSettlement,
@@ -2738,6 +2738,11 @@ export function processMilitary(world: WorldState, context: MutableTurnContext):
   const continuingSteps = planArmyOrders(world, context, true);
   for (const army of world.armies) {
     setFormationStatus(world, army, army.order.kind === 'retreat' ? '撤退' : army.order.warId ? '出征' : '驻留');
+    const step = recoveryRetreatStep(world, army, context.turn);
+    if (!step) continue;
+    recordArmyMovement(army, army.regionId, step, context.turn, 'retreat', army.order.warId);
+    army.regionId = step; acted.add(army.id);
+    syncArmyPersonnelLocations(world, army);
   }
   const wars = [...world.wars].filter((war) => war.active).sort((left, right) => stableCompare(left.id, right.id));
   for (const war of wars) {
