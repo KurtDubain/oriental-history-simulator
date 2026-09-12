@@ -1321,7 +1321,7 @@ function routeBetween(world: WorldState, leftId: string, rightId: string): Route
   ));
 }
 
-function selectArmyCommander(world: WorldState, polity: PolityState): CharacterState | null {
+function selectArmyCommander(world: WorldState, polity: PolityState, maySpawn = true): CharacterState | null {
   let candidate: CharacterState | null | undefined = selectCandidate(
     aliveCharacters(world, polity.id).filter((character) => trustedForOffice(world, polity, character) && isAvailableForExpedition(world, polity.id, character)),
     (character) => character.leadership * 0.52
@@ -1329,7 +1329,7 @@ function selectArmyCommander(world: WorldState, polity: PolityState): CharacterS
       + character.loyalty * 0.2
       + character.renown * 0.1,
   );
-  if (!candidate) candidate = spawnCharacter(world, polity, 'new-commander');
+  if (!candidate && maySpawn) candidate = spawnCharacter(world, polity, 'new-commander');
   return candidate ?? null;
 }
 
@@ -1339,8 +1339,9 @@ function createArmy(
   region: RegionState,
   context: MutableTurnContext,
   preferredCommander?: CharacterState,
+  peacetimeRecovery = false,
 ): ArmyState | null {
-  const commander = preferredCommander ?? selectArmyCommander(world, polity);
+  const commander = preferredCommander ?? selectArmyCommander(world, polity, !peacetimeRecovery);
   if (!commander || !isAvailableForExpedition(world, polity.id, commander)) return null;
   const response = selectExpeditionResponses(world, polity, commander, region);
   const participantIds = response.participantIds;
@@ -1351,6 +1352,8 @@ function createArmy(
   const recruitable = Math.min(supported, Math.max(0, 7_000 - existingSoldiers));
   if (existingSoldiers + recruitable < MIN_NEW_ARMY_SIZE) return null;
   const equipmentPayment = armyEquipmentCost(recruitable);
+  if (peacetimeRecovery && (region.food < (existingSoldiers + recruitable) * 2
+    || polity.treasury < equipmentPayment + Math.ceil((existingSoldiers + recruitable) * .11))) return null;
   const treasuryBefore = polity.treasury;
   const wealthBefore = region.wealth;
   polity.treasury -= equipmentPayment;
@@ -1551,18 +1554,21 @@ function supplyArmy(
   if (paid < wage) army.morale = Math.round(clamp(army.morale - 3 * (1 - paid / Math.max(1, wage))));
   army.training = Math.round(clamp(army.training + (army.lastMovedTurn === context.turn - 1 ? 0 : 1)));
 }
-function maintainArmies(world: WorldState, context: MutableTurnContext): void {
+export function maintainArmies(world: WorldState, context: MutableTurnContext): void {
   ensureEligiblePersonalForces(world);
   if (releaseUnavailableFormationMembers(world)) repairDepletedFormationCommands(world, context);
   for (const polity of world.polities.filter((item) => item.alive).sort((left, right) => stableCompare(left.id, right.id))) {
     let armies = world.armies.filter((army) => army.polityId === polity.id);
     const activeWar = world.wars.some((war) => war.active && (war.attackerId === polity.id || war.defenderId === polity.id));
     const desired = desiredFieldFormationCount(world, polity);
-    if (activeWar && armies.length < desired) {
-      const stagingRegions = formationStagingRegions(world, polity);
-      while (armies.length < desired && stagingRegions.length > 0) {
-        const raised = createArmy(world, polity, stagingRegions[armies.length % stagingRegions.length]!, context);
-        if (!raised) break;
+    // Restore an empty peacetime command once a year, not the whole garrison quota.
+    const recover = !activeWar && armies.length === 0 && context.season === '春';
+    if (activeWar && armies.length < desired || recover) {
+      const stagingRegions = formationStagingRegions(world, polity).filter(region => !recover
+        || region.food >= 14_000 && supportedNewArmySize(polity.treasury, region.population) >= MIN_NEW_ARMY_SIZE);
+      while (armies.length < (recover ? 1 : desired) && stagingRegions.length > 0) {
+        const raised = createArmy(world, polity, stagingRegions[armies.length % stagingRegions.length]!, context, undefined, recover);
+        if (!raised) { if (recover) { stagingRegions.shift(); continue; } break; }
         armies.push(raised);
       }
     }

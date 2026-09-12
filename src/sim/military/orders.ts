@@ -297,6 +297,12 @@ function retreatTarget(world: WorldState, army: ArmyState): string {
   const best = safe[0] ?? candidates[0];
   const current = (army.order.kind === 'retreat' || army.order.kind === 'hold' && army.order.reasonCode === 'low_readiness') && army.order.status === 'active'
     ? safe.find(c => c.region.id === army.order.targetRegionId) : undefined;
+  if (current && best && army.recentMovement?.orderKind === 'retreat') {
+    const alternative = pathBetween(world, army.regionId, best.region.id, allowed);
+    // Reissuing costs a marching quarter. A safe post stays our destination unless
+    // the new route saves time after that delay, without retracing the last step.
+    if (best.distance + 1 >= current.distance || alternative?.[1] === army.recentMovement.fromRegionId) return current.region.id;
+  }
   // Don't lose a marching quarter over a small food-score fluctuation. A longer
   // detour must also justify its extra steps; lost/blocked/threatened posts never stick.
   if (current && best && best.score - current.score <= 12 + Math.max(0, best.distance-current.distance) * 2) return current.region.id;

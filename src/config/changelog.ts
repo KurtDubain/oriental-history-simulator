@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.19',
+  version: '1.29.20',
   date: '2026-09-12',
-  title: '权势有继，行军有序',
+  title: '军府再整，退路有继',
   items: [
-    '同领袖重组延续实际权势；交班不再混入早年战役，有效撤退令不因微小波动重发。',
+    '陆军空缺时按实有人力钱粮恢复编队；撤退改向计入重发军令的等待与折返代价。',
   ],
 };
 

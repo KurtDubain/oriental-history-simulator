@@ -46,6 +46,40 @@ function defensiveCoverageFixture() {
 }
 
 describe('defensive coverage from current information',()=>{
+  it('counts the new-order delay, but permits a safe shortcut that really shortens a withdrawal',()=>{
+    for(const savesExtraQuarter of [false,true]){
+      const {world,capital,near,far,enemy,army}=defensiveCoverageFixture();
+      world.armies=[army];enemy.controllerId=army.polityId;
+      const middle={...enemy,id:'recovery-waypoint',neighbors:[enemy.id,far.id]};
+      world.regions.push(middle);
+      capital.neighbors=[near.id];near.neighbors=[capital.id,enemy.id];
+      enemy.neighbors=[near.id,savesExtraQuarter?middle.id:far.id];far.neighbors=[savesExtraQuarter?middle.id:enemy.id];
+      for(const r of world.regions){r.food=1_000_000;r.defense=10;}
+      army.morale=24;army.order={...army.order,kind:'retreat',warId:'visible-front',targetRegionId:far.id,issuedTurn:2,reasonCode:'low_readiness'};
+      army.recentMovement={fromRegionId:enemy.id,toRegionId:near.id,turn:9,orderKind:'retreat',warId:'visible-front'};
+      planArmyOrders(world,factContext(world));
+      expect(army.order.targetRegionId).toBe(savesExtraQuarter?capital.id:far.id);
+      expect(army.order.issuedTurn).toBe(savesExtraQuarter?world.turn:2);
+    }
+  });
+  it('continues an executed retreat instead of retracing its last step when the capital briefly refills',()=>{
+    const {world,capital,near,far,enemy,army}=defensiveCoverageFixture();
+    enemy.neighbors=[];capital.neighbors=[near.id];near.neighbors=[capital.id,far.id];far.neighbors=[near.id];
+    for(const r of [capital,near,far]){r.food=200_000;r.defense=10;}
+    army.morale=24;army.order={...army.order,kind:'retreat',warId:'visible-front',targetRegionId:far.id,issuedTurn:2,reasonCode:'low_readiness'};
+    army.recentMovement={fromRegionId:capital.id,toRegionId:near.id,turn:9,orderKind:'retreat',warId:'visible-front'};
+    for(let t=10;t<14;t++){
+      world.turn=t;capital.food=t%2?0:1_000_000;
+      planArmyOrders(world,factContext(world));
+      expect(army.order).toMatchObject({targetRegionId:far.id,issuedTurn:2});
+      expect(armyOrderPath(world,army)).toEqual([near.id,far.id]);
+      expect(armyOrderIsExecutable(army,'visible-front',t)).toBe(true);
+    }
+    // Safety wins over continuity, even after movement has begun.
+    far.food=0;capital.food=1_000_000;world.turn++;
+    planArmyOrders(world,factContext(world));expect(army.order.targetRegionId).toBe(capital.id);
+    expect(armyOrderIsExecutable(army,'visible-front',world.turn)).toBe(false);
+  });
   it('keeps a reachable retreat destination across small food changes, but replans a lost, blocked, hungry or threatened post',()=>{
     for(const mode of ['stable','lost','blocked','hungry','threatened','better']){
       const {world,capital,near,far,enemy,army}=defensiveCoverageFixture();
@@ -55,6 +89,7 @@ describe('defensive coverage from current information',()=>{
       for(const r of [capital,near,far]){r.food=r.population;r.defense=0;}
       far.defense=23;army.morale=24;army.order={...army.order,kind:'retreat',warId:'visible-front',targetRegionId:far.id,
         issuedTurn:2,issuerId:army.commanderId,reasonCode:'low_readiness'};
+      if(mode!=='better')army.recentMovement={fromRegionId:capital.id,toRegionId:near.id,turn:9,orderKind:'retreat',warId:'visible-front'};
       const issued=army.order.issuedTurn;
       if(mode==='lost')far.controllerId=enemy.controllerId;
       if(mode==='blocked')near.neighbors=near.neighbors.filter(id=>id!==far.id);
