@@ -491,7 +491,23 @@ function issueOrder(
   army.order = { ...next, sourceFactId: fact.id };
 }
 
-export function planArmyOrders(world: WorldState, context: FactTurnBuffer): void {
+function continuesReinforcementStep(world: WorldState, army: ArmyState, next: OrderPlan, turn: number,
+  stepId = armyOrderPath(world, army)?.[1]): boolean {
+  const old = army.order;
+  if (army.embarkedOperationId || old.kind !== 'reinforce' || next.kind !== 'reinforce' || !next.warId
+    || !armyOrderIsExecutable(army, next.warId, turn) || next.status !== 'active'
+    || old.issuerId !== next.issuerId || old.reasonCode !== next.reasonCode
+    || old.targetArmyId !== next.targetArmyId || army.lastMovedTurn === turn) return false;
+  if (!stepId || armyOrderPath(world, { ...army, order: { ...old, ...next } })?.[1] !== stepId) return false;
+  return !world.armies.some(other => !other.embarkedOperationId && other.soldiers > 0
+    && world.wars.some(war => war.active && [war.attackerId, war.defenderId].includes(army.polityId)
+      && enemyIdFor(war, army.polityId) === other.polityId)
+    && other.regionId === stepId);
+}
+
+export function planArmyOrders(world: WorldState, context: FactTurnBuffer, beforeMovement = false): Map<string, string> {
+  // Local to one military resolution: next-region IDs, never another order ledger.
+  const steps = new Map<string, string>();
   for (const army of [...world.armies].sort((left, right) => stableCompare(left.id, right.id))) {
     if (army.embarkedOperationId) {
       const reissued: OrderPlan = {
@@ -508,12 +524,19 @@ export function planArmyOrders(world: WorldState, context: FactTurnBuffer): void
       continue;
     }
     const next = desiredPlan(world, army);
-    if (samePlan(army.order, next)) {
+    // Finish an already authorized, shared safe step first. The existing review
+    // after movement issues the changed destination with its real new timestamp.
+    if (samePlan(army.order, next) || beforeMovement && continuesReinforcementStep(world, army, next, context.turn)) {
       army.order.lastReviewedTurn = context.turn;
+      if (beforeMovement && army.order.kind === 'reinforce' && armyOrderIsExecutable(army, army.order.warId ?? '', context.turn)) {
+        const step = armyOrderPath(world, army)?.[1];
+        if (step) steps.set(army.id, step);
+      }
       continue;
     }
     issueOrder(world, context, army, next);
   }
+  return steps;
 }
 
 export function issueAmphibiousArmyOrder(
@@ -533,7 +556,7 @@ export function issueAmphibiousArmyOrder(
   else army.order.lastReviewedTurn = context.turn;
 }
 
-export function armyOrderPath(world: WorldState, army: ArmyState): string[] | null {
+export function armyOrderPath(world: WorldState, army: ArmyState, authorizedStep?: string): string[] | null {
   const order = army.order;
   if (order.kind === 'hold' || order.status === 'blocked') return null;
   const targetRegionId = order.targetArmyId
@@ -541,7 +564,13 @@ export function armyOrderPath(world: WorldState, army: ArmyState): string[] | nu
     : order.targetRegionId;
   if (!targetRegionId) return null;
   if (order.kind === 'retreat' || order.kind === 'reinforce') {
-    return pathBetween(world, army.regionId, targetRegionId, new Set([army.polityId]));
+    const path = pathBetween(world, army.regionId, targetRegionId, new Set([army.polityId]));
+    if (path || order.kind !== 'reinforce' || !authorizedStep) return path;
+    // An earlier army may capture the distant destination during this phase.
+    // Only the already authorized shared step survives, never a fresh detour.
+    const next = desiredPlan(world, army);
+    return continuesReinforcementStep(world, army, next, world.turn, authorizedStep)
+      ? armyOrderPath(world, { ...army, order: { ...order, ...next } }) : null;
   }
   const war = order.warId ? world.wars.find((candidate) => candidate.id === order.warId && candidate.active) : null;
   if (!war) return null;

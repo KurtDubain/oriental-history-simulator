@@ -12,6 +12,8 @@ import {
   type WorldState,
 } from '../index';
 import { emitSimulationFact, type FactTurnBuffer } from '../facts';
+import { processMilitary } from '../engine';
+import { createTurnContext } from '../turn-context-state';
 import {
   collectReferencedFactIds,
   compactWorldArchive,
@@ -29,6 +31,115 @@ function factContext(world: WorldState): FactTurnBuffer {
     facts: [],
   };
 }
+
+function reinforcementFixture() {
+  const world=createWorld('共同路段，不是新的行军');world.turn=10;
+  const [start,step,fork,left,right,enemy]=world.regions;
+  const own=world.polities[0],foe=world.polities[1];
+  for(const r of [start,step,fork,left,right]){r.controllerId=own.id;r.food=1_000_000;}
+  enemy.controllerId=foe.id;
+  start.neighbors=[step.id];step.neighbors=[start.id,fork.id];fork.neighbors=[step.id,left.id,right.id];
+  left.neighbors=[fork.id];right.neighbors=[fork.id];enemy.neighbors=[];
+  const army=world.armies.find(a=>a.polityId===own.id)!;world.armies=[army];
+  army.regionId=start.id;army.supply=100;army.morale=80;army.embarkedOperationId=null;
+  army.order={...army.order,kind:'reinforce',warId:'shared-road',issuerId:army.commanderId,
+    targetRegionId:left.id,targetArmyId:null,issuedTurn:8,status:'active',reasonCode:'defend_war_goal'};
+  world.wars=[{id:'shared-road',kind:'interstate',attackerId:foe.id,defenderId:own.id,
+    startedTurn:8,endedTurn:null,active:true,attackerScore:0,defenderScore:0,reason:'守边',lastBattleTurn:9,
+    goal:'边境',targetRegionIds:[right.id],exhaustion:0}];
+  return {world,army,start,step,fork,left,right,enemy};
+}
+
+describe('reinforcement execution continuity',()=>{
+  it('a distant target lost earlier in the same military phase does not cancel an authorized shared step',()=>{
+    const {world,army,start,step,left,right,enemy}=reinforcementFixture(),context=factContext(world);
+    world.wars[0].targetRegionIds=[left.id];
+    const steps=planArmyOrders(world,context,true),old={...army.order};
+    left.controllerId=enemy.controllerId;world.wars[0].targetRegionIds=[right.id];
+    expect(armyOrderPath(world,army)).toBeNull();
+    expect(armyOrderPath(world,army,steps.get(army.id))?.[1]).toBe(step.id);
+    expect(army.order).toEqual(old);expect(context.facts).toHaveLength(0);
+    recordArmyMovement(army,start.id,step.id,world.turn);army.regionId=step.id;
+    expect(armyOrderPath(world,army,steps.get(army.id))).toBeNull();
+    planArmyOrders(world,context);expect(army.order).toMatchObject({targetRegionId:right.id,issuedTurn:world.turn});
+    expect(context.facts.some(f=>f.kind==='army_order_changed'&&f.payload.previous.targetRegionId===left.id&&f.payload.next.targetRegionId===right.id)).toBe(true);
+  });
+  it.each(['next-captured','road-cut','enemy','commander','war','ended','morale','supply','landing'] as const)(
+    'does not extend a previous step authorization after %s changes',mode=>{
+      const {world,army,start,step,left,right,enemy}=reinforcementFixture();world.wars[0].targetRegionIds=[left.id];
+      const steps=planArmyOrders(world,factContext(world),true);
+      left.controllerId=enemy.controllerId;world.wars[0].targetRegionIds=[right.id];
+      if(mode==='next-captured')step.controllerId=enemy.controllerId;
+      if(mode==='road-cut')start.neighbors=[];
+      if(mode==='enemy')world.armies.push({...army,id:'enemy-in-route',polityId:enemy.controllerId,regionId:step.id});
+      if(mode==='commander')army.commanderId='new-commander';
+      if(mode==='war')army.order.warId='new-war';
+      if(mode==='ended')world.wars[0].active=false;
+      if(mode==='morale')army.morale=10;
+      if(mode==='supply')army.supply=10;
+      if(mode==='landing')army.embarkedOperationId='voyage';
+      expect(armyOrderPath(world,army,steps.get(army.id))).toBeNull();
+    });
+  it('the real military resolver advances once per season while destinations update along a common road',()=>{
+    const {world,army,start,step,fork,left,right}=reinforcementFixture();
+    for(const [from,to] of [[start,step],[step,fork],[fork,left],[fork,right]])world.routes.push({
+      ...world.routes[0],id:`fixture-${from.id}-${to.id}`,fromRegionId:from.id,toRegionId:to.id,
+    });
+    world.wars.push({...world.wars[0],id:'zz-other-front'});
+    const context=createTurnContext(world);processMilitary(world,context);
+    expect(army.regionId).toBe(step.id);
+    expect(army.recentMovement).toMatchObject({fromRegionId:start.id,toRegionId:step.id,turn:10,orderKind:'reinforce'});
+    expect(army.order).toMatchObject({targetRegionId:right.id,issuedTurn:10});
+    const first=context.facts.find(f=>f.kind==='army_order_changed'&&f.payload.armyId===army.id)!;
+    expect(first.kind==='army_order_changed'&&first.regionIds).toContain(step.id);
+    world.turn++;world.wars[0].targetRegionIds=[left.id];
+    const next=createTurnContext(world);processMilitary(world,next);
+    expect(army.regionId).toBe(fork.id);expect(army.lastMovedTurn).toBe(11);
+    expect(army.recentMovement).toMatchObject({fromRegionId:step.id,toRegionId:fork.id});
+    expect(army.order).toMatchObject({targetRegionId:left.id,issuedTurn:11});
+    expect([...context.facts,...next.facts].filter(f=>f.kind==='battle')).toHaveLength(0);
+    expect(world.armies.filter(a=>a.id===army.id)).toHaveLength(1);
+    expect(world.characters.find(c=>c.id===army.commanderId)?.commandingArmyId).toBe(army.id);
+    expect(army.soldiers).toBe(world.personalForces.filter(f=>f.formationId===army.id).reduce((sum,f)=>sum+f.soldiers,0));
+  });
+  it('executes the eligible common step before the existing post-movement review records a new target',()=>{
+    const {world,army,start,step,right}=reinforcementFixture(),context=factContext(world),old={...army.order};
+    planArmyOrders(world,context,true);
+    expect(army.order).toMatchObject({issuedTurn:old.issuedTurn,targetRegionId:old.targetRegionId});
+    expect(context.facts).toHaveLength(0);expect(armyOrderIsExecutable(army,'shared-road',world.turn)).toBe(true);
+    expect(armyOrderPath(world,army)?.[1]).toBe(step.id);
+    recordArmyMovement(army,start.id,step.id,world.turn);army.regionId=step.id;
+    planArmyOrders(world,context);
+    expect(army.order).toMatchObject({issuedTurn:world.turn,targetRegionId:right.id});
+    const fact=context.facts.find(f=>f.kind==='army_order_changed')!;
+    expect(fact.kind==='army_order_changed'&&fact.payload.previous.issuedTurn).toBe(old.issuedTurn);
+    expect(fact.kind==='army_order_changed'&&fact.payload.next.issuedTurn).toBe(world.turn);
+    expect(army.order.sourceFactId).toBe(fact.id);
+    expect(armyOrderIsExecutable(army,'shared-road',world.turn)).toBe(false);
+  });
+  it.each(['new','commander','war','ended','reverse','task','blocked','captured','threat','supply','morale','landing'] as const)(
+    'keeps the ordinary review and delay for %s',mode=>{
+      const {world,army,start,step,left,right,enemy}=reinforcementFixture(),context=factContext(world);
+      if(mode==='new')army.order.issuedTurn=world.turn;
+      if(mode==='commander')army.order.issuerId='previous-commander';
+      if(mode==='war')army.order.warId='previous-war';
+      if(mode==='ended')world.wars[0].active=false;
+      if(mode==='reverse'){start.neighbors.push(right.id);right.neighbors.push(start.id);}
+      if(mode==='task')army.order.kind='advance';
+      if(mode==='blocked')left.neighbors=[]; // Break the old branch, not the new route.
+      if(mode==='blocked')world.regions.find(r=>r.neighbors.includes(left.id))!.neighbors=world.regions.find(r=>r.neighbors.includes(left.id))!.neighbors.filter(id=>id!==left.id);
+      if(mode==='captured')left.controllerId=enemy.controllerId;
+      if(mode==='threat')world.armies.push({...army,id:'approaching-enemy',polityId:enemy.controllerId,regionId:step.id,order:{...army.order}});
+      if(mode==='supply')army.supply=10;
+      if(mode==='morale')army.morale=10;
+      if(mode==='landing')army.embarkedOperationId='voyage';
+      const expected=structuredClone(world);planArmyOrders(expected,factContext(expected));
+      planArmyOrders(world,context,true);
+      expect(army.order).toEqual(expected.armies[0].order);
+      expect(army.regionId).toBe(start.id);
+      if(mode!=='landing')expect(armyOrderIsExecutable(army,'shared-road',world.turn)).toBe(false);
+    });
+});
 
 function defensiveCoverageFixture() {
   const world=createWorld('可见威胁与守军覆盖');world.turn=10;

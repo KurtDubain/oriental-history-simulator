@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { advanceWorldBy, createWorld } from '../sim';
+import { advanceWorldBy, createWorld, serializeWorld } from '../sim';
 import {
   observerStorageKey,
   restoreWorldSession,
@@ -71,8 +71,11 @@ describe('restoreWorldSession', () => {
     expect(restoreWorldSession(second, 'collection', new MemoryReader(), false).focusedPoliticalFactionId).toBeNull();
   });
 
-  it('retains the frozen 春战副将 T12 simulation identity across observer-only changes', () => {
+  it('retains the current-rule 春战副将 T12 simulation identity across observer-only changes', () => {
     const world = advanceWorldBy(createWorld('春战副将'), 12);
+    const before = serializeWorld(world);
+    restoreWorldSession(world, 'continue', new MemoryReader(), false);
+    expect(serializeWorld(world)).toBe(before);
 
     expect({
       turn: world.turn,
@@ -83,11 +86,13 @@ describe('restoreWorldSession', () => {
       historyCount: world.history.length,
     }).toEqual({
       turn: 12,
-      hash: '8f0806124ba4c505',
-      factDigest: '70f705d042bb55f6',
-      historyDigest: '1d42f050f59a20c0',
-      factCount: 429,
-      historyCount: 276,
+      // First divergence: T4 a_009 moves Kaesong→Pyongyang under its old
+      // authorized reinforcement step; the actual new order still dates T3.
+      hash: '80fd3f940d83b4e2',
+      factDigest: '47f537029adb7e4d',
+      historyDigest: '755f773facc617e3',
+      factCount: 467,
+      historyCount: 283,
     });
   });
 });

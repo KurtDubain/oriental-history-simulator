@@ -10,8 +10,8 @@ import {
 } from '.';
 import type { MapProfile } from './types';
 
-// Verified against two independent replays: migration no longer counts as succession;
-// the prior checkout has identical military states (continuity audit goldens.json).
+// Two independent replays, v1.29.21: the first change is T6 a_004 completing
+// its authorized reinforcement step (reinforcement-continuity/goldens traces).
 const GENERAL_GROUP_BASELINES = {
   "架构边界-入世": [
     [
@@ -45,39 +45,39 @@ const GENERAL_GROUP_BASELINES = {
       "e4b2fd6e651de372"
     ],
     [
-      "3289d7ecfc59b1e2",
-      "ce1c9ccd1b333715",
+      "2b71a2d9121852ca",
+      "7de4da28413ab97e",
       "7d8ac69d98b10c85"
     ],
     [
-      "786e38714496b47a",
-      "6b216d9989dcf984",
-      "db97c45881847626"
+      "2877dac6f489523f",
+      "3fc95fd357ee6402",
+      "66200e6a71c2fe77"
     ],
     [
-      "5c6692ea58c696e9",
-      "0991841cf4308c9a",
-      "dcce1145fff99a6f"
+      "d851a1da59480415",
+      "08e87e2c9774654d",
+      "51ab261c2f6aa76c"
     ],
     [
-      "9c31a84985afd2b9",
-      "fc5a9c76fd289331",
-      "8c414b3f0d7f4691"
+      "a3493bf2b5348860",
+      "4b0084de0405fee0",
+      "e6af6f39c622551a"
     ],
     [
-      "eef74c42733a5384",
-      "5e04fcfe51ac555b",
-      "f4b91cecbd4920f4"
+      "c6fdd585eb9b97d4",
+      "d432296d735d244f",
+      "882516766cf966e4"
     ],
     [
-      "3e463f5008fb1c80",
-      "37e42f2c9bf46769",
-      "10e1e0a8ec7e043b"
+      "21772cc1cabf784e",
+      "543fee5904e30a6e",
+      "6146c647e618f76e"
     ],
     [
-      "b1a8469c4f137d00",
-      "b737806c89e825fd",
-      "2aa41f1ef1066259"
+      "f2fd05b28f1b2749",
+      "97997efa222d46cc",
+      "a365090b9969565f"
     ]
   ],
   "州县民生": [

@@ -2732,10 +2732,10 @@ function endWar(
   }
 }
 
-function processMilitary(world: WorldState, context: MutableTurnContext): void {
+export function processMilitary(world: WorldState, context: MutableTurnContext): void {
   const acted = new Set<string>();
   refreshAllArmyMilitaryAuthority(world);
-  planArmyOrders(world, context);
+  const continuingSteps = planArmyOrders(world, context, true);
   for (const army of world.armies) {
     setFormationStatus(world, army, army.order.kind === 'retreat' ? '撤退' : army.order.warId ? '出征' : '驻留');
   }
@@ -2776,7 +2776,7 @@ function processMilitary(world: WorldState, context: MutableTurnContext): void {
         const army = world.armies.find((item) => item.id === listedArmy.id);
         if (!army || army.embarkedOperationId || acted.has(army.id) || army.morale < 12
           || !armyOrderIsExecutable(army, war.id, context.turn)) continue;
-        const path = armyOrderPath(world, army);
+        const path = armyOrderPath(world, army, continuingSteps.get(army.id));
         if (!path || path.length < 2) continue;
         const nextRegion = world.regions.find((region) => region.id === path[1]);
         const route = nextRegion ? routeBetween(world, army.regionId, nextRegion.id) : undefined;
