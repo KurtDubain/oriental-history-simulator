@@ -1325,8 +1325,8 @@ export function App() {
     situationReturnFocusRef.current = returnFocusTo
       ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null);
     situationFocusRestoreAllowedRef.current = true;
-    const projection = projectSituationWorkbench(current, preferredSituationId);
-    if (!projection.selectedId || !projection.selected) return;
+    const projection = projectSituationWorkbench(current, preferredSituationId, false);
+    if (!projection.selectedId) return;
     playback.pause();
     navigation.openLayer({ kind: 'situations', situationId: projection.selectedId });
   }, [navigation, playback]);

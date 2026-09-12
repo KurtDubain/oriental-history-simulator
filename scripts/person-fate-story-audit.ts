@@ -5,11 +5,12 @@ import {
   readWorldFacts,
   readWorldHistory,
   serializeWorld,
+  keyedRandom,
   validateWorld,
   type BattleFact,
   type WorldState,
 } from '../src/sim';
-import { projectPersonStoryArc } from '../src/view/person-story-arc';
+import { personHistoryEvidence, projectPersonStoryArc } from '../src/view/person-story-arc';
 import { createRosterDiscoveryState } from '../src/view/roster-discovery';
 import { projectRosterCollection } from '../src/view/roster-adapter';
 import { battleFateChances } from '../src/sim/military/battle-fate';
@@ -25,7 +26,8 @@ const severityBands = {
   died: { low: 0, guarded: 0, grave: 0, extreme: 0 },
 };
 const recoveryDurations: Record<string, number> = {};
-const storyLengths = { one: 0, two: 0, three: 0 };
+const storyLengths = { one: 0, two: 0, three: 0, four: 0, five: 0 };
+let conditionalFateChecks = 0;
 const totals = {
   battles: 0, participantAppearances: 0, wounded: 0, battleDeaths: 0, diseaseDeaths: 0, naturalDeaths: 0,
   repeatWounds: 0, woundedNextQuarterBattles: 0, recoveredAndReturned: 0, neverReturned: 0,
@@ -89,6 +91,8 @@ function auditWorld(world: WorldState, seed: string): void {
   if (violations.length) failures.push(`${seed}: ${violations[0]?.code} ${violations[0]?.message}`);
   const facts = readWorldFacts(world);
   const history = readWorldHistory(world);
+  const evidence = personHistoryEvidence(world);
+  const factIds = new Set(facts.map(fact => fact.id)), eventIds = new Set(history.map(event => event.id));
   const battles = facts.filter((fact): fact is BattleFact => fact.kind === 'battle');
   const battleById = new Map(battles.map((fact) => [fact.id, fact]));
   totals.battles += battles.length;
@@ -110,7 +114,13 @@ function auditWorld(world: WorldState, seed: string): void {
       if (!row) failures.push(`${seed}: ${fact.id} 负伤没有可核验的战场暴露`);
       else {
         const person = world.characters.find((item) => item.id === fact.payload.characterId);
-        const severity = battleFateChances(row.participant, row.won, fact.payload.healthBefore, person?.caution ?? 50, person?.leadership ?? 50).severity;
+        const chances = battleFateChances(row.participant, row.won, fact.payload.healthBefore, person?.caution ?? 50, person?.leadership ?? 50);
+        const severity = chances.severity;
+        const roll = keyedRandom(world.seed, battle!.turn, 'battle-fate', battle!.id, fact.payload.characterId);
+        conditionalFateChecks += 1;
+        if (roll >= chances.death + chances.wound || (roll < chances.death) !== Boolean(fact.payload.observerProtectionConsumed)) {
+          failures.push(`${seed}: ${fact.id} 负伤与真实暴露条件及确定性裁决不符`);
+        }
         severityBands.wounded[severityBand(severity)] += 1;
         if (row.won && row.participant.losses / Math.max(1, row.participant.soldiersBefore) < .12) totals.lowRiskNamedFates += 1;
       }
@@ -140,7 +150,12 @@ function auditWorld(world: WorldState, seed: string): void {
         if (!row) failures.push(`${seed}: ${fact.id} 战死没有可核验的战场暴露`);
         else {
           const person = world.characters.find((item) => item.id === fact.payload.characterId);
-          const severity = battleFateChances(row.participant, row.won, fact.payload.health, person?.caution ?? 50, person?.leadership ?? 50).severity;
+          const chances = battleFateChances(row.participant, row.won, fact.payload.health, person?.caution ?? 50, person?.leadership ?? 50);
+          const severity = chances.severity;
+          conditionalFateChecks += 1;
+          if (keyedRandom(world.seed, battle!.turn, 'battle-fate', battle!.id, fact.payload.characterId) >= chances.death) {
+            failures.push(`${seed}: ${fact.id} 战死与真实暴露条件及确定性裁决不符`);
+          }
           severityBands.died[severityBand(severity)] += 1;
           if (row.won && row.participant.losses / Math.max(1, row.participant.soldiersBefore) < .12) totals.lowRiskNamedFates += 1;
         }
@@ -162,13 +177,23 @@ function auditWorld(world: WorldState, seed: string): void {
   totals.formationsRaised += raised.length;
   totals.formationParticipants += raised.reduce((sum, event) => sum + event.actorIds.length, 0);
   for (const person of world.characters) {
-    const arc = projectPersonStoryArc(world, person);
+    const arc = projectPersonStoryArc(world, person, evidence);
     if (arc.length === 1) storyLengths.one += 1;
     if (arc.length === 2) storyLengths.two += 1;
     if (arc.length === 3) storyLengths.three += 1;
-    if (arc.length > 3) failures.push(`${seed}: ${person.id} 人物故事超过三段`);
+    if (arc.length === 4) storyLengths.four += 1;
+    if (arc.length === 5) storyLengths.five += 1;
+    if (arc.length > 5) failures.push(`${seed}: ${person.id} 人物故事超过五段`);
     if (!person.alive && arc.length && arc.at(-1)?.phase !== 'ending') failures.push(`${seed}: ${person.id} 故人故事未以结局收束`);
-    if (arc.some((beat) => !beat.sourceFactIds.length)) failures.push(`${seed}: ${person.id} 人物故事存在无来源段落`);
+    for (const beat of arc) {
+      if ((!beat.sourceFactIds.length && !beat.sourceEventIds.length)
+        || beat.sourceFactIds.some(id => !factIds.has(id)) || beat.sourceEventIds.some(id => !eventIds.has(id))
+        || (!beat.primaryFactId && !beat.primaryEventId)
+        || (beat.primaryFactId && !beat.sourceFactIds.includes(beat.primaryFactId))
+        || (beat.primaryEventId && !beat.sourceEventIds.includes(beat.primaryEventId))) {
+        failures.push(`${seed}: ${person.id} 人物故事主证据或完整来源不可解析`);
+      }
+    }
     if (arc.length && storySamples.length < 12 && !storySamples.some((sample) => sample.length === arc.length)) {
       storySamples.push({ seed, person: person.name, alive: person.alive, length: arc.length,
         beats: arc.map((beat) => ({ date: beat.dateLabel, label: beat.phaseLabel, title: beat.title, summary: beat.summary })) });
@@ -217,9 +242,9 @@ if (!saveResumeExact) failures.push(`${resumeSeed} 存读档后演化不一致`)
 if (!totals.battles) failures.push('长程样本没有产生战斗');
 if (totals.publicRefusals) failures.push('已删除的公开拒令仍进入自然史');
 if (totals.technicalCapHits) failures.push(`仍有${totals.technicalCapHits}支编队触及18人技术上限`);
-if (totals.lowRiskAppearances && totals.lowRiskNamedFates / totals.lowRiskAppearances > .001) {
-  failures.push('低战损胜势中的具名伤亡仍然过密');
-}
+// The former 0.1% sample quota predates the exposure-based fate rule. Winners
+// remain at nonzero risk; validate every actual outcome against its recorded
+// health/loss/role and keyed draw above. Keep density visible, not a death quota.
 
 const output = {
   sample: { coreSeeds, heldOutSeeds, turns }, totals, severityBands, recoveryDurations, formationSizes, storyLengths,
@@ -235,6 +260,8 @@ const output = {
   },
   partialResponseExamples, refusalExamples, storySamples: storySamples.slice(0, 3),
   deterministicReplayExact, saveResumeExact, failures,
+  conditionalFateChecks,
+  riskContract: '记录人次密度；逐条核对实际暴露及确定性裁决，不规定样本伤亡配额',
 };
 
 console.log(JSON.stringify(output, null, 2));

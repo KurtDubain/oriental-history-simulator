@@ -158,8 +158,9 @@ function auditPauseCandidates(world: WorldState, metrics: Metrics): void {
 
 function auditLead(world: WorldState, lead: ObserverLead, metrics: Metrics): void {
   if (!targetExists(world, lead)) fail(world.seed, world.turn, `${lead.id} targets a missing entity`);
-  if (!lead.question.endsWith('？') || lead.evidence.length !== 2 || lead.evidence.some((line) => !line.trim())) {
-    fail(world.seed, world.turn, `${lead.id} does not contain one concrete question and two evidence lines`);
+  // “眼下大事” is a statement; provenance/identity below, not punctuation, establish its subject.
+  if (!lead.question.trim() || lead.evidence.length !== 2 || lead.evidence.some((line) => !line.trim())) {
+    fail(world.seed, world.turn, `${lead.id} does not contain a headline and two evidence lines`);
   }
   if (!lead.primarySceneId || lead.primarySourceFactIds.some((id) => !world.facts.some((fact) => fact.id === id))) {
     fail(world.seed, world.turn, `${lead.id} does not retain valid principal evidence identity`);

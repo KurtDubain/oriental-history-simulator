@@ -2,6 +2,8 @@ import { advanceWorld, createWorld, serializeWorld } from '../src/sim';
 import { deriveObserverLeads } from '../src/view/observer-leads';
 import { projectQuarterPulse } from '../src/view/quarter-pulse-stories';
 import { projectSituationWorkbench } from '../src/view/situation-detail';
+import { projectWarGroups } from '../src/view/war-group-projection';
+import { armyOrderPath } from '../src/sim/military/orders';
 
 const DEFAULT_SEEDS = ['沧衡-甲子', '潮生商路', '孤城疫年', '春战副将'] as const;
 const quarters = Number(process.env.TRIM02_AUDIT_TURNS ?? 16);
@@ -31,6 +33,7 @@ interface AuditRow {
 
 const failures: string[] = [];
 const rows: AuditRow[] = [];
+let sourcedContactPreviews = 0;
 
 function fail(scope: string, message: string): void {
   if (failures.length < 100) failures.push(`${scope}: ${message}`);
@@ -78,9 +81,20 @@ for (const seed of seeds) {
       }
     }
 
+    const leadCopy = leads.flatMap(lead => {
+      const situation = world.situationSystem.situations.find(item => item.id === lead.situationId);
+      const contact = situation?.type === 'war_progress' ? projectWarGroups(world, situation.scopeKey)?.contacts[0] : null;
+      const army = contact && world.armies.find(item => item.id === contact.attackerArmyId);
+      const sourcedContact = contact && army
+        && lead.primarySceneId === `war-state:${situation!.scopeKey}:${army.id}:${contact.regionId}`
+        && armyOrderPath(world, army).includes(contact.regionId)
+        && lead.recentChange === `眼下 · ${contact.region}即将接敌`;
+      if (sourcedContact) sourcedContactPreviews += 1;
+      return [lead.question, ...lead.evidence, sourcedContact ? '' : lead.recentChange ?? ''];
+    });
     const visibleCopy = [
       ...pulse.stories.flatMap((story) => [story.title, story.summary]),
-      ...leads.flatMap((lead) => [lead.question, ...lead.evidence, lead.recentChange ?? '']),
+      ...leadCopy,
       ...(dossier.selected
         ? [dossier.selected.currentChange, ...dossier.selected.playerSummary]
         : []),
@@ -136,6 +150,7 @@ console.log(JSON.stringify({
   phase: 'TRIM02',
   scope: { seeds: seeds.length, quartersPerSeed: quarters },
   totals,
+  sourcedContactPreviews,
   rows,
   failures,
 }, null, 2));

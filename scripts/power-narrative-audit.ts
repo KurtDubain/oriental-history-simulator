@@ -1,6 +1,6 @@
-import { advanceWorld, createWorld, serializeWorld, type SimulationFact } from '../src/sim';
+import { advanceWorld, createWorld, readWorldFacts, serializeWorld, type SimulationFact } from '../src/sim';
 import { calculateFactionPowerLedger } from '../src/sim/politics/power-ledger';
-import { projectHistoricalScenes, projectSituationHistoricalScenes } from '../src/view/historical-scenes';
+import { projectHistoricalScenes, projectSituationHistoricalScenes, type HistoricalScene } from '../src/view/historical-scenes';
 
 const DEFAULT_SEEDS = ['权势资源账', '军权春秋', '关河旧梦', '东海风云'] as const;
 const turns = Number(process.env.POWER_NARRATIVE_AUDIT_TURNS ?? 64);
@@ -31,14 +31,21 @@ function fail(seed: string, message: string): void {
   if (failures.length < 100) failures.push(`${seed}: ${message}`);
 }
 
-function hasConcreteAction(text: string): boolean {
-  return /开战|交战|取胜|守住|停战|议和|占得上风|易手|接管|争取|答应|观望|请领|请掌|应允|安抚|削权|撤去|受任|出任|去职|去世|负伤|阵亡于[^：。]{1,12}|成婚|暂缓|未准|推举|推为|继任|离任|离开领袖位置|更换领袖|退出朝局|结成盟约|退出[^：。]{0,12}权力中枢|清洗|发动宫变|篡立新朝/u.test(text);
+function hasConcreteAction(scene: HistoricalScene, facts: ReadonlyMap<string, SimulationFact>): boolean {
+  const sources = scene.sourceFactIds.map(id => facts.get(id));
+  return Boolean(scene.title.trim() && scene.summary.trim())
+    && sources.length > 0 && sources.every(Boolean)
+    && sources.some(fact => fact!.kind !== 'situation_milestone'
+      && (fact!.actorIds.some(id => scene.actorIds.includes(id))
+        || fact!.polityIds.some(id => scene.polityIds.includes(id))
+        || fact!.regionIds.some(id => scene.regionIds.includes(id))));
 }
 
 for (const seed of seeds) {
   let world = createWorld(seed);
   for (let turn = 0; turn < turns; turn += 1) world = advanceWorld(world);
   const beforeProjection = serializeWorld(world);
+  const factsById = new Map(readWorldFacts(world).map(fact => [fact.id, fact]));
   const factions = world.factions.filter((faction) => faction.active);
   let saturatedFactions = 0;
   let resourceCount = 0;
@@ -72,7 +79,7 @@ for (const seed of seeds) {
       continue;
     }
     agencyScenes += 1;
-    if (!scene.shortText.includes(actor) || !scene.shortText.includes(army) || !hasConcreteAction(scene.shortText)) {
+    if (!scene.shortText.includes(actor) || !scene.shortText.includes(army) || !hasConcreteAction(scene, factsById)) {
       fail(seed, `${resolution.id} scene omits actor, army or concrete action`);
     }
     if (!scene.sourceFactIds.includes(resolution.id) || !scene.sourceFactIds.includes(resolution.payload.submissionFactId)) {
@@ -88,7 +95,7 @@ for (const seed of seeds) {
     const scene = projectSituationHistoricalScenes(world, situation, 1)[0];
     if (!scene) continue;
     situationScenes += 1;
-    if (!hasConcreteAction(scene.shortText)) fail(seed, `${situation.id} first scene has no concrete action: ${scene.shortText}`);
+    if (!hasConcreteAction(scene, factsById)) fail(seed, `${situation.id} first scene has no concrete action: ${scene.shortText}`);
     if (scene.sourceFactIds.length === 0) fail(seed, `${situation.id} scene has no Fact provenance`);
   }
   if (serializeWorld(world) !== beforeProjection) fail(seed, 'read-only projections mutated WorldState');

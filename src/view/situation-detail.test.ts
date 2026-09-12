@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as archive from '../sim/archive';
 import { advanceWorld, advanceWorldBy, createWorld } from '../sim';
 import type { WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations';
@@ -37,6 +38,28 @@ function withoutOptionalHistoryLinks<T extends {
 }
 
 describe('Situation detail projection', () => {
+  it('reads each complete chain once per detail, regardless of scene count, without stale world data', () => {
+    const world = establishedWorld();
+    const facts = vi.spyOn(archive, 'readWorldFacts'), history = vi.spyOn(archive, 'readWorldHistory');
+    try {
+      const before = JSON.stringify(world);
+      const directory = projectSituationWorkbench(world, null, false);
+      expect(facts).not.toHaveBeenCalled();
+      expect(history).not.toHaveBeenCalled();
+      const first = projectSituationWorkbench(world);
+      expect(directory).toEqual({ ...first, selected: null });
+      expect(facts).toHaveBeenCalledTimes(1);
+      expect(history).toHaveBeenCalledTimes(1);
+      expect(first.selected?.scenes.length).toBeGreaterThan(0);
+      expect(JSON.stringify(world)).toBe(before);
+      facts.mockClear(); history.mockClear();
+      const next = advanceWorld(world);
+      const view = projectSituationWorkbench(next);
+      expect(view.selected).toEqual(projectSituationDetail(next, next.situationSystem.situations.find(s => s.id === view.selectedId)!));
+      expect(projectSituationWorkbench(world)).toEqual(first);
+      expect(projectSituationWorkbench(structuredClone(next))).toEqual(view);
+    } finally { facts.mockRestore(); history.mockRestore(); }
+  });
   it('renders naturally active Situation types as bounded Chinese stories without mutating the world', () => {
     const world = establishedWorld();
     const before = JSON.stringify(world);

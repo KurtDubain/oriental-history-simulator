@@ -1,14 +1,12 @@
-import { continuousAppointmentIds } from '../sim/facts/projector';
 import type { SituationState } from '../sim/situations';
 import type { SimulationFact } from '../sim/facts/types';
 import type { DeltaValue, StateDelta, WorldState } from '../sim/types';
-import { readWorldFacts, readWorldHistory } from '../sim/archive';
 import { projectCoreImpacts } from './core-impact-projection';
 import { historyTurnDate } from './v1-history';
-import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import { projectWarGroups } from './war-group-projection';
 import {
   projectFactNarrative,
+  historicalSceneContext,
   projectSituationHistoricalScenes,
   type HistoricalScene,
 } from './historical-scenes';
@@ -258,10 +256,9 @@ function projectDelta(world: WorldState, factId: string, delta: StateDelta): Sit
 
 type FactHistoryIndex = ReadonlyMap<string, readonly string[]>;
 
-function buildFactHistoryIndex(world: WorldState): FactHistoryIndex {
+function buildFactHistoryIndex(history: ReturnType<typeof historicalSceneContext>['history']): FactHistoryIndex {
   const index = new Map<string, string[]>();
-  for (const event of readWorldHistory(world)) {
-    if (!isDefaultVisibleHistoryEvent(event)) continue;
+  for (const event of history) {
     for (const factId of event.sourceFactIds) {
       const eventIds = index.get(factId) ?? [];
       if (eventIds.length < 2 && !eventIds.includes(event.id)) eventIds.push(event.id);
@@ -404,15 +401,16 @@ function directoryItem(situation: SituationState, world: WorldState): SituationD
 
 export function projectSituationDetail(world: WorldState, situation: SituationState): SituationDetailProjection {
   const item = projectSituationSnapshotItem(situation, world);
-  const allFacts = readWorldFacts(world);
-  const historyByFact = buildFactHistoryIndex(world);
+  const context = historicalSceneContext(world);
+  const allFacts = context.facts;
+  const historyByFact = buildFactHistoryIndex(context.history);
   const milestoneFacts = allFacts
     .filter((fact): fact is Extract<SimulationFact, { kind: 'situation_milestone' }> => (
       fact.kind === 'situation_milestone' && fact.payload.situationId === situation.id
     ))
     .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
   const evidenceSelection = evidenceFacts(situation, milestoneFacts, allFacts);
-  const continuations = continuousAppointmentIds(allFacts);
+  const continuations = context.continuations;
   const evidence = evidenceSelection.facts
     .filter((fact) => fact.kind !== 'situation_milestone' && !continuations.has(fact.id))
     .map((fact) => projectFact(world, fact, historyByFact));
@@ -434,7 +432,7 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
   const endTurn = situation.resolvedTurn;
   const durationTurns = Math.max(1, (endTurn ?? situation.lastUpdatedTurn) - situation.startedTurn + 1);
   const durationLabel = durationTurns < 4 ? `${durationTurns}季` : `${Math.floor(durationTurns / 4)}年${durationTurns % 4 ? `${durationTurns % 4}季` : ''}`;
-  const scenes = projectSituationHistoricalScenes(world, situation, 3);
+  const scenes = projectSituationHistoricalScenes(world, situation, 3, null, 'all', context);
   const latestScene = scenes[0];
   const lastSettledTurn = world.lastTurn?.turn ?? Math.max(0, world.turn - 1);
   const recentFactIds = new Set(latestScene?.sourceFactIds ?? []);
@@ -487,6 +485,7 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
 export function projectSituationWorkbench(
   world: WorldState,
   preferredSituationId: string | null = null,
+  includeDetail = true,
 ): SituationWorkbenchProjection {
   const openSituations = world.situationSystem.situations
     .filter((situation) => situation.status === 'open')
@@ -517,6 +516,6 @@ export function projectSituationWorkbench(
     open: openSituations.map((situation) => directoryItem(situation, world)),
     recentResolved: visibleResolved.map((situation) => directoryItem(situation, world)),
     selectedId: selectedSituation?.id ?? null,
-    selected: selectedSituation ? projectSituationDetail(world, selectedSituation) : null,
+    selected: includeDetail && selectedSituation ? projectSituationDetail(world, selectedSituation) : null,
   };
 }

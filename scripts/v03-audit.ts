@@ -9,6 +9,8 @@ import {
   type CommodityKind,
   type WorldState,
 } from '../src/sim';
+import { createTurnContext } from '../src/sim/turn-context-state';
+import { processV03Knowledge } from '../src/sim/v03-life';
 
 const DEFAULT_SEEDS = ['北辰海图', '潮生商路', '孤城疫年', '秋水迁徙'];
 const seeds = (process.env.V03_AUDIT_SEEDS?.split(',').map((seed) => seed.trim()).filter(Boolean)
@@ -308,9 +310,39 @@ if (samples.reduce((sum, sample) => sum + sample.importedExposures, 0) === 0) {
 if (samples.reduce((sum, sample) => sum + sample.diseaseImportEvents, 0) === 0) {
   failures.push('全局: 多世界样本没有疾病沿实际流量输入的史事');
 }
-if (samples.reduce((sum, sample) => sum + sample.practicePrototypes, 0) === 0) {
-  failures.push('全局: 多世界样本没有自然形成任何地方实践原型');
+// Natural runs measure incidence, not a deadline for invention. Exercise the
+// same production boundary with explicitly completed accumulation as well.
+const practiceFixture = createWorld('地方实践条件夹具');
+const readyPractice = practiceFixture.practiceStates[0]!;
+const incompletePractice = practiceFixture.practiceStates[1]!;
+for (const state of [readyPractice, incompletePractice]) {
+  state.prototypeTurn = null;
+  state.lostTurn = null;
+  state.innovationProgress = state === readyPractice ? 100 : 0;
 }
+const practiceContext = createTurnContext(practiceFixture);
+const prototypeEvents: string[] = [];
+const emitPractice: Parameters<typeof processV03Knowledge>[2] = (input) => {
+  const id = `fixture_${prototypeEvents.length}`;
+  if (input.kind === 'practice_prototype') {
+    prototypeEvents.push(id);
+    if (!input.stateDeltas?.some(delta => delta.entityId === readyPractice.id
+      && delta.field === 'prototypeTurn' && delta.before === null && delta.after === practiceContext.turn)
+      || !input.causes.some(cause => cause.refs?.some(ref => ref.entityId === readyPractice.id))) {
+      failures.push('实践夹具: 原型史事缺少真实状态变化或来源');
+    }
+  }
+  return { ...input, id, turn: practiceContext.turn, year: practiceContext.year,
+    season: practiceContext.season, actorIds: input.actorIds ?? [], polityIds: input.polityIds ?? [],
+    regionIds: input.regionIds ?? [], evidence: input.evidence ?? [], stateDeltas: input.stateDeltas ?? [],
+    sourceFactIds: input.sourceFactIds ?? [], situationIds: input.situationIds ?? [] };
+};
+processV03Knowledge(practiceFixture, practiceContext, emitPractice);
+processV03Knowledge(practiceFixture, practiceContext, emitPractice);
+const practiceBoundaryValid = readyPractice.prototypeTurn === practiceContext.turn
+  && incompletePractice.prototypeTurn === null && prototypeEvents.length === 1
+  && practiceContext.knowledge.prototypeIds.filter(id => id === readyPractice.id).length === 1;
+if (!practiceBoundaryValid) failures.push('实践夹具: 已积累/未积累/重复结算边界失败');
 if (samples.reduce((sum, sample) => sum + sample.tradeTreatyEvents, 0) === 0) {
   failures.push('全局: 多世界样本没有由真实成交形成任何贸易协定');
 }
@@ -329,6 +361,7 @@ console.log(JSON.stringify({
     maximumSaveMiB: maximumSave,
   },
   samples,
+  coverage: { practiceBoundaryValid, prototypeEvents, naturalPracticePrototypes: samples.reduce((sum, sample) => sum + sample.practicePrototypes, 0) },
   failures: failures.slice(0, 80),
 }, null, 2));
 

@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.24',
-  date: '2026-09-12',
-  title: '国军战果，亲历有别',
+  version: '1.29.25',
+  date: '2026-09-13',
+  title: '长卷快读',
   items: [
-    '人物传区分任内国军战果与本人参战，保留全部史事依据。',
+    '长局案卷共享史实读取，打开更快，人物与战役依据完整保留。',
   ],
 };
 
