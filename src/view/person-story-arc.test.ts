@@ -68,6 +68,50 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it.each(['absent', 'present', 'partial'] as const)('credits only battle participants within a merged national campaign (%s)', mode => {
+    const w = createWorld('国事来源不等于亲自参战');
+    const p = w.characters.find(p => w.armies.some(a => a.commanderId === p.id))!;
+    const other = w.characters.find(c => c.id !== p.id)!, enemy = w.polities.find(n => n.id !== p.polityId)!;
+    const [a, b] = w.regions; a.neighbors = [b.id]; b.neighbors = [a.id];
+    w.offices = [{ id: 'reign', holderId: p.id, polityId: p.polityId, kind: '君主', rank: 100,
+      regionId: a.id, armyId: null, appointedTurn: 0, endedTurn: null, active: true }];
+    w.facts = []; w.history = [];
+    for (const [i, region] of [a, b].entries()) {
+      const fight = battleFact(w, p.id, `fight-${i}`, 10 + i, 30);
+      fight.regionIds = [region.id]; fight.payload.targetRegionId = region.id;
+      // The ruler remains an event actor even in battles fought entirely by others.
+      if (mode === 'absent' || mode === 'partial' && i === 1) {
+        fight.payload.attacker.commanderId = other.id;
+        fight.payload.attacker.participants![0].characterId = other.id;
+      }
+      const gain: SimulationFact = { ...fight, id: `gain-${i}`, kind: 'territory_control_changed', sourceFactIds: [fight.id],
+        payload: { regionId: region.id, previousControllerId: enemy.id, nextControllerId: p.polityId,
+          reason: 'battle_capture', warId: fight.payload.warId } };
+      w.facts.push(fight, gain);
+      w.history.push({ ...fight, id: `event-${i}`, kind: i ? 'polity_eliminated' : 'capital_fall',
+        title: i ? '敌国灭亡' : '敌都失守', summary: i ? '敌国失去最后领土。' : '敌国迁都。',
+        evidence: [], situationIds: [], sourceFactIds: [gain.id], stateDeltas: [i
+          ? { entityType: 'polity', entityId: enemy.id, field: 'alive', before: true, after: false }
+          : { entityType: 'polity', entityId: enemy.id, field: 'capitalRegionId', before: a.id, after: b.id }] });
+    }
+    const body = serializeWorld(w), hash = computeWorldHash(w), arc = projectPersonStoryArc(w, p);
+    const beat = arc.find(b => b.title.includes('任内连取'))!;
+    expect(beat.summary).toContain(`任内军队取得${a.name}、${b.name}。`);
+    if (mode === 'absent') expect(beat.summary).not.toContain('本人参战');
+    else {
+      const personal = beat.summary.split('本人参战：')[1];
+      expect(personal).toContain(a.name);
+      if (mode === 'partial') expect(personal).not.toContain(b.name);
+      else expect(personal).toContain(b.name);
+      expect(personal).not.toMatch(/任内|灭敌/);
+    }
+    expect(beat.sourceFactIds).toEqual(['fight-0', 'fight-1', 'gain-0', 'gain-1']);
+    expect(beat.sourceEventIds).toEqual(['event-0', 'event-1']);
+    expect(beat.primaryFactId).toBe('gain-1'); expect(beat.primaryEventId).toBe('event-1');
+    expect(arc).toHaveLength(1);
+    expect(computeWorldHash(w)).toBe(hash); expect(serializeWorld(w)).toBe(body);
+  });
+
   it('keeps the ruler’s own late reversals ahead of indirect court turnover, but keeps the broker’s real career', () => {
     const w=createWorld('本人转折与间接掌事'),p=w.characters.find(p=>w.armies.some(a=>a.commanderId===p.id))!;
     const broker=w.characters.find(c=>c.id!==p.id)!,base=battleFact(w,p.id,'base',10,10),[a,b,c]=w.regions;

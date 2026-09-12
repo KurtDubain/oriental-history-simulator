@@ -386,11 +386,14 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
     const own = candidates.filter(c => c.phase === 'battle' && c.sourceFactIds.some(id => battles.has(id) || group.some(f => f.id === id)))
       .sort((a,b) => (a.startTurn ?? a.turn)-(b.startTurn ?? b.turn)
         || (evidence.order.get(a.primaryFactId ?? '') ?? 0)-(evidence.order.get(b.primaryFactId ?? '') ?? 0));
+    // Episodes require an actual participants entry; merged national candidates do not.
+    const personal = orderedEpisodes.filter(e => battles.has(e.battle.id) || own.some(c => c.sourceFactIds.includes(e.battle.id)))
+      .map(e => `${world.regions.find(r => r.id === e.battle.payload.targetRegionId)?.name ?? '当地'}${battleSide(e.battle, person.id)!.stance}`);
     const combined: Candidate = { id: group[0].id,
       startTurn: Math.min(group[0].turn, ...own.map(c => c.startTurn ?? c.turn)),
       turn: Math.max(group.at(-1)!.turn, ...own.map(c => c.turn)), phase: 'battle', priority: -1,
       title: `${person.name}任内连取${places.length > 3 ? `${places.at(-1)}等${places.length}地` : places.join('、')}`,
-      summary: `任内军队取得${places.join('、')}。${own.length ? `本人参战：${own.map(c => c.title).join('；')}。` : ''}`,
+      summary: `任内军队取得${places.join('、')}。${personal.length ? `本人参战：${[...new Set(personal)].join('、')}。` : ''}`,
       importance: Math.max(...group.map(f => f.importance)), ...sourceEvents(events, ids, group.at(-1)!.id) };
     mergeSources(combined, own); candidates.push(combined);
     for (const c of own) candidates.splice(candidates.indexOf(c), 1);
