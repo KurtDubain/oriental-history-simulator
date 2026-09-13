@@ -17,8 +17,10 @@
 - **必需环境变量：无**。个人站继续使用 `npm run build` / `dist` 即可。竞赛项目使用上表命令与目录，不需要秘密配置或站点域名。
 - 可选 `OHS_EDITION=personal|contest`：用于校验命令，冲突、空值或未知值失败。不是让个人构建偷偷变成竞赛构建。
 - 既有 `OHS_MAP_PROFILE_ALLOWLIST` 不再是必需设置；如仍设置，只接受竞赛命令下的 `contest-v01`。建议删除遗留手工设置，由构建命令选定公开 catalog。
-- 可选 `VERCEL_GIT_COMMIT_SHA`（Vercel 提供）、`GITHUB_SHA`（CI 提供）：依次作为提交标识；本地回退 `git rev-parse HEAD`。无 Git 的源码导出包明确记录 `commitId: null` 与 local buildId，不编造提交。
+- 可选 `VERCEL_GIT_COMMIT_SHA`（Vercel 提供）、`GITHUB_SHA`（CI 提供）：依次作为提交标识；本地回退 `git rev-parse HEAD`。元数据生成器对无 Git 源码只能记录 `commitId: null` 与 local buildId，不编造提交；正式构建仍需 Git 历史通过下述版本门。
 - `VERCEL_ENV` 不改变内容。两版使用相同模拟代码和规则，版别信息不进入 WorldState、Fact、存档或世界 hash。
+
+版本门在 main/正式发布条件下默认核对 `HEAD^..HEAD`：仅文档变化可以不升版，但仍检查 package/lockfile/两版 changelog 一致。可选 `OHS_RELEASE_BASE` 用于一次发布或 PR 的跨提交范围；文件差异和版本都比较该 ref 与 HEAD 的共同祖先，不能固定旧值规避检查。本地未提交生产修改独立比较 HEAD。无父提交、浅克隆缺历史、无效/自身基线或 Git 查询失败会明确阻断，应补齐历史或提供正确基线，不会猜成文档变更。`npm run check:release-tests` 在独立临时 Git 仓库验证这些边界。
 
 每次构建保留原版本、类型、地图、全部同步/异步 JS、CSS、媒体预算检查。
 竞赛版同时检查 Rollup 模块图、HTML 地图 payload 与从私人地图派生的敏感数据令牌；不是只隐藏一个选图按钮。旧 `contest-profile.json` 继续存在，其范围与 `version.json` 由同一组已选 profile 派生。详情见 [CONTEST_BUILD.md](./CONTEST_BUILD.md)。

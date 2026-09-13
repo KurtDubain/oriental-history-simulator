@@ -47,16 +47,17 @@ if (!/^\d{4}-\d{2}-\d{2}$/.test(latestRelease.date) || latestRelease.items.lengt
   throw new Error('最新发布记录必须包含 YYYY-MM-DD 日期和至少一条更新内容。');
 }
 
-function git(args: string[]): string | null {
+function git(args: string[]): string {
   try {
-    return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+    return execFileSync('git', args, { cwd: root, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] });
   } catch {
-    return null;
+    throw new Error(`无法核验发布差异：git ${args.join(' ')} 查询失败。请补齐 Git 历史（含浅克隆父提交），或提供可解析的 OHS_RELEASE_BASE；不会按纯文档变更放行。`);
   }
 }
 
-function lines(value: string | null): string[] {
-  return value?.split('\n').map((item) => item.trim()).filter(Boolean) ?? [];
+function changedFiles(...refs: string[]): string[] {
+  // Count both sides of renames: moving src/foo into docs still removes production code.
+  return git(['diff', '--no-renames', '--name-only', '-z', ...refs, '--']).split('\0').filter(Boolean);
 }
 
 function affectsRelease(file: string): boolean {
@@ -76,29 +77,32 @@ function affectsRelease(file: string): boolean {
 }
 
 const requestedBase = process.env.OHS_RELEASE_BASE?.trim() || null;
-const workingChanges = [
-  ...lines(git(['diff', '--name-only', 'HEAD'])),
-  ...lines(git(['ls-files', '--others', '--exclude-standard'])),
-];
-const committedChanges = requestedBase
-  ? lines(git(['diff', '--name-only', `${requestedBase}...HEAD`]))
-  : [];
-const productionFilesChanged = [...workingChanges, ...committedChanges].some(affectsRelease);
 const productionDeployment = process.env.VERCEL_GIT_COMMIT_REF === 'main'
   || process.env.RELEASE_REQUIRE_VERSION_BUMP === '1';
+const workingChanges = [
+  ...changedFiles('HEAD'),
+  ...git(['ls-files', '--others', '--exclude-standard', '-z']).split('\0').filter(Boolean),
+];
+let committedBase: string | null = null;
+if (requestedBase || productionDeployment) {
+  const ref = git(['rev-parse', '--verify', '--end-of-options', `${requestedBase || 'HEAD^'}^{commit}`]).trim();
+  // Preserve explicit three-dot/PR semantics, but use its actual merge base for BOTH checks.
+  committedBase = requestedBase ? git(['merge-base', ref, 'HEAD']).trim() : ref;
+  if (committedBase === git(['rev-parse', 'HEAD']).trim()) {
+    throw new Error('发布比较基线必须早于 HEAD，不能用 HEAD 自身跳过已提交变更检查。');
+  }
+}
+const comparisons = workingChanges.some(affectsRelease) ? ['HEAD'] : [];
+if (committedBase && changedFiles(committedBase, 'HEAD').some(affectsRelease)) comparisons.push(committedBase);
 
-let comparisonRef: string | null = null;
-if (productionDeployment && (productionFilesChanged || !requestedBase)) comparisonRef = requestedBase || 'HEAD^';
-else if (productionFilesChanged) comparisonRef = 'HEAD';
-
-if (comparisonRef) {
-  const basePackageText = git(['show', `${comparisonRef}:package.json`]);
-  if (basePackageText) {
-    const basePackage = JSON.parse(basePackageText) as PackageMetadata;
-    if (basePackage.version === currentVersion) {
-      throw new Error(`生产更新必须提升版本号，当前仍为 v${currentVersion}。`);
-    }
+for (const comparisonRef of comparisons) {
+  const basePackage = JSON.parse(git(['show', `${comparisonRef}:package.json`])) as PackageMetadata;
+  if (!basePackage.version || !/^\d+\.\d+\.\d+$/.test(basePackage.version)) {
+    throw new Error(`无法核验发布差异：基线 ${comparisonRef} 的 package.json 没有有效版本。`);
+  }
+  if (basePackage.version === currentVersion) {
+    throw new Error(`生产更新必须提升版本号，当前仍为 v${currentVersion}。`);
   }
 }
 
-console.log(`Release metadata OK: v${currentVersion} · ${latestRelease.title} · base ${comparisonRef ?? 'metadata-only'}`);
+console.log(`Release metadata OK: v${currentVersion} · ${latestRelease.title} · base ${comparisons.join(',') || 'metadata-only'} · committed range ${committedBase ? `${committedBase}..HEAD` : 'none'}`);

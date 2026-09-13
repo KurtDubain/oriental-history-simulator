@@ -43,6 +43,9 @@ jobs:
       - name: Verify build edition contracts
         run: npm run check:editions
 
+      - name: Verify release baselines with isolated Git histories
+        run: npm run check:release-tests
+
       - name: Audit political identity and court projection
         run: npm run test:audit:politics
 
