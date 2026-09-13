@@ -40,6 +40,9 @@ jobs:
       - name: Run unit tests
         run: npm run test:run
 
+      - name: Verify build edition contracts
+        run: npm run check:editions
+
       - name: Audit political identity and court projection
         run: npm run test:audit:politics
 
@@ -57,6 +60,9 @@ jobs:
 
       - name: Verify safe application updates
         run: npm run test:update
+
+      - name: Verify both production editions and save boundaries
+        run: npm run test:e2e:editions
 
       - name: Run primary browser flow
         run: npm run test:e2e

@@ -86,7 +86,7 @@ try {
   await page.route('**/version.json?*', (route) => route.fulfill({
     status: 200,
     contentType: 'application/json',
-    body: JSON.stringify({ version: '99.0.0', buildId: 'remote-build-future' }),
+    body: JSON.stringify({ ...deployed, version: '99.0.0', buildId: 'remote-build-future' }),
   }));
   await release.getByTestId('check-app-update').click();
   await page.waitForFunction(() => JSON.parse(window.render_game_to_text()).appUpdate.phase === 'available');

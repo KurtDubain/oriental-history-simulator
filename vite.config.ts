@@ -1,5 +1,7 @@
 import { defineConfig } from 'vitest/config';
 import type { Plugin } from 'vite';
+import { loadEnv } from 'vite';
+import { resolveBuildTarget, buildMetadata, sourceCommitId } from './scripts/build-target.mjs';
 import react from '@vitejs/plugin-react';
 import packageJson from './package.json';
 import { MAP_PROFILE_CATALOG as FULL_MAP_PROFILE_CATALOG } from './src/maps/catalog';
@@ -7,27 +9,20 @@ import { MAP_PROFILE_CATALOG as CONTEST_MAP_PROFILE_CATALOG } from './src/maps/c
 import { serializeApplicationJson } from './src/maps/html-payload';
 import type { MapProfile } from './src/maps/types';
 
+export default defineConfig(({ mode }) => {
 const runtimeProcess = (globalThis as typeof globalThis & {
   process?: { env?: Record<string, string | undefined> };
 }).process;
-const buildId = runtimeProcess?.env?.VERCEL_GIT_COMMIT_SHA?.trim()
-  || runtimeProcess?.env?.GITHUB_SHA?.trim()
-  || `local-${packageJson.version}`;
-const mapProfileAllowlist = runtimeProcess?.env?.OHS_MAP_PROFILE_ALLOWLIST?.trim();
-if (mapProfileAllowlist && mapProfileAllowlist !== 'contest-v01') {
-  throw new Error(`Unsupported OHS_MAP_PROFILE_ALLOWLIST: ${mapProfileAllowlist}`);
-}
-const contestBuild = mapProfileAllowlist === 'contest-v01';
+const env = { ...loadEnv(mode, '.', ''), ...runtimeProcess?.env };
+const target = resolveBuildTarget(mode, env);
+const commitId = sourceCommitId(env);
+const contestBuild = target.edition === 'contest';
 const mapCatalogPath = decodeURIComponent(new URL(
-  contestBuild
-    ? './src/maps/catalog.contest.ts'
-    : './src/maps/catalog.ts',
+  `./src/maps/${target.catalog}`,
   import.meta.url,
 ).pathname);
 const changelogPath = decodeURIComponent(new URL(
-  contestBuild
-    ? './src/config/changelog.contest.ts'
-    : './src/config/changelog.ts',
+  `./src/config/${target.changelog}`,
   import.meta.url,
 ).pathname);
 
@@ -92,33 +87,33 @@ function contestIsolation(enabled: boolean): Plugin {
         fileName: 'contest-profile.json',
         source: `${JSON.stringify({
           productVersion: packageJson.version,
-          allowlist: ['contest-v01'],
-          profiles: [{ id: 'contest-v01', revision: 1, contentVersion: 'contest-v01-68' }],
+          allowlist: metadata.profiles.map(profile => profile.id),
+          profiles: metadata.profiles,
         })}\n`,
       });
     },
   };
 }
 
-function appVersionAsset(version: string, deploymentId: string): Plugin {
+function appVersionAsset(): Plugin {
   return {
     name: 'canghai-app-version-asset',
     transformIndexHtml(html) {
-      return html.split('__APP_VERSION_TEXT__').join(`v${version}`);
+      return html.split('__APP_VERSION_TEXT__').join(`v${packageJson.version}`);
     },
     configureServer(server) {
       server.middlewares.use('/version.json', (_request, response) => {
         response.statusCode = 200;
         response.setHeader('Content-Type', 'application/json; charset=utf-8');
         response.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
-        response.end(`${JSON.stringify({ version, buildId: deploymentId })}\n`);
+        response.end(`${JSON.stringify(metadata)}\n`);
       });
     },
     generateBundle() {
       this.emitFile({
         type: 'asset',
         fileName: 'version.json',
-        source: `${JSON.stringify({ version, buildId: deploymentId })}\n`,
+        source: `${JSON.stringify(metadata)}\n`,
       });
     },
   };
@@ -127,8 +122,9 @@ function appVersionAsset(version: string, deploymentId: string): Plugin {
 const buildMapProfiles = contestBuild
   ? CONTEST_MAP_PROFILE_CATALOG
   : FULL_MAP_PROFILE_CATALOG;
+const metadata = buildMetadata(target, packageJson.version, commitId, buildMapProfiles);
 
-export default defineConfig({
+return {
   resolve: {
     alias: {
       '@app-changelog': changelogPath,
@@ -136,15 +132,18 @@ export default defineConfig({
   },
   define: {
     __APP_VERSION__: JSON.stringify(packageJson.version),
-    __APP_BUILD_ID__: JSON.stringify(buildId),
+    __APP_BUILD_ID__: JSON.stringify(metadata.buildId),
+    __APP_EDITION__: JSON.stringify(target.edition),
+    __APP_EDITION_LABEL__: JSON.stringify(target.label),
   },
   plugins: [
     mapProfilePayload(buildMapProfiles, mapCatalogPath),
     contestIsolation(contestBuild),
-    appVersionAsset(packageJson.version, buildId),
+    appVersionAsset(),
     react(),
   ],
   build: {
+    outDir: target.outDir,
     minify: 'terser',
     terserOptions: {
       // Vite emits ES modules; declaring that boundary lets Terser remove
@@ -196,4 +195,5 @@ export default defineConfig({
     environment: 'node',
     include: ['src/**/*.test.ts', 'src/**/*.test.tsx'],
   },
+};
 });

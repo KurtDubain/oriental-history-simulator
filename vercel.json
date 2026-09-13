@@ -2,9 +2,15 @@
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "vite",
   "installCommand": "npm ci",
-  "buildCommand": "npm run build",
-  "outputDirectory": "dist",
   "headers": [
+    {
+      "source": "/media/(.*)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
+    },
+    {
+      "source": "/contest-profile.json",
+      "headers": [{ "key": "Cache-Control", "value": "no-cache, no-store, must-revalidate" }]
+    },
     {
       "source": "/assets/(.*)",
       "headers": [
@@ -35,7 +41,7 @@
   ],
   "rewrites": [
     {
-      "source": "/((?!assets/|version\\.json$).*)",
+      "source": "/((?!assets/|media/|version\\.json$|contest-profile\\.json$).*)",
       "destination": "/index.html"
     }
   ]

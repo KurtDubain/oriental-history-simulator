@@ -1,7 +1,7 @@
 {
   "name": "oriental-history-simulator",
   "private": true,
-  "version": "1.29.27",
+  "version": "1.29.28",
   "type": "module",
   "engines": {
     "node": ">=20 <23",
@@ -9,9 +9,11 @@
   },
   "scripts": {
     "dev": "vite --host 127.0.0.1",
-    "play": "npm run build && vite preview --host 127.0.0.1 --open",
-    "build": "npm run check:release && npm run check:maps && tsc -b && vite build && npm run check:bundle:app && npm run check:media -- dist",
-    "build:contest": "npm run check:release && tsc -p tsconfig.contest.json && tsc -p tsconfig.node.json && OHS_MAP_PROFILE_ALLOWLIST=contest-v01 npm run check:maps && OHS_MAP_PROFILE_ALLOWLIST=contest-v01 vite build --outDir dist-contest && npm run check:contest-bundle && npm run check:bundle:contest && npm run check:media -- dist-contest",
+    "play": "npm run build && npm run preview:personal -- --open",
+    "build": "node scripts/build-edition.mjs build personal",
+    "build:personal": "node scripts/build-edition.mjs build personal",
+    "build:contest": "node scripts/build-edition.mjs build contest",
+    "check:editions": "node --test scripts/build-target.test.mjs",
     "check:release": "vite-node scripts/check-release.ts",
     "check:maps": "vite-node scripts/validate-map-profiles.ts",
     "check:contest-bundle": "vite-node scripts/verify-contest-bundle.ts",
@@ -37,6 +39,7 @@
     "test:e2e:general-groups": "node scripts/e2e-general-groups.mjs",
     "test:e2e:reader-layout": "node scripts/e2e-reader-layout.mjs",
     "test:e2e:self-evolution": "node scripts/e2e-self-evolution.mjs",
+    "test:e2e:editions": "vite-node scripts/e2e-build-editions.ts",
     "test:e2e:contest": "vite-node scripts/e2e-contest-build.ts",
     "test:e2e:maps": "node scripts/e2e-map-profiles.mjs",
     "test:update": "node scripts/verify-app-update.mjs",
@@ -58,8 +61,10 @@
     "test:audit:archive": "vite-node scripts/archive-capacity-audit.ts",
     "test:audit:person-fate": "vite-node scripts/person-fate-story-audit.ts",
     "test:audit:architecture": "vite-node scripts/architecture-baseline.ts",
-    "test:release": "npm run test:run && npm run test:audit:architecture && npm run build && npm run build:contest && npm run test:update && npm run test:e2e && npm run test:e2e:self-evolution && npm run test:e2e:reader-layout && npm run test:e2e:fux01 && npm run test:e2e:fux03 && npm run test:e2e:media && npm run test:e2e:trim01 && npm run test:e2e:trim016 && npm run test:e2e:trim018 && npm run test:e2e:trim02 && npm run test:e2e:roster01 && npm run test:e2e:politics && npm run test:e2e:relationships && npm run test:e2e:person-fate && npm run test:e2e:general-groups && npm run test:e2e:maps && npm run test:e2e:contest && npm run test:audit:phase-a && npm run test:audit:phase-b && npm run test:audit:phase-c && npm run test:audit:agency && npm run test:audit:agency-intent && npm run test:audit:power-narrative && npm run test:audit:narrative && npm run test:audit:politics && npm run test:audit:local-governance && npm run test:audit:maps && npm run test:audit:archive && npm run test:audit:person-fate && npm run test:audit",
-    "preview": "vite preview --host 127.0.0.1"
+    "test:release": "npm run check:editions && npm run test:run && npm run test:audit:architecture && npm run build && npm run build:contest && npm run test:update && npm run test:e2e && npm run test:e2e:self-evolution && npm run test:e2e:reader-layout && npm run test:e2e:fux01 && npm run test:e2e:fux03 && npm run test:e2e:media && npm run test:e2e:trim01 && npm run test:e2e:trim016 && npm run test:e2e:trim018 && npm run test:e2e:trim02 && npm run test:e2e:roster01 && npm run test:e2e:politics && npm run test:e2e:relationships && npm run test:e2e:person-fate && npm run test:e2e:general-groups && npm run test:e2e:maps && npm run test:e2e:contest && npm run test:e2e:editions && npm run test:audit:phase-a && npm run test:audit:phase-b && npm run test:audit:phase-c && npm run test:audit:agency && npm run test:audit:agency-intent && npm run test:audit:power-narrative && npm run test:audit:narrative && npm run test:audit:politics && npm run test:audit:local-governance && npm run test:audit:maps && npm run test:audit:archive && npm run test:audit:person-fate && npm run test:audit",
+    "preview": "node scripts/build-edition.mjs preview personal",
+    "preview:personal": "node scripts/build-edition.mjs preview personal",
+    "preview:contest": "node scripts/build-edition.mjs preview contest"
   },
   "dependencies": {
     "fflate": "^0.8.2",

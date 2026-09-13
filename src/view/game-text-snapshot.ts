@@ -14,7 +14,7 @@ import {
   type WorldState,
 } from '../sim';
 import { findWorldHistoryEvent } from '../sim/archive';
-import { APP_VERSION } from '../version';
+import { APP_VERSION, APP_EDITION } from '../version';
 import {
   projectRosterCollection,
   rosterScopeFor,
@@ -152,6 +152,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
     return JSON.stringify({
       mode: 'start',
       productVersion: APP_VERSION,
+      edition: APP_EDITION,
       appUpdate: getAppUpdateState(),
       title: '沧衡纪',
       mapProfile: { id: mapProfile.id, revision: mapProfile.revision, name: mapProfile.name },
@@ -372,6 +373,7 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
   return JSON.stringify({
     mode: startOpen ? 'world-menu' : 'observing',
     productVersion: APP_VERSION,
+    edition: APP_EDITION,
     appUpdate: getAppUpdateState(),
     worldSchemaVersion: world.schemaVersion,
     mapContentVersion: world.mapContentVersion,

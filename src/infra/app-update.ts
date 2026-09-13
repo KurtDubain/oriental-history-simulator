@@ -1,11 +1,12 @@
-import { APP_BUILD_ID, APP_VERSION } from '../version';
+import { APP_BUILD_ID, APP_VERSION, APP_EDITION } from '../version';
 
 const VERSION_ENDPOINT = '/version.json';
 const VERSION_CHECK_INTERVAL_MS = 15 * 60 * 1000;
 
-export type AppUpdatePhase = 'idle' | 'checking' | 'current' | 'available' | 'offline' | 'error';
+export type AppUpdatePhase = 'idle' | 'checking' | 'current' | 'available' | 'offline' | 'error' | 'mismatch';
 
 export interface RemoteAppVersion {
+  edition: typeof APP_EDITION;
   version: string;
   buildId: string;
 }
@@ -20,6 +21,7 @@ export interface AppUpdateState {
 }
 
 export interface AppUpdateCheckOptions {
+  localEdition: typeof APP_EDITION;
   localVersion: string;
   localBuildId: string;
   online: boolean;
@@ -56,15 +58,17 @@ export function parseRemoteAppVersion(value: unknown): RemoteAppVersion | null {
   const record = value as Record<string, unknown>;
   if (typeof record.version !== 'string' || !/^\d+\.\d+\.\d+$/.test(record.version)) return null;
   if (typeof record.buildId !== 'string' || record.buildId.trim().length === 0) return null;
-  return { version: record.version, buildId: record.buildId.trim() };
+  if (record.edition !== 'personal' && record.edition !== 'contest') return null;
+  return { version: record.version, buildId: record.buildId.trim(), edition: record.edition };
 }
 
 export function isSameDeployment(
   localVersion: string,
   localBuildId: string,
   remote: RemoteAppVersion,
+  localEdition = APP_EDITION,
 ): boolean {
-  return remote.version === localVersion && remote.buildId === localBuildId;
+  return remote.edition === localEdition && remote.version === localVersion && remote.buildId === localBuildId;
 }
 
 export async function resolveAppUpdateCheck(
@@ -75,8 +79,9 @@ export async function resolveAppUpdateCheck(
   try {
     const remote = parseRemoteAppVersion(await options.fetchRemote());
     if (!remote) return { phase: 'error', remote: null, checkedAt };
+    if (remote.edition !== options.localEdition) return { phase: 'mismatch', remote: null, checkedAt };
     return {
-      phase: isSameDeployment(options.localVersion, options.localBuildId, remote) ? 'current' : 'available',
+      phase: isSameDeployment(options.localVersion, options.localBuildId, remote, options.localEdition) ? 'current' : 'available',
       remote,
       checkedAt,
     };
@@ -107,6 +112,7 @@ export function checkForAppUpdate(manual = true): Promise<AppUpdateCheckResult> 
   if (checkPromise) return checkPromise;
   if (manual) publish({ phase: 'checking' });
   checkPromise = resolveAppUpdateCheck({
+    localEdition: APP_EDITION,
     localVersion: APP_VERSION,
     localBuildId: APP_BUILD_ID,
     online: typeof navigator !== 'undefined' ? navigator.onLine : false,
@@ -153,6 +159,7 @@ export function appUpdateStatusText(update: AppUpdateState): string {
   if (update.phase === 'available') return `发现 v${update.remoteVersion ?? '新版本'}`;
   if (update.phase === 'offline') return '当前离线，稍后再试';
   if (update.phase === 'error') return '暂时无法检查更新';
+  if (update.phase === 'mismatch') return '更新版别不符，请核对站点配置';
   if (update.phase === 'current') return '已是最新';
   return '尚未检查';
 }

@@ -196,6 +196,9 @@ const DEFAULT_SEED = '沧衡-甲子';
 const BASE_AUTOPLAY_INTERVAL = 1_800;
 
 function playerErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof Error && error.message.startsWith('存档需要地图内容')) {
+    return '当前版别不包含这份史册所需的地图。原存档未被修改。';
+  }
   return error instanceof Error
     && /[\u3400-\u9fff]/.test(error.message)
     && !/[a-z]/i.test(error.message)

@@ -2,6 +2,8 @@
 
 日常个人版默认打包两张固定地图。参赛版使用独立内容白名单，只从 `catalog.contest.ts` 引入 `contest-v01@1`“云海八荒”。
 
+双版命令、版别元数据、更新检查、存档边界及两个 Vercel 项目的配置交接见 [BUILD_EDITIONS.md](./BUILD_EDITIONS.md)。同一 main，不需要竞赛分支；默认 `npm run build` / `dist` 保持个人版。
+
 ```bash
 npm run build:contest
 ```

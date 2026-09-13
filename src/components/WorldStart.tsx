@@ -1,6 +1,6 @@
 import { BookOpen, FileUp, Library, Sparkles, X } from 'lucide-react';
 import { useRef } from 'react';
-import { APP_VERSION } from '../version';
+import { APP_VERSION, APP_EDITION_LABEL } from '../version';
 import { listMapProfiles } from '../maps';
 import type { MapProfile, MapProfileId, MapPoint } from '../maps';
 import { useDialogLayer } from './useDialogLayer';
@@ -124,14 +124,14 @@ export function WorldStart({
         </button>
       ) : null}
       <section className="world-start__content">
-        <p className="world-start__kicker">架空东方历史演化观察台 · v{APP_VERSION}</p>
+        <p className="world-start__kicker">历史演化观察台 · {APP_EDITION_LABEL} v{APP_VERSION}</p>
         <h1 id="world-start-title">沧衡纪</h1>
         <p className="world-start__lede">不统治天下，只见证它如何成为历史。</p>
 
         <section className="world-start__maps" aria-labelledby="world-start-map-title">
           <div className="world-start__section-heading">
             <h2 id="world-start-map-title">选择舆图</h2>
-            <p>只决定山河底板，两张地图共用同一套历史规则</p>
+            <p>只决定山河底板，各舆图共用同一套历史规则</p>
           </div>
           <div className="world-start__map-options" role="radiogroup" aria-label="新世界地图">
             {mapProfiles.map((profile) => {

@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.27',
+  version: '1.29.28',
   date: '2026-09-13',
-  title: '音画复验',
+  title: '双版交付准备',
   items: [
-    '音画验收改用正式历史夹具并接入发布检查；既有声音、图片与默认静音保持不变。',
+    '明确构建版别、更新识别与地图范围；保留同一套演变规则和完整史册读写。',
   ],
 };
 

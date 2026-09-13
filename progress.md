@@ -1115,3 +1115,13 @@ Current story-audit request: 用当前模拟器实际推进多个固定世界，
 - 原npm run test:release最终从头跑完exit0、35/35全部通过：108文件849单测、171生产文件架构、两版构建/地图/全部同步异步chunk/媒体、更新、17项E2E及13项后段审计。媒体位于新构建之后，使用自管4298生产预览且结束关闭；原目录、无output临时副本、release内共三轮两端通过。35项日志顺序与原命令逐项匹配，无首个失败或后续未执行；不是分项拼接。未改任何原审计/剧情断言、超时或模拟规则。
 - 此前六专项本次均通过，历史失败日志不清零。归档封存tick P95 197.999/200ms、finalize57.917/100ms；全体tick最大885.69ms仍记录，不关闭全部性能待办。人物命运82项条件风险核验通过，自然64季仍0战死由正式夹具覆盖UI；v03自然实践原型0仍报告，不改规则凑剧情。完整矩阵/原始release.log、全部桌面手机截图与五音效人工路径见output/media-acceptance-v1.29.27/REPORT.md、RELEASE_MATRIX.md、HUMAN_CHECK.md。
 - 最终两版JS422723B、CSS39749B、媒体60736B；5KiB额外余量差2883B未达。src/sim、WorldState/存档、音频控制、素材、CSS与压缩配置均零diff，生产仅双版版本记录改变。首批音画技术接入及当前原发布链已收口，主观听感/耳机外放/物理手机静音后台仍待人确认，未冒充试听或真机验收；未运行额外独立冷/热基准、新百年调参或全面无障碍复验。按用户范围停在这里，不增加音画/玩法，不提交、推送、部署。
+
+### 2026-09-13 / v1.29.28 双版本构建与部署准备
+
+- 基线f910fd4/v1.29.27、main，origin为github-kurt的KurtDubain/oriental-history-simulator；开工仅本文件已有17行复核/比较追加，原样保留且不夹带提交。远端复查本地原有16提交领先、无分叉；用户授权验证后提交与正常推送，不授权Vercel操作。
+- 集中build-target定义与构建/预览入口，保留build→个人dist、build:contest→dist-contest，新增build:personal/preview:personal/preview:contest。命令锁定版别，未知值/环境冲突/覆盖目录参数失败，预览拒绝错误版别或版本产物。复用原地图allowlist、Rollup私人模块拒绝、328项私人内容扫描、全部chunk和媒体门禁，不重建内容系统。
+- version.json新增edition/commitId/profiles，buildId带版别前缀，开篇/观史台/文本状态显示当前版别；跨版更新明确拒绝。竞赛缺图导入错误说明明确，原自动恢复、收藏拒绝及原档留底逻辑保持，合法赛图读写与续演不受限。WorldState、src/sim、src/persistence、schema、随机序列、CSS、素材、依赖与压缩配置零diff。
+- vercel.json仅解除buildCommand/outputDirectory绑定，保留默认个人构建、SPA与hashed assets缓存，固定名media重验证，version/profile禁缓存且不走页面回退。docs/BUILD_EDITIONS.md交接两项目同仓库同main同根目录、各自命令与产物、可选环境校验、版别/版本/提交核对及待用户提供项目/域名。没有创建云项目、绑定域名或部署；正常push可能触发现有个人站Git集成。
+- 新4项版别契约、11项定向Vitest、原contest/update/media和新增双版四场景E2E独立通过；1440×900/390×844为真实浏览器模拟尺寸，非物理设备。两版赛图同种子T0/T1/T4/T8正文逐字一致，T8 ff7dd23eea75d646、恢复T9 9aca9ff42234d4ab；阅读/声音操作正文不变，私图拒绝不覆盖原存档。mandatory原客户端两版截图与状态已实际查看，个人T1/T2仍a6de1959a0b8c191/f57642726ac8865d；正常console/page errors空、无观察到的横溢出或新增海陆错误。
+- 原npm run test:release于19:13—19:53从头exit0、37/37全部通过：108文件850单测、4项版别契约、171生产文件架构、两版类型/地图/JS/CSS/媒体、更新、18项E2E与13项后段审计。此前六专项本次均通过，历史失败不清零；归档封存tick P95197.999/200ms、finalize56.748/100ms，全体tick最大929.995ms仍记录；人物命运82项条件核验通过，v03自然实践原型0不改规则凑剧情。新项目开发时两次E2E失败分别为手机隐藏footer标签和world-menu测试准备，已最小修复并完整重跑，日志保留，未放宽超时或删有效断言。
+- 提交前候选两版全部5个JS chunk：个人422954B、竞赛422962B（相对开工422723为+231/+239），原424960预算余2006/1998B；CSS39749B、媒体60736B均不变。额外5KiB余量仍差3114/3122B，不扩大减重；提交后实际SHA注入的最终逐chunk值单独记录于output/build-editions-v1.29.28/budgets.json。原发布日志/37项矩阵、前后截图、恢复正文、失败记录及部署边界见同目录REPORT.md。未验线上CDN/正式域名、物理手机和主观听感，不把构建准备当作双站已部署。

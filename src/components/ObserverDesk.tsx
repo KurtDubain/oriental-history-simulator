@@ -13,7 +13,7 @@ import {
 import { useId, useMemo, useRef, useState } from 'react';
 import { LATEST_APP_RELEASE } from '@app-changelog';
 import { appUpdateStatusText, type AppUpdateState } from '../infra/app-update';
-import { APP_VERSION } from '../version';
+import { APP_VERSION, APP_EDITION_LABEL } from '../version';
 import { useDialogLayer } from './useDialogLayer';
 import {
   OBSERVER_GUIDE_STEPS,
@@ -375,7 +375,7 @@ export function ObserverDesk({
                 <span>04</span>
                 <h3 id="observer-release-heading">版本与更新</h3>
               </div>
-              <strong>v{APP_VERSION}</strong>
+              <strong>{APP_EDITION_LABEL} · v{APP_VERSION}</strong>
             </div>
             <div className="observer-desk__release-line">
               <div role="status" aria-live="polite" data-testid="app-update-status">

@@ -100,7 +100,7 @@ try {
   await continueError.waitFor();
   assert.match(
     await continueError.textContent() ?? '',
-    /本地史册损坏、缺页，或来自暂不支持的版本/,
+    /当前版别不包含这份史册所需的地图。原存档未被修改/,
   );
   assert.equal((await allSaves(page)).find((row) => row.key === 'autosave')?.value.payload, privatePayload);
 
