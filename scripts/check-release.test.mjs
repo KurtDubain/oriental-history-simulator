@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { chmodSync, mkdtempSync, mkdirSync, readFileSync, writeFileSync, rmSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,6 +17,7 @@ function fixture(t, { initialCommit = true } = {}) {
   const env = { ...process.env, GIT_CONFIG_GLOBAL: '/dev/null', GIT_CONFIG_NOSYSTEM: '1' };
   // Isolate test fixtures from the host's CI variables, not the actual build process.
   for (const key of ['OHS_RELEASE_BASE', 'VERCEL_GIT_COMMIT_REF', 'RELEASE_REQUIRE_VERSION_BUMP', 'OHS_EDITION', 'OHS_MAP_PROFILE_ALLOWLIST', 'GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE']) delete env[key];
+  for (const key of Object.keys(env)) if (key === 'CI' || key.startsWith('VERCEL')) delete env[key];
   const git = (...args) => execFileSync('git', args, { cwd: dir, env, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
   const put = (file, text) => { mkdirSync(resolve(dir, file, '..'), { recursive: true }); writeFileSync(join(dir, file), text); };
   const version = value => {
@@ -31,6 +32,7 @@ function fixture(t, { initialCommit = true } = {}) {
   git('config', 'user.name', 'Release Contract Test'); git('config', 'user.email', 'release@example.invalid');
   git('config', 'commit.gpgsign', 'false');
   version('1.0.0'); put('src/app.ts', 'export const value = 0;');
+  put('.npmrc', '# fixture configuration\n'); put('vercel.json', '{}\n');
   put('scripts/check-release.ts', checker); put('vite.config.mjs', 'export default {};');
   if (initialCommit) commit('initial release');
   const check = (edition, vars = { VERCEL_GIT_COMMIT_REF: 'main' }, cwd = dir) => {
@@ -47,8 +49,86 @@ function fixture(t, { initialCommit = true } = {}) {
       assert.match(result.text, pattern);
     }
   };
-  return { dir, env, git, put, version, commit, expect };
+  const hosted = () => ({ VERCEL: '1', VERCEL_ENV: 'production', VERCEL_DEPLOYMENT_ID: 'dpl_fixture',
+    VERCEL_GIT_PROVIDER: 'github', VERCEL_GIT_REPO_OWNER: 'fixture', VERCEL_GIT_REPO_SLUG: 'release',
+    VERCEL_GIT_COMMIT_REF: 'main', VERCEL_GIT_COMMIT_SHA: git('rev-parse', 'HEAD') });
+  const configChanges = () => { put('.npmrc', '# harmless fixture transformation\n'); put('vercel.json', '{ }\n'); };
+  return { dir, env, git, put, version, commit, expect, check, hosted, configChanges };
 }
+
+test('verified hosted Git builds tolerate only unstaged regular configuration content changes', t => {
+  const f = fixture(t); f.version('1.0.1'); f.commit('production release'); f.configChanges();
+  f.expect(true, /托管配置.*\.npmrc.*vercel\.json/, f.hosted());
+  f.expect(true, /Release metadata OK/, { ...f.hosted(), VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'review/patch' });
+  f.git('checkout', '-q', '--detach'); // Cloud checkouts need not have a local branch.
+  f.expect(true, /Release metadata OK/, f.hosted());
+  f.put('progress.md', 'documentation');
+  f.git('add', 'progress.md'); f.git('commit', '-qm', 'docs only');
+  f.expect(true, /metadata-only/, f.hosted());
+});
+
+test('local and incomplete hosted sources do not get a configuration exemption', t => {
+  const f = fixture(t); f.version('1.0.1'); f.commit('production release'); f.configChanges();
+  f.expect(false, /工作区.*HEAD.*\.npmrc.*vercel\.json/, {});
+  f.expect(false, /工作区.*HEAD/, { CI: 'true', VERCEL: '1', VERCEL_GIT_COMMIT_REF: 'main' });
+  for (const key of Object.keys(f.hosted())) {
+    const vars = f.hosted(); delete vars[key];
+    f.expect(false, /工作区.*HEAD/, vars);
+  }
+  for (const vars of [
+    { VERCEL_GIT_COMMIT_SHA: '0'.repeat(40) }, { VERCEL_GIT_COMMIT_SHA: f.git('rev-parse', '--short', 'HEAD') },
+    { VERCEL_GIT_PROVIDER: 'unknown' }, { VERCEL_ENV: 'development' },
+  ]) f.expect(false, /工作区.*HEAD/, { ...f.hosted(), ...vars });
+});
+
+test('a hosted Git source does not exempt source, scripts, or untracked production changes', t => {
+  for (const file of ['src/app.ts', 'scripts/new.mjs', 'public/new.txt']) {
+    const f = fixture(t); f.version('1.0.1'); f.commit('production release'); f.configChanges();
+    f.put(file, 'changed');
+    f.expect(false, /工作区.*HEAD/, f.hosted());
+  }
+});
+
+test('configuration staging, additions, deletions, modes and type changes are not platform rewrites', t => {
+  for (const file of ['.npmrc', 'vercel.json']) {
+    for (const change of ['stage', 'stage-then-revert-worktree', 'untracked', 'added', 'deleted', 'mode', 'symlink']) {
+      const f = fixture(t); f.version('1.0.1'); f.commit('production release');
+      if (change === 'untracked' || change === 'added') {
+        f.git('rm', file); f.version('1.0.2'); f.commit('release without config');
+      }
+      if (change === 'deleted') rmSync(join(f.dir, file));
+      else if (change === 'mode') { f.git('config', 'core.filemode', 'true'); chmodSync(join(f.dir, file), 0o755); }
+      else if (change === 'symlink') { rmSync(join(f.dir, file)); symlinkSync('package.json', join(f.dir, file)); }
+      else f.put(file, 'changed');
+      if (['stage', 'added', 'stage-then-revert-worktree'].includes(change)) f.git('add', file);
+      if (change === 'stage-then-revert-worktree') f.put(file, f.git('show', `HEAD:${file}`) + '\n');
+      f.expect(false, /工作区.*HEAD/, f.hosted());
+    }
+  }
+});
+
+test('committed configuration changes still require a bump, including hosted builds and explicit ranges', t => {
+  for (const file of ['.npmrc', 'vercel.json']) {
+    const f = fixture(t), base = f.git('rev-parse', 'HEAD');
+    f.put(file, 'changed'); f.commit('config without bump');
+    f.expect(false, /已提交.*基线.*\.npmrc|已提交.*基线.*vercel\.json/);
+    f.configChanges(); f.expect(false, /已提交.*基线/, f.hosted());
+    f.expect(false, /已提交.*基线/, { ...f.hosted(), VERCEL_ENV: 'preview', VERCEL_GIT_COMMIT_REF: 'review/patch' });
+    f.put('progress.md', 'notes'); f.git('add', 'progress.md'); f.git('commit', '-qm', 'docs');
+    f.expect(false, /已提交.*基线/, { ...f.hosted(), OHS_RELEASE_BASE: base });
+  }
+});
+
+test('diagnostics identify change scope and paths without exposing configuration or source values', t => {
+  const f = fixture(t); f.version('1.0.1'); f.commit('release');
+  const marker = 'fixture-secret-must-not-appear'; f.put('.npmrc', `# ${marker}`);
+  for (const edition of editions) {
+    const result = f.check(edition, { ...f.hosted(), VERCEL_GIT_REPO_OWNER: marker, VERCEL_GIT_COMMIT_SHA: marker });
+    assert.notEqual(result.status, 0);
+    assert.match(result.text, /工作区.*HEAD.*\.npmrc/);
+    assert.doesNotMatch(result.text, new RegExp(marker));
+  }
+});
 
 test('a production release followed by documentation-only commits builds without another bump', t => {
   const f = fixture(t);

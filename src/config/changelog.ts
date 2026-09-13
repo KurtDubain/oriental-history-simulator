@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.29',
+  version: '1.29.30',
   date: '2026-09-13',
-  title: '发布校验收口',
+  title: '托管构建校验',
   items: [
-    '纯文档更新不再误拦截；生产更新继续核对完整变更范围和版本记录。',
+    '区分托管配置转换与开发修改，保留两版发布和版本校验。',
   ],
 };
 

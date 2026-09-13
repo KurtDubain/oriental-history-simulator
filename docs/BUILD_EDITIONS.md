@@ -22,6 +22,8 @@
 
 版本门在 main/正式发布条件下默认核对 `HEAD^..HEAD`：仅文档变化可以不升版，但仍检查 package/lockfile/两版 changelog 一致。可选 `OHS_RELEASE_BASE` 用于一次发布或 PR 的跨提交范围；文件差异和版本都比较该 ref 与 HEAD 的共同祖先，不能固定旧值规避检查。本地未提交生产修改独立比较 HEAD。无父提交、浅克隆缺历史、无效/自身基线或 Git 查询失败会明确阻断，应补齐历史或提供正确基线，不会猜成文档变更。`npm run check:release-tests` 在独立临时 Git 仓库验证这些边界。
 
+Vercel Git 托管构建只有同时具备系统来源信息（`VERCEL`、`VERCEL_ENV`、`VERCEL_DEPLOYMENT_ID`、`VERCEL_GIT_PROVIDER`、仓库 owner/slug、commit ref/SHA），且来源完整、环境为 production/preview、SHA 与实际 Git HEAD 完全一致时，才容忍已确认的 `.npmrc`、`vercel.json` 未暂存普通文件内容修改（Git模式100644保持不变、状态M、该路径无暂存变化）。系统变量语义见[Vercel官方说明](https://vercel.com/docs/environment-variables/system-environment-variables)。这不是仅凭CI标志跳过工作区，也不是对配置字段内容或来源签名的鉴定；两个路径仍属于生产文件。新增、删除、暂存、模式/类型变化及其他生产路径不获例外，本地修改仍须升版；已核验的托管构建（含preview）仍检查正常已提交范围。来源缺失/SHA不符时回到严格校验，不设置手工伪造变量补齐。报错仅输出分类、Git基线和路径，不输出配置正文或环境值。云端实际字段变换仍未核验，由部署session重新构建确认，不据一般平台文档编造具体原因。
+
 每次构建保留原版本、类型、地图、全部同步/异步 JS、CSS、媒体预算检查。
 竞赛版同时检查 Rollup 模块图、HTML 地图 payload 与从私人地图派生的敏感数据令牌；不是只隐藏一个选图按钮。旧 `contest-profile.json` 继续存在，其范围与 `version.json` 由同一组已选 profile 派生。详情见 [CONTEST_BUILD.md](./CONTEST_BUILD.md)。
 
