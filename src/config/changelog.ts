@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.26',
+  version: '1.29.27',
   date: '2026-09-13',
-  title: '落墨有声',
+  title: '音画复验',
   items: [
-    '新增可关闭的书页山水、章首印纹与短提示音；默认静音，启用后按需播放，不补播旧史。',
+    '音画验收改用正式历史夹具并接入发布检查；既有声音、图片与默认静音保持不变。',
   ],
 };
 
