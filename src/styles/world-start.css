@@ -44,6 +44,11 @@
   background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 180 180' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)' opacity='.12'/%3E%3C/svg%3E");
 }
 
+html[data-illustrations="true"] .world-start__grain {
+  background: url('/media/images/river-margin.webp') right bottom / min(840px, 100vw) auto no-repeat;
+  opacity: .36;
+}
+
 .world-start__close {
   position: fixed;
   z-index: 3;

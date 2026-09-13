@@ -74,6 +74,15 @@
   box-shadow: inset 0 0 0 3px rgb(245 232 205 / 11%);
 }
 
+html[data-illustrations="true"] :is(.situation-workbench__seal, .history-workbench__seal) { position: relative; }
+html[data-illustrations="true"] :is(.situation-workbench__seal, .history-workbench__seal)::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  background: url('/media/images/river-seal.webp') center / cover no-repeat;
+}
+
 .situation-workbench__masthead > div {
   display: grid;
   min-width: 0;

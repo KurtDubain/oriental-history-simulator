@@ -45,12 +45,13 @@ try {
     const panel = page.getByTestId('settings-panel');
     await panel.waitFor();
     assert.match(await panel.textContent(), /只调整舆图与界面的观看方式/);
-    assert.doesNotMatch(await panel.textContent(), /声音|音量|声景|试听/);
-    assert.equal(await panel.locator('img, input[type="range"]').count(), 0);
+    assert.match(await panel.textContent(), /默认静音/);
+    assert.equal(await panel.locator('input[type="range"]').count(), 1);
+    assert.equal(await panel.getByLabel('提示音').isChecked(), false);
 
     await panel.getByRole('button', { name: /^减少/ }).click();
     await panel.getByRole('button', { name: /^紧凑/ }).click();
-    await panel.locator('.settings-switch-row input[type="checkbox"]').uncheck();
+    await panel.getByLabel('地图气氛').uncheck();
     const configured = await snapshot(page);
     assert.equal(configured.interface.settings.motion, 'reduced');
     assert.equal(configured.interface.settings.density, 'compact');
@@ -59,7 +60,8 @@ try {
     assert.equal(configured.deterministicWorldHash, baseline.deterministicWorldHash);
     const stored = await page.evaluate((key) => JSON.parse(localStorage.getItem(key)), settingsKey);
     assert.equal(stored.motion, 'reduced');
-    assert.equal('sound' in stored, false);
+    assert.equal(stored.sound, false);
+    assert.equal(stored.volume, .4);
 
     const viewportFits = await page.evaluate(() => (
       document.documentElement.scrollWidth <= document.documentElement.clientWidth

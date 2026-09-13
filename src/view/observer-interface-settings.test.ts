@@ -47,6 +47,7 @@ describe('observer interface settings', () => {
       motion: 'system',
       mapAtmosphere: true,
       interfaceDensity: 'comfortable',
+      sound: false, volume: .4, illustrations: true,
     });
   });
 
@@ -60,6 +61,7 @@ describe('observer interface settings', () => {
     const normalized = normalizeObserverInterfaceSettings(callerOwned);
 
     expect(normalized).toEqual({
+      ...createObserverInterfaceSettings(),
       version: OBSERVER_INTERFACE_SETTINGS_VERSION,
       motion: 'reduced',
       mapAtmosphere: false,
@@ -113,5 +115,14 @@ describe('observer interface settings', () => {
     expect(loadObserverInterfaceSettings(blockedStorage)).toEqual(createObserverInterfaceSettings());
     expect(saveObserverInterfaceSettings(createObserverInterfaceSettings(), blockedStorage)).toBe(false);
     expect(clearObserverInterfaceSettings(blockedStorage)).toBe(false);
+  });
+
+  it('keeps media local, clamps volume and preserves mute across reloads', () => {
+    expect(normalizeObserverInterfaceSettings({volume:NaN}).volume).toBe(.4);
+    expect(normalizeObserverInterfaceSettings({volume:3}).volume).toBe(1);
+    expect(normalizeObserverInterfaceSettings({volume:-1}).volume).toBe(0);
+    const prefs=normalizeObserverInterfaceSettings({sound:true,volume:.25,illustrations:false});
+    expect(parseObserverInterfaceSettings(serializeObserverInterfaceSettings(prefs))).toEqual(prefs);
+    expect(normalizeObserverInterfaceSettings({sound:'true'}).sound).toBe(false);
   });
 });

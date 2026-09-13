@@ -303,6 +303,7 @@ export function App() {
     fullscreen,
     commitSettings: commitInterfaceSettings,
     toggleFullscreen: handleFullscreen,
+    media,
   } = useObserverInterface();
 
   const worldRef = useRef<WorldState | null>(null);
@@ -547,6 +548,7 @@ export function App() {
     nextWorld: WorldState,
     source: OpenWorldSource,
   ) => {
+    media.reset();
     clearRosterDossier(); rosterDiscovery.reset(); resetRuntimePerformanceMetrics();
     const validWorld = assertValidWorld(nextWorld);
     resetAutosaveCoordinator(source === 'continue' ? validWorld.turn : 0);
@@ -833,6 +835,7 @@ export function App() {
   }, [refreshWorldSaves]);
 
   const handleNewWorldMenu = useCallback(async (returnFocusTo?: HTMLElement | null) => {
+    media.reset();
     playback.pause();
     setWorldStartInitialFocus('primary');
     worldStartReturnFocusRef.current = returnFocusTo
@@ -883,6 +886,7 @@ export function App() {
       }
       const next = assertValidRuntimeTurn(current, advanced);
       commitWorld(next);
+      media.settled([...next.facts, ...next.history], current.turn, source !== 'auto');
       const nextEmbodiment = advanceEmbodimentObserverState(
         embodimentBeforeAdvance,
         current,
@@ -1029,6 +1033,7 @@ export function App() {
     causalReturnFocusRef.current = returnFocusTo;
     causalFocusRestoreAllowedRef.current = true;
     navigation.openEvent(eventId, preserveCurrent);
+    media.read();
     completeGuideStep('cause-traced');
     return true;
   }, [completeGuideStep, navigation, playback]);
@@ -1100,6 +1105,7 @@ export function App() {
     if (nextView === activeView) return;
     playback.pause();
     clearRosterDossier(); navigation.goToView(nextView);
+    if (nextView === 'chronicle') media.read();
   }, [activeView, clearRosterDossier, navigation, playback]);
 
   const handleCloseHistoryWorkbench = useCallback(() => {
@@ -1329,6 +1335,7 @@ export function App() {
     if (!projection.selectedId) return;
     playback.pause();
     navigation.openLayer({ kind: 'situations', situationId: projection.selectedId });
+    media.read();
   }, [navigation, playback]);
 
   const handleRosterReasonSelect = useCallback((reason: RosterReason) => {
@@ -2172,6 +2179,7 @@ export function App() {
         settings={interfaceSettings}
         fullscreen={fullscreen}
         onSettingsChange={commitInterfaceSettings}
+        onPreviewSound={() => media.read()}
         onToggleFullscreen={handleFullscreen}
         onClose={handleCloseSettings}
         returnFocusTo={settingsTriggerRef.current}

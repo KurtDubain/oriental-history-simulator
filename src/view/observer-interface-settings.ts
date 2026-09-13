@@ -14,6 +14,9 @@ export interface ObserverInterfaceSettings {
   motion: ObserverMotionPreference;
   mapAtmosphere: boolean;
   interfaceDensity: ObserverInterfaceDensity;
+  sound: boolean;
+  volume: number;
+  illustrations: boolean;
 }
 
 /** Minimal localStorage-compatible boundary, kept injectable for SSR and tests. */
@@ -60,6 +63,9 @@ export function createObserverInterfaceSettings(): ObserverInterfaceSettings {
     motion: 'system',
     mapAtmosphere: true,
     interfaceDensity: 'comfortable',
+    sound: false,
+    volume: .4,
+    illustrations: true,
   };
 }
 
@@ -72,6 +78,10 @@ export function normalizeObserverInterfaceSettings(value: unknown): ObserverInte
     motion: safeMotion(value.motion, defaults.motion),
     mapAtmosphere: safeBoolean(value.mapAtmosphere, defaults.mapAtmosphere),
     interfaceDensity: safeDensity(value.interfaceDensity, defaults.interfaceDensity),
+    sound: safeBoolean(value.sound, defaults.sound),
+    volume: typeof value.volume === 'number' && Number.isFinite(value.volume)
+      ? Math.max(0, Math.min(1, value.volume)) : defaults.volume,
+    illustrations: safeBoolean(value.illustrations, defaults.illustrations),
   };
 }
 

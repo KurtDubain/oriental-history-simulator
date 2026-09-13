@@ -24,6 +24,7 @@ export interface SettingsPanelProps {
   fullscreen?: boolean;
   onSettingsChange: (settings: ObserverInterfaceSettings) => void;
   onToggleFullscreen?: () => void;
+  onPreviewSound?: () => void;
   onClose: () => void;
   returnFocusTo?: HTMLElement | null;
 }
@@ -44,6 +45,7 @@ export function SettingsPanel({
   fullscreen = false,
   onSettingsChange,
   onToggleFullscreen,
+  onPreviewSound,
   onClose,
   returnFocusTo,
 }: SettingsPanelProps) {
@@ -116,6 +118,25 @@ export function SettingsPanel({
               />
               <i aria-hidden="true" />
             </label>
+
+            <label className="settings-switch-row">
+              <span className="settings-switch-row__icon" aria-hidden="true"><Image size={18} /></span>
+              <span><strong>书页装饰</strong><small>淡墨山水与章首印纹，不改变地图信息</small></span>
+              <input type="checkbox" checked={safeSettings.illustrations} onChange={event => commit({ illustrations: event.target.checked })} />
+              <i aria-hidden="true" />
+            </label>
+
+            <label className="settings-switch-row">
+              <span className="settings-switch-row__icon" aria-hidden="true">♪</span>
+              <span><strong>提示音</strong><small>翻卷、落季与重大转折；默认静音，无背景音乐</small></span>
+              <input type="checkbox" checked={safeSettings.sound} onChange={event => commit({ sound: event.target.checked })} />
+              <i aria-hidden="true" />
+            </label>
+            <div className="settings-sound">
+              <label htmlFor="settings-volume">音量 {Math.round(safeSettings.volume * 100)}%</label>
+              <input id="settings-volume" type="range" min="0" max="1" step="0.05" value={safeSettings.volume} onChange={event => commit({ volume: Number(event.target.value) })} />
+              <button type="button" disabled={!safeSettings.sound || !safeSettings.volume} onClick={onPreviewSound}>试听翻卷</button>
+            </div>
 
             <fieldset className="settings-choice" data-testid="settings-motion-choice">
               <legend><Gauge size={15} aria-hidden="true" />动态效果</legend>

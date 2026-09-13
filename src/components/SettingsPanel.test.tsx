@@ -90,8 +90,9 @@ describe('SettingsPanel', () => {
     const rangeInputs = collectElements(root).filter((element) => (
       element.type === 'input' && element.props.type === 'range'
     ));
-    expect(rangeInputs).toHaveLength(0);
-    expect(nodeText(root)).not.toContain('声音');
+    expect(rangeInputs).toHaveLength(1);
+    expect(nodeText(root)).toContain('默认静音');
+    expect(nodeText(root)).toContain('书页装饰');
   });
 
   it('emits normalized settings for switches, motion, and density choices', () => {
@@ -109,7 +110,7 @@ describe('SettingsPanel', () => {
       element.type === 'button' && nodeText(element).includes('紧凑')
     ));
 
-    expect(checkboxes).toHaveLength(1);
+    expect(checkboxes).toHaveLength(3);
     checkboxes[0].props.onChange?.({ target: { checked: false } });
     reducedMotion?.props.onClick?.();
     compactDensity?.props.onClick?.();

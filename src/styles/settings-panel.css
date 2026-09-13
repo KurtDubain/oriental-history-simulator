@@ -32,6 +32,11 @@
   animation: settings-panel-enter 240ms cubic-bezier(.22, .78, .24, 1) both;
 }
 
+.settings-sound { display: flex; align-items: center; gap: 10px; font-size: 13px; }
+.settings-sound input { flex: 1; min-width: 40px; height: 44px; accent-color: var(--observer-vermilion); }
+.settings-sound button { min-height: 44px; padding: 0 10px; color: inherit; background: transparent; border: 1px solid var(--observer-line); cursor: pointer; }
+.settings-sound button:disabled { opacity: .5; cursor: default; }
+
 .settings-panel__hero {
   position: relative;
   min-height: 122px;

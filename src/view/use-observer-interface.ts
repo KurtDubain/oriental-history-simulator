@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
+import { ObserverMedia } from './observer-media';
 import {
   loadObserverInterfaceSettings,
   normalizeObserverInterfaceSettings,
@@ -11,10 +12,12 @@ export interface ObserverInterfaceController {
   fullscreen: boolean;
   commitSettings: (settings: ObserverInterfaceSettings) => void;
   toggleFullscreen: () => void;
+  media: ObserverMedia;
 }
 
 /** Owns the small set of presentation-only settings and fullscreen state. */
 export function useObserverInterface(): ObserverInterfaceController {
+  const [media] = useState(() => new ObserverMedia());
   const [settings, setSettings] = useState<ObserverInterfaceSettings>(() => (
     loadObserverInterfaceSettings()
   ));
@@ -24,9 +27,32 @@ export function useObserverInterface(): ObserverInterfaceController {
 
   const commitSettings = useCallback((candidate: ObserverInterfaceSettings) => {
     const next = normalizeObserverInterfaceSettings(candidate);
+    media.configure(next);
+    media.unlock();
     saveObserverInterfaceSettings(next);
     setSettings(next);
-  }, []);
+  }, [media]);
+
+  useEffect(() => {
+    media.configure(settings);
+    document.documentElement.dataset.illustrations = String(settings.illustrations);
+  }, [media, settings]);
+  useEffect(() => {
+    const gesture = () => media.unlock();
+    const hidden = () => { if (document.hidden) media.stop(); };
+    const leave = () => media.stop();
+    document.addEventListener('pointerdown', gesture);
+    document.addEventListener('keydown', gesture);
+    document.addEventListener('visibilitychange', hidden);
+    window.addEventListener('pagehide', leave);
+    return () => {
+      document.removeEventListener('pointerdown', gesture);
+      document.removeEventListener('keydown', gesture);
+      document.removeEventListener('visibilitychange', hidden);
+      window.removeEventListener('pagehide', leave);
+      media.dispose();
+    };
+  }, [media]);
 
   const toggleFullscreen = useCallback(() => {
     if (document.fullscreenElement) void document.exitFullscreen();
@@ -42,5 +68,6 @@ export function useObserverInterface(): ObserverInterfaceController {
     fullscreen,
     commitSettings,
     toggleFullscreen,
+    media,
   };
 }

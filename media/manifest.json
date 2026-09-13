@@ -1,3 +1,11 @@
 {
-  "assets": []
+  "assets": [
+    {"path":"media/sfx/quarter-step.mp3","kind":"sfx","load":"lazy","source":"media/sources/synthesize.mjs","creator":"本项目原创程序合成","license":"CC0-1.0，media/SOURCES.md"},
+    {"path":"media/sfx/folio-open.mp3","kind":"sfx","load":"lazy","source":"media/sources/synthesize.mjs","creator":"本项目原创程序合成","license":"CC0-1.0，media/SOURCES.md"},
+    {"path":"media/sfx/battle-seal.mp3","kind":"sfx","load":"lazy","source":"media/sources/synthesize.mjs","creator":"本项目原创程序合成","license":"CC0-1.0，media/SOURCES.md"},
+    {"path":"media/sfx/accession.mp3","kind":"sfx","load":"lazy","source":"media/sources/synthesize.mjs","creator":"本项目原创程序合成","license":"CC0-1.0，media/SOURCES.md"},
+    {"path":"media/sfx/farewell.mp3","kind":"sfx","load":"lazy","source":"media/sources/synthesize.mjs","creator":"本项目原创程序合成","license":"CC0-1.0，media/SOURCES.md"},
+    {"path":"media/images/river-margin.webp","kind":"image","load":"initial","source":"OpenAI image_gen exec-c864bf7b-a619-44d6-8567-15da4fb86332，media/SOURCES.md","creator":"用户委托，OpenAI image_gen","license":"适用 OpenAI 输出使用条款；来源及生成记录见 media/SOURCES.md"},
+    {"path":"media/images/river-seal.webp","kind":"image","load":"lazy","source":"OpenAI image_gen exec-0b17835d-78a0-4953-9d39-5ea6e8635a08，media/SOURCES.md","creator":"用户委托，OpenAI image_gen","license":"适用 OpenAI 输出使用条款；来源及生成记录见 media/SOURCES.md"}
+  ]
 }

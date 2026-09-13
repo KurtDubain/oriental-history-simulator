@@ -168,6 +168,9 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       navigationJourney: projectNavigationJourney(navigation),
       settings: {
         open: settingsOpen,
+        sound: options.interfaceSettings.sound,
+        volume: options.interfaceSettings.volume,
+        illustrations: options.interfaceSettings.illustrations,
         motion: options.interfaceSettings.motion,
         mapAtmosphere: options.interfaceSettings.mapAtmosphere,
         density: options.interfaceSettings.interfaceDensity,
@@ -476,6 +479,9 @@ export function makeTextSnapshot(world: WorldState | null, options: SnapshotOpti
       overlay: options.overlay,
       settings: {
         open: settingsOpen,
+        sound: options.interfaceSettings.sound,
+        volume: options.interfaceSettings.volume,
+        illustrations: options.interfaceSettings.illustrations,
         motion: options.interfaceSettings.motion,
         mapAtmosphere: options.interfaceSettings.mapAtmosphere,
         density: options.interfaceSettings.interfaceDensity,
