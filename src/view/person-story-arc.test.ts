@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { computeWorldHash, createWorld, serializeWorld } from '../sim';
+import { advanceWorld, computeWorldHash, createWorld, serializeWorld } from '../sim';
 import type { BattleFact, SimulationFact } from '../sim/facts';
 import type { WorldState } from '../sim/types';
 import { projectPersonStoryArc } from './person-story-arc';
@@ -68,6 +68,42 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it.each([true,false])('discovers a current ending backed by a real career, without promoting a lone death (event=%s)', withEvent => {
+    const w=createWorld('前史与结局不是阵亡配额');
+    const [veteran,lone]=w.armies.slice(0,2).map(a=>w.characters.find(p=>p.id===a.commanderId)!);
+    w.facts=[];w.history=[];w.offices=[];w.turn=50;
+    for(const p of [veteran,lone]) {
+      p.alive=false;p.deathTurn=49;
+      const last=battleFact(w,p.id,`last-${p.id}`,49,400);last.importance=3;last.payload.attackerWon=false;
+      const death:SimulationFact={...last,id:`death-${p.id}`,kind:'character_death',sourceFactIds:[last.id],
+        payload:{characterId:p.id,cause:'battle',battleFactId:last.id,age:56,health:0,diseaseId:null,role:'副将'}};
+      w.facts.push(last,death);
+      if(withEvent)w.history.push({...death,id:`event-${p.id}`,kind:'character_battle_death',title:'阵亡',summary:'战败阵亡。',
+        sourceFactIds:[last.id,death.id],situationIds:[],evidence:[]});
+      if(p===lone)continue;
+      const earlier=battleFact(w,p.id,'early-battle',8,200);earlier.importance=3;
+      w.facts.unshift(earlier,{...earlier,id:'late-relief',turn:40,kind:'local_governance_resolved',
+        payload:{actorId:p.id,polityId:p.polityId,regionId:earlier.regionIds[0],authorityId:p.id,
+          action:'open_granary',outcome:'enacted',reasonCode:'measure_enacted',score:60,threshold:50,
+          pressure:80,foodSeasonsBefore:.5,unrestBefore:12,unrestAfter:1,foodSpent:500,treasurySpent:0}});
+    }
+    const report=advanceWorld(createWorld('季报壳')).lastTurn!;
+    w.lastTurn={...report,turn:49,factIds:w.facts.filter(f=>f.turn===49).map(f=>f.id),eventIds:w.history.map(e=>e.id)};
+    const body=serializeWorld(w),hash=computeWorldHash(w),arc=projectPersonStoryArc(w,veteran);
+    const get=(id:string)=>projectRosterCollection(w,'people',{query:'',quickView:'deceased',filters:{},sort:'attention'}).items.find(p=>p.id===id)!;
+    const shown=get(veteran.id),isolated=get(lone.id),ending=arc.find(b=>b.phase==='ending')!;
+    expect(shown.reason?.label).toBe(ending.title);
+    expect(shown.reason?.kind).toBe('current-event');
+    expect(isolated.reason?.kind).not.toBe('current-event');
+    expect(shown.discovery!.attention.importance).toBeGreaterThan(isolated.discovery!.attention.importance);
+    expect(arc.every(b=>b.sourceFactIds.every(id=>w.facts.some(f=>f.id===id)))).toBe(true);
+    expect(arc.length).toBeLessThanOrEqual(5);
+    expect(serializeWorld(w)).toBe(body);expect(computeWorldHash(w)).toBe(hash);
+    w.lastTurn={...w.lastTurn,factIds:[],eventIds:[]};w.turn++;
+    expect(get(veteran.id).reason?.kind).toBe('recent-event');
+    expect(projectPersonStoryArc(w,veteran)).toEqual(arc);
+  });
+
   it.each(['absent', 'present', 'partial'] as const)('credits only battle participants within a merged national campaign (%s)', mode => {
     const w = createWorld('国事来源不等于亲自参战');
     const p = w.characters.find(p => w.armies.some(a => a.commanderId === p.id))!;

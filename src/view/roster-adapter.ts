@@ -473,12 +473,17 @@ function personItems(context: ProjectionContext): RosterItem[] {
     const watched = explainWatchAlert(watchAlert, event ?? situation);
     const story = projectPersonStoryArc(context.world, item, evidence);
     // Compare the displayed career, not the number of citations attached to a death.
-    const turning = [...story].sort((a, b) => storyTerritories(b.sourceFactIds, evidence.byId).size - storyTerritories(a.sourceFactIds, evidence.byId).size
-      || b.importance - a.importance)[0];
-    const remembered = turning ? candidate('recent-event', turning.title,
+    const career = story.filter(b => b.phase !== 'ending' && (b.importance >= 4
+      || b.importance >= 3 && (b.phase === 'battle' || b.phase === 'setback')
+      || b.sourceFactIds.some(id => evidence.byId.get(id)?.kind === 'local_governance_resolved')));
+    // An established life ending this quarter is a current discovery, not a permanent death bonus.
+    const currentEnding = !item.alive && career.length > 1 ? story.find(b => b.phase === 'ending' && b.importance >= 3
+      && (context.currentFactIds.has(b.primaryFactId ?? '') || context.currentEventIds.has(b.primaryEventId ?? ''))) : undefined;
+    const turning = currentEnding ?? [...story].reverse().sort((a, b) => b.importance - a.importance
+      || storyTerritories(b.sourceFactIds, evidence.byId).size - storyTerritories(a.sourceFactIds, evidence.byId).size)[0];
+    const remembered = turning ? candidate(currentEnding ? 'current-event' : 'recent-event', turning.title,
       { kind: 'item', id: item.id }, { importance: storyTerritories(story.flatMap(b => b.sourceFactIds), evidence.byId).size
-        + story.filter(b => b.phase !== 'ending' && (b.importance >= 4
-          || b.sourceFactIds.some(id => evidence.byId.get(id)?.kind === 'local_governance_resolved'))).length, value: turning.importance }) : null;
+        + career.length, value: turning.importance }) : null;
     const structural = candidate(item.alive && identity.rank >= 70 ? 'authority' : actualCommand ? 'command' : 'standing',
       officeLabel, { kind: 'item', id: item.id }, { value: item.alive ? identity.rank : past?.rank ?? 0 });
     const attention = chooseAttention([watched, ...(item.alive ? [situation, recent && story.some(b => b.sourceEventIds.includes(recent.id)) ? event : null] : []), remembered, structural].filter((entry): entry is AttentionCandidate => Boolean(entry)));

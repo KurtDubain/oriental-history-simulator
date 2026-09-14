@@ -179,10 +179,15 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact, co
     };
   }
   if (fact.kind === 'war_ended') {
-    const winner = fact.payload.winnerId ? polityName(world, fact.payload.winnerId) : null;
+    const { result, attackerId, defenderId, winnerId } = fact.payload;
+    const extinct = result.endsWith('_destroyed') || result.endsWith('_dissolved');
+    const outcome = extinct
+      ? `${polityName(world, result.startsWith('attacker_') ? attackerId : defenderId)}${result.endsWith('_destroyed') ? '灭亡' : '解体'}，战事终止`
+      : result === 'negotiated_peace' ? '双方议和'
+        : winnerId ? `${polityName(world, winnerId)}占得上风` : '战事结束';
     return {
-      title: `${polityName(world, fact.payload.attackerId)}与${polityName(world, fact.payload.defenderId)}停战`,
-      summary: `${winner ? `${winner}占得上风` : '双方议和'}；攻方战果${compactNumber(fact.payload.attackerScore)}、守方战果${compactNumber(fact.payload.defenderScore)}。${fact.payload.reason}`,
+      title: extinct ? outcome : `${polityName(world, attackerId)}与${polityName(world, defenderId)}停战`,
+      summary: `${outcome}；攻方战果${compactNumber(fact.payload.attackerScore)}、守方战果${compactNumber(fact.payload.defenderScore)}。${fact.payload.reason}`,
     };
   }
   if (fact.kind === 'battle') {

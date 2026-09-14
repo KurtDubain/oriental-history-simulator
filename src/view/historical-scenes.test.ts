@@ -18,6 +18,38 @@ import {
 } from './historical-scenes';
 
 describe('NAR01/NAR02 concrete historical scenes', () => {
+  it.each(['attacker_destroyed', 'defender_destroyed', 'attacker_dissolved', 'defender_dissolved',
+    'negotiated_peace', 'attacker_advantage', 'defender_advantage'] as const)(
+    'reads the recorded war ending, not a missing winner or an unrelated extinction (%s)', result => {
+      const world = advanceWorld(createWorld('战争结束原因夹具')), [attacker, defender, unrelated] = world.polities;
+      const report = world.lastTurn!;
+      const end: Extract<SimulationFact, {kind:'war_ended'}> = {
+        id:'ending-subject',kind:'war_ended',turn:report.turn,year:report.year,season:report.season,
+        category:'军事',importance:5,actorIds:[],polityIds:[attacker.id,defender.id],regionIds:[],
+        sourceFactIds:[],causes:[],stateDeltas:[],payload:{warId:'recorded-war',attackerId:attacker.id,defenderId:defender.id,
+          result,winnerId:null,loserId:null,reason:'真实结束依据',durationTurns:10,attackerScore:0,defenderScore:0,indemnity:0},
+      };
+      const own: HistoryEvent = {...end,id:'ending-event',kind:'peace',title:'战事终止',summary:end.payload.reason,
+        sourceFactIds:[end.id],evidence:[],situationIds:[]};
+      world.facts=[end];world.history=[own,{...own,id:'unrelated-end',kind:'polity_eliminated',
+        title:`${unrelated.name}灭亡`,polityIds:[unrelated.id],sourceFactIds:[]}];
+      report.factIds=[end.id];report.eventIds=[own.id];
+      const body=serializeWorld(world),copy=projectFactNarrative(world,end);
+      if(result.endsWith('_destroyed')||result.endsWith('_dissolved')) {
+        const side=result.startsWith('attacker_')?attacker:defender;
+        expect(copy.title).toContain(side.shortName||side.name);
+        expect(copy.title).toContain(result.endsWith('_destroyed')?'灭亡':'解体');
+        expect(copy.summary).not.toContain('双方议和');
+      }else if(result==='negotiated_peace')expect(copy.summary).toContain('双方议和');
+      else expect(copy.summary).not.toContain('双方议和');
+      expect(copy.summary).not.toContain(unrelated.name);
+      const scene=projectHistoricalScenes(world,[end],1)[0],card=projectQuarterPulse(world).stories[0];
+      expect(scene.summary).toContain(copy.summary);expect(card.summary).toContain(copy.summary);
+      expect(card.eventId).toBe(own.id);expect(card.sourceFactIds).toContain(end.id);
+      expect(card.historyEventIds).toContain(own.id);expect(card.historyEventIds).not.toContain('unrelated-end');
+      expect(serializeWorld(world)).toBe(body);
+    });
+
   it('opens death itself before inheritance consequences, independent of record IDs and listing order', () => {
     const world = advanceWorld(createWorld('主证据夹具')), person = world.characters[0], report = world.lastTurn!;
     const death: Extract<SimulationFact, { kind: 'character_death' }> = {
