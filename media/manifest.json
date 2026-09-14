@@ -1,5 +1,8 @@
 {
   "assets": [
+    {"path":"favicon.svg","kind":"image","load":"initial","source":"沿用TopBar衡印；Noto Serif CJK SC Black字形转轮廓，media/SOURCES.md","creator":"本项目标识排版；字形Adobe","license":"字形SIL OFL-1.1，media/sources/NotoSerifCJK-OFL.txt"},
+    {"path":"favicon.ico","kind":"image","load":"initial","source":"public/favicon.svg、media/sources/render-favicon.mjs","creator":"本项目标识排版；字形Adobe","license":"字形SIL OFL-1.1，media/sources/NotoSerifCJK-OFL.txt"},
+    {"path":"apple-touch-icon.png","kind":"image","load":"initial","source":"public/favicon.svg、media/sources/render-favicon.mjs","creator":"本项目标识排版；字形Adobe","license":"字形SIL OFL-1.1，media/sources/NotoSerifCJK-OFL.txt"},
     {"path":"media/sfx/quarter-step.mp3","kind":"sfx","load":"lazy","source":"media/sources/synthesize.mjs","creator":"本项目原创程序合成","license":"CC0-1.0，media/SOURCES.md"},
     {"path":"media/sfx/folio-open.mp3","kind":"sfx","load":"lazy","source":"media/sources/synthesize.mjs","creator":"本项目原创程序合成","license":"CC0-1.0，media/SOURCES.md"},
     {"path":"media/sfx/battle-seal.mp3","kind":"sfx","load":"lazy","source":"media/sources/synthesize.mjs","creator":"本项目原创程序合成","license":"CC0-1.0，media/SOURCES.md"},

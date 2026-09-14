@@ -4,6 +4,10 @@
   "installCommand": "npm ci",
   "headers": [
     {
+      "source": "/(favicon\\.(?:svg|ico)|apple-touch-icon\\.png)",
+      "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
+    },
+    {
       "source": "/media/(.*)",
       "headers": [{ "key": "Cache-Control", "value": "public, max-age=0, must-revalidate" }]
     },
@@ -41,7 +45,7 @@
   ],
   "rewrites": [
     {
-      "source": "/((?!assets/|media/|version\\.json$|contest-profile\\.json$).*)",
+      "source": "/((?!assets/|media/|version\\.json$|contest-profile\\.json$|favicon\\.(?:svg|ico)$|apple-touch-icon\\.png$).*)",
       "destination": "/index.html"
     }
   ]

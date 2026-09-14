@@ -7,6 +7,7 @@ v1.29.26 已接入五个原创短音效、两张生成式装饰图。不是背�
 - 文件放入 `public/media/sfx/` 或 `public/media/images/`，小写英文语义名、连字符；音效用 Ogg/MP3/M4A，图片用 WebP/AVIF。
 - 每个文件必须登记到 `media/manifest.json` 的 `assets`，字段：`path`（如 `media/sfx/quarter-turn.ogg`）、`kind`（`sfx`/`image`）、`load`（`initial`/`lazy`）、`source`（原始来源 URL 或创作源文件）、`creator`、`license`（授权类型及授权凭据路径/URL）。不得登记虚假授权；来源不清不进入产物。
 - 原稿、授权凭据和压缩工作文件不放 `public`。同一声音可供多类真实事件复用，不按每位人物制作资源。
+- v1.29.33增加三个必要的根图标例外：`public/favicon.svg`、`public/favicon.ico`、`public/apple-touch-icon.png`。只允许这三个名字，均以`kind:image/load:initial`登记到同一清单并计入原图片/首屏/总预算；其余图片仍用media/images下的WebP/AVIF。根图标也检查未登记文件及生产拷贝正文一致。
 
 ## 统计与加载
 
@@ -53,3 +54,9 @@ v1.29.26 已接入五个原创短音效、两张生成式装饰图。不是背�
 - [ ] 快速推进、同季多事、切换世界及导入旧历史不形成声音轰炸。
 
 这份清单是待确认项，不因浏览器技术测试通过而自动勾选。
+
+## 站点图标
+
+v1.29.33沿用游戏已有朱砂衡印，SVG原稿转轮廓、不依赖下载字体；ICO包含16/32/48像素，手机收藏图180像素。个人/竞赛、默认/腾讯云四组共用同一套图标，不改变首页和游戏布局。源码、授权及离线生成命令见media/SOURCES.md。
+
+Vercel静态路由明确排除图标，固定路径要求重新验证缓存；腾讯云既有Nginx可直接提供这些类型，不需要新增端口或改配置。图标接入不等于已启用PWA、完成手机主屏安装或已经部署新版本。

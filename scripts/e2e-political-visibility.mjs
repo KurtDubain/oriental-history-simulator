@@ -68,7 +68,6 @@ const CENTRAL_OFFICES = new Set(['君主', '宰辅', '枢密使', '廷臣']);
 function collectBrowserErrors(page, target) {
   page.on('console', (message) => {
     if (message.type() !== 'error') return;
-    if (message.location().url.endsWith('/favicon.ico')) return;
     target.push({ type: 'console.error', text: message.text(), location: message.location() });
   });
   page.on('pageerror', (error) => target.push({ type: 'pageerror', text: String(error) }));

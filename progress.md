@@ -1215,3 +1215,23 @@ Current story-audit request: 用当前模拟器实际推进多个固定世界，
 - 生产页脚E2E10组通过：两版×默认/腾讯云×1440×900/390×844，额外腾讯云两版1280×720；首次及续读首页、外链真实点击目标、保存刷新恢复、游戏地图不出现页脚、无横溢出及console/page error。手机备案行首次y713～757、有档y767～811，文字131.78px/11px、点击行44px，已实际打开最终8张腾讯云首页截图。10组同赛图T1hash均8891d2e09768dc4b。
 - mandatory初跑发现1280×720下旧absolute页脚加行后拦截开启按钮，失败截图/日志未删除；已仅对启用备案的页脚改正常文档流，默认版布局不变。四组重建、页脚专项及mandatory重跑通过，实际查看T0地图截图与状态；无force click。原双版本E2E也完整通过，T0/T1/T4/T8源码/两版全文与T9恢复一致，阅读证据/音画/更新版别/存档门保留。模拟、地图、存档、Vercel配置零diff。
 - 完成说明与证据：output/icp-footer-v1.29.32/REPORT.md、assets.json、browser-final/、mandatory-final/；原进度正文前缀逐字节验证保留。未运行完整release及长期审计，未做实体手机或线上验收；旧失败不清零。只修改本地、未提交推送部署，**本地已修改；腾讯云线上尚未更新。** 备案展示不表示游戏内容审批已确认。
+
+## 2026-09-14 — 腾讯云 v1.29.32 备案页脚正式部署
+
+- 用户授权将已完成本地修改发布腾讯云。开工干净main/0572410715da59f5b592ede5dfb4cda517a92866/v1.29.32，线上仍1.29.31。原progress前439427字节SHA256 73c6072c3e3e275b6b89674b2156aeb8ba6723db2d51ed9babbbff1a8e91ca8e保留。没有改生产源码、提交或推送，Vercel未操作。
+- OHS_TENCENT_ICP=1两版从已提交源码串行重建，版别5/5、首页5/5及两版原全部构建门通过；上传包与本地SHA一致。JSgzip423241/423244B、CSS39827，原预算通过，额外5KiB余量仍未达。只发布dist-tencent/dist-contest-tencent，icpFooter:true、Tencent buildId、完整HEAD和两图/一图清单核验通过。
+- 旧运维manager不识别新-tencent-标识；只适配identity_at 4行新增/1行替换，严格布尔并保留旧ID回滚。原14安全测试、新20项、真实新旧4产物通过，主代理独立20项通过；服务器Python3.6实际加载并只读验证旧发布清单通过。先备份旧工具及六份Nginx配置，再安装；新manager SHA265d0a4f4c1f6be2c44101daaf48f5ea4cc788745705f45b8fec536685eca500。
+- canghai.dyp02.vip及canghai-contest.dyp02.vip均原子切换到v1.29.32-0572410-20260914-icp，previous保留v1.29.31-733c0f4-20260914。56项严格TLS/31文件SHA/MIME/缓存/HTTP跳转/SPA/缺失资源/跨版隔离/博客足球健康全部通过。六份Nginx配置SHA未变，不reload或重启，不改端口、容器、数据库、DNS/证书/续签。两证书到期仍2026-12-13北京时间19:53:32/19:53:56。
+- Playwright技能CLI真实headed Chrome两版1440×900/390×844首次和有档首页截图实际查看，完整备案号居中、不挡操作、无横溢出；真实链接打开工信部。个人旧版T1保存339d02b3879b83d0→新版续读同hash→T2 3308e23200d9ac5c；竞赛T1 cf2ef3626ef9b52e保存刷新续读一致→T2 184f62718fd51a65。两站SPA深链刷新正常，未force click或注入世界状态。
+- 如实保留旧版即有的favicon.ico 404：新两站独立浏览器也出现，不冒称console全部空；不影响游戏操作，未顺手改图标。无本轮构建/网络/定向测试失败。未重跑全量Vitest、完整release、百年审计、实体手机或共享服务重启实验，旧archive性能待办不清零。
+- **腾讯云线上已部署**，Git push仍不会自动更新；本地仅docs/TENCENT_DEPLOYMENT.md及本段部署记录未提交。报告output/tencent-icp-deploy-20260914/REPORT.md，截图output/playwright/tencent-icp-deploy-20260914/，备份/www/backups/canghai-deploy/v1.29.32-0572410-20260914-icp/。页脚仅展示已有备案信息，不表示新增游戏审批已确认。
+
+## 2026-09-14 — 衡印站点图标（本地v1.29.33）
+
+- 用户问ICO是否丢失、没有则做精致图标，为后续验收资料准备。检查110个可见提交及当前index/public，未发现旧favicon或图标link；旧404为此前未接入，不是部署删除。起点HEAD0572410/v1.29.32，已有部署docs/progress改动保留；原progress前442126字节SHA256 dca7947496a51b8b94d8bea79c65d11ee51ef472e87e45754e2675340bba1268保留。
+- 沿用游戏TopBar朱砂衡印，SVG转轮廓字形、ICO16/32/48、180PNG共8254B。字形Noto Serif CJK SC Black/Adobe/OFL已记录来源与完整授权；字体和离线fontTools仅output，不进入依赖/产物，无外链字体、AI图像或游戏内UI改动。SVG可作为后续验收材料母版，离线render-favicon.mjs可重生两格式。
+- index三link、Vercel静态排除/再验证缓存、原manifest/checker3精确根图标接入，继续原图片/首屏/总预算；补遗漏/错格式/坏拷贝/资源结构回归，并移除旧政治E2E的favicon错误豁免。按原版本门package/lock/两版当前记录升1.29.33，不改sim/存档/地图/游戏CSS/依赖。
+- 定向11/11、默认/腾讯两版四组完整构建及原预算/地图/竞赛私人扫描通过；全部JSgzip默认423141/423146、腾讯423241/423244，CSS39827。媒体60736→68990（+8254），首屏17452→25706；所有图标保守计入首屏，原预算不提高，额外JS5KiB余量/归档性能待办不清零。
+- headed真实浏览器四组自动favicon.svg200，三图标逐项200/MIME/正文/解码通过，console/page errors=[]；16/32/48/96px浅深底及ICO对照实际查看。既有首页/备案E2E10组全部通过，T1及恢复hash均8891d2e09768dc4b，默认无备案/Tencent手机完整居中、无遮挡横溢，6张指定首页图实看；外链此专项用模拟响应，只验证目标。
+- develop-web-game mandatory原脚本2轮截图/state实看，T0 observing/private-v03 hashf243712b0b785279。初跑Node21以CJS加载失败，按既有记录加--experimental-default-type=module后通过，两日志保留；空动作未推进，不冒称T1，季度推进/保存由正式E2E补齐。本轮无最终失败，未重跑全量Vitest/完整release/百年/真机收藏安装。
+- **仅本地已修改、未提交推送或部署**，腾讯云仍1.29.32，Vercel未操作。当前产物是HEAD0572410上的未提交候选，不上传冒充已提交来源。报告output/favicon-v1.29.33/REPORT.md、图标及原稿在public，截图/构建日志在同output；素材来源media/SOURCES.md。没有提前展开封面/录视频等整套验收材料任务。

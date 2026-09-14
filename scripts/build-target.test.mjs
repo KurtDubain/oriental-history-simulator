@@ -77,7 +77,8 @@ test('shared hosting config leaves build/output to projects and preserves static
   const config = JSON.parse(readFileSync('vercel.json', 'utf8'));
   assert.equal(config.buildCommand, undefined); assert.equal(config.outputDirectory, undefined);
   const fallback = new RegExp(`^${config.rewrites[0].source}$`);
-  for (const path of ['/assets/app-hash.js', '/media/sfx/paper.mp3', '/version.json', '/contest-profile.json']) {
+  const icons = ['/favicon.ico', '/favicon.svg', '/apple-touch-icon.png'];
+  for (const path of ['/assets/app-hash.js', '/media/sfx/paper.mp3', '/version.json', '/contest-profile.json', ...icons]) {
     assert.equal(fallback.test(path), false, path);
   }
   assert.equal(fallback.test('/history'), true);
@@ -86,4 +87,11 @@ test('shared hosting config leaves build/output to projects and preserves static
   assert.match(cache('/contest-profile.json'), /no-store/);
   assert.doesNotMatch(cache('/media/(.*)'), /immutable/);
   assert.match(cache('/assets/(.*)'), /immutable/);
+  for (const path of icons) {
+    const policy = config.headers.find(h => new RegExp(`^${h.source}$`).test(path))?.headers.find(h => h.key === 'Cache-Control')?.value;
+    assert.ok(policy, `${path} needs an explicit cache policy`);
+    assert.match(policy, /(?:^|,)\s*max-age=0(?:,|$)/);
+    assert.match(policy, /must-revalidate/);
+    assert.doesNotMatch(policy, /immutable/);
+  }
 });

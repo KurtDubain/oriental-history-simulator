@@ -17,3 +17,15 @@
 - 印纹提示：方形暖白纸，朱砂石印质感，山河抽象轮廓与不规则磨损，留白，双色，无可读篆字、龙凤、王权符号、阴影或界面。
 
 两图只做缩放与 WebP 编码（quality .8），不用于权威地图，不冒充具体地区或历史人物。
+
+## 衡印站点图标 / 2026-09-14
+
+沿用既有 TopBar 的“衡”字朱砂印，不重新设计游戏品牌或改变界面。色值取自 observer-ui.css：朱砂 `#9c352b`、米白 `#f4ead4`。`public/favicon.svg` 是可编辑的自包含矢量原稿：方印、细边框与已转轮廓的单字；没有外部字体、CSS、图片请求或脚本，不依赖系统汉字字体。
+
+字形来自 [Noto Serif CJK SC Black 2.003](https://github.com/notofonts/noto-cjk/blob/main/Serif/OTF/SimplifiedChinese/NotoSerifCJKsc-Black.otf)，字体copyright为©2017–2024 Adobe；依据上游[SIL OFL 1.1](https://github.com/notofonts/noto-cjk/blob/main/Serif/LICENSE)使用，授权副本见 `sources/NotoSerifCJK-OFL.txt`。这是排版后的字形标识，不是手写书法或真实古印，也不冒称整个字形由本项目原创。
+
+制作时使用临时fontTools 4.60.2提取U+8861的SVGPathPen轮廓，字形bounds=(8,-95,992,856)，在64×64画布以translate(8,50.25)、scale(.048,-.048)居中；字体和临时工具仅留在被忽略的output目录，均不进入浏览器产物和项目依赖。
+
+`sources/render-favicon.mjs` 从原稿离线生成 `public/favicon.ico`（16/32/48三帧PNG编码）与 `public/apple-touch-icon.png`（180×180）。调用既有本机sharp工具，不修改package依赖：`node media/sources/render-favicon.mjs /absolute/path/to/sharp/module`。未来修改SVG后需重生另两文件，再跑媒体/图标测试与双平台四组构建；不得只手改某一发布目录。
+
+三格式均登记为initial image，保守地一起计入原媒体预算；实际浏览器通常只请求其中一个favicon，手机收藏可能另请求touch图。没有新增manifest、Service Worker或PWA功能。
