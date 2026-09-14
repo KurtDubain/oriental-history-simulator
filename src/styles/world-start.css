@@ -501,6 +501,35 @@ html[data-illustrations="true"] .world-start__grain {
   letter-spacing: 0.09em;
 }
 
+.world-start:has(.world-start__filing) {
+  padding-bottom: max(1rem, env(safe-area-inset-bottom));
+}
+
+.world-start__footer:has(.world-start__filing) {
+  position: relative;
+  inset: auto;
+  flex-wrap: wrap;
+  margin-top: 1rem;
+}
+
+.world-start__filing {
+  display: flex;
+  flex: 0 0 100%;
+  min-height: 44px;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  font-size: 11px;
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-decoration: none;
+}
+
+.world-start__filing:hover,
+.world-start__filing:focus-visible {
+  text-decoration: underline;
+}
+
 @keyframes world-start-enter {
   from {
     opacity: 0;

@@ -1,6 +1,8 @@
 node_modules/
 dist/
 dist-contest/
+dist-tencent/
+dist-contest-tencent/
 output/
 test-artifacts/
 coverage/

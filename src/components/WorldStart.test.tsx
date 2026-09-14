@@ -1,9 +1,16 @@
 import { createElement } from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { listMapProfiles } from '../maps';
 import type { MapProfileId } from '../maps';
 import { WorldStart, type WorldStartProps } from './WorldStart';
+
+const footer = vi.hoisted(() => ({ enabled: false }));
+vi.mock('../version', async (original) => ({
+  ...await original<typeof import('../version')>(),
+  get APP_ICP_FOOTER() { return footer.enabled; },
+}));
+afterEach(() => { footer.enabled = false; });
 
 function renderStart(overrides: Partial<WorldStartProps> = {}): {
   markup: string;
@@ -34,6 +41,16 @@ function renderStart(overrides: Partial<WorldStartProps> = {}): {
 }
 
 describe('WorldStart map profile selection', () => {
+  it.each([false, true])('shows only the opt-in filing link on the homepage (hasSave=%s)', (hasSave) => {
+    expect(renderStart({ hasSave }).markup).not.toContain('beian.miit.gov.cn');
+    footer.enabled = true;
+    const { markup } = renderStart({ hasSave });
+    expect(markup).toMatch(/<a[^>]+href="https:\/\/beian\.miit\.gov\.cn\/"[^>]*>冀ICP备2023028175号-1<\/a>/);
+    expect(markup.match(/冀ICP备2023028175号-1/g)).toHaveLength(1);
+    expect(markup.includes('id="continue-world"')).toBe(hasSave);
+    expect(renderStart({ open: false }).markup).toBe('');
+  });
+
   it('presents both registered atlases with a real outline, scale and playstyle before the seed', () => {
     const profiles = listMapProfiles();
     const { markup, onCreate, onSelectMapProfile } = renderStart();

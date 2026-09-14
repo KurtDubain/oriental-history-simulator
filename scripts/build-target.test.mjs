@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import { resolveBuildTarget, buildMetadata, assertPreviewArtifact } from './build-target.mjs';
+import { BUILD_TARGETS, resolveBuildTarget, buildMetadata, assertPreviewArtifact } from './build-target.mjs';
 
 test('commands own the edition; deployment environment is independent', () => {
   for (const mode of ['development', 'production', 'test', 'personal']) {
@@ -30,6 +30,34 @@ test('same version/commit remain distinguishable; preview rejects other or stale
   assert.throws(() => assertPreviewArtifact(contest, a, '1.2.3'));
   assert.throws(() => assertPreviewArtifact(contest, b, '1.2.4'));
   assert.match(buildMetadata(contest, '1.2.3', null, profiles).buildId, /^contest-local-/);
+});
+
+test('Tencent ICP is opt-in for either edition and keeps all four artifacts separate', () => {
+  const outputs = new Set();
+  for (const edition of ['personal', 'contest']) {
+    const normal = resolveBuildTarget(edition);
+    const tencent = resolveBuildTarget(edition, { OHS_TENCENT_ICP: '1' });
+    assert.equal(normal.icpFooter, false);
+    assert.equal(resolveBuildTarget(edition, { OHS_TENCENT_ICP: '0' }).icpFooter, false);
+    assert.equal(resolveBuildTarget(edition, { VERCEL_ENV: 'production' }).icpFooter, false);
+    assert.equal(tencent.icpFooter, true);
+    assert.equal(tencent.edition, normal.edition);
+    assert.equal(tencent.catalog, normal.catalog);
+    assert.equal(tencent.outDir, `${normal.outDir}-tencent`);
+    outputs.add(normal.outDir); outputs.add(tencent.outDir);
+    const a = buildMetadata(normal, '1.2.3', 'abcdef', []);
+    const b = buildMetadata(tencent, '1.2.3', 'abcdef', []);
+    assertPreviewArtifact(BUILD_TARGETS[edition], a, '1.2.3');
+    assert.equal(b.icpFooter, true);
+    assert.notEqual(a.buildId, b.buildId);
+    assertPreviewArtifact(tencent, b, '1.2.3');
+    assert.throws(() => assertPreviewArtifact(tencent, a, '1.2.3'));
+    assert.throws(() => assertPreviewArtifact(normal, b, '1.2.3'));
+    for (const value of ['', 'true', 'yes', '2']) {
+      assert.throws(() => resolveBuildTarget(edition, { OHS_TENCENT_ICP: value }), /OHS_TENCENT_ICP/);
+    }
+  }
+  assert.equal(outputs.size, 4);
 });
 
 test('CLI rejects conflicts and output/mode overrides before build/preview', () => {

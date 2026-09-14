@@ -1205,3 +1205,13 @@ Current story-audit request: 用当前模拟器实际推进多个固定世界，
 - 独立证书已签发、SNI与严格TLS通过，到期北京时间2026-12-13 19:53:32/19:53:56；每日04:29独立续签检查与日志轮转已安装并检查。腾讯云暂无Git自动部署。Nginx/crond开机启用；不停止共享服务、不重启整机，未冒称断电恢复验收。
 - 真实Chrome两版1440×900/390×844新建、推进、人物、经历证据返回、保存刷新续读和T2续演通过；T1恢复签名个人db9127f3d5061122、竞赛adeba3a90fe379c6一致，捕获error/warn空，所查页面无横溢出。截图对话内联实看，无虚构截图文件。非实体手机/百年/完整release验收。
 - 首次reload立即SNI读到旧默认证书的瞬态、临时ACME探针已不存在导致mv退出1、两次CDP点击等待超时均如实记录，后续核查正常；未放宽断言或证书验证。报告output/tencent-deploy-20260914/REPORT.md，长期维护docs/TENCENT_DEPLOYMENT.md，服务器ops /www/server/canghai-deploy与备份/www/backups/canghai-deploy。原archive性能/包体额外余量待办未豁免。
+
+## 2026-09-14 — 腾讯云首页备案页脚（v1.29.32，本地验收中）
+
+- 起点 main / 09d4131e7a7ac745dde5c3aee76c240b9b0ffece / v1.29.31，工作区干净，原有进度与部署记录全部保留。按现有生产修改版本门同步 package/lock 与两版 changelog 到 v1.29.32；不改模拟、存档、地图或线上配置，不提交推送部署。
+- 复用 WorldStart 底部及 build-target/build-edition：显式 `OHS_TENCENT_ICP=1` 才显示用户核对的单行备案链接；默认/0关闭，其他值拒绝。不按域名判断，personal/contest仍仅决定内容。四组产物独立为 dist、dist-contest、dist-tencent、dist-contest-tencent；竞赛扫描随已选目录执行，原预算不变。version.json 标明 icpFooter，预览拒绝标记串用。
+- 新增目标/首页定向回归已先红后绿；开发与验证证据统一保存在 output/icp-footer-v1.29.32/。当前仅本地改动，腾讯云线上尚未更新，后续构建/浏览器实测结果继续在末尾追加。
+- 最终验收：构建目标5/5、WorldStart5/5、发布合同15/15、全量Vitest108文件861项、架构门通过。四组最终main条件构建全部通过原版本/类型/地图/全部chunk/CSS/媒体门，竞赛两组私人内容扫描通过。默认JS423141/423145B，腾讯云423240/423243B，均≤424960；CSS39827B（+78），媒体60736B不变。额外5KiB余量仍未达，不扩展减重。
+- 生产页脚E2E10组通过：两版×默认/腾讯云×1440×900/390×844，额外腾讯云两版1280×720；首次及续读首页、外链真实点击目标、保存刷新恢复、游戏地图不出现页脚、无横溢出及console/page error。手机备案行首次y713～757、有档y767～811，文字131.78px/11px、点击行44px，已实际打开最终8张腾讯云首页截图。10组同赛图T1hash均8891d2e09768dc4b。
+- mandatory初跑发现1280×720下旧absolute页脚加行后拦截开启按钮，失败截图/日志未删除；已仅对启用备案的页脚改正常文档流，默认版布局不变。四组重建、页脚专项及mandatory重跑通过，实际查看T0地图截图与状态；无force click。原双版本E2E也完整通过，T0/T1/T4/T8源码/两版全文与T9恢复一致，阅读证据/音画/更新版别/存档门保留。模拟、地图、存档、Vercel配置零diff。
+- 完成说明与证据：output/icp-footer-v1.29.32/REPORT.md、assets.json、browser-final/、mandatory-final/；原进度正文前缀逐字节验证保留。未运行完整release及长期审计，未做实体手机或线上验收；旧失败不清零。只修改本地、未提交推送部署，**本地已修改；腾讯云线上尚未更新。** 备案展示不表示游戏内容审批已确认。

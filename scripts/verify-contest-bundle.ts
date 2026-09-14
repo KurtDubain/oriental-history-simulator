@@ -4,8 +4,10 @@ import packageJson from '../package.json';
 import { CONTEST_V01_MAP_PROFILE } from '../src/maps/contest-v01';
 import { PRIVATE_V03_MAP_PROFILE } from '../src/maps/private-v03';
 import type { MapProfile } from '../src/maps/types';
+import { resolveBuildTarget } from './build-target.mjs';
 
-const root = new URL('../dist-contest/', import.meta.url);
+const outDir = resolveBuildTarget('contest', process.env).outDir;
+const root = new URL(`../${outDir}/`, import.meta.url);
 const readableExtensions = new Set(['.css', '.html', '.js', '.json']);
 const manuallySensitiveTokens = [
   '河北', '北京', '天津', '山东', '河南', '山西', '陕西', '宁夏',
@@ -96,7 +98,7 @@ if (forbiddenTokens.length < 200) {
 }
 
 const files = await collectFiles(root);
-if (files.length === 0) throw new Error('dist-contest is empty');
+if (files.length === 0) throw new Error(`${outDir} is empty`);
 const contents = await Promise.all(files.map(async (file) => ({
   file,
   text: await readFile(file, 'utf8'),
@@ -149,7 +151,7 @@ if (leaked.length > 0 || missing.length > 0 || profilePayloadInJavascript.length
     token,
     files: contents
       .filter((entry) => containsToken(entry.text, token))
-      .map((entry) => entry.file.pathname.split('/dist-contest/')[1] ?? entry.file.pathname),
+      .map((entry) => entry.file.pathname.slice(root.pathname.length)),
   }));
   throw new Error(JSON.stringify({
     leaked: locations,

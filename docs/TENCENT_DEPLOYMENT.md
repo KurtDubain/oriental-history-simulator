@@ -27,15 +27,17 @@
 
 腾讯云目前为**手动发布**，没有 Git 自动部署。Git 推送不会更新这里。
 
-1. 在本机确认当前源码、版本与 Git 状态，依次运行 `npm run check:editions`、`npm run build:personal`、`npm run build:contest`。失败就停止，不跳过任何门禁。
-2. 核对两版 version.json 的 edition、完整 commitId、buildId、profiles。有未提交产品改动时，不得将旧 HEAD 冒充构建来源。
-3. 使用全新的 RELEASE 名；仅打包 dist / dist-contest 内的公共静态文件，不能上传仓库、环境文件、密钥或 node_modules。
+从 v1.29.32 起，本地已准备首页备案页脚，**腾讯云线上尚未更新**。以下是后续发布模板，不代表本轮执行过服务器操作；页脚仅展示已有域名备案记录，不表示游戏内容审批。
+
+1. 在本机确认当前源码、版本与 Git 状态，依次运行 `npm run check:editions`、`OHS_TENCENT_ICP=1 npm run build:personal`、`OHS_TENCENT_ICP=1 npm run build:contest`。失败就停止，不跳过任何门禁。默认/Vercel 构建命令与原 dist / dist-contest 不变，不启用该页脚。
+2. 核对两版 version.json 的 edition、完整 commitId、buildId、profiles，以及 `icpFooter: true`。有未提交产品改动时，不得将旧 HEAD 冒充构建来源。预览使用相同标记和对应 preview 命令，详见 [BUILD_EDITIONS.md](./BUILD_EDITIONS.md)。
+3. 使用全新的 RELEASE 名；仅打包 dist-tencent / dist-contest-tencent 内的公共静态文件，不能上传仓库、环境文件、密钥或 node_modules，不要误用无页脚的默认产物。上线后实际检查首次首页与“续读旧史”首页的完整备案链接。
 
 以下是命令模板，大写参数必须替换为本次实际值，不能原样执行：
 
 ```sh
-COPYFILE_DISABLE=1 tar -czf PERSONAL_PACKAGE.tar.gz -C dist .
-COPYFILE_DISABLE=1 tar -czf CONTEST_PACKAGE.tar.gz -C dist-contest .
+COPYFILE_DISABLE=1 tar -czf PERSONAL_PACKAGE.tar.gz -C dist-tencent .
+COPYFILE_DISABLE=1 tar -czf CONTEST_PACKAGE.tar.gz -C dist-contest-tencent .
 shasum -a 256 PERSONAL_PACKAGE.tar.gz CONTEST_PACKAGE.tar.gz
 ssh -i /Users/mutu/.ssh/personal_space_deploy_ed25519 root@82.156.137.232 'mkdir -m 700 /www/server/canghai-deploy/incoming/NEW_RELEASE'
 scp -i /Users/mutu/.ssh/personal_space_deploy_ed25519 PERSONAL_PACKAGE.tar.gz CONTEST_PACKAGE.tar.gz root@82.156.137.232:/www/server/canghai-deploy/incoming/NEW_RELEASE/

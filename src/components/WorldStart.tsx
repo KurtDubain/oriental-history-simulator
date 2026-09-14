@@ -1,6 +1,6 @@
 import { BookOpen, FileUp, Library, Sparkles, X } from 'lucide-react';
 import { useRef } from 'react';
-import { APP_VERSION, APP_EDITION_LABEL } from '../version';
+import { APP_VERSION, APP_EDITION_LABEL, APP_ICP_FOOTER } from '../version';
 import { listMapProfiles } from '../maps';
 import type { MapProfile, MapProfileId, MapPoint } from '../maps';
 import { useDialogLayer } from './useDialogLayer';
@@ -257,6 +257,9 @@ export function WorldStart({
           ? `${selectedMapProfile.name} · ${selectedMapProfile.simulation.regions.length} 陆区 · ${selectedMapProfile.simulation.seaZones.length} 海域`
           : '请选择一张舆图'}</span>
         <span>v{APP_VERSION} · 按 F 全屏</span>
+        {APP_ICP_FOOTER ? (
+          <a className="world-start__filing" href="https://beian.miit.gov.cn/" target="_blank" rel="noopener noreferrer">冀ICP备2023028175号-1</a>
+        ) : null}
       </footer>
     </div>
   );

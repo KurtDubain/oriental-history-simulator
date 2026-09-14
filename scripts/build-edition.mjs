@@ -8,7 +8,7 @@ if (!['build', 'preview'].includes(action) || !['personal', 'contest'].includes(
 }
 const target = resolveBuildTarget(edition, process.env);
 // Do not let inherited build assertions accidentally select the catalog for standalone checks.
-const env = { ...process.env };
+const env = { ...process.env, OHS_TENCENT_ICP: target.icpFooter ? '1' : '0' };
 delete env.OHS_EDITION;
 delete env.OHS_MAP_PROFILE_ALLOWLIST;
 const run = (file, argv) => execFileSync(process.execPath, [file, ...argv], { stdio: 'inherit', env });

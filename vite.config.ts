@@ -135,6 +135,7 @@ return {
     __APP_BUILD_ID__: JSON.stringify(metadata.buildId),
     __APP_EDITION__: JSON.stringify(target.edition),
     __APP_EDITION_LABEL__: JSON.stringify(target.label),
+    __APP_ICP_FOOTER__: JSON.stringify(target.icpFooter),
   },
   plugins: [
     mapProfilePayload(buildMapProfiles, mapCatalogPath),

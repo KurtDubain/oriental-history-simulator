@@ -11,6 +11,21 @@
 先 `npm ci`。`npm run preview` 仍为个人版；预览支持 `-- --port 4311`、`--host 127.0.0.1`、`--open`，只读对应产物，不重新构建。
 缺少产物、版别不符或 package 版本不符时失败，请先重建。构建不接受额外 mode/root/outDir 参数；预览也不能借这些参数指向另一目录。
 
+### 腾讯云首页备案页脚（v1.29.32，本地待发布）
+
+只在明确设置 `OHS_TENCENT_ICP=1` 时，世界书页底部显示用户提供的现有备案链接：`冀ICP备2023028175号-1` → `https://beian.miit.gov.cn/`。首次首页与有存档的续读首页共用此入口，地图内不显示。它不表示游戏内容审批或认证。
+
+| 腾讯云用途 | 构建 | 本地生产预览 | 独立输出 |
+| --- | --- | --- | --- |
+| canghai.dyp02.vip / personal | `OHS_TENCENT_ICP=1 npm run build:personal` | `OHS_TENCENT_ICP=1 npm run preview:personal -- --port 4175` | `dist-tencent` |
+| canghai-contest.dyp02.vip / contest | `OHS_TENCENT_ICP=1 npm run build:contest` | `OHS_TENCENT_ICP=1 npm run preview:contest -- --port 4176` | `dist-contest-tencent` |
+
+该标记默认关闭，显式 `0` 也关闭，其他值直接报错。命令将已解析的标记传给整个构建流程，不让 `.env` 隐式改变其产物目录；不根据 hostname、URL 或内容版别猜部署平台。不将它设为全局 shell/Vercel 环境变量。原 `npm run build`、`build:personal`、`build:contest` 和默认预览仍使用 `dist` / `dist-contest`，不显示备案页脚；四组产物各自保留。
+
+`version.json` 增加构建信息 `icpFooter: true|false`，腾讯云 buildId 带 `-tencent-`，同版本同提交也能区分；preview 校验版别、版本和页脚标记，拒绝混用。此信息不进入世界或存档。腾讯云竞赛产物仍经过原私人地图扫描、全部 JS/CSS 与媒体门禁，不绕过检查。两版四组均构建后，可运行 `npm run test:e2e:icp-footer`，从当前产物实际新建、保存、刷新续读并检查两种尺寸；输入不依赖旧试玩输出。
+
+本地修改不等于线上更新，腾讯云仍须后续按 [TENCENT_DEPLOYMENT.md](./TENCENT_DEPLOYMENT.md) 手动发布。这次没有操作服务器、DNS、证书或 Vercel。
+
 ## 构建边界与环境变量
 
 - 单一构建目标定义：`scripts/build-target.mjs`。正式命令锁定版别，Vite 对应 mode 选定现有 catalog/changelog；默认 development/production/test 仍为个人版。不是通过 URL、域名或运行时按钮切版。

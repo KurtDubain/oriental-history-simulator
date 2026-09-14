@@ -17,13 +17,17 @@ export function resolveBuildTarget(mode, env = {}) {
     && (edition !== 'contest' || env.OHS_MAP_PROFILE_ALLOWLIST !== 'contest-v01')) {
     throw new Error('OHS_MAP_PROFILE_ALLOWLIST conflicts with the build edition');
   }
-  return target;
+  if (env.OHS_TENCENT_ICP !== undefined && !['0', '1'].includes(env.OHS_TENCENT_ICP)) {
+    throw new Error('OHS_TENCENT_ICP must be 0 (default) or 1');
+  }
+  const icpFooter = env.OHS_TENCENT_ICP === '1';
+  return { ...target, icpFooter, outDir: `${target.outDir}${icpFooter ? '-tencent' : ''}` };
 }
 
 export function buildMetadata(target, version, commitId, profiles) {
   return {
-    version, edition: target.edition, commitId,
-    buildId: `${target.edition}-${commitId || `local-${version}`}`,
+    version, edition: target.edition, commitId, icpFooter: target.icpFooter ?? false,
+    buildId: `${target.edition}${target.icpFooter ? '-tencent' : ''}-${commitId || `local-${version}`}`,
     profiles: profiles.map(({ id, revision, contentVersion }) => ({ id, revision, contentVersion })),
   };
 }
@@ -36,7 +40,8 @@ export function sourceCommitId(env) {
 }
 
 export function assertPreviewArtifact(target, metadata, version) {
-  if (metadata.version !== version || metadata.edition !== target.edition) {
-    throw new Error(`Wrong or stale ${target.outDir}/version.json; run npm run build:${target.edition}`);
+  if (metadata.version !== version || metadata.edition !== target.edition
+    || (metadata.icpFooter ?? false) !== (target.icpFooter ?? false)) {
+    throw new Error(`Wrong or stale ${target.outDir}/version.json; run ${target.icpFooter ? 'OHS_TENCENT_ICP=1 ' : ''}npm run build:${target.edition}`);
   }
 }

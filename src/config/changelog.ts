@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.31',
+  version: '1.29.32',
   date: '2026-09-14',
-  title: '史事与故人发现',
+  title: '首页备案信息',
   items: [
-    '区分亡国终战与议和，让有真实前史的人物结局更易被发现。',
+    '腾讯云构建的世界书页显示备案链接，其他构建保持不显示。',
   ],
 };
 

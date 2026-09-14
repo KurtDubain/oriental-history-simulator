@@ -5,6 +5,7 @@ declare global {
   const __APP_BUILD_ID__: string;
   const __APP_EDITION__: 'personal' | 'contest';
   const __APP_EDITION_LABEL__: string;
+  const __APP_ICP_FOOTER__: boolean;
 
   interface Window {
     render_game_to_text?: () => string;
