@@ -4,9 +4,12 @@ import {
   advanceWorld,
   computeWorldHash,
   createWorld,
+  deserializeWorld,
   projectCharacterEmbodiedActions,
   projectEmbodiedActions,
   stableHash,
+  serializeWorld,
+  validateWorld,
   validateTurnRuntime,
   type EmbodiedActionCommand,
   type WorldState,
@@ -40,6 +43,45 @@ function militaryPlayable(seed: string) {
 }
 
 describe('EMB01-04 embodied character action', () => {
+  it('does not permit a faction leader to create a relationship with themself', () => {
+    const world = createWorld('入世自我表态', 'contest-v01');
+    const leader = world.characters.find(p => projectEmbodiedActions(world, p.id)
+      .some(a => a.command.kind === 'declare_stance' && world.factions
+        .some(f => f.id === a.command.targetId && f.leaderId === p.id)))!;
+    const stance = projectEmbodiedActions(world, leader.id).find(a => a.command.kind === 'declare_stance')!;
+    expect(stance.available).toBe(false);
+    const next = advanceWorld(world, { embodiedAction: stance.command });
+    expect(next.relationships.every(r => r.sourceId !== r.targetId)).toBe(true);
+    expect(validateWorld(next)).toEqual([]);
+    expect(() => deserializeWorld(serializeWorld(next))).not.toThrow();
+  });
+  it.each(['strengthen_relationship', 'seek_opportunity', 'declare_stance'])(
+    'keeps the full evidence and save contract after %s', kind => {
+      const initial = createWorld('入世存读档合同', 'contest-v01');
+      const action = initial.characters.flatMap(person => projectEmbodiedActions(initial, person.id))
+        .find(option => option.available && option.command.kind === kind);
+      expect(action, `fixture needs an executable ${kind}`).toBeDefined();
+      const next = advanceWorld(initial, { embodiedAction: action!.command });
+      expect(validateWorld(next)).toEqual([]);
+      const resolution = next.facts.find(f => f.kind === 'embodied_action_resolved')!;
+      const entry = next.characters.find(p => p.id === action!.command.actorId)!.biography
+        .find(b => b.factId === resolution.id)!;
+      expect(entry).toMatchObject({ eventId: null, factId: resolution.id });
+      expect(next.history.some(e => e.sourceFactIds.includes(entry.factId!))).toBe(true);
+      const body = serializeWorld(next), restored = deserializeWorld(body);
+      expect(serializeWorld(restored)).toBe(body);
+      expect(serializeWorld(advanceWorld(restored))).toBe(serializeWorld(advanceWorld(next)));
+      expect(serializeWorld(advanceWorld(initial, { embodiedAction: action!.command }))).toBe(body);
+      const damaged = structuredClone(next);
+      damaged.characters.find(p => p.id === action!.command.actorId)!.biography
+        .find(b => b.factId === resolution.id)!.eventId = next.history[0].id;
+      const actor = damaged.characters.find(p => p.id === action!.command.actorId)!;
+      actor.biographyDigest = stableHash(actor.biography);
+      damaged.hash = computeWorldHash(damaged);
+      expect(validateWorld(damaged).some(v => v.code === 'character.biography-fact')).toBe(true);
+      expect(() => deserializeWorld(serializeWorld(damaged))).toThrow('传记事实');
+    });
+
   it('projects actions without mutating authoritative state', () => {
     const world = createWorld('入世投影纯度');
     const before = stableHash(world);

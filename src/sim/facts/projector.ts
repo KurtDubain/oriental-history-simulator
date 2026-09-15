@@ -1,5 +1,10 @@
 import type { SimulationFact } from './types';
 
+/** Militia casualties are civilians, never included in formation losses. */
+export function battleLossText(payload: Extract<SimulationFact, { kind: 'battle' }>['payload']): string {
+  return `攻方军团损失${payload.attacker.losses}人、守方常备军损失${payload.defenders.reduce((sum, side) => sum + side.losses, 0)}人、守地民兵损失${payload.militiaLosses}人`;
+}
+
 /** Same-quarter evidence only; a new address is not a new tenure. */
 export function isContinuousAppointment(fact: SimulationFact, context: readonly SimulationFact[]): boolean {
   if (fact.kind !== 'appointment_started' && fact.kind !== 'appointment_ended') return false;

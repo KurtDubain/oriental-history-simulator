@@ -378,6 +378,8 @@ function resolveCommitment(
   commitment.resolvedTurn = world.turn;
   commitment.resolutionEventId = event.id;
   if (status === '失效') return;
+  if (commitment.kind === '外交盟约' && status === '履约'
+    && [commitment.promisorId, commitment.promiseeId].some(id => !world.characters.find(c => c.id === id)?.alive)) return;
   if (!world.characters.some((character) => character.id === commitment.promisorId)) return;
   if (!world.characters.some((character) => character.id === commitment.promiseeId)) return;
   remember(
@@ -1306,13 +1308,17 @@ function fulfillDueCommitment(
   commitment: CommitmentState,
   emit: EmitEvent,
 ): void {
+  const signers = [commitment.promisorId, commitment.promiseeId].map(id => world.characters.find(c => c.id === id));
+  const posthumous = commitment.kind === '外交盟约' && signers.some(c => !c?.alive);
   const event = emit({
     category: commitment.kind === '外交盟约' ? '外交' : '政治',
     kind: 'commitment_fulfilled',
     title: `${commitment.kind}承诺履行`,
-    summary: `${commitment.promisorId}与${commitment.promiseeId}在约定期限内维持“${commitment.terms}”，承诺转化为可追溯的信任记忆。`,
+    summary: posthumous
+      ? `${commitment.polityIds.map(id => world.polities.find(p => p.id === id)?.name ?? '缔约国').join('与')}继续履行国家盟约“${commitment.terms}”，现已期满；原签约人已有离世者。`
+      : `${signers.map(c => c?.name ?? '原签约人').join('与')}在约定期限内维持“${commitment.terms}”。`,
     importance: commitment.kind === '外交盟约' ? 3 : 2,
-    actorIds: [commitment.promisorId, commitment.promiseeId],
+    actorIds: posthumous ? [] : [commitment.promisorId, commitment.promiseeId],
     polityIds: commitment.polityIds,
     causes: [
       { label: '承诺条款', role: '结构', weight: 0.35, evidence: commitment.terms },

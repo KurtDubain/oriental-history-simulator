@@ -200,7 +200,8 @@ export function projectEmbodiedActions(world: WorldState, actorId: string): read
   const opportunity = opportunityLabel(world, actor);
   const relationUnavailable = adultReason ?? (!relationTarget ? '身边没有可明确往来的人物' : actor.personalWealth < 1 ? '至少需要 1 点私产用于往来' : null);
   const chanceUnavailable = adultReason ?? (!chanceTarget ? '眼下没有能够回应请求的上位者' : null);
-  const stanceUnavailable = adultReason ?? (!faction ? '所属政权尚无可公开表态的政治集团' : null);
+  const stanceUnavailable = adultReason ?? (!faction ? '所属政权尚无可公开表态的政治集团'
+    : faction.leaderId === actor.id ? '已是该集团领袖，不能向自己争取回应' : null);
   return [
     {
       command: createEmbodiedActionCommand(world, actor.id, 'strengthen_relationship', 'character', relationTarget?.id ?? 'missing'),
@@ -284,7 +285,7 @@ function appendBiography(character: CharacterState, event: HistoryEvent, factId:
     kind,
     summary: event.summary,
     importance: event.importance,
-    eventId: event.id,
+    eventId: null,
     factId,
   });
   if (character.biography.length > 80) character.biography.splice(0, character.biography.length - 80);
@@ -329,10 +330,10 @@ export function resolveEmbodiedAction(
   ).actionId) {
     const template = projected.find((item) => item.command.kind === requested.kind);
     const targetCharacter = requested.targetKind === 'character'
-      ? world.characters.find((item) => item.id === requested.targetId && item.alive)
+      ? world.characters.find((item) => item.id === requested.targetId && item.id !== actor.id && item.alive)
       : null;
     const targetFaction = requested.targetKind === 'faction'
-      ? world.factions.find((item) => item.id === requested.targetId && item.active && item.polityId === actor.polityId)
+      ? world.factions.find((item) => item.id === requested.targetId && item.leaderId !== actor.id && item.active && item.polityId === actor.polityId)
       : null;
     const knownCharacterTarget = Boolean(targetCharacter && (
       targetCharacter.polityId === actor.polityId

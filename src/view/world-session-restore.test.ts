@@ -90,7 +90,9 @@ describe('restoreWorldSession', () => {
       // authorized reinforcement step; the actual new order still dates T3.
       hash: '80fd3f940d83b4e2',
       factDigest: '47f537029adb7e4d',
-      historyDigest: '755f773facc617e3',
+      // v1.29.34 spells out militia losses; independent HEAD replay confirms
+      // identical Facts/hash. Only battle prose and its digest changed at T4.
+      historyDigest: '30b9f82d5d9deedd',
       factCount: 467,
       historyCount: 283,
     });

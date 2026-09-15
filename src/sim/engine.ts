@@ -7,6 +7,7 @@ import { FAMILY_NAMES, GIVEN_NAMES, selectAvailableGivenName } from './names';
 import { DEFAULT_MAP_PROFILE_ID, getMapProfile, getMapProfileRevision, getMapProfileForContentVersion } from '../maps';
 import type { MapProfile, MapProfileId } from '../maps/types';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
+import { battleLossText } from './facts/projector';
 import {
   emitSimulationFact,
   projectFactLinks,
@@ -2479,7 +2480,7 @@ function resolveBattle(
   setFormationStatus(world, attackerArmy, '交战');
   for (const defender of defenders) setFormationStatus(world, defender, '交战');
   const attackerLosses = applyCasualties(world, [attackerArmy], integer(attackerBefore * attackerLossRate), context);
-  const defenderLosses = applyCasualties(world, defenders, integer(defenderBefore * defenderLossRate), context);
+  applyCasualties(world, defenders, integer(defenderBefore * defenderLossRate), context);
   const militiaLosses = Math.min(
     target.population,
     integer(militia * (attackerWon ? 0.2 : 0.08)),
@@ -2610,7 +2611,7 @@ function resolveBattle(
     category: '军事',
     kind: 'battle',
     title: `${target.name}之战：${attackerWon ? '攻方得势' : '守方获胜'}`,
-    summary: `${attackerArmy.name}以${attackerBefore}人进攻${target.name}，攻方战损${attackerLosses}、守军战损${defenderLosses}，${attackerWon ? '突破防线' : '被迫退回'}。`,
+    summary: `${attackerArmy.name}以${attackerBefore}人进攻${target.name}，${battleLossText(battleFact.payload)}，${attackerWon ? '突破防线' : '被迫退回'}。`,
     importance: 3,
     actorIds: [
       ...new Set([

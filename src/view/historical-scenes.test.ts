@@ -11,6 +11,7 @@ import { compactWorldArchive } from '../sim/archive';
 import type { HistoryEvent, SimulationFact } from '../sim/types';
 import { projectQuarterPulse } from './quarter-pulse-stories';
 import type { SituationState } from '../sim/situations';
+import { battleLossText } from '../sim/facts/projector';
 import {
   projectFactNarrative,
   projectHistoricalScenes,
@@ -18,6 +19,22 @@ import {
 } from './historical-scenes';
 
 describe('NAR01/NAR02 concrete historical scenes', () => {
+  it.each([false,true])('separates militia from standing casualties in Facts and Chronicle (standing=%s)', standing => {
+    const world = advanceWorldBy(createWorld('战损口径', 'contest-v01'),8);
+    const battle = world.facts.find(f=>f.kind==='battle')!;
+    if(battle.kind!=='battle')throw new Error('missing battle');
+    const event = world.history.find(e=>e.kind==='battle'&&e.sourceFactIds.includes(battle.id));
+    expect(event?.summary).toContain(battleLossText(battle.payload));
+    const defended = world.facts.find(f=>f.kind==='battle' && f.payload.defenders.length > 0)!;
+    if(defended.kind!=='battle')throw new Error('missing standing defenders');
+    battle.payload.defenders=standing ? structuredClone(defended.payload.defenders) : [];
+    battle.payload.militiaLosses=417;
+    const before = serializeWorld(world), narrative=projectFactNarrative(world,battle);
+    expect(narrative.summary).toContain(battleLossText(battle.payload));
+    expect(narrative.summary).toContain('守地民兵损失417人');
+    if(!standing)expect(narrative.summary).toContain('守方常备军损失0人');
+    expect(serializeWorld(world)).toBe(before);
+  });
   it.each(['attacker_destroyed', 'defender_destroyed', 'attacker_dissolved', 'defender_dissolved',
     'negotiated_peace', 'attacker_advantage', 'defender_advantage'] as const)(
     'reads the recorded war ending, not a missing winner or an unrelated extinction (%s)', result => {

@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.33',
-  date: '2026-09-14',
-  title: '衡印图标',
+  version: '1.29.34',
+  date: '2026-09-15',
+  title: '入世存读与历史收口',
   items: [
-    '浏览器标签与手机收藏使用朱砂衡印，游戏与存档保持不变。',
+    '修复入世后的存读档，厘清履约、战损与人生结局的证据。',
   ],
 };
 

@@ -56,7 +56,7 @@ function causalActorSummary(world: WorldState, item: HistoryEvent) {
 }
 
 function causalReference(world: WorldState, ref: NonNullable<HistoryEvent['causes'][number]['refs']>[number]): CausalReference | null {
-  const detail = ref.field ? `${ref.label} · ${ref.field}` : ref.label;
+  const detail = playerHistoryText(world, ref.field ? `${ref.label} · ${ref.field}` : ref.label);
   if (ref.entityType === 'region') {
     const item = region(world, ref.entityId);
     return item ? { id: item.id, kind: 'region', label: item.name, detail } : null;
@@ -121,13 +121,13 @@ export function toCausalEvent(world: WorldState, item: HistoryEvent): CausalEven
   const factors: CausalFactor[] = item.causes.map((cause, index) => ({
     id: `${item.id}-cause-${index}`,
     role: factorRole(index, item.causes.length, cause.role),
-    label: cause.label,
+    label: playerHistoryText(world, cause.label),
     actor: (item.kind === 'world_created' && index === 0)
       || cause.role === '选择'
       || (!cause.role && index === item.causes.length - 1)
       ? actorSummary
       : undefined,
-    evidence: cause.evidence,
+    evidence: playerHistoryText(world, cause.evidence),
     refs: (cause.refs ?? []).map((ref) => causalReference(world, ref)).filter((ref): ref is CausalReference => Boolean(ref)),
   })).filter((factor) => item.kind !== 'character_death' || factor.role !== 'outcome');
   factors.push({
@@ -135,9 +135,9 @@ export function toCausalEvent(world: WorldState, item: HistoryEvent): CausalEven
     role: 'outcome',
     label: playerHistoryText(world, item.title),
     detail: playerHistoryText(world, item.summary),
-    evidence: [...item.causes.filter((cause) => cause.role === '结果').map((cause) => cause.evidence), item.stateDeltas.length
+    evidence: playerHistoryText(world, [...item.causes.filter((cause) => cause.role === '结果').map((cause) => cause.evidence), item.stateDeltas.length
       ? `${item.stateDeltas.length} 项世界状态发生改变`
-      : item.evidence[0]].filter(Boolean).join('；'),
+      : item.evidence[0]].filter(Boolean).join('；')),
   });
   return {
     id: item.id,
@@ -164,7 +164,7 @@ export function toCausalEvent(world: WorldState, item: HistoryEvent): CausalEven
         return resolved ? { id: resolved.id, kind: resolved.kind, label: resolved.label, detail: resolved.detail } : null;
       })),
     ]).slice(0, 8),
-    consequence: item.stateDeltas.slice(0, 2).map((delta) => `${delta.field}：${String(delta.before)} → ${String(delta.after)}`).join('；'),
+    consequence: playerHistoryText(world, item.stateDeltas.slice(0, 2).map((delta) => `${delta.field}：${String(delta.before)} → ${String(delta.after)}`).join('；')),
   };
 }
 

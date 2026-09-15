@@ -273,8 +273,8 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
     const defeated = reignAt(event.turn, event.sourceFactIds).some(o => o.polityId === loss?.entityId);
     const victorious = !defeated && reignAt(event.turn, transfers.map(f => f!.id)).some(o => transfers.some(f =>
       f!.payload.nextControllerId === o.polityId && f!.payload.previousControllerId === loss?.entityId));
-    const capture = capital ? [...episodes.values()].find(e => e.battle.turn === event.turn
-      && e.battle.payload.targetRegionId === oldCapitalId && battleSide(e.battle, person.id)?.won
+    const capture = capital || event.kind === 'polity_eliminated' ? [...episodes.values()].find(e => e.battle.turn === event.turn
+      && (capital ? e.battle.payload.targetRegionId === oldCapitalId : transfers.some(f => f!.payload.regionId === e.battle.payload.targetRegionId)) && battleSide(e.battle, person.id)?.won
       && event.sourceFactIds.some(id => { const f = byId.get(id); return f && rootBattleId(f, byId) === e.battle.id; })) : undefined;
     if (!founded && !accession && !legacyDeed && !((capital || event.kind === 'polity_eliminated') && (defeated || victorious || capture))) continue;
     const battle = capture?.battle;
@@ -311,7 +311,7 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
     if (episode) {
       if (episode.phase === 'battle') {
         episode.priority = -1;
-        episode.title = `${person.name}参战，攻克${place}`;
+        episode.title = capital ? `${person.name}参战，攻克${place}` : `${person.name}参战，${polityName}灭亡`;
         episode.primaryEventId = event.id;
         episode.primaryFactId = battle.id;
       }
@@ -393,7 +393,7 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
       startTurn: Math.min(group[0].turn, ...own.map(c => c.startTurn ?? c.turn)),
       turn: Math.max(group.at(-1)!.turn, ...own.map(c => c.turn)), phase: 'battle', priority: -1,
       title: `${person.name}任内连取${places.length > 3 ? `${places.at(-1)}等${places.length}地` : places.join('、')}`,
-      summary: `任内军队取得${places.join('、')}。${personal.length ? `本人参战：${[...new Set(personal)].join('、')}。` : ''}`,
+      summary: `任内军队取得${places.join('、')}。${personal.length ? `本人参战：${[...new Set(personal)].join('、')}。` : ''}${events.filter(e => e.kind === 'polity_eliminated' && own.some(c => c.sourceEventIds.includes(e.id))).map(e => `${e.title}。`).join('')}`,
       importance: Math.max(...group.map(f => f.importance)), ...sourceEvents(events, ids, group.at(-1)!.id) };
     mergeSources(combined, own); candidates.push(combined);
     for (const c of own) candidates.splice(candidates.indexOf(c), 1);

@@ -133,9 +133,10 @@ describe('person story arc', () => {
     const body = serializeWorld(w), hash = computeWorldHash(w), arc = projectPersonStoryArc(w, p);
     const beat = arc.find(b => b.title.includes('任内连取'))!;
     expect(beat.summary).toContain(`任内军队取得${a.name}、${b.name}。`);
+    expect(beat.summary).toContain('敌国灭亡');
     if (mode === 'absent') expect(beat.summary).not.toContain('本人参战');
     else {
-      const personal = beat.summary.split('本人参战：')[1];
+      const personal = beat.summary.split('本人参战：')[1].split('。')[0];
       expect(personal).toContain(a.name);
       if (mode === 'partial') expect(personal).not.toContain(b.name);
       else expect(personal).toContain(b.name);
@@ -145,6 +146,16 @@ describe('person story arc', () => {
     expect(beat.sourceEventIds).toEqual(['event-0', 'event-1']);
     expect(beat.primaryFactId).toBe('gain-1'); expect(beat.primaryEventId).toBe('event-1');
     expect(arc).toHaveLength(1);
+    if (mode === 'present') {
+      w.offices = [];
+      const participant = projectPersonStoryArc(w, p).find(b => b.sourceEventIds.includes('event-1'))!;
+      expect(participant.title).toContain(`${enemy.name}灭亡`);
+      expect(participant.summary).toContain('敌国失去最后领土');
+      expect(participant.primaryEventId).toBe('event-1');
+      expect(participant.sourceFactIds).toEqual(['fight-0', 'fight-1', 'gain-0', 'gain-1']);
+      w.offices = [{ id: 'reign', holderId: p.id, polityId: p.polityId, kind: '君主', rank: 100,
+        regionId: a.id, armyId: null, appointedTurn: 0, endedTurn: null, active: true }];
+    }
     expect(computeWorldHash(w)).toBe(hash); expect(serializeWorld(w)).toBe(body);
   });
 

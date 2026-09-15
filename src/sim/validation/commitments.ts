@@ -40,6 +40,11 @@ export function validateCommitmentState(world: WorldState): InvariantViolation[]
     } else if (
       (commitment.status === '履约' || commitment.status === '背约')
       && world.turn - commitment.resolvedTurn < 32
+      && !(commitment.kind === '外交盟约' && commitment.status === '履约'
+        && [commitment.promisorId, commitment.promiseeId].some(id => {
+          const death = characterById.get(id)?.deathTurn;
+          return death != null && death <= commitment.resolvedTurn!;
+        }))
     ) {
       const expectedMemory = commitment.status === '履约' ? '恩义' : '背叛';
       const hasResolutionMemory = world.relationships.some((relationship) => relationship.memories.some((memory) => (

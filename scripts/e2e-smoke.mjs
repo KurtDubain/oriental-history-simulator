@@ -1729,6 +1729,13 @@ try {
   assert.match(await embodimentPage.locator('.observer-embodiment-result').textContent(), /上次结果/);
   assert.ok(embodimentSettled.interface.selectedDetail.biography.some((item) => item.factId), '入世结果必须进入人物传记');
   await embodimentPage.screenshot({ path: `${ARTIFACT_DIR}/embodiment-result.png`, fullPage: true });
+  // A runtime-valid action must also survive the full validator on reloading.
+  await embodimentPage.getByLabel('保存当前世界').click();
+  await waitForLatestAutosave(embodimentPage, embodimentSettled);
+  await embodimentPage.reload({ waitUntil: 'networkidle' });
+  await embodimentPage.click('#continue-world');
+  await embodimentPage.waitForSelector('.world-map__canvas');
+  assert.equal((await snapshot(embodimentPage)).deterministicWorldHash, embodimentSettled.deterministicWorldHash);
   assert.deepEqual(embodimentErrors, []);
   await embodimentContext.close();
 

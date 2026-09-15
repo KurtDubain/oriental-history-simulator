@@ -12,6 +12,8 @@ import type { MapProfile } from './types';
 
 // Two independent replays, v1.29.21: the first change is T6 a_004 completing
 // its authorized reinforcement step (reinforcement-continuity/goldens traces).
+// v1.29.34: only History digests change at T4: standing/militia casualty wording.
+// Independent HEAD replay confirmed unchanged world hashes and complete Facts.
 const GENERAL_GROUP_BASELINES = {
   "架构边界-入世": [
     [
@@ -37,47 +39,47 @@ const GENERAL_GROUP_BASELINES = {
     [
       "4312fa420c35f086",
       "5231c4de3543d0d9",
-      "9b717e469f373039"
+      "7a0dbfbd28feb528"
     ],
     [
       "29fe44bbb618fb3a",
       "d3172db7fe33a3f3",
-      "e4b2fd6e651de372"
+      "370ac0a9c76f1488"
     ],
     [
       "2b71a2d9121852ca",
       "7de4da28413ab97e",
-      "7d8ac69d98b10c85"
+      "609cf2daf7067bba"
     ],
     [
       "2877dac6f489523f",
       "3fc95fd357ee6402",
-      "66200e6a71c2fe77"
+      "54367339ed1edb40"
     ],
     [
       "d851a1da59480415",
       "08e87e2c9774654d",
-      "51ab261c2f6aa76c"
+      "fbc48728d50a6efb"
     ],
     [
       "a3493bf2b5348860",
       "4b0084de0405fee0",
-      "e6af6f39c622551a"
+      "53f70309faf8a3c0"
     ],
     [
       "c6fdd585eb9b97d4",
       "d432296d735d244f",
-      "882516766cf966e4"
+      "67b10470962e4e26"
     ],
     [
       "21772cc1cabf784e",
       "543fee5904e30a6e",
-      "6146c647e618f76e"
+      "a7e6eb7238fd408c"
     ],
     [
       "f2fd05b28f1b2749",
       "97997efa222d46cc",
-      "a365090b9969565f"
+      "a4ff32eef129b125"
     ]
   ],
   "州县民生": [
@@ -104,47 +106,47 @@ const GENERAL_GROUP_BASELINES = {
     [
       "38ddda06bd5c4567",
       "d81761734532aaf6",
-      "c447c2e9cb06690a"
+      "f7b227bc18cbb274"
     ],
     [
       "f6fde6f445c70f89",
       "f3a7871a7ac76e5b",
-      "9c657d2e4e2b796d"
+      "7db49000de54da0f"
     ],
     [
       "6be34527965aa466",
       "76dc2ef465b3bff2",
-      "9ec07771e848d213"
+      "8246c1b1ea8c7919"
     ],
     [
       "b5f4de6ada056191",
       "c98c57dde996c24b",
-      "eb46e1067ab1fbb3"
+      "21c001225d6738f8"
     ],
     [
       "71797ef3c4e44a13",
       "9c4bf8922d5ebe19",
-      "f2442c4884cc1721"
+      "59c8a87060103911"
     ],
     [
       "0049fa8d3a7103ef",
       "608308312e868d87",
-      "45470849f2b163b7"
+      "479e1246ccd1abe9"
     ],
     [
       "79e65bf0076024c7",
       "8e2821e44f7cfa03",
-      "9c45b31d3d7708f4"
+      "2568effa01abdc84"
     ],
     [
       "4ba1548a7446ae56",
       "ecc8161dc6cc23f7",
-      "fcd607a2b7c20443"
+      "ac6d1b792908d5ff"
     ],
     [
       "109e84ddae31748d",
       "5390d825fce10af8",
-      "d83398d547b12dbc"
+      "98d4b302960c7c69"
     ]
   ]
 } as const;

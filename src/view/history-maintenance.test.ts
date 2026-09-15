@@ -66,7 +66,7 @@ describe('same history, faithful reading', () => {
     expect(scene.summary.indexOf('第1战')).toBeLessThan(scene.summary.indexOf('第2战'));
     expect(scene.summary.indexOf('第2战')).toBeLessThan(scene.summary.indexOf('第3战'));
     expect(scene.sourceFactIds).toHaveLength(facts.length);
-    expect(scene.summary.match(/双方军团损失100人，守地民兵损失7人/g)).toHaveLength(3);
+    expect(scene.summary.match(/攻方军团损失50人、守方常备军损失50人、守地民兵损失7人/g)).toHaveLength(3);
     if (changes.length) {
       const causeIndex = wins.lastIndexOf(true) + 1;
       expect(scene.summary.slice(scene.summary.indexOf(`第${causeIndex}战`) + 3).split(/第\d战/)[0]).toContain('此战后');

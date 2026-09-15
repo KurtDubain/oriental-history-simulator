@@ -1,11 +1,49 @@
 import { describe, expect, it } from 'vitest';
 import { advanceWorld, computeWorldHash, createWorld, deserializeWorld, serializeWorld, stableHash } from './index';
-import { releaseRulerSubordination, syncOfficeAppointments } from './v02';
+import { processV02Society, releaseRulerSubordination, syncOfficeAppointments } from './v02';
+import { validateCommitmentState } from './validation/commitments';
 import { createTurnContext } from './turn-context-state';
 import { woundRecoveryQuarters } from './military/battle-readiness';
 import type { HistoryEvent } from './types';
 
 describe('ruler identity and bounded recovery', () => {
+  it.each([false, true])('settles a state treaty without making dead signers act (deceased=%s)', deceased => {
+    const world = createWorld('国家履约与签约人');
+    world.turn = 3; world.season = '冬';
+    const [left,right] = world.characters;
+    if (deceased) { left.alive = false; left.deathTurn = 2; }
+    const commitment = { id:'commit_test', kind:'外交盟约' as const, promisorId:left.id, promiseeId:right.id,
+      polityIds:world.polities.slice(0,2).map(p=>p.id), terms:'互不进攻', madeTurn:0, dueTurn:3,
+      status:'生效' as const, resolvedTurn:null, eventId:world.history[0].id, resolutionEventId:null, trustStake:10 };
+    world.commitments = [commitment];
+    const context = createTurnContext(world);
+    processV02Society(world,context,input=>{
+      const event: HistoryEvent = { ...input,id:`event_${++world.counters.event}`,turn:world.turn,year:world.year,season:world.season,
+        actorIds:input.actorIds??[],polityIds:input.polityIds??[],regionIds:input.regionIds??[],evidence:input.evidence??[],
+        stateDeltas:input.stateDeltas??[],sourceFactIds:input.sourceFactIds??[],situationIds:input.situationIds??[] };
+      world.history.push(event);context.events.push(event);return event;
+    });
+    const event = world.history.find(e=>e.id===commitment.resolutionEventId)!;
+    const memories = world.relationships.flatMap(r=>r.memories).filter(m=>m.eventId===event.id);
+    expect(commitment.status).toBe('履约');
+    expect(event.stateDeltas).toContainEqual(expect.objectContaining({entityId:commitment.id,after:'履约'}));
+    expect(memories.length).toBe(deceased ? 0 : 1);
+    if (deceased) {
+      expect(event.actorIds).toEqual([]);
+      expect(event.summary).toContain('国家');
+      expect(event.summary).not.toContain(left.id);
+    } else {
+      expect(event.actorIds).toEqual([left.id,right.id]);
+      expect(event.summary).toContain(left.name);
+    }
+    expect(validateCommitmentState(world)).toEqual([]);
+    if (!deceased) {
+      // A later death does not excuse a missing memory of a living person's action.
+      left.alive = false;left.deathTurn = 4;world.turn = 5;
+      for(const r of world.relationships)r.memories=r.memories.filter(m=>m.eventId!==event.id);
+      expect(validateCommitmentState(world).some(v=>v.code==='commitment.memory')).toBe(true);
+    }
+  });
   it('ends an inherited subordinate command without taking the commander’s force or calling it betrayal', () => {
     const world = createWorld('君位与旧军令');
     const army = world.armies.find(a => a.deputyCommanderId)!;

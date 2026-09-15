@@ -1,4 +1,4 @@
-import { continuousAppointmentIds, isContinuousAppointment } from '../sim/facts/projector';
+import { battleLossText, continuousAppointmentIds, isContinuousAppointment } from '../sim/facts/projector';
 import type { HistoryEvent, SimulationFact, StateDelta, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations';
 import { findWorldFact, readWorldFacts, readWorldHistory } from '../sim/archive';
@@ -42,7 +42,8 @@ export function playerHistoryText(world: WorldState, text: string): string {
     [...world.characters, ...world.factions, ...world.families, ...world.armies,
       ...world.regions, ...world.polities, ...world.fleets].find((item) => item.id === id)?.name
     ?? (id.startsWith('c_') ? '一位旧识' : '旧日所属')
-  )).replace(/具名出生是人口群体中的叙事标记，不重复增加州域人口。/g, '')
+  )).replace(/(?:具名出生是人口群体中的叙事标记，不重复增加州域人口。|[；;]?具名人物是群体人口中的叙事标记，不重复扣减人口。)/g, '')
+    .replace(/政权政权/g, '政权')
     .replace(/集结(\d+)人部曲，共(\d+)人/g, '集结$1名军政人物的部曲，共$2名士兵')
     .replace(/，承诺转化为可追溯的信任记忆|；这次回应已经进入双方关系与军令审查|；此承诺可因履职而完成，也可因抗命而破裂/g, '')
     .replace(/经职位、支持与风险审查后获准/g, '获朝廷准许')
@@ -192,11 +193,10 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact, co
   }
   if (fact.kind === 'battle') {
     const attacker = characterName(world, fact.payload.attacker.commanderId);
-    const defenders = fact.payload.defenders.map((item) => characterName(world, item.commanderId)).join('、') || '守军';
-    const losses = fact.payload.attacker.losses + fact.payload.defenders.reduce((sum, item) => sum + item.losses, 0);
+    const defenders = fact.payload.defenders.map((item) => characterName(world, item.commanderId)).join('、');
     return {
       title: `${regionName(world, fact.payload.targetRegionId)}之战`,
-      summary: `${attacker}承行军令，与${defenders}所部交战，${fact.payload.attackerWon ? '攻方取胜' : '守方守住战线'}；双方军团损失${compactNumber(losses)}人，守地民兵损失${compactNumber(fact.payload.militiaLosses)}人。`,
+      summary: `${attacker}承行军令，与${defenders ? `${defenders}所部` : '守地民兵'}交战，${fact.payload.attackerWon ? '攻方取胜' : '守方守住战线'}；${battleLossText(fact.payload)}。`,
     };
   }
   if (fact.kind === 'army_order_changed') {
