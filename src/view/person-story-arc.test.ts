@@ -68,6 +68,36 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it.each(['capital_fall', 'polity_eliminated'] as const)('names a low-loss member’s decisive result without inventing a capital (%s)', kind => {
+    const w = createWorld('低损成员与最后据点', 'contest-v01');
+    const army = w.armies.find(a => a.participantIds.some(id => id !== a.commanderId && id !== a.deputyCommanderId))!;
+    const p = w.characters.find(c => army.participantIds.includes(c.id) && c.id !== army.commanderId && c.id !== army.deputyCommanderId)!;
+    const enemy = w.polities.find(n => n.id !== army.polityId)!;
+    const place = w.regions.find(r => r.id === enemy.capitalRegionId)!;
+    w.turn = 11; w.offices = []; w.history = [];
+    const battle = battleFact(w, p.id, 'last-battle', 10, 1);
+    battle.importance = 3; battle.payload.targetRegionId = place.id; battle.regionIds = [place.id];
+    const gain: SimulationFact = { ...battle, id: 'last-gain', kind: 'territory_control_changed', sourceFactIds: [battle.id],
+      payload: { regionId: place.id, previousControllerId: enemy.id, nextControllerId: army.polityId, reason: 'battle_capture', warId: battle.payload.warId } };
+    w.facts = [battle, gain];
+    expect(projectPersonStoryArc(w, p)).toEqual([]); // No ordinary battle candidate survives the existing threshold.
+    const event = { ...battle, id: 'decisive-event', kind, title: kind === 'capital_fall' ? '敌都失守' : `${enemy.name}灭亡`,
+      summary: '本军取得最后据点。', evidence: [], situationIds: [], sourceFactIds: [gain.id], stateDeltas: [kind === 'capital_fall'
+        ? { entityType: 'polity' as const, entityId: enemy.id, field: 'capitalRegionId', before: place.id, after: 'elsewhere' }
+        : { entityType: 'polity' as const, entityId: enemy.id, field: 'alive', before: true, after: false }] };
+    w.history = [event];
+    const body = serializeWorld(w), hash = computeWorldHash(w), arc = projectPersonStoryArc(w, p);
+    expect(arc).toHaveLength(1);
+    expect(arc[0].title).toBe(`${p.name}参战，${kind === 'capital_fall' ? `攻克${place.name}` : `${enemy.name}灭亡`}`);
+    expect(arc[0].primaryEventId).toBe(event.id); expect(arc[0].primaryFactId).toBe(battle.id);
+    expect(arc[0].sourceFactIds).toEqual(expect.arrayContaining([battle.id, gain.id]));
+    expect(arc[0].sourceEventIds).toEqual([event.id]);
+    expect(serializeWorld(w)).toBe(body); expect(computeWorldHash(w)).toBe(hash);
+    // Being an Event actor without Battle participation does not earn a personal victory.
+    battle.payload.attacker.participants = [];
+    expect(projectPersonStoryArc(w, p)).toEqual([]);
+  });
+
   it.each([true,false])('discovers a current ending backed by a real career, without promoting a lone death (event=%s)', withEvent => {
     const w=createWorld('前史与结局不是阵亡配额');
     const [veteran,lone]=w.armies.slice(0,2).map(a=>w.characters.find(p=>p.id===a.commanderId)!);

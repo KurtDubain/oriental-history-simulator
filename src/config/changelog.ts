@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.34',
+  version: '1.29.35',
   date: '2026-09-15',
-  title: '入世存读与历史收口',
+  title: '灭国经历与履约校验',
   items: [
-    '修复入世后的存读档，厘清履约、战损与人生结局的证据。',
+    '校正参战灭国经历，收紧同季履约与死亡的记忆校验。',
   ],
 };
 

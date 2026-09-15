@@ -296,8 +296,9 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
       }
     }
     const polityName = world.polities.find(p => p.id === (founded?.entityId ?? loss?.entityId))?.name ?? '该国';
+    const battleTitle = `${person.name}参战，${capital ? `攻克${place}` : `${polityName}灭亡`}`;
     const title = founded ? `${event.title}，建立${polityName}` : accession ? `${person.name}登位` : legacyDeed ? event.title
-      : battle ? `${person.name}参战，攻克${place}` : capital ? `任内国事：${victorious ? `攻取${place}` : event.title}`
+      : battle ? battleTitle : capital ? `任内国事：${victorious ? `攻取${place}` : event.title}`
         : `任内${victorious ? '灭敌' : '亡国'}：${polityName}`;
     const sourceFactIds = unique([...event.sourceFactIds, ...(battle ? [battle.id] : []), ...appointments.filter(f => f.turn === event.turn && (
       ((accession || founded) && (f.kind === 'appointment_started' && (f.payload.officeKind === '君主' || f.payload.polityId === founded?.entityId)
@@ -311,7 +312,7 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
     if (episode) {
       if (episode.phase === 'battle') {
         episode.priority = -1;
-        episode.title = capital ? `${person.name}参战，攻克${place}` : `${person.name}参战，${polityName}灭亡`;
+        episode.title = battleTitle;
         episode.primaryEventId = event.id;
         episode.primaryFactId = battle.id;
       }

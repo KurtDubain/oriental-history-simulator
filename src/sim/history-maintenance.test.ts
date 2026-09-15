@@ -7,11 +7,12 @@ import { woundRecoveryQuarters } from './military/battle-readiness';
 import type { HistoryEvent } from './types';
 
 describe('ruler identity and bounded recovery', () => {
-  it.each([false, true])('settles a state treaty without making dead signers act (deceased=%s)', deceased => {
+  it.each(['living', 'died-before', 'died-earlier-this-turn', 'dies-later-this-turn', 'dies-next-turn'])('checks treaty memory against its actual settlement actors (%s)', mode => {
+    const deceased = mode.startsWith('died-');
     const world = createWorld('国家履约与签约人');
     world.turn = 3; world.season = '冬';
     const [left,right] = world.characters;
-    if (deceased) { left.alive = false; left.deathTurn = 2; }
+    if (deceased) { left.alive = false; left.deathTurn = mode === 'died-before' ? 2 : 3; }
     const commitment = { id:'commit_test', kind:'外交盟约' as const, promisorId:left.id, promiseeId:right.id,
       polityIds:world.polities.slice(0,2).map(p=>p.id), terms:'互不进攻', madeTurn:0, dueTurn:3,
       status:'生效' as const, resolvedTurn:null, eventId:world.history[0].id, resolutionEventId:null, trustStake:10 };
@@ -38,9 +39,17 @@ describe('ruler identity and bounded recovery', () => {
     }
     expect(validateCommitmentState(world)).toEqual([]);
     if (!deceased) {
-      // A later death does not excuse a missing memory of a living person's action.
-      left.alive = false;left.deathTurn = 4;world.turn = 5;
+      // A later death, even in the same quarter, does not erase an earlier personal action.
+      if (mode.startsWith('dies-')) {
+        left.alive = false; left.deathTurn = mode === 'dies-next-turn' ? 4 : 3;
+        world.turn = left.deathTurn + 1;
+      }
+      expect(validateCommitmentState(world)).toEqual([]);
       for(const r of world.relationships)r.memories=r.memories.filter(m=>m.eventId!==event.id);
+      expect(validateCommitmentState(world).some(v=>v.code==='commitment.memory')).toBe(true);
+    } else {
+      // Death alone cannot excuse a settlement that actually names personal actors.
+      event.actorIds = [left.id, right.id];
       expect(validateCommitmentState(world).some(v=>v.code==='commitment.memory')).toBe(true);
     }
   });

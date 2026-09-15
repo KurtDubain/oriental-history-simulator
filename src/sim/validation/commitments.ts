@@ -30,6 +30,7 @@ export function validateCommitmentState(world: WorldState): InvariantViolation[]
   }
 
   for (const commitment of world.commitments) {
+    const resolutionEvent = commitment.resolutionEventId ? eventById.get(commitment.resolutionEventId) : undefined;
     if (!eventById.has(commitment.eventId)) violations.push(issue('commitment.event', `${commitment.id}建立事件不可追溯`, commitment.id));
     if (!characterById.has(commitment.promisorId) || !characterById.has(commitment.promiseeId)) violations.push(issue('commitment.characters', `${commitment.id}承诺人物引用无效`, commitment.id));
     if (commitment.polityIds.some((id) => !polityById.has(id))) violations.push(issue('commitment.polities', `${commitment.id}承诺政权引用无效`, commitment.id));
@@ -41,6 +42,8 @@ export function validateCommitmentState(world: WorldState): InvariantViolation[]
       (commitment.status === '履约' || commitment.status === '背约')
       && world.turn - commitment.resolvedTurn < 32
       && !(commitment.kind === '外交盟约' && commitment.status === '履约'
+        && resolutionEvent?.kind === 'commitment_fulfilled' && resolutionEvent.turn === commitment.resolvedTurn
+        && resolutionEvent.actorIds.length === 0
         && [commitment.promisorId, commitment.promiseeId].some(id => {
           const death = characterById.get(id)?.deathTurn;
           return death != null && death <= commitment.resolvedTurn!;
@@ -76,9 +79,6 @@ export function validateCommitmentState(world: WorldState): InvariantViolation[]
       violations.push(issue('commitment.faction-alliance-outcome', `${commitment.id}在派系联盟终止后被判为${commitment.status}`, commitment.id));
     }
     if (endingFact && commitment.status === '失效') {
-      const resolutionEvent = commitment.resolutionEventId
-        ? eventById.get(commitment.resolutionEventId)
-        : undefined;
       if (
         commitment.resolvedTurn === null
         || commitment.resolvedTurn < endingFact.turn
