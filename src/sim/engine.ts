@@ -945,7 +945,7 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
       ) {
         army.deputyCommanderId = selectCandidate(
           aliveCharacters(world, polity.id).filter((character) => (
-            isBattleReadyCharacter(world, character) && !character.commandingArmyId
+            trustedForOffice(world, polity, character) && isBattleReadyCharacter(world, character) && !character.commandingArmyId
             && !character.commandingFleetId
             && !character.governedRegionId
             && character.id !== army.commanderId
@@ -1134,26 +1134,19 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
       + character.renown * 0.04
       + character.loyalty * 0.02;
     const occupiedRulerIds = new Set(world.polities.filter((item) => item.alive && item.rulerId).map((item) => item.rulerId));
-    const legalMinor = selectCandidate(
-      world.characters.filter((character) => (
-        character.alive
-        && character.age < 16
-        && character.polityId === polity.id
-        && !occupiedRulerIds.has(character.id)
-        && lineageSupport(character) >= 46
-      )),
-      (character) => lineageSupport(character) * 2 + character.age + character.influence,
-    );
-    let regent = legalMinor ? selectRegent(world, polity) : undefined;
-    let successor = legalMinor && regent
-      ? legalMinor
-      : selectCandidate(
-      aliveCharacters(world, polity.id).filter((character) => !occupiedRulerIds.has(character.id)),
+    const legalMinors = world.characters.filter(character => character.alive && character.age < 16
+      && character.polityId === polity.id && !occupiedRulerIds.has(character.id) && lineageSupport(character) >= 46);
+    let regent = legalMinors.length ? selectRegent(world, polity) : undefined;
+    let successor = selectCandidate([
+      ...aliveCharacters(world, polity.id).filter(character => !occupiedRulerIds.has(character.id)),
+      ...(regent ? legalMinors : []),
+    ],
       successionScore,
     );
-    if (!successor && legalMinor) {
+    const selectedScore = successor ? successionScore(successor) : null;
+    if (!successor && legalMinors.length) {
       regent = spawnCharacter(world, polity, 'background-regent') ?? undefined;
-      if (regent) successor = legalMinor;
+      if (regent) successor = selectCandidate(legalMinors, successionScore);
     }
     successor ??= spawnCharacter(world, polity, 'background-successor') ?? undefined;
     let anonymousCouncilRegency = false;
@@ -1171,6 +1164,7 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
     polity.rulerId = successor.id;
     successor.governedRegionId = null;
     const sameDynasty = Boolean(previousFamilyId && successor.familyId === previousFamilyId);
+    if (successor.age >= 16) regent = undefined;
     const underRegency = successor.age < 16 && (Boolean(regent) || anonymousCouncilRegency);
     const regentInfluenceBefore = regent?.influence ?? 0;
     if (underRegency && regent) regent.influence = Math.round(clamp(regent.influence + 10));
@@ -1206,7 +1200,7 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
         { label: '家族认可', role: '条件', weight: 0.18, evidence: `家族声望${world.families.find((family) => family.id === successor.familyId)?.prestige ?? 0}` },
         { label: underRegency ? '摄政安排' : '官职派系支持', role: '条件', weight: 0.22, evidence: anonymousCouncilRegency ? '无具名成人可用，由不具人物能力值的匿名议会监国' : underRegency ? `${regent?.name ?? '朝臣'}成年且制度支持${regent ? institutionalSupport(regent).toFixed(1) : '0'}` : `制度支持${institutionalSupport(successor).toFixed(1)}` },
         { label: '军队支持', role: '条件', weight: 0.14, evidence: successor.commandingArmyId ? `掌握军团${successor.commandingArmyId}` : '未直接掌军，以宫廷网络补足' },
-        { label: underRegency ? '摄政选择' : '继承选择', role: '选择', weight: 0.16, evidence: anonymousCouncilRegency ? '天下无可并入对象，启用已登记未成年候补与匿名议会' : underRegency ? '未成年合法继承人与在世成人摄政同时具备' : `候选总分${successionScore(successor).toFixed(1)}居首` },
+        { label: '继承选择', role: '选择', weight: 0.16, evidence: selectedScore !== null ? `合资格候选总分${selectedScore.toFixed(1)}居首${underRegency ? '，已有成年摄政可用' : ''}` : anonymousCouncilRegency ? '天下无可并入对象，启用已登记未成年候补与匿名议会' : '常规候选不足，启用既有背景候补补足继承或摄政' },
       ],
       stateDeltas: [
         { entityType: 'polity', entityId: polity.id, field: 'rulerId', before: rulerIdBefore, after: successor.id },
@@ -1368,7 +1362,10 @@ function createArmy(
 
   world.counters.army += 1;
   const armyId = `a_${String(world.counters.army).padStart(3, '0')}`;
-  const deputyCommanderId = participantIds.slice(1).find((id) => !world.characters.find((person) => person.id === id)?.governedRegionId) ?? null;
+  const deputyCommanderId = participantIds.slice(1).find(id => {
+    const person = world.characters.find(p => p.id === id)!;
+    return !person.governedRegionId && trustedForOffice(world, polity, person);
+  }) ?? null;
   const army: ArmyState = {
     id: armyId,
     name: `${region.name}新军`,

@@ -86,15 +86,14 @@ describe('restoreWorldSession', () => {
       historyCount: world.history.length,
     }).toEqual({
       turn: 12,
-      // First divergence: T4 a_009 moves Kaesong→Pyongyang under its old
-      // authorized reinforcement step; the actual new order still dates T3.
-      hash: '80fd3f940d83b4e2',
-      factDigest: '47f537029adb7e4d',
-      // v1.29.34 spells out militia losses; independent HEAD replay confirms
-      // identical Facts/hash. Only battle prose and its digest changed at T4.
-      historyDigest: '30b9f82d5d9deedd',
+      // v1.29.36: T4 changes only succession evidence. First state divergence
+      // is T7: an unstaffed Guangzhou ship project waits instead of silently
+      // completing without a fleet and charging for another batch (HEAD replay).
+      hash: '3a40781b3a421a6f',
+      factDigest: '59e41aa6f27e97cc',
+      historyDigest: '2498c46fe1f69cff',
       factCount: 467,
-      historyCount: 283,
+      historyCount: 282,
     });
   });
 });

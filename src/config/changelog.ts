@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.35',
+  version: '1.29.36',
   date: '2026-09-15',
-  title: '灭国经历与履约校验',
+  title: '继承比较与军职资格',
   items: [
-    '校正参战灭国经历，收紧同季履约与死亡的记忆校验。',
+    '统一继承候选比较，补齐亡国君主的军职任用门槛。',
   ],
 };
 

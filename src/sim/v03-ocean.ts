@@ -3,6 +3,7 @@ import type { MapProfile } from '../maps/types';
 import { keyedInt, keyedRandom, stableCompare } from './random';
 import { emitSimulationFact, projectFactLinks, type BattleFact, type SimulationFact } from './facts';
 import { practiceEffect } from './v03-life';
+import { trustedForOffice } from './v02';
 import {
   creditBattleCommandStanding,
   recordArmyMovement,
@@ -205,6 +206,8 @@ function createPorts(world: WorldState): PortState[] {
 }
 
 function selectFleetCommander(world: WorldState, polityId: string): WorldState['characters'][number] | null {
+  const polity = world.polities.find(item => item.id === polityId);
+  if (!polity) return null;
   const deputyIds = new Set([
     ...world.armies.map((army) => army.deputyCommanderId).filter((id): id is string => Boolean(id)),
     ...world.fleets.map((fleet) => fleet.deputyCommanderId).filter((id): id is string => Boolean(id)),
@@ -215,6 +218,7 @@ function selectFleetCommander(world: WorldState, polityId: string): WorldState['
       character.alive
       && character.age >= 16
       && character.polityId === polityId
+      && trustedForOffice(world, polity, character)
       && character.role !== '君主'
       && !character.commandingArmyId
       && !character.commandingFleetId
@@ -1402,6 +1406,8 @@ function fleetOfficerCandidate(
   excluded: ReadonlySet<string>,
   commander: boolean,
 ): WorldState['characters'][number] | null {
+  const polity = world.polities.find(item => item.id === polityId);
+  if (!polity) return null;
   const armyOfficers = new Set(world.armies.flatMap((army) => army.participantIds));
   const fleetDeputies = new Set(world.fleets.map((fleet) => fleet.deputyCommanderId).filter((id): id is string => Boolean(id)));
   return world.characters
@@ -1409,6 +1415,7 @@ function fleetOfficerCandidate(
       character.alive
       && character.age >= 16
       && character.polityId === polityId
+      && trustedForOffice(world, polity, character)
       && character.role !== '君主'
       && !character.governedRegionId
       && !character.commandingArmyId
@@ -1842,7 +1849,7 @@ function completeShipProject(world: WorldState, project: ShipbuildingProjectStat
     target.repairNeed = Math.round(clamp(target.repairNeed + 4));
   } else {
     const region = world.regions.find((item) => item.id === project.portRegionId && item.controllerId === project.polityId);
-    if (region) createFleetAtPort(world, region, project);
+    if (!region || !createFleetAtPort(world, region, project)) return;
   }
   project.status = '完成';
   project.completedTurn = world.turn;
