@@ -1,4 +1,5 @@
 import { FAMILY_NAMES, GIVEN_NAMES, selectAvailableGivenName } from './names';
+import { biologicalParents, closeKin } from './lineage';
 import { findMapProfileForContentVersion } from '../maps';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
 import { detachPersonalForce, personalForce } from './military/personal-forces';
@@ -837,16 +838,8 @@ function applyMarriage(
     actorIds: [left.id, right.id],
     polityIds: [left.polityId, right.polityId],
     regionIds: [left.locationRegionId, right.locationRegionId],
-    causes: [
-      { label: '适婚条件', role: '条件', weight: 0.25, evidence: `双方年龄${left.age}/${right.age}且此前无配偶` },
-      { label: '家族利益', role: '结构', weight: 0.3, evidence: `${leftFamily?.name ?? left.familyName}与${rightFamily?.name ?? right.familyName}互补声望与影响` },
-      { label: diplomatic ? '国家信任' : '关系亲和', role: '选择', weight: 0.3, evidence: diplomatic ? '婚盟服务于国家间信任与安全' : '双方人格、年龄和家族网络相容' },
-      { label: '婚盟结果', role: '结果', weight: 0.15, evidence: '配偶与家族联盟关系已写入权威状态' },
-    ],
-    stateDeltas: [
-      { entityType: 'character', entityId: left.id, field: 'spouseIds', before: null, after: right.id },
-      { entityType: 'character', entityId: right.id, field: 'spouseIds', before: null, after: left.id },
-    ],
+    causes: fact.causes,
+    stateDeltas: fact.stateDeltas,
     ...projectFactLinks(fact),
   });
   for (const [source, target] of [[left, right], [right, left]] as const) {
@@ -1145,7 +1138,7 @@ function processLocalMarriages(world: WorldState, context: V02TurnContext, emit:
       for (let right = left + 1; right < candidates.length; right += 1) {
         const a = candidates[left] as CharacterState;
         const b = candidates[right] as CharacterState;
-        if (a.familyId === b.familyId || a.parentIds.includes(b.id) || b.parentIds.includes(a.id)) continue;
+        if (a.familyId === b.familyId || closeKin(world, a, b)) continue;
         const ageGap = Math.abs(a.age - b.age);
         const score = 78 - ageGap * 2
           + (a.influence + b.influence) * 0.12
@@ -1168,7 +1161,7 @@ function processBirths(world: WorldState, context: V02TurnContext, emit: EmitEve
   for (const character of world.characters.filter((item) => item.alive && item.age >= 18 && item.age <= 44)) {
     for (const spouseId of character.spouseIds) {
       const spouse = world.characters.find((item) => item.id === spouseId && item.alive && item.age >= 18 && item.age <= 55);
-      if (!spouse) continue;
+      if (!spouse || !biologicalParents(character, spouse) || closeKin(world, character, spouse)) continue;
       const key = [character.id, spouse.id].sort(stableCompare).join(':');
       if (seen.has(key)) continue;
       seen.add(key);
@@ -1177,7 +1170,7 @@ function processBirths(world: WorldState, context: V02TurnContext, emit: EmitEve
   }
   for (const parents of couples.sort((left, right) => stableCompare(left[0].id, right[0].id))) {
     const count = Math.max(childCount(world, parents[0].id), childCount(world, parents[1].id));
-    const eligibleParent = parents.find((parent) => parent.age <= 44);
+    const eligibleParent = parents.find((parent) => parent.sex === '女');
     if (!eligibleParent || count >= 4) continue;
     const chance = clamp(0.22 - count * 0.035 - Math.max(0, eligibleParent.age - 34) * 0.008, 0.04, 0.22);
     if (!keyedChance(world.seed, chance, context.turn, 'birth', parents[0].id, parents[1].id)) continue;
@@ -2075,7 +2068,8 @@ export function processV02Diplomacy(world: WorldState, context: V02TurnContext, 
       .filter((character) => character.politicalClass === '宗室' && character.age >= 18 && character.age <= 44 && character.spouseIds.length === 0)
       .sort((a, b) => b.influence - a.influence || stableCompare(a.id, b.id))[0];
     const rightCandidate = livingAdults(world, right.id)
-      .filter((character) => character.politicalClass === '宗室' && character.age >= 18 && character.age <= 44 && character.spouseIds.length === 0)
+      .filter((character) => character.politicalClass === '宗室' && character.age >= 18 && character.age <= 44 && character.spouseIds.length === 0
+        && leftCandidate && !closeKin(world, leftCandidate, character))
       .sort((a, b) => b.influence - a.influence || stableCompare(a.id, b.id))[0];
     if (!leftCandidate || !rightCandidate) continue;
     const event = applyMarriage(world, context, leftCandidate, rightCandidate, true, emit);

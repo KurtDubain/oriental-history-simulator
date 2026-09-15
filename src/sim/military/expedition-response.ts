@@ -1,7 +1,7 @@
 import { keyedRandom, stableCompare } from '../random';
 import type { CharacterState, WorldState } from '../types';
 import { isBattleReadyCharacter } from './battle-readiness';
-import { personalForce } from './personal-forces';
+import { isFleetDeputy, personalForce } from './personal-forces';
 
 export type ExpeditionResponseOutcome = 'responded' | 'stayed';
 export interface ExpeditionResponseDecision {
@@ -38,14 +38,14 @@ function strongest(motives: readonly Motive[], fallback: string): string {
 }
 
 export function isAvailableForExpedition(
-  world: Pick<WorldState, 'characters' | 'personalForces' | 'facts' | 'turn'>,
+  world: Pick<WorldState, 'characters' | 'personalForces' | 'facts' | 'turn' | 'fleets'>,
   polityId: string,
   character: CharacterState,
 ): boolean {
   const force = personalForce(world, character.id);
   return character.alive && character.polityId === polityId && isBattleReadyCharacter(world, character)
     && Boolean(force?.soldiers && force.formationId === null)
-    && !character.commandingArmyId && !character.commandingFleetId;
+    && !character.commandingArmyId && !character.commandingFleetId && !isFleetDeputy(world, character.id);
 }
 
 /** Competing motives stay continuous; keyed chance settles the actual tension without exposing a score threshold. */

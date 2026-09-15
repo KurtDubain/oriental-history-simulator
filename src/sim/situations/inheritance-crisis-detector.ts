@@ -1,5 +1,6 @@
 import { makeSituationSignal as makeSignal, situationIndexRef as indexRef } from "./candidate-registry";
 import { isContinuousAppointment } from '../facts/projector';
+import { continuesRulingLine } from '../lineage';
 import type {
   ArmyState,
   CharacterState,
@@ -882,17 +883,22 @@ function resolutionCandidate(
 }
 
 function classifyRulerTransfer(
+  index: InheritanceCrisisIndex,
+  polity: PolityState,
   predecessor: CharacterState,
   successor: CharacterState,
   predecessorDied: boolean,
 ): InheritanceResolutionOutcomeKey {
+  const sameLine = continuesRulingLine({ characters: [...index.charactersById.values()],
+    families: [...index.familiesById.values()], polities: [...index.politiesById.values()] },
+  { ...polity, rulingFamilyId: predecessor.familyId }, successor);
   if (predecessorDied) {
     if (successor.age < 16) return 'regency_established';
-    return successor.familyId === predecessor.familyId
+    return sameLine
       ? 'orderly_succession'
       : 'dynasty_replaced';
   }
-  return successor.familyId === predecessor.familyId
+  return sameLine
     ? 'palace_transfer'
     : 'usurpation';
 }
@@ -996,7 +1002,7 @@ function detectInheritanceCrisis(
       || !successor?.alive
       || successor.id === predecessor.id
     ) continue;
-    const outcomeKey = classifyRulerTransfer(predecessor, successor, true);
+    const outcomeKey = classifyRulerTransfer(context.index, polity, predecessor, successor, true);
     const resolutionFacts = selectTransferFacts(
       currentFacts,
       polity.id,
@@ -1033,7 +1039,7 @@ function detectInheritanceCrisis(
     const predecessor = context.index.charactersById.get(endedFact.payload.holderId);
     const successor = context.index.charactersById.get(startedFact.payload.holderId);
     if (!predecessor || !successor?.alive) continue;
-    const outcomeKey = classifyRulerTransfer(predecessor, successor, false);
+    const outcomeKey = classifyRulerTransfer(context.index, polity, predecessor, successor, false);
     results.push(resolutionCandidate(
       polity,
       [endedFact, startedFact],

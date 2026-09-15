@@ -14,6 +14,8 @@ import type { MapProfile } from './types';
 // its authorized reinforcement step (reinforcement-continuity/goldens traces).
 // v1.29.34: only History digests change at T4: standing/militia casualty wording.
 // Independent HEAD replay confirmed unchanged world hashes and complete Facts.
+// v1.29.37: fleet deputies remain occupied; first divergence T4/T6.
+// Original/current office and fact traces: output/kinship-fleet-closure-20260915/golden-trace.json.
 const GENERAL_GROUP_BASELINES = {
   "架构边界-入世": [
     [
@@ -47,39 +49,39 @@ const GENERAL_GROUP_BASELINES = {
       "370ac0a9c76f1488"
     ],
     [
-      "2b71a2d9121852ca",
-      "7de4da28413ab97e",
+      "38b51330be8d504f",
+      "5ea3daf3eaa4c9b1",
       "609cf2daf7067bba"
     ],
     [
-      "2877dac6f489523f",
-      "3fc95fd357ee6402",
+      "3a88436dad619d1b",
+      "98211452075df0db",
       "54367339ed1edb40"
     ],
     [
-      "d851a1da59480415",
-      "08e87e2c9774654d",
-      "fbc48728d50a6efb"
+      "338de0ce2fbecb2f",
+      "017d35e7f13d1fa6",
+      "f240c1d81cd44ba5"
     ],
     [
-      "a3493bf2b5348860",
-      "4b0084de0405fee0",
-      "53f70309faf8a3c0"
+      "35441d8680ad7fcf",
+      "a7ff07a9cfec08a4",
+      "09029d3381eddcfd"
     ],
     [
-      "c6fdd585eb9b97d4",
-      "d432296d735d244f",
-      "67b10470962e4e26"
+      "ff5fbe8e30e808d1",
+      "5114a387cf608e91",
+      "85d9ee034aec0ef7"
     ],
     [
-      "21772cc1cabf784e",
-      "543fee5904e30a6e",
-      "a7e6eb7238fd408c"
+      "e28ff41573020380",
+      "a3ec1bbf49f9512e",
+      "19b61a04d73124eb"
     ],
     [
-      "f2fd05b28f1b2749",
-      "97997efa222d46cc",
-      "a4ff32eef129b125"
+      "9ffdb6b37ac65866",
+      "05d94719c8fdd2d5",
+      "13b031dca1597840"
     ]
   ],
   "州县民生": [
@@ -104,49 +106,49 @@ const GENERAL_GROUP_BASELINES = {
       "f8fc93d93f0d8a92"
     ],
     [
-      "38ddda06bd5c4567",
-      "d81761734532aaf6",
-      "f7b227bc18cbb274"
+      "dff18fdadb071849",
+      "f230e637fc540af2",
+      "67395235d302b9d2"
     ],
     [
-      "f6fde6f445c70f89",
-      "f3a7871a7ac76e5b",
-      "7db49000de54da0f"
+      "521062fe544b74d8",
+      "4378fa2544341539",
+      "e843e3898cd6b4ab"
     ],
     [
-      "6be34527965aa466",
-      "76dc2ef465b3bff2",
-      "8246c1b1ea8c7919"
+      "da590b3f99093fdb",
+      "7ed4d8d754f85572",
+      "7cf222dd94193d69"
     ],
     [
-      "b5f4de6ada056191",
-      "c98c57dde996c24b",
-      "21c001225d6738f8"
+      "e31277079f023650",
+      "6657ba86f19882f0",
+      "a272ca861f2e56bf"
     ],
     [
-      "71797ef3c4e44a13",
-      "9c4bf8922d5ebe19",
-      "59c8a87060103911"
+      "aa792bbd082f319f",
+      "d525e17454412855",
+      "5bea08b65c8667f4"
     ],
     [
-      "0049fa8d3a7103ef",
-      "608308312e868d87",
-      "479e1246ccd1abe9"
+      "eade7a7b82d42b8f",
+      "9535565f1cb069a8",
+      "1f583101ae9269b7"
     ],
     [
-      "79e65bf0076024c7",
-      "8e2821e44f7cfa03",
-      "2568effa01abdc84"
+      "0920e10cca556398",
+      "9668ae96610176d2",
+      "5fda8e28b611931a"
     ],
     [
-      "4ba1548a7446ae56",
-      "ecc8161dc6cc23f7",
-      "ac6d1b792908d5ff"
+      "93c4e8f0a18e37ca",
+      "a8f9663794e2c2bd",
+      "0d9a2a99cbb6b12b"
     ],
     [
-      "109e84ddae31748d",
-      "5390d825fce10af8",
-      "98d4b302960c7c69"
+      "58bb32df61a82fb4",
+      "1ca9794c97f03f3c",
+      "421843e7ac51df0f"
     ]
   ]
 } as const;

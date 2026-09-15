@@ -86,14 +86,13 @@ describe('restoreWorldSession', () => {
       historyCount: world.history.length,
     }).toEqual({
       turn: 12,
-      // v1.29.36: T4 changes only succession evidence. First state divergence
-      // is T7: an unstaffed Guangzhou ship project waits instead of silently
-      // completing without a fleet and charging for another batch (HEAD replay).
-      hash: '3a40781b3a421a6f',
-      factDigest: '59e41aa6f27e97cc',
-      historyDigest: '2498c46fe1f69cff',
-      factCount: 467,
-      historyCount: 282,
+      // v1.29.37: T4 keeps the existing naval deputy out of army replacement.
+      // Two full replay chains and concrete office changes recorded in golden-trace.json.
+      hash: 'ced775cbde823c9b',
+      factDigest: 'c8f00326bdcdabcd',
+      historyDigest: '251156b3b5e5de9f',
+      factCount: 474,
+      historyCount: 289,
     });
   });
 });

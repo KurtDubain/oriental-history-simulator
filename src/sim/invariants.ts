@@ -1,4 +1,5 @@
 import { getDateForTurn } from './calendar';
+import { validateLineage } from './lineage';
 import { stableCompare, stableHash } from './random';
 import { computeWorldHash } from './world-hash';
 import { validateSituationSystemState } from './situations/reducer';
@@ -1977,9 +1978,9 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       deputyAssignments.add(fleet.deputyCommanderId);
     }
   }
-
   for (const character of world.characters) {
     if (!regionById.has(character.locationRegionId)) push(violations, 'character.location', `${character.name}位置无效`, character.id);
+    violations.push(...validateLineage(world, character));
     if (!polityById.has(character.polityId)) push(violations, 'character.polity', `${character.name}政权引用无效`, character.id);
     if (!isWholeNonNegative(character.age)) push(violations, 'character.age', `${character.name}年龄无效`, character.id);
     if (!familyById.has(character.familyId)) push(violations, 'character.family', `${character.name}家族引用无效`, character.id);
@@ -2076,7 +2077,6 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
       if (!source || source.promotedCharacterId !== character.id) push(violations, 'character.background-source', `${character.name}背景来源引用无效`, character.id);
     }
   }
-
   const ancestryState = new Map<string, 0 | 1 | 2>();
   const visitAncestry = (characterId: string): void => {
     const state = ancestryState.get(characterId) ?? 0;

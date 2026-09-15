@@ -11,7 +11,7 @@ import {
   syncArmyPersonnelLocations,
 } from './military/authority';
 import { armyOrderFactIds, issueAmphibiousArmyOrder, minimumLandingForce } from './military/orders';
-import { applyFormationLosses, formationForces, setFormationStatus } from './military/personal-forces';
+import { applyFormationLosses, formationForces, isFleetDeputy, setFormationStatus } from './military/personal-forces';
 import type { V03Emit, V03TurnContext } from './v03-context';
 import {
   COMMODITIES,
@@ -206,31 +206,9 @@ function createPorts(world: WorldState): PortState[] {
 }
 
 function selectFleetCommander(world: WorldState, polityId: string): WorldState['characters'][number] | null {
-  const polity = world.polities.find(item => item.id === polityId);
-  if (!polity) return null;
-  const deputyIds = new Set([
-    ...world.armies.map((army) => army.deputyCommanderId).filter((id): id is string => Boolean(id)),
-    ...world.fleets.map((fleet) => fleet.deputyCommanderId).filter((id): id is string => Boolean(id)),
-  ]);
-  const formationIds = new Set(world.armies.flatMap((army) => army.participantIds));
-  return world.characters
-    .filter((character) => (
-      character.alive
-      && character.age >= 16
-      && character.polityId === polityId
-      && trustedForOffice(world, polity, character)
-      && character.role !== '君主'
-      && !character.commandingArmyId
-      && !character.commandingFleetId
-      && !character.governedRegionId
-      && !deputyIds.has(character.id)
-      && !formationIds.has(character.id)
-    ))
-    .sort((left, right) => (
-      (right.leadership + right.cunning * 0.45 + right.loyalty * 0.2)
-      - (left.leadership + left.cunning * 0.45 + left.loyalty * 0.2)
-      || stableCompare(left.id, right.id)
-    ))[0] ?? null;
+  return fleetOfficerCandidate(world, polityId,
+    new Set(world.armies.flatMap(army => army.deputyCommanderId ? [army.deputyCommanderId] : [])), true, undefined,
+    character => character.leadership + character.cunning * 0.45 + character.loyalty * 0.2);
 }
 
 function createFleetAtPort(
@@ -1383,9 +1361,20 @@ function activeTradeAgreement(world: WorldState, leftId: string, rightId: string
   );
 }
 
-function dissolveFleet(world: WorldState, fleet: FleetState, context: V03TurnContext): void {
+function dissolveFleet(world: WorldState, fleet: FleetState, context: V03TurnContext, emit: V03Emit): void {
   const settlement = world.regions.find((region) => region.id === fleet.portRegionId)
     ?? world.regions.find((region) => region.id === fleet.homePortRegionId);
+  const ships = fleet.warships + fleet.transports + fleet.patrolShips;
+  const retained = settlement?.port && world.polities.some(p => p.alive && p.id === settlement.controllerId);
+  let batchId: string | null = null;
+  if (retained && settlement) {
+    batchId = `shipproject_${String(++world.counters.shipProject).padStart(5, '0')}`;
+    world.shipbuildingProjects.push({ id: batchId, polityId: settlement.controllerId, portRegionId: settlement.id,
+      targetFleetId: null, warships: fleet.warships, transports: fleet.transports, patrolShips: fleet.patrolShips,
+      timberCommitted: 0, ironCommitted: 0, treasurySpent: 0, progress: 100,
+      startedTurn: world.turn, completedTurn: null, status: '建造中' });
+    for (const project of world.shipbuildingProjects) if (project.targetFleetId === fleet.id) project.targetFleetId = null;
+  } else context.maritime.shipsLost += ships;
   if (settlement) {
     settlement.population += fleet.sailors;
     settlement.food += fleet.food;
@@ -1398,6 +1387,14 @@ function dissolveFleet(world: WorldState, fleet: FleetState, context: V03TurnCon
   const commander = world.characters.find((character) => character.id === fleet.commanderId);
   if (commander?.commandingFleetId === fleet.id) commander.commandingFleetId = null;
   world.fleets = world.fleets.filter((item) => item.id !== fleet.id);
+  emit({ category: '海洋', kind: 'fleet_disbanded', title: `${fleet.name}撤销编制`, importance: 3,
+    summary: retained ? `${ships}艘船归${settlement!.name}待配员；${fleet.sailors}名水手、${fleet.food}军粮返还当地。`
+      : `无港可接管，${ships}艘船废弃，计入非战斗退出。`,
+    polityIds: [fleet.polityId], regionIds: settlement ? [settlement.id] : [],
+    causes: [{ label: '编制条件', role: '触发', weight: 1, evidence: retained ? '指挥编制失效，港区承接实物' : '失去港区' }],
+    stateDeltas: [{ entityType: 'fleet', entityId: fleet.id, field: 'ships', before: ships, after: 0 },
+      ...(batchId ? [{ entityType: 'region' as const, entityId: settlement!.id, field: `shipbuilding:${batchId}:ships`, before: 0, after: ships }] : [])],
+  });
 }
 
 function fleetOfficerCandidate(
@@ -1405,11 +1402,12 @@ function fleetOfficerCandidate(
   polityId: string,
   excluded: ReadonlySet<string>,
   commander: boolean,
+  fleetId?: string,
+  score = (character: WorldState['characters'][number]) => character.leadership * 0.58 + character.cunning * 0.24 + character.loyalty * 0.18,
 ): WorldState['characters'][number] | null {
   const polity = world.polities.find(item => item.id === polityId);
   if (!polity) return null;
   const armyOfficers = new Set(world.armies.flatMap((army) => army.participantIds));
-  const fleetDeputies = new Set(world.fleets.map((fleet) => fleet.deputyCommanderId).filter((id): id is string => Boolean(id)));
   return world.characters
     .filter((character) => (
       character.alive
@@ -1421,13 +1419,12 @@ function fleetOfficerCandidate(
       && !character.commandingArmyId
       && !character.commandingFleetId
       && !armyOfficers.has(character.id)
-      && !fleetDeputies.has(character.id)
+      && !isFleetDeputy(world, character.id, commander ? fleetId : undefined)
       && !excluded.has(character.id)
       && (commander || character.role === '廷臣' || character.role === '将领')
     ))
     .sort((left, right) => (
-      (right.leadership * 0.58 + right.cunning * 0.24 + right.loyalty * 0.18)
-      - (left.leadership * 0.58 + left.cunning * 0.24 + left.loyalty * 0.18)
+      score(right) - score(left)
       || stableCompare(left.id, right.id)
     ))[0] ?? null;
 }
@@ -1444,7 +1441,7 @@ function repairFleets(world: WorldState, context: V03TurnContext, emit: V03Emit)
     if (!alivePolities.has(fleet.polityId)) {
       const receiver = home ? alivePolities.get(home.controllerId) : undefined;
       if (!receiver) {
-        dissolveFleet(world, fleet, context);
+        dissolveFleet(world, fleet, context, emit);
         continue;
       }
       const previousPolityId = fleet.polityId;
@@ -1453,9 +1450,9 @@ function repairFleets(world: WorldState, context: V03TurnContext, emit: V03Emit)
       fleet.polityId = receiver.id;
       fleet.portRegionId = home?.id ?? null;
       fleet.seaZoneId = null;
-      const replacement = fleetOfficerCandidate(world, receiver.id, new Set(), true);
+      const replacement = fleetOfficerCandidate(world, receiver.id, new Set(), true, fleet.id);
       if (!replacement) {
-        dissolveFleet(world, fleet, context);
+        dissolveFleet(world, fleet, context, emit);
         continue;
       }
       fleet.commanderId = replacement.id;
@@ -1488,7 +1485,7 @@ function repairFleets(world: WorldState, context: V03TurnContext, emit: V03Emit)
         .filter((region) => region.port && region.controllerId === fleet.polityId)
         .sort((left, right) => right.portLevel - left.portLevel || stableCompare(left.id, right.id))[0];
       if (!replacementHome) {
-        dissolveFleet(world, fleet, context);
+        dissolveFleet(world, fleet, context, emit);
         continue;
       }
       if (fleet.portRegionId === fleet.homePortRegionId) {
@@ -1509,9 +1506,9 @@ function repairFleets(world: WorldState, context: V03TurnContext, emit: V03Emit)
     );
     if (!valid) {
       if (current?.commandingFleetId === fleet.id) current.commandingFleetId = null;
-      const replacement = fleetOfficerCandidate(world, fleet.polityId, used, true);
+      const replacement = fleetOfficerCandidate(world, fleet.polityId, used, true, fleet.id);
       if (!replacement) {
-        dissolveFleet(world, fleet, context);
+        dissolveFleet(world, fleet, context, emit);
         continue;
       }
       fleet.commanderId = replacement.id;
@@ -1841,6 +1838,7 @@ function updateBlockades(world: WorldState, context: V03TurnContext, emit: V03Em
 }
 
 function completeShipProject(world: WorldState, project: ShipbuildingProjectState, context: V03TurnContext, emit: V03Emit): void {
+  const retained = project.timberCommitted === 0 && project.ironCommitted === 0 && project.treasurySpent === 0;
   const target = project.targetFleetId ? world.fleets.find((fleet) => fleet.id === project.targetFleetId) : undefined;
   if (target) {
     target.warships += project.warships;
@@ -1856,8 +1854,9 @@ function completeShipProject(world: WorldState, project: ShipbuildingProjectStat
   emit({
     category: '海洋',
     kind: 'shipbuilding_completed',
-    title: `${world.regions.find((item) => item.id === project.portRegionId)?.name ?? '港口'}新舰下水`,
-    summary: `船厂以已承诺的${project.timberCommitted}木材、${project.ironCommitted}铁器完成${project.warships + project.transports + project.patrolShips}艘船。`,
+    title: `${world.regions.find((item) => item.id === project.portRegionId)?.name ?? '港口'}${retained ? '舰船重新编成' : '新舰下水'}`,
+    summary: retained ? `原有${project.warships + project.transports + project.patrolShips}艘船完成配员，重新入列。`
+      : `船厂以已承诺的${project.timberCommitted}木材、${project.ironCommitted}铁器完成${project.warships + project.transports + project.patrolShips}艘船。`,
     importance: 3,
     actorIds: target ? [target.commanderId] : [],
     polityIds: [project.polityId],
@@ -1885,13 +1884,15 @@ function processShipbuilding(world: WorldState, context: V03TurnContext, emit: V
     const lostAuthority = !polity?.alive || portRegion?.controllerId !== project.polityId;
     const lostTarget = Boolean(project.targetFleetId && !targetFleet);
     if (lostAuthority || lostTarget) {
+      const finishedShips = project.progress >= 100 ? project.warships + project.transports + project.patrolShips : 0;
+      context.maritime.shipsLost += finishedShips;
       project.status = '取消';
       project.completedTurn = context.turn;
       emit({
         category: '海洋',
         kind: 'shipbuilding_cancelled',
         title: `${portRegion?.name ?? project.portRegionId}造船工程中止`,
-        summary: `${lostAuthority ? '原政权已失去存续或船厂控制' : '承接扩编的舰队已经不存在'}，已投入的木材、铁器与工钱视为沉没成本，工程不再产生船只。`,
+        summary: `${lostAuthority ? '原政权已失去存续或船厂控制' : '承接扩编的舰队已经不存在'}，${finishedShips ? `${finishedShips}艘待配员船只随批次废弃，计入非战斗退出` : '已投入的木材、铁器与工钱视为沉没成本，工程不再产生船只'}。`,
         importance: 2,
         polityIds: [project.polityId],
         regionIds: portRegion ? [portRegion.id] : [],

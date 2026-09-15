@@ -4,6 +4,7 @@ import {
   type RouteDefinition,
 } from '../maps/types';
 import { FAMILY_NAMES, GIVEN_NAMES, selectAvailableGivenName } from './names';
+import { continuesRulingLine } from './lineage';
 import { DEFAULT_MAP_PROFILE_ID, getMapProfile, getMapProfileRevision, getMapProfileForContentVersion } from '../maps';
 import type { MapProfile, MapProfileId } from '../maps/types';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
@@ -79,6 +80,7 @@ import {
   ensureEligiblePersonalForces,
   formationForces,
   personalForce,
+  isFleetDeputy,
   setFormationStatus,
   syncAllFormationStrengths,
   syncFormationStrength,
@@ -911,7 +913,7 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
         if (current) current.commandingArmyId = null;
         const replacement = selectCandidate(
           aliveCharacters(world, polity.id).filter((character) => trustedForOffice(world, polity, character) && isBattleReadyCharacter(world, character) && !character.commandingArmyId && !character.commandingFleetId && !character.governedRegionId
-            && personalForce(world, character.id)?.formationId === null),
+            && !isFleetDeputy(world, character.id) && personalForce(world, character.id)?.formationId === null),
           (character) => character.leadership * 0.55 + character.cunning * 0.2 + character.loyalty * 0.2 + character.renown * 0.05,
         ) ?? spawnCharacter(world, polity, 'emergency-commander');
         if (!replacement) {
@@ -950,7 +952,7 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
             && !character.governedRegionId
             && character.id !== army.commanderId
             && character.id !== polity.rulerId
-            && !assignedDeputies.has(character.id)
+            && !assignedDeputies.has(character.id) && !isFleetDeputy(world, character.id)
             && personalForce(world, character.id)?.formationId === null
           )),
           (character) => character.leadership * 0.4 + character.loyalty * 0.35 + character.caution * 0.15 + character.cunning * 0.1,
@@ -977,7 +979,7 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
           && !character.governedRegionId
           && !character.commandingArmyId
           && !character.commandingFleetId
-          && !assignedDeputies.has(character.id)
+          && !assignedDeputies.has(character.id) && !isFleetDeputy(world, character.id)
         )),
         (character) => character.governance * 0.5 + character.loyalty * 0.3 + character.caution * 0.12 + character.cunning * 0.08,
       );
@@ -1163,7 +1165,7 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
     const governmentFormBefore = polity.governmentForm;
     polity.rulerId = successor.id;
     successor.governedRegionId = null;
-    const sameDynasty = Boolean(previousFamilyId && successor.familyId === previousFamilyId);
+    const sameDynasty = continuesRulingLine(world, polity, successor);
     if (successor.age >= 16) regent = undefined;
     const underRegency = successor.age < 16 && (Boolean(regent) || anonymousCouncilRegency);
     const regentInfluenceBefore = regent?.influence ?? 0;
@@ -1196,7 +1198,7 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
       polityIds: [polity.id],
       regionIds: polity.capitalRegionId ? [polity.capitalRegionId] : [],
       causes: [
-        { label: '真实谱系', role: '结构', weight: 0.3, evidence: `谱系支持${lineageSupport(successor)}；${sameDynasty ? `人物familyId与统治家族${previousFamilyId}一致` : '人物不属于旧统治家族'}` },
+        { label: '真实谱系', role: '结构', weight: 0.3, evidence: `谱系支持${lineageSupport(successor)}；${sameDynasty ? '承接原统治家族及其源流' : '由其他统治家族接替'}` },
         { label: '家族认可', role: '条件', weight: 0.18, evidence: `家族声望${world.families.find((family) => family.id === successor.familyId)?.prestige ?? 0}` },
         { label: underRegency ? '摄政安排' : '官职派系支持', role: '条件', weight: 0.22, evidence: anonymousCouncilRegency ? '无具名成人可用，由不具人物能力值的匿名议会监国' : underRegency ? `${regent?.name ?? '朝臣'}成年且制度支持${regent ? institutionalSupport(regent).toFixed(1) : '0'}` : `制度支持${institutionalSupport(successor).toFixed(1)}` },
         { label: '军队支持', role: '条件', weight: 0.14, evidence: successor.commandingArmyId ? `掌握军团${successor.commandingArmyId}` : '未直接掌军，以宫廷网络补足' },

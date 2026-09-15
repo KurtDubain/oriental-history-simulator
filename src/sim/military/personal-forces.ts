@@ -13,6 +13,10 @@ interface LegacyRetinue {
   soldiers: number;
 }
 
+export function isFleetDeputy(world: Pick<WorldState, 'fleets'>, id: string, exceptFleet?: string): boolean {
+  return world.fleets.some(f => f.id !== exceptFleet && f.deputyCommanderId === id);
+}
+
 interface LegacyArmy extends Omit<ArmyState, 'participantIds'> {
   participantIds?: string[];
   retinues?: LegacyRetinue[];
