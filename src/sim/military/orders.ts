@@ -12,7 +12,7 @@ import type {
 
 type OrderPlan = Omit<ArmyOrderDirective, 'issuedTurn' | 'lastReviewedTurn' | 'provenance'>;
 
-const ORDER_LABELS = {
+export const ORDER_LABELS = {
   hold: '固守',
   advance: '进军',
   intercept: '截击',

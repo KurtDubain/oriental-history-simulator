@@ -1,4 +1,6 @@
 import type { SituationState } from '../sim/situations';
+import { ORDER_LABELS } from '../sim/military/orders';
+import { stableCompare } from '../sim/random';
 import type { SimulationFact } from '../sim/facts/types';
 import type { DeltaValue, StateDelta, WorldState } from '../sim/types';
 import { projectCoreImpacts } from './core-impact-projection';
@@ -167,11 +169,7 @@ const FIELD_LABELS: Readonly<Record<string, string>> = {
 };
 
 const ORDER_VALUE_LABELS: Readonly<Record<string, string>> = {
-  hold: '固守',
-  advance: '进军',
-  intercept: '截击',
-  reinforce: '驰援',
-  retreat: '撤退',
+  ...ORDER_LABELS,
   active: '可以执行',
   blocked: '道路受阻',
   peace_garrison: '战事已息，留营守备',
@@ -184,10 +182,6 @@ const ORDER_VALUE_LABELS: Readonly<Record<string, string>> = {
   low_readiness: '军粮或军心不足',
   target_invalid: '原定目标失效',
 };
-
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values)].sort(stableCompare);
@@ -362,7 +356,7 @@ function playerSummary(
       contact
         ? `${contact.attackerCommander}正率${contact.attacker}接近${contact.region}，将迎上${contact.defenderCommanders}。`
         : latest
-          ? `最近一战在${latest.region}，${latest.attackerCommander}${latest.result}；${latest.aftermath}`
+          ? `最近一战在${latest.region}，${latest.result}；${latest.aftermath}`
           : '双方尚未留下新的会战记录。',
     ];
   }

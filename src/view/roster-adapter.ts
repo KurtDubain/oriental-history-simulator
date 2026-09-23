@@ -3,6 +3,7 @@ import {
   projectCharacterEmbodiedActions,
 } from '../sim/agency';
 import { stableCompare } from '../sim/random';
+import { ORDER_LABELS } from '../sim/military/orders';
 import type {
   CharacterState,
   HistoryEvent,
@@ -624,7 +625,7 @@ function militaryItem(
       ? `${commander?.name ?? '无帅'}掌令、军中更听${allegiance?.name ?? '旧主'} · ${location}`
       : `${commander?.name ?? '无帅'} · ${location}${fleet ? ` · ${fleet.mission}` : ''}`,
     meta: army
-      ? `${({ hold: '固守', advance: '进军', intercept: '截击', reinforce: '驰援', retreat: '撤退' } as const)[army.order.kind]} · ${compact.format(strength)} 人 · 余粮 ${coverage.toFixed(1)} 季`
+      ? `${ORDER_LABELS[army.order.kind]} · ${compact.format(strength)} 人 · 余粮 ${coverage.toFixed(1)} 季`
       : `${compact.format(strength)} 人 · 余粮 ${coverage.toFixed(1)} 季`,
     accent: polity(context.world, item.polityId)?.color,
     alert: Boolean(watched?.reason.kind === 'watched-alert') || strained || item.morale < 40,

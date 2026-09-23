@@ -4,9 +4,9 @@ import {createHash} from 'node:crypto';
 import {gunzipSync} from 'node:zlib';
 import {chromium} from 'playwright';
 import {preview} from 'vite';
-// Committed, unmodified natural history shared with the person-fate acceptance tests.
+// Current-rule, unmodified natural history shared with person-fate acceptance.
 // Fail before launching a server if this input is missing, damaged, or lacks its real history.
-const fixtures=new URL('./fixtures/person-fate/',import.meta.url);
+const fixtures=new URL('./fixtures/person-fate/current/',import.meta.url);
 const fixture=JSON.parse(await readFile(new URL('manifest.json',fixtures),'utf8')).find(x=>x.key==='deceased');
 assert(fixture,'historical media import requires the deceased fixture');
 const buffer=gunzipSync(Buffer.from(await readFile(new URL(`${fixture.key}.json.gz.base64`,fixtures),'utf8'),'base64'));
@@ -17,12 +17,13 @@ const death=history.facts.find(f=>f.id===fixture.factId);
 assert.equal(death?.kind,'character_death');assert.equal(death.payload.characterId,fixture.personId);
 assert(history.facts.some(f=>f.id===death.payload.battleFactId&&f.kind==='battle'));
 assert(history.history.some(e=>e.id===fixture.eventId&&e.sourceFactIds.includes(death.id)));
+assert(fixture.caseId&&history.history.some(e=>e.id===fixture.caseEventId),'media evidence needs its captured case event');
 const url=process.env.OHS_E2E_URL??'http://127.0.0.1:4298';
 const server=process.env.OHS_E2E_URL?null:await preview({preview:{host:'127.0.0.1',port:4298,strictPort:true}});
 const version=JSON.parse(await readFile('package.json','utf8')).version;
 const root=process.env.OHS_MEDIA_DIR??`output/media-e2e-v${version}`;
 await mkdir(root,{recursive:true});
-await writeFile(`${root}/fixture.json`,JSON.stringify({path:'scripts/fixtures/person-fate/deceased.json.gz.base64',...fixture,bytes:buffer.length},null,2));
+await writeFile(`${root}/fixture.json`,JSON.stringify({path:'scripts/fixtures/person-fate/current/deceased.json.gz.base64',...fixture,bytes:buffer.length},null,2));
 // Test-only observation of real decoded audio in the native output graph, not a mocked player.
 function audioProbe(){
  const qa=window.__audioQA={starts:[],levels:[],contexts:[]};
@@ -75,7 +76,12 @@ try{for(const[label,width,height]of[['desktop',1440,900],['mobile',390,844]]){
  const leads=page.locator('[data-observer-leads=true]'),toggle=leads.getByTestId('observer-leads-mobile-toggle');if(await toggle.isVisible())await toggle.click();
  const t=performance.now();await leads.locator('.observer-leads__situation-shortcut').click();await page.locator('.situation-workbench-layer').waitFor();const firstMs=performance.now()-t;await sleep(750);await shot('case');
  const readStarts=(await audio()).starts;assert.equal(readStarts.length,prior+1);assert(Math.abs(readStarts.at(-1).duration-.32)<.08,'old case uses paper, not historical event cue');
- await page.locator('.situation-workbench__evidence summary').click();await page.locator('.situation-workbench__fact-list button[data-event-id]').first().click();await page.locator('#observer-causal-drawer').waitFor();await shot('evidence');await page.keyboard.press('Escape');await page.locator('#observer-causal-drawer').waitFor({state:'hidden'});await page.locator('.situation-workbench__close').click();await shot('return');assert.equal((await state()).deterministicWorldHash,hash);
+ // Default recommendations may legitimately have Fact-only evidence. Prepare the
+ // captured event-bearing case through the real directory, not a ranking quota.
+ await page.locator('.situation-workbench__directory-toggle').click();
+ await page.locator(`.situation-workbench__directory button[data-situation-id="${fixture.caseId}"]`).click();
+ await page.locator(`.situation-workbench-layer[data-situation-id="${fixture.caseId}"]`).waitFor();
+ await page.locator('.situation-workbench__evidence summary').click();await page.locator(`.situation-workbench__fact-list button[data-event-id="${fixture.caseEventId}"]`).click();await page.locator('#observer-causal-drawer').waitFor();await shot('evidence');await page.keyboard.press('Escape');await page.locator('#observer-causal-drawer').waitFor({state:'hidden'});await page.locator('.situation-workbench__close').click();await shot('return');assert.equal((await state()).deterministicWorldHash,hash);
  assert.deepEqual(errors,[]);results.push({label,hash,firstMs,audio:await audio(),requests,errors});await writeFile(root+'/results.json',JSON.stringify(results,null,2));await context.close();
 }}catch(e){for(const c of browser.contexts())for(const p of c.pages()){await p.screenshot({path:`${root}/failure.png`});await writeFile(`${root}/failure.txt`,await p.locator('body').innerText());}throw e;}finally{await browser.close();await new Promise(r=>server?server.httpServer.close(r):r());}
 console.log(results.map(({label,hash,firstMs,errors})=>({label,hash,firstMs,errors})));

@@ -1,4 +1,6 @@
 import { battleLossText, continuousAppointmentIds, isContinuousAppointment } from '../sim/facts/projector';
+import { ORDER_LABELS } from '../sim/military/orders';
+import { stableCompare } from '../sim/random';
 import type { HistoryEvent, SimulationFact, StateDelta, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations';
 import { findWorldFact, readWorldFacts, readWorldHistory } from '../sim/archive';
@@ -91,10 +93,6 @@ export function participantBattleHeadline(world: WorldState, factId: string): st
   return person && side
     ? `${person.name}${side.commanderId === person.id ? '率部' : '随军'}在${regionName(world, fact.payload.targetRegionId)}${won ? '得胜' : '受挫'}`
     : `${regionName(world, fact.payload.targetRegionId)}之战，${fact.payload.attackerWon ? '攻方取胜' : '守方守住'}`;
-}
-
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function unique(values: readonly string[]): string[] {
@@ -200,7 +198,7 @@ export function projectFactNarrative(world: WorldState, fact: SimulationFact, co
     };
   }
   if (fact.kind === 'army_order_changed') {
-    const labels = { hold: '固守', advance: '进军', intercept: '截击', reinforce: '驰援', retreat: '撤退' } as const;
+    const labels = ORDER_LABELS;
     const target = fact.payload.next.targetArmyId
       ? armyName(world, fact.payload.next.targetArmyId)
       : fact.payload.next.targetRegionId

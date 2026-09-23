@@ -1,3 +1,4 @@
+import { stableCompare } from '../sim/random';
 import { armyOrderPath } from '../sim/military/orders';
 import type { ArmyOrderKind, ArmyState, FactionState, SimulationFact, WarState, WorldState } from '../sim/types';
 
@@ -109,9 +110,6 @@ export interface WarGroupProjection {
   armyIds: readonly string[];
 }
 
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 function personName(world: WorldState, id: string | null | undefined): string {
   return world.characters.find((item) => item.id === id)?.name ?? '无名将领';

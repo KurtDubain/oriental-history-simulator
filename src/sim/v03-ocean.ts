@@ -3,7 +3,7 @@ import type { MapProfile } from '../maps/types';
 import { keyedInt, keyedRandom, stableCompare } from './random';
 import { emitSimulationFact, projectFactLinks, type BattleFact, type SimulationFact } from './facts';
 import { practiceEffect } from './v03-life';
-import { trustedForOffice } from './v02';
+import { clamp, promoteBackgroundPerson, unassignedOfficeCandidate } from './v02';
 import {
   creditBattleCommandStanding,
   recordArmyMovement,
@@ -74,10 +74,6 @@ interface TransportPath {
   edges: TransportEdge[];
   cost: number;
   risk: number;
-}
-
-function clamp(value: number, minimum = 0, maximum = 100): number {
-  return Math.max(minimum, Math.min(maximum, value));
 }
 
 function whole(value: number): number {
@@ -205,22 +201,22 @@ function createPorts(world: WorldState): PortState[] {
     });
 }
 
-function selectFleetCommander(world: WorldState, polityId: string): WorldState['characters'][number] | null {
+function selectFleetCommander(world: WorldState, polityId: string, port?: string, emit?: V03Emit): WorldState['characters'][number] | null {
   return fleetOfficerCandidate(world, polityId,
     new Set(world.armies.flatMap(army => army.deputyCommanderId ? [army.deputyCommanderId] : [])), true, undefined,
-    character => character.leadership + character.cunning * 0.45 + character.loyalty * 0.2);
+    character => character.leadership + character.cunning * 0.45 + character.loyalty * 0.2, emit, port);
 }
 
 function createFleetAtPort(
   world: WorldState,
   portRegion: RegionState,
   composition?: { warships: number; transports: number; patrolShips: number },
+  emit?: V03Emit,
 ): FleetState | null {
   const polity = world.polities.find((item) => item.id === portRegion.controllerId && item.alive);
   if (!polity) return null;
-  const commander = selectFleetCommander(world, polity.id);
-  if (!commander) return null;
   const port = world.ports.find((item) => item.regionId === portRegion.id);
+  if (emit && !port) return null;
   const level = port?.level ?? Math.max(1, portRegion.cityLevel - 1);
   const ships = composition ?? {
     warships: 4 + level * 2,
@@ -229,6 +225,10 @@ function createFleetAtPort(
   };
   const sailors = Math.min(portRegion.population, whole((ships.warships * 90 + ships.transports * 55 + ships.patrolShips * 42)));
   if (sailors < 300) return null;
+  // Only a ready, physically staffed batch may request a local officer. Bootstrap
+  // passes no emitter and retains its original named-officer-only selection.
+  const commander = selectFleetCommander(world, polity.id, portRegion.id, emit);
+  if (!commander) return null;
   const food = Math.min(portRegion.food, sailors * 2);
   portRegion.population -= sailors;
   portRegion.food -= food;
@@ -1402,24 +1402,20 @@ function fleetOfficerCandidate(
   polityId: string,
   excluded: ReadonlySet<string>,
   commander: boolean,
-  fleetId?: string,
+  fleet?: FleetState,
   score = (character: WorldState['characters'][number]) => character.leadership * 0.58 + character.cunning * 0.24 + character.loyalty * 0.18,
+  emit?: V03Emit,
+  port = fleet?.portRegionId,
 ): WorldState['characters'][number] | null {
   const polity = world.polities.find(item => item.id === polityId);
   if (!polity) return null;
   const armyOfficers = new Set(world.armies.flatMap((army) => army.participantIds));
-  return world.characters
+  const candidate = world.characters
     .filter((character) => (
-      character.alive
-      && character.age >= 16
-      && character.polityId === polityId
-      && trustedForOffice(world, polity, character)
+      unassignedOfficeCandidate(world, polity, character)
       && character.role !== '君主'
-      && !character.governedRegionId
-      && !character.commandingArmyId
-      && !character.commandingFleetId
       && !armyOfficers.has(character.id)
-      && !isFleetDeputy(world, character.id, commander ? fleetId : undefined)
+      && !isFleetDeputy(world, character.id, commander ? fleet?.id : undefined)
       && !excluded.has(character.id)
       && (commander || character.role === '廷臣' || character.role === '将领')
     ))
@@ -1427,6 +1423,8 @@ function fleetOfficerCandidate(
       score(right) - score(left)
       || stableCompare(left.id, right.id)
     ))[0] ?? null;
+  return candidate ?? (commander && port && emit
+    ? promoteBackgroundPerson(world, polity, 'fleet-commander', undefined, port, emit) : null);
 }
 
 function repairFleets(world: WorldState, context: V03TurnContext, emit: V03Emit): void {
@@ -1450,7 +1448,7 @@ function repairFleets(world: WorldState, context: V03TurnContext, emit: V03Emit)
       fleet.polityId = receiver.id;
       fleet.portRegionId = home?.id ?? null;
       fleet.seaZoneId = null;
-      const replacement = fleetOfficerCandidate(world, receiver.id, new Set(), true, fleet.id);
+      const replacement = fleetOfficerCandidate(world, receiver.id, new Set(), true, fleet, undefined, emit);
       if (!replacement) {
         dissolveFleet(world, fleet, context, emit);
         continue;
@@ -1506,7 +1504,7 @@ function repairFleets(world: WorldState, context: V03TurnContext, emit: V03Emit)
     );
     if (!valid) {
       if (current?.commandingFleetId === fleet.id) current.commandingFleetId = null;
-      const replacement = fleetOfficerCandidate(world, fleet.polityId, used, true, fleet.id);
+      const replacement = fleetOfficerCandidate(world, fleet.polityId, used, true, fleet, undefined, emit);
       if (!replacement) {
         dissolveFleet(world, fleet, context, emit);
         continue;
@@ -1837,17 +1835,26 @@ function updateBlockades(world: WorldState, context: V03TurnContext, emit: V03Em
   }
 }
 
-function completeShipProject(world: WorldState, project: ShipbuildingProjectState, context: V03TurnContext, emit: V03Emit): void {
+function completeShipProject(world: WorldState, project: ShipbuildingProjectState, context: V03TurnContext, emit: V03Emit, allowCreation = true): void {
   const retained = project.timberCommitted === 0 && project.ironCommitted === 0 && project.treasurySpent === 0;
-  const target = project.targetFleetId ? world.fleets.find((fleet) => fleet.id === project.targetFleetId) : undefined;
+  // Orphaned expansion hulls may join a fleet actually docked here, not a
+  // nominal home-port fleet at sea. Existing targeted projects retain their path.
+  let target = world.fleets.filter(f => f.polityId === project.polityId && (project.targetFleetId
+    ? f.id === project.targetFleetId : f.portRegionId === project.portRegionId && !f.seaZoneId))
+    .sort((a, b) => stableCompare(a.id, b.id))[0];
   if (target) {
+    project.targetFleetId = target.id;
     target.warships += project.warships;
     target.transports += project.transports;
     target.patrolShips += project.patrolShips;
     target.repairNeed = Math.round(clamp(target.repairNeed + 4));
   } else {
+    if (!allowCreation) return;
     const region = world.regions.find((item) => item.id === project.portRegionId && item.controllerId === project.polityId);
-    if (!region || !createFleetAtPort(world, region, project)) return;
+    if (!region) return;
+    const created = createFleetAtPort(world, region, project, emit);
+    if (!created) return;
+    target = created;
   }
   project.status = '完成';
   project.completedTurn = world.turn;
@@ -1858,7 +1865,7 @@ function completeShipProject(world: WorldState, project: ShipbuildingProjectStat
     summary: retained ? `原有${project.warships + project.transports + project.patrolShips}艘船完成配员，重新入列。`
       : `船厂以已承诺的${project.timberCommitted}木材、${project.ironCommitted}铁器完成${project.warships + project.transports + project.patrolShips}艘船。`,
     importance: 3,
-    actorIds: target ? [target.commanderId] : [],
+    actorIds: [target.commanderId],
     polityIds: [project.polityId],
     regionIds: [project.portRegionId],
     causes: [
@@ -1867,9 +1874,9 @@ function completeShipProject(world: WorldState, project: ShipbuildingProjectStat
       { label: '跨季进度', role: '触发', weight: 0.15, evidence: `进度${project.progress}` },
       { label: '船只批次', role: '结果', weight: 0.2, evidence: `战船${project.warships}、运输船${project.transports}、巡逻船${project.patrolShips}` },
     ],
-    stateDeltas: target ? [
-      { entityType: 'fleet', entityId: target.id, field: 'warships', before: target.warships - project.warships, after: target.warships, delta: project.warships },
-    ] : [],
+    stateDeltas: (['warships', 'transports', 'patrolShips'] as const).map(field => ({
+      entityType: 'fleet', entityId: target.id, field, before: target[field] - project[field], after: target[field], delta: project[field],
+    })),
   });
   context.maritime.fleetIds = world.fleets.map((fleet) => fleet.id).sort(stableCompare);
 }
@@ -2438,6 +2445,13 @@ export function processV03Maritime(
   capture: LandingCaptureResolver,
 ): void {
   repairFleets(world, context, emit);
+  // Receive already-built orphan hulls while the local fleet is still in port.
+  // New crews/construction and cancellation remain in the normal completion pass.
+  for (const project of world.shipbuildingProjects) if (project.status === '建造中' && project.progress >= 100
+    && !project.targetFleetId && world.polities.some(p => p.id === project.polityId && p.alive)
+    && world.regions.some(r => r.id === project.portRegionId && r.controllerId === project.polityId)) {
+    completeShipProject(world, project, context, emit, false);
+  }
   context.maritime.fleetIds = world.fleets.map((fleet) => fleet.id).sort(stableCompare);
   chooseFleetMissions(world);
   moveFleets(world);

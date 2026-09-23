@@ -1,0 +1,450 @@
+{
+  "source": {
+    "version": "1.29.38",
+    "seed": "秋灯照海-收卷乙酉",
+    "worldHash": "8307dda585b7befc",
+    "turn": 400,
+    "map": "contest-v01"
+  },
+  "death": {
+    "actorIds": [
+      "c_049"
+    ],
+    "category": "政治",
+    "causes": [
+      {
+        "evidence": "年龄68岁，基础年度死亡风险7.5%",
+        "label": "年龄风险",
+        "role": "结构",
+        "weight": 0.52
+      },
+      {
+        "evidence": "健康92将综合风险调整为8.2%",
+        "label": "健康状态",
+        "role": "条件",
+        "weight": 0.3
+      },
+      {
+        "evidence": "人物生命状态与所任职位已同步结算",
+        "label": "死亡裁决",
+        "role": "结果",
+        "weight": 0.18
+      }
+    ],
+    "id": "fact_0000476",
+    "importance": 4,
+    "kind": "character_death",
+    "payload": {
+      "age": 68,
+      "cause": "natural",
+      "characterId": "c_049",
+      "diseaseId": null,
+      "health": 92,
+      "role": "君主"
+    },
+    "polityIds": [
+      "p_linyuan"
+    ],
+    "regionIds": [
+      "r_xilan"
+    ],
+    "season": "冬",
+    "sourceFactIds": [],
+    "stateDeltas": [
+      {
+        "after": false,
+        "before": true,
+        "entityId": "c_049",
+        "entityType": "character",
+        "field": "alive"
+      },
+      {
+        "after": 0,
+        "before": 4842,
+        "delta": -4842,
+        "entityId": "c_049",
+        "entityType": "character",
+        "field": "personalForce.soldiers"
+      },
+      {
+        "after": 139827,
+        "before": 134985,
+        "delta": 4842,
+        "entityId": "r_xilan",
+        "entityType": "region",
+        "field": "population"
+      }
+    ],
+    "turn": 27,
+    "year": 7
+  },
+  "succession": {
+    "actorIds": [
+      "c_049",
+      "c_057"
+    ],
+    "category": "政治",
+    "causes": [
+      {
+        "evidence": "谱系支持46；承接原统治家族及其源流",
+        "label": "真实谱系",
+        "role": "结构",
+        "weight": 0.3
+      },
+      {
+        "evidence": "家族声望60",
+        "label": "家族认可",
+        "role": "条件",
+        "weight": 0.18
+      },
+      {
+        "evidence": "制度支持60.9",
+        "label": "官职派系支持",
+        "role": "条件",
+        "weight": 0.22
+      },
+      {
+        "evidence": "未直接掌军，以宫廷网络补足",
+        "label": "军队支持",
+        "role": "条件",
+        "weight": 0.14
+      },
+      {
+        "evidence": "合资格候选总分53.9居首",
+        "label": "继承选择",
+        "role": "选择",
+        "weight": 0.16
+      }
+    ],
+    "evidence": [
+      "谱系支持46；承接原统治家族及其源流",
+      "家族声望60",
+      "制度支持60.9",
+      "未直接掌军，以宫廷网络补足",
+      "合资格候选总分53.9居首"
+    ],
+    "id": "event_000439",
+    "importance": 4,
+    "kind": "succession",
+    "polityIds": [
+      "p_linyuan"
+    ],
+    "regionIds": [
+      "r_tianheng"
+    ],
+    "season": "冬",
+    "situationIds": [],
+    "sourceFactIds": [],
+    "stateDeltas": [
+      {
+        "after": "c_057",
+        "before": "c_049",
+        "entityId": "p_linyuan",
+        "entityType": "polity",
+        "field": "rulerId"
+      },
+      {
+        "after": "陈氏",
+        "before": "陈氏",
+        "entityId": "p_linyuan",
+        "entityType": "polity",
+        "field": "dynastyName"
+      },
+      {
+        "after": 62,
+        "before": 62,
+        "delta": 0,
+        "entityId": "p_linyuan",
+        "entityType": "polity",
+        "field": "legitimacy"
+      },
+      {
+        "after": 33.888888888888886,
+        "before": 39,
+        "delta": -5.111111111111114,
+        "entityId": "p_linyuan",
+        "entityType": "polity",
+        "field": "authority"
+      }
+    ],
+    "summary": "陈氏陈维恭凭真实谱系、家族认可与制度支持继承君位。",
+    "title": "陈维恭继位",
+    "turn": 27,
+    "year": 7
+  },
+  "battle": {
+    "actorIds": [
+      "c_025",
+      "c_049"
+    ],
+    "category": "军事",
+    "causes": [
+      {
+        "evidence": "fact_0000191确认玄津行营保持战场控制",
+        "label": "战役胜利",
+        "role": "触发",
+        "weight": 0.65
+      },
+      {
+        "evidence": "紫畛由云岫国转入临渊朝",
+        "label": "区域接管",
+        "role": "结果",
+        "weight": 0.35
+      }
+    ],
+    "id": "fact_0000192",
+    "importance": 4,
+    "kind": "territory_control_changed",
+    "payload": {
+      "nextControllerId": "p_linyuan",
+      "previousControllerId": "p_yunxi",
+      "reason": "battle_capture",
+      "regionId": "r_zizhen",
+      "warId": "war_0002"
+    },
+    "polityIds": [
+      "p_linyuan",
+      "p_yunxi"
+    ],
+    "regionIds": [
+      "r_zizhen"
+    ],
+    "season": "春",
+    "sourceFactIds": [
+      "fact_0000191"
+    ],
+    "stateDeltas": [
+      {
+        "after": "p_linyuan",
+        "before": "p_yunxi",
+        "entityId": "r_zizhen",
+        "entityType": "region",
+        "field": "controllerId"
+      }
+    ],
+    "turn": 8,
+    "year": 3
+  },
+  "sources": [
+    {
+      "actorIds": [
+        "c_049",
+        "c_063"
+      ],
+      "category": "军事",
+      "causes": [
+        {
+          "evidence": "攻方战力10226，守方战力1617",
+          "label": "兵力与素质",
+          "weight": 0.34
+        },
+        {
+          "evidence": "攻方陈德义依法掌令、军中实听陈德义（拥戴80）；守方无常备军",
+          "label": "指挥与听命",
+          "weight": 0.22
+        },
+        {
+          "evidence": "平原、防御33，守方倍率1.18",
+          "label": "地形城防",
+          "weight": 0.2
+        },
+        {
+          "evidence": "结算前攻方补给100、士气53、训练40；守方：无常备军，仅有地方守备",
+          "label": "结算前补给士气",
+          "weight": 0.16
+        },
+        {
+          "evidence": "攻方1.05，守方1.03",
+          "label": "有限战场误差",
+          "weight": 0.08
+        }
+      ],
+      "id": "fact_0000191",
+      "importance": 3,
+      "kind": "battle",
+      "payload": {
+        "attacker": {
+          "allegianceCharacterId": "c_049",
+          "allegianceStrength": 80,
+          "armyId": "a_010",
+          "commanderId": "c_049",
+          "deputyCommanderId": "c_063",
+          "losses": 327,
+          "moraleAfter": 61,
+          "moraleBefore": 53,
+          "participants": [
+            {
+              "characterId": "c_049",
+              "factionId": "fac_0016",
+              "formationCommanderId": "c_049",
+              "losses": 145,
+              "role": "commander",
+              "soldiersAfter": 2854,
+              "soldiersBefore": 2999
+            },
+            {
+              "characterId": "c_063",
+              "factionId": "fac_0014",
+              "formationCommanderId": "c_049",
+              "losses": 182,
+              "role": "deputy",
+              "soldiersAfter": 3583,
+              "soldiersBefore": 3765
+            }
+          ],
+          "polityId": "p_linyuan",
+          "soldiersAfter": 6437,
+          "soldiersBefore": 6764,
+          "supplyBefore": 100,
+          "trainingBefore": 40
+        },
+        "attackerPower": 10226.409159435707,
+        "attackerWon": true,
+        "defenderPower": 1617.1113111210757,
+        "defenders": [],
+        "militiaLosses": 385,
+        "routeId": "route_zizhen_huaijing",
+        "targetRegionId": "r_zizhen",
+        "warId": "war_0002"
+      },
+      "polityIds": [
+        "p_linyuan",
+        "p_yunxi"
+      ],
+      "regionIds": [
+        "r_huaijing",
+        "r_zizhen"
+      ],
+      "season": "春",
+      "sourceFactIds": [
+        "fact_0000164"
+      ],
+      "stateDeltas": [
+        {
+          "after": 36,
+          "before": 35,
+          "delta": 1,
+          "entityId": "c_049",
+          "entityType": "character",
+          "field": "merit"
+        },
+        {
+          "after": 8,
+          "before": 4,
+          "delta": 4,
+          "entityId": "c_063",
+          "entityType": "character",
+          "field": "deputyExperience"
+        },
+        {
+          "after": 6437,
+          "before": 6764,
+          "delta": -327,
+          "entityId": "a_010",
+          "entityType": "army",
+          "field": "soldiers"
+        },
+        {
+          "after": 61,
+          "before": 53,
+          "delta": 8,
+          "entityId": "a_010",
+          "entityType": "army",
+          "field": "morale"
+        }
+      ],
+      "turn": 8,
+      "year": 3
+    },
+    {
+      "actorIds": [
+        "c_049"
+      ],
+      "category": "军事",
+      "causes": [
+        {
+          "evidence": "陈德义依法统领玄津行营",
+          "label": "下令者",
+          "role": "结构",
+          "weight": 0.3
+        },
+        {
+          "evidence": "陈德义获军中拥戴80",
+          "label": "承行者",
+          "role": "条件",
+          "weight": 0.25
+        },
+        {
+          "evidence": "镜丘方向的旧令因“奉命夺取本战目标”而复核",
+          "label": "改令缘由",
+          "role": "选择",
+          "weight": 0.25
+        },
+        {
+          "evidence": "进军紫畛",
+          "label": "新令去向",
+          "role": "结果",
+          "weight": 0.2
+        }
+      ],
+      "id": "fact_0000164",
+      "importance": 1,
+      "kind": "army_order_changed",
+      "payload": {
+        "armyId": "a_010",
+        "next": {
+          "issuedTurn": 6,
+          "issuerId": "c_049",
+          "kind": "advance",
+          "lastReviewedTurn": 6,
+          "provenance": "fact",
+          "reasonCode": "war_goal",
+          "status": "active",
+          "targetArmyId": null,
+          "targetRegionId": "r_zizhen",
+          "warId": "war_0002"
+        },
+        "polityId": "p_linyuan",
+        "previous": {
+          "issuedTurn": 3,
+          "issuerId": "c_051",
+          "kind": "advance",
+          "lastReviewedTurn": 6,
+          "provenance": "fact",
+          "reasonCode": "war_goal",
+          "status": "active",
+          "targetArmyId": null,
+          "targetRegionId": "r_jingqiu",
+          "warId": "war_0002"
+        }
+      },
+      "polityIds": [
+        "p_linyuan"
+      ],
+      "regionIds": [
+        "r_jinbu",
+        "r_zizhen"
+      ],
+      "season": "秋",
+      "sourceFactIds": [],
+      "stateDeltas": [
+        {
+          "after": "c_049",
+          "before": "c_051",
+          "entityId": "a_010",
+          "entityType": "army",
+          "field": "order.issuerId"
+        },
+        {
+          "after": "r_zizhen",
+          "before": "r_jingqiu",
+          "entityId": "a_010",
+          "entityType": "army",
+          "field": "order.targetRegionId"
+        }
+      ],
+      "turn": 6,
+      "year": 2
+    }
+  ]
+}

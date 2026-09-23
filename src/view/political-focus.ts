@@ -1,3 +1,4 @@
+import { stableCompare } from '../sim/random';
 import { findWorldFact } from '../sim/archive';
 import { getDateForTurn } from '../sim/calendar';
 import { calculateFactionPowerLedger } from '../sim/politics/power-ledger';
@@ -22,9 +23,6 @@ export interface PoliticalFocusLink {
 
 type PoliticalFocusLabelWorld = Pick<WorldState, 'factions' | 'polities'>;
 
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 function inactiveDetail(faction: FactionState, polityName: string, polityAlive: boolean): string {
   if (!polityAlive) return `${polityName}已亡，此派只留于旧史`;

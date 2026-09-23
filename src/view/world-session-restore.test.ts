@@ -86,13 +86,13 @@ describe('restoreWorldSession', () => {
       historyCount: world.history.length,
     }).toEqual({
       turn: 12,
-      // v1.29.37: T4 keeps the existing naval deputy out of army replacement.
-      // Two full replay chains and concrete office changes recorded in golden-trace.json.
-      hash: 'ced775cbde823c9b',
-      factDigest: 'c8f00326bdcdabcd',
-      historyDigest: '251156b3b5e5de9f',
-      factCount: 474,
-      historyCount: 289,
+      // v1.29.40: T5 background entrant no longer joins an unrelated same-surname family.
+      // Two identical bodies and first differences: mechanism-tail-20260917/goldens.json.
+      hash: 'fe6ca1d9b9d3b46b',
+      factDigest: '85b472cd3e49e7fa',
+      historyDigest: '00b449fa2f36f9ba',
+      factCount: 476,
+      historyCount: 295,
     });
   });
 });

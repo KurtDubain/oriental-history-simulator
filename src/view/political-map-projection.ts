@@ -1,3 +1,4 @@
+import { stableCompare } from '../sim/random';
 import type {
   CharacterState,
   FactionState,
@@ -126,9 +127,6 @@ const ROOT_KIND_LABEL: Readonly<Record<FactionSpatialPowerRootKind, FactionSpati
   fleet_command: '舰队军令',
 };
 
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 function rounded(value: number): number {
   return Math.round(value * 10) / 10;

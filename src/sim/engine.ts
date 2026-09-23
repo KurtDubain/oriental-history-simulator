@@ -4,7 +4,7 @@ import {
   type RouteDefinition,
 } from '../maps/types';
 import { FAMILY_NAMES, GIVEN_NAMES, selectAvailableGivenName } from './names';
-import { continuesRulingLine } from './lineage';
+import { continuesRulingLine, successionPlan } from './lineage';
 import { DEFAULT_MAP_PROFILE_ID, getMapProfile, getMapProfileRevision, getMapProfileForContentVersion } from '../maps';
 import type { MapProfile, MapProfileId } from '../maps/types';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
@@ -38,7 +38,10 @@ import {
   createV02WorldSystems,
   establishRulingFamilyBranch,
   getDiplomacy,
-  governingCharacter, selectRegent, trustedForOffice,
+  lifeStage,
+  clamp,
+  governingCharacter, trustedForOffice,
+  unassignedOfficeCandidate,
   markPeaceDiplomacy,
   markWarDiplomacy,
   processV02Diplomacy,
@@ -159,25 +162,8 @@ const INITIAL_CHARACTER_COUNT_PER_POLITY = 24;
 const MIN_ARMY_SIZE = 250;
 const MIN_NEW_ARMY_SIZE = 1_500;
 
-function lifeStageForAge(age: number, alive = true): CharacterState['lifeStage'] {
-  if (!alive) return '已故';
-  if (age < 8) return '幼年';
-  if (age < 16) return '成长';
-  if (age < 30) return '成年';
-  if (age < 60) return '盛年';
-  return '衰老';
-}
-
-function armyEquipmentCost(soldiers: number): number {
-  return Math.ceil(soldiers / 4);
-}
-
 function supportedNewArmySize(availableTreasury: number, population: number): number {
   return Math.min(7_000, integer(population * 0.035), integer(availableTreasury) * 4);
-}
-
-function clamp(value: number, minimum = 0, maximum = 100): number {
-  return Math.max(minimum, Math.min(maximum, value));
 }
 
 function integer(value: number): number {
@@ -243,7 +229,7 @@ function createRoutes(regions: RegionState[], definitions: readonly RouteDefinit
   const routes = definitions.map((definition, index) => {
     const from = regionById.get(definition.fromRegionId);
     const to = regionById.get(definition.toRegionId);
-    if (!from || !to) throw new Error('Map route references an unknown region');
+    if (!from || !to) throw new Error('道路引用未知地区');
     const route: RouteState = {
       id: definition.id ?? `route_${String(index + 1).padStart(2, '0')}`,
       fromRegionId: from.id,
@@ -448,7 +434,7 @@ export function createWorld(
   profileRevision?: number,
 ): WorldState {
   if (typeof seed !== 'string' || seed.length === 0) {
-    throw new Error('World seed must be a non-empty string');
+    throw new Error('种子须为非空字符串');
   }
   const profile: MapProfile = profileRevision === undefined
     ? getMapProfile(profileId)
@@ -464,7 +450,7 @@ export function createWorld(
   }
   const polities = profile.simulation.polities.map((definition) => {
     const ruler = characters.find((character) => character.polityId === definition.id && character.role === '君主');
-    if (!ruler) throw new Error(`Missing initial ruler for ${definition.id}`);
+    if (!ruler) throw new Error(`缺少初始君主：${definition.id}`);
     return createPolity(seed, definition, ruler, regions);
   });
   const world: WorldState = {
@@ -685,10 +671,6 @@ export function processRegions(world: WorldState, context: MutableTurnContext): 
 
 function aliveCharacters(world: WorldState, polityId: string): CharacterState[] {
   return world.characters.filter((character) => character.alive && character.age >= 16 && character.polityId === polityId);
-}
-
-function spawnCharacter(world: WorldState, polity: PolityState, purpose: string, forcedFamily?: string): CharacterState | null {
-  return promoteBackgroundPerson(world, polity, purpose, forcedFamily);
 }
 
 function characterDeathChance(age: number): number {
@@ -912,10 +894,10 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
       if (!current?.alive || current.polityId !== polity.id || !isBattleReadyCharacter(world, current)) {
         if (current) current.commandingArmyId = null;
         const replacement = selectCandidate(
-          aliveCharacters(world, polity.id).filter((character) => trustedForOffice(world, polity, character) && isBattleReadyCharacter(world, character) && !character.commandingArmyId && !character.commandingFleetId && !character.governedRegionId
+          world.characters.filter((character) => unassignedOfficeCandidate(world, polity, character) && isBattleReadyCharacter(world, character)
             && !isFleetDeputy(world, character.id) && personalForce(world, character.id)?.formationId === null),
           (character) => character.leadership * 0.55 + character.cunning * 0.2 + character.loyalty * 0.2 + character.renown * 0.05,
-        ) ?? spawnCharacter(world, polity, 'emergency-commander');
+        ) ?? promoteBackgroundPerson(world, polity, 'emergency-commander');
         if (!replacement) {
           removeArmy(world, army, context, true);
           continue;
@@ -946,10 +928,8 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
         || assignedDeputies.has(deputy.id)
       ) {
         army.deputyCommanderId = selectCandidate(
-          aliveCharacters(world, polity.id).filter((character) => (
-            trustedForOffice(world, polity, character) && isBattleReadyCharacter(world, character) && !character.commandingArmyId
-            && !character.commandingFleetId
-            && !character.governedRegionId
+          world.characters.filter((character) => (
+            unassignedOfficeCandidate(world, polity, character) && isBattleReadyCharacter(world, character)
             && character.id !== army.commanderId
             && character.id !== polity.rulerId
             && !assignedDeputies.has(character.id) && !isFleetDeputy(world, character.id)
@@ -974,16 +954,14 @@ function repairAppointments(world: WorldState, context: MutableTurnContext): voi
     for (const regionId of polity.controlledRegionIds) {
       if (regionId === polity.capitalRegionId || governed.has(regionId)) continue;
       const governor = selectCandidate(
-        aliveCharacters(world, polity.id).filter((character) => (
-          trustedForOffice(world, polity, character) && character.id !== polity.rulerId
-          && !character.governedRegionId
-          && !character.commandingArmyId
-          && !character.commandingFleetId
+        world.characters.filter((character) => (
+          unassignedOfficeCandidate(world, polity, character) && character.id !== polity.rulerId
           && !assignedDeputies.has(character.id) && !isFleetDeputy(world, character.id)
+          && personalForce(world, character.id)?.formationId == null
         )),
         (character) => character.governance * 0.5 + character.loyalty * 0.3 + character.caution * 0.12 + character.cunning * 0.08,
-      );
-      if (!governor) break;
+      ) ?? promoteBackgroundPerson(world, polity, 'local-governor', undefined, regionId, input => pushEvent(world, context, input));
+      if (!governor) continue;
       governor.governedRegionId = regionId;
       governor.locationRegionId = regionId;
       governed.add(regionId);
@@ -999,7 +977,7 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
     .sort((left, right) => stableCompare(left.id, right.id));
   for (const character of ordered) {
     character.age += 1;
-    character.lifeStage = lifeStageForAge(character.age, true);
+    character.lifeStage = lifeStage(character.age, true);
     if (character.protectedUntilTurn !== null && character.protectedUntilTurn < context.turn) {
       character.protectedUntilTurn = null;
     }
@@ -1104,53 +1082,21 @@ function processCharacterLifecycle(world: WorldState, context: MutableTurnContex
 export function resolveVacantRulers(world: WorldState, context: MutableTurnContext): void {
   for (const polity of world.polities.filter((item) => item.alive && !item.rulerId)) {
     const previousDynasty = polity.dynastyName;
-    const previousFamilyId = polity.rulingFamilyId;
     const deceasedRuler = world.characters.find((character) => (
       !character.alive
       && character.deathTurn === context.turn
       && character.role === '君主'
       && character.polityId === polity.id
     ));
-    const lineageSupport = (character: CharacterState): number => {
-      if (!deceasedRuler) return character.familyId === previousFamilyId ? 42 : 0;
-      if (character.parentIds.includes(deceasedRuler.id)) return 100;
-      if (character.spouseIds.includes(deceasedRuler.id)) return 72;
-      if (character.parentIds.some((parentId) => deceasedRuler.parentIds.includes(parentId))) return 64;
-      if (character.familyId === previousFamilyId) return 46;
-      return 0;
-    };
-    const institutionalSupport = (character: CharacterState): number => {
-      const factionSupport = world.factions
-        .filter((faction) => faction.active && faction.polityId === polity.id && faction.memberIds.includes(character.id))
-        .reduce((sum, faction) => sum + faction.power * 0.22, 0);
-      const officeSupport = world.offices
-        .filter((office) => office.active && office.polityId === polity.id && office.holderId === character.id)
-        .reduce((sum, office) => sum + office.rank * 0.14, 0);
-      const family = world.families.find((item) => item.id === character.familyId);
-      return factionSupport + officeSupport + (family?.prestige ?? 0) * 0.18 + (character.commandingArmyId || character.commandingFleetId ? 24 : 0);
-    };
-    const successionScore = (character: CharacterState): number => lineageSupport(character) * 0.46
-      + institutionalSupport(character) * 0.34
-      + character.governance * 0.08
-      + character.cunning * 0.06
-      + character.renown * 0.04
-      + character.loyalty * 0.02;
-    const occupiedRulerIds = new Set(world.polities.filter((item) => item.alive && item.rulerId).map((item) => item.rulerId));
-    const legalMinors = world.characters.filter(character => character.alive && character.age < 16
-      && character.polityId === polity.id && !occupiedRulerIds.has(character.id) && lineageSupport(character) >= 46);
-    let regent = legalMinors.length ? selectRegent(world, polity) : undefined;
-    let successor = selectCandidate([
-      ...aliveCharacters(world, polity.id).filter(character => !occupiedRulerIds.has(character.id)),
-      ...(regent ? legalMinors : []),
-    ],
-      successionScore,
-    );
-    const selectedScore = successor ? successionScore(successor) : null;
-    if (!successor && legalMinors.length) {
-      regent = spawnCharacter(world, polity, 'background-regent') ?? undefined;
-      if (regent) successor = selectCandidate(legalMinors, successionScore);
+    const plan = successionPlan(world, polity, deceasedRuler);
+    let regent = plan.regent;
+    let successor: CharacterState | undefined = plan.successor?.character;
+    const selectedScore = successor && (successor.age >= 16 || regent) ? plan.successor!.successionScore : null;
+    if ((!successor || successor.age < 16 && !regent) && plan.minors.length) {
+      regent = promoteBackgroundPerson(world, polity, 'background-regent') ?? undefined;
+      successor = regent ? plan.minors[0].character : undefined;
     }
-    successor ??= spawnCharacter(world, polity, 'background-successor') ?? undefined;
+    successor ??= promoteBackgroundPerson(world, polity, 'background-successor') ?? undefined;
     let anonymousCouncilRegency = false;
     if (!successor) {
       if (dissolveHeirlessPolity(world, polity, deceasedRuler, context)) continue;
@@ -1161,6 +1107,9 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
       if (successor.factionId) expelFactionMembers(world, successor.factionId, [successor.id]);
       successor.polityId = polity.id;
     }
+    const assessed = successionPlan(world, polity, deceasedRuler).claims;
+    const claim = assessed.find(c => c.character.id === successor.id)!;
+    const regentSupport = assessed.find(c => c.character.id === regent?.id)?.institutionalSupport ?? 0;
     const rulerIdBefore = deceasedRuler?.id ?? '';
     const governmentFormBefore = polity.governmentForm;
     polity.rulerId = successor.id;
@@ -1198,9 +1147,9 @@ export function resolveVacantRulers(world: WorldState, context: MutableTurnConte
       polityIds: [polity.id],
       regionIds: polity.capitalRegionId ? [polity.capitalRegionId] : [],
       causes: [
-        { label: '真实谱系', role: '结构', weight: 0.3, evidence: `谱系支持${lineageSupport(successor)}；${sameDynasty ? '承接原统治家族及其源流' : '由其他统治家族接替'}` },
+        { label: '真实谱系', role: '结构', weight: 0.3, evidence: `谱系支持${claim.lineageLegitimacy}；${sameDynasty ? '承接原统治家族及其源流' : '由其他统治家族接替'}` },
         { label: '家族认可', role: '条件', weight: 0.18, evidence: `家族声望${world.families.find((family) => family.id === successor.familyId)?.prestige ?? 0}` },
-        { label: underRegency ? '摄政安排' : '官职派系支持', role: '条件', weight: 0.22, evidence: anonymousCouncilRegency ? '无具名成人可用，由不具人物能力值的匿名议会监国' : underRegency ? `${regent?.name ?? '朝臣'}成年且制度支持${regent ? institutionalSupport(regent).toFixed(1) : '0'}` : `制度支持${institutionalSupport(successor).toFixed(1)}` },
+        { label: underRegency ? '摄政安排' : '官职派系支持', role: '条件', weight: 0.22, evidence: anonymousCouncilRegency ? '无具名成人可用，由不具人物能力值的匿名议会监国' : underRegency ? `${regent?.name ?? '朝臣'}成年且制度支持${regentSupport.toFixed(1)}` : `制度支持${claim.institutionalSupport.toFixed(1)}` },
         { label: '军队支持', role: '条件', weight: 0.14, evidence: successor.commandingArmyId ? `掌握军团${successor.commandingArmyId}` : '未直接掌军，以宫廷网络补足' },
         { label: '继承选择', role: '选择', weight: 0.16, evidence: selectedScore !== null ? `合资格候选总分${selectedScore.toFixed(1)}居首${underRegency ? '，已有成年摄政可用' : ''}` : anonymousCouncilRegency ? '天下无可并入对象，启用已登记未成年候补与匿名议会' : '常规候选不足，启用既有背景候补补足继承或摄政' },
       ],
@@ -1326,7 +1275,7 @@ function selectArmyCommander(world: WorldState, polity: PolityState, maySpawn = 
       + character.loyalty * 0.2
       + character.renown * 0.1,
   );
-  if (!candidate && maySpawn) candidate = spawnCharacter(world, polity, 'new-commander');
+  if (!candidate && maySpawn) candidate = promoteBackgroundPerson(world, polity, 'new-commander');
   return candidate ?? null;
 }
 
@@ -1348,7 +1297,7 @@ function createArmy(
   const supported = supportedNewArmySize(polity.treasury, region.population);
   const recruitable = Math.min(supported, Math.max(0, 7_000 - existingSoldiers));
   if (existingSoldiers + recruitable < MIN_NEW_ARMY_SIZE) return null;
-  const equipmentPayment = armyEquipmentCost(recruitable);
+  const equipmentPayment = Math.ceil(recruitable / 4);
   if (peacetimeRecovery && (region.food < (existingSoldiers + recruitable) * 2
     || polity.treasury < equipmentPayment + Math.ceil((existingSoldiers + recruitable) * .11))) return null;
   const treasuryBefore = polity.treasury;
@@ -1433,7 +1382,7 @@ function removeArmy(
     region.food += army.food;
     context.food.transferred += army.food;
   } else if (army.soldiers > 0 || army.food > 0) {
-    throw new Error(`Cannot settle removed army ${army.id}`);
+    throw new Error(`撤编结算失败：${army.id}`);
   }
   const commander = world.characters.find((character) => character.id === army.commanderId);
   if (commander?.commandingArmyId === army.id) commander.commandingArmyId = null;
@@ -2009,7 +1958,7 @@ function processRebellions(world: WorldState, context: MutableTurnContext): void
   }
   ensureEligiblePersonalForces(world);
   const mobilizedArmy = defectingArmy ?? createArmy(world, newPolity, region, context, character);
-  if (!mobilizedArmy) throw new Error('Rebellion passed its resource gate but could not mobilize an army');
+  if (!mobilizedArmy) throw new Error('起兵资源达标但组军失败');
   const { war: rebellionWar, fact: rebellionWarStartedFact } = startWar(
     world,
     context,
@@ -2708,7 +2657,7 @@ function endWar(
     causes: peaceCauses,
     stateDeltas: treasuryDeltas,
   });
-  if (!warEndedFact) throw new Error(`Active war ${war.id} could not emit its ending Fact`);
+  if (!warEndedFact) throw new Error(`战事缺少结束事实：${war.id}`);
   const peaceEvent = pushEvent(world, context, {
     category: '外交',
     kind: 'peace',
@@ -3108,7 +3057,7 @@ export function advanceWorld(currentWorld: WorldState, options: AdvanceWorldOpti
 }
 
 export function advanceWorldBy(currentWorld: WorldState, turns: number): WorldState {
-  if (!Number.isInteger(turns) || turns < 0) throw new Error('Turn count must be a non-negative integer');
+  if (!Number.isInteger(turns) || turns < 0) throw new Error('推进季数须为非负整数');
   let world = currentWorld;
   for (let index = 0; index < turns; index += 1) world = advanceWorld(world);
   return world;

@@ -11,7 +11,7 @@ const externalUrl = process.env.PERSON_FATE_E2E_URL;
 const appUrl = externalUrl ?? `http://127.0.0.1:${PORT}`;
 const version = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const artifactDir = `output/person-fate-e2e-v${version}`;
-const fixtureRoot = new URL('./fixtures/person-fate/', import.meta.url);
+const fixtureRoot = new URL('./fixtures/person-fate/current/', import.meta.url);
 const fixtures = JSON.parse(await readFile(new URL('manifest.json', fixtureRoot), 'utf8'));
 const scenarios = [
   { slug: 'desktop-1440x900', viewport: { width: 1440, height: 900 } },

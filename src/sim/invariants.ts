@@ -73,34 +73,19 @@ export interface RuntimeTurnArtifacts {
   factChain?: RuntimeAppendOnlyChainArtifact;
 }
 
-const RUNTIME_ENTITY_KIND_SET = new Set<RuntimeEntityKind>([
-  'region',
-  'route',
-  'seaZone',
-  'seaLane',
-  'portLink',
-  'port',
-  'polity',
-  'character',
-  'army',
-  'fleet',
-  'war',
-  'family',
-  'relationship',
-  'faction',
-  'diplomacy',
-  'office',
-  'backgroundPerson',
-  'commitment',
-  'tradeCorridor',
-  'navalOperation',
-  'shipbuildingProject',
-  'pathogen',
-  'infection',
-  'practice',
-  'practiceState',
-  'situation',
-]);
+// One lookup for accepted delta kinds and their existing collection; no state
+// or index is retained. Situation is the sole nested collection.
+const RUNTIME_COLLECTIONS = {
+  region: 'regions', route: 'routes', seaZone: 'seaZones', seaLane: 'seaLanes',
+  portLink: 'portLinks', port: 'ports', polity: 'polities', character: 'characters',
+  army: 'armies', fleet: 'fleets', war: 'wars', family: 'families',
+  relationship: 'relationships', faction: 'factions', diplomacy: 'diplomacy',
+  office: 'offices', backgroundPerson: 'backgroundPeople', commitment: 'commitments',
+  tradeCorridor: 'tradeCorridors', navalOperation: 'navalOperations',
+  shipbuildingProject: 'shipbuildingProjects', pathogen: 'pathogens',
+  infection: 'infections', practice: 'practices', practiceState: 'practiceStates',
+  situation: 'situationSystem',
+} as const satisfies Record<RuntimeEntityKind, keyof WorldState>;
 
 export interface ValidationMeasurement {
   mode: 'runtime' | 'full';
@@ -116,6 +101,10 @@ function duplicateIds(values: readonly string[]): string[] {
     seen.add(value);
   }
   return [...duplicates].sort(stableCompare);
+}
+
+function indexById<T extends { id: string }>(items: readonly T[]): Map<string, T> {
+  return new Map(items.map(item => [item.id, item]));
 }
 
 function push(
@@ -721,7 +710,7 @@ export function deriveRuntimeTurnArtifacts(
   const changed = new Map<RuntimeEntityKind, Set<string>>();
   for (const record of [...appendedFacts, ...appendedEvents]) {
     for (const delta of record.stateDeltas) {
-      if (!RUNTIME_ENTITY_KIND_SET.has(delta.entityType as RuntimeEntityKind)) continue;
+      if (!Object.hasOwn(RUNTIME_COLLECTIONS, delta.entityType)) continue;
       // Schema 3/4 StateDelta calls regional practice-state records `practice`.
       // Preserve that archive spelling, but normalize the runtime artifact to
       // the authoritative collection that actually owns region-practice_* IDs.
@@ -747,35 +736,8 @@ export function deriveRuntimeTurnArtifacts(
 }
 
 function runtimeCollection(world: WorldState, kind: RuntimeEntityKind): readonly { id: string }[] {
-  switch (kind) {
-    case 'region': return world.regions;
-    case 'route': return world.routes;
-    case 'seaZone': return world.seaZones;
-    case 'seaLane': return world.seaLanes;
-    case 'portLink': return world.portLinks;
-    case 'port': return world.ports;
-    case 'polity': return world.polities;
-    case 'character': return world.characters;
-    case 'army': return world.armies;
-    case 'fleet': return world.fleets;
-    case 'war': return world.wars;
-    case 'family': return world.families;
-    case 'relationship': return world.relationships;
-    case 'faction': return world.factions;
-    case 'diplomacy': return world.diplomacy;
-    case 'office': return world.offices;
-    case 'backgroundPerson': return world.backgroundPeople;
-    case 'commitment': return world.commitments;
-    case 'tradeCorridor': return world.tradeCorridors;
-    case 'navalOperation': return world.navalOperations;
-    case 'shipbuildingProject': return world.shipbuildingProjects;
-    case 'pathogen': return world.pathogens;
-    case 'infection': return world.infections;
-    case 'practice': return world.practices;
-    case 'practiceState': return world.practiceStates;
-    case 'situation': return world.situationSystem.situations;
-    default: return [];
-  }
+  if (kind === 'situation') return world.situationSystem.situations;
+  return Object.hasOwn(RUNTIME_COLLECTIONS, kind) ? world[RUNTIME_COLLECTIONS[kind]] : [];
 }
 
 function validateRuntimeEvent(
@@ -1392,58 +1354,34 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     push(violations, 'clock.mismatch', `回合${world.turn}应为${expectedDate.year}年${expectedDate.season}`);
   }
 
-  const collections: Array<[string, string[]]> = [
-    ['region', world.regions.map((item) => item.id)],
-    ['route', world.routes.map((item) => item.id)],
-    ['polity', world.polities.map((item) => item.id)],
-    ['character', world.characters.map((item) => item.id)],
-    ['personal-force', world.personalForces.map((item) => item.ownerId)],
-    ['army', world.armies.map((item) => item.id)],
-    ['war', world.wars.map((item) => item.id)],
-    ['event', history.map((item) => item.id)],
-    ['fact', facts.map((item) => item.id)],
-    ['family', world.families.map((item) => item.id)],
-    ['faction', world.factions.map((item) => item.id)],
-    ['relationship', world.relationships.map((item) => item.id)],
-    ['office', world.offices.map((item) => item.id)],
-    ['background', world.backgroundPeople.map((item) => item.id)],
-    ['commitment', world.commitments.map((item) => item.id)],
-    ['sea-zone', world.seaZones.map((item) => item.id)],
-    ['sea-lane', world.seaLanes.map((item) => item.id)],
-    ['port-link', world.portLinks.map((item) => item.id)],
-    ['port', world.ports.map((item) => item.id)],
-    ['fleet', world.fleets.map((item) => item.id)],
-    ['trade-corridor', world.tradeCorridors.map((item) => item.id)],
-    ['naval-operation', world.navalOperations.map((item) => item.id)],
-    ['ship-project', world.shipbuildingProjects.map((item) => item.id)],
-    ['pathogen', world.pathogens.map((item) => item.id)],
-    ['infection', world.infections.map((item) => item.id)],
-    ['practice', world.practices.map((item) => item.id)],
-    ['practice-state', world.practiceStates.map((item) => item.id)],
-    ['situation', world.situationSystem.situations.map((item) => item.id)],
+  const collections: Array<[string, readonly { id: string }[]]> = [
+    ['region', world.regions], ['route', world.routes], ['polity', world.polities],
+    ['character', world.characters],
+    ['personal-force', world.personalForces.map(item => ({ id: item.ownerId }))],
+    ['army', world.armies], ['war', world.wars], ['event', history], ['fact', facts],
+    ['family', world.families], ['faction', world.factions], ['relationship', world.relationships],
+    ['office', world.offices], ['background', world.backgroundPeople], ['commitment', world.commitments],
+    ['sea-zone', world.seaZones], ['sea-lane', world.seaLanes], ['port-link', world.portLinks],
+    ['port', world.ports], ['fleet', world.fleets], ['trade-corridor', world.tradeCorridors],
+    ['naval-operation', world.navalOperations], ['ship-project', world.shipbuildingProjects],
+    ['pathogen', world.pathogens], ['infection', world.infections], ['practice', world.practices],
+    ['practice-state', world.practiceStates], ['situation', world.situationSystem.situations],
   ];
-  for (const [kind, ids] of collections) {
+  const collectionIds = new Map(collections.map(([kind, items]) => [kind, items.map(item => item.id)]));
+  for (const [kind, ids] of collectionIds) {
     for (const id of duplicateIds(ids)) push(violations, 'id.duplicate', `${kind}出现重复ID ${id}`, id);
   }
 
-  const counterChecks: Array<[keyof WorldState['counters'], string[], number]> = [
-    ['character', world.characters.map((item) => item.id), world.characters.length],
-    ['army', world.armies.map((item) => item.id), 0],
-    ['polity', world.polities.map((item) => item.id), world.polities.length],
-    ['war', world.wars.map((item) => item.id), world.wars.length],
-    ['event', history.map((item) => item.id), history.length],
-    ['fact', facts.map((item) => item.id), facts.length],
-    ['family', world.families.map((item) => item.id), world.families.length],
-    ['faction', world.factions.map((item) => item.id), world.factions.length],
-    ['relationship', world.relationships.map((item) => item.id), world.relationships.length],
-    ['office', world.offices.map((item) => item.id), world.offices.length],
-    ['commitment', world.commitments.map((item) => item.id), world.commitments.length],
-    ['fleet', world.fleets.map((item) => item.id), world.fleets.length],
-    ['tradeCorridor', world.tradeCorridors.map((item) => item.id), world.tradeCorridors.length],
-    ['navalOperation', world.navalOperations.map((item) => item.id), world.navalOperations.length],
-    ['shipProject', world.shipbuildingProjects.map((item) => item.id), world.shipbuildingProjects.length],
+  const counterChecks: Array<[keyof WorldState['counters'], string]> = [
+    ['character', 'character'], ['army', 'army'], ['polity', 'polity'], ['war', 'war'],
+    ['event', 'event'], ['fact', 'fact'], ['family', 'family'], ['faction', 'faction'],
+    ['relationship', 'relationship'], ['office', 'office'], ['commitment', 'commitment'],
+    ['fleet', 'fleet'], ['tradeCorridor', 'trade-corridor'],
+    ['navalOperation', 'naval-operation'], ['shipProject', 'ship-project'],
   ];
-  for (const [name, ids, minimumCount] of counterChecks) {
+  for (const [name, kind] of counterChecks) {
+    const ids = collectionIds.get(kind)!;
+    const minimumCount = name === 'army' ? 0 : ids.length;
     const counter = world.counters[name];
     const maximumSuffix = ids.reduce((maximum, id) => Math.max(maximum, numericIdSuffix(id)), 0);
     if (!isWholeNonNegative(counter) || counter < maximumSuffix || counter < minimumCount) {
@@ -1451,20 +1389,20 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     }
   }
 
-  const regionById = new Map(world.regions.map((region) => [region.id, region]));
-  const routeById = new Map(world.routes.map((route) => [route.id, route]));
-  const polityById = new Map(world.polities.map((polity) => [polity.id, polity]));
-  const characterById = new Map(world.characters.map((character) => [character.id, character]));
-  const armyById = new Map(world.armies.map((army) => [army.id, army]));
-  const seaZoneById = new Map(world.seaZones.map((zone) => [zone.id, zone]));
-  const fleetById = new Map(world.fleets.map((fleet) => [fleet.id, fleet]));
-  const pathogenById = new Map(world.pathogens.map((pathogen) => [pathogen.id, pathogen]));
-  const practiceById = new Map(world.practices.map((practice) => [practice.id, practice]));
-  const familyById = new Map(world.families.map((family) => [family.id, family]));
-  const factionById = new Map(world.factions.map((faction) => [faction.id, faction]));
-  const warById = new Map(world.wars.map((war) => [war.id, war]));
-  const eventById = new Map(history.map((event) => [event.id, event]));
-  const factById = new Map(facts.map((fact) => [fact.id, fact]));
+  const regionById = indexById(world.regions);
+  const routeById = indexById(world.routes);
+  const polityById = indexById(world.polities);
+  const characterById = indexById(world.characters);
+  const armyById = indexById(world.armies);
+  const seaZoneById = indexById(world.seaZones);
+  const fleetById = indexById(world.fleets);
+  const pathogenById = indexById(world.pathogens);
+  const practiceById = indexById(world.practices);
+  const familyById = indexById(world.families);
+  const factionById = indexById(world.factions);
+  const warById = indexById(world.wars);
+  const eventById = indexById(history);
+  const factById = indexById(facts);
   violations.push(...validateCourtActionFacts(fullWorld, facts.filter(
     (fact): fact is Extract<SimulationFact, { kind: 'court_action_resolved' }> => fact.kind === 'court_action_resolved',
   )));

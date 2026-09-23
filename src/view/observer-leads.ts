@@ -180,7 +180,7 @@ function situationChoices(world: WorldState, situation: SituationState, item: Si
       primarySceneId: `war-state:${situation.scopeKey}:${contact.attackerArmyId}:${contact.regionId}`,
       primarySourceFactIds: war?.latestBattle ? [war.latestBattle.factId] : [],
       evidence: [war?.latestBattle
-        ? `最近一战在${war.latestBattle.region}，${war.latestBattle.attackerCommander}${war.latestBattle.result}。`
+        ? `最近一战在${war.latestBattle.region}，${war.latestBattle.result}。`
         : `${contact.attackerCommander}正率${contact.attacker}接近${contact.region}。`,
       `${contact.attackerCommander}约${contact.steps}步后将迎上${contact.defenderCommanders}。`],
       recentChange: `眼下 · ${contact.region}即将接敌`,

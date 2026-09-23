@@ -1,3 +1,4 @@
+import { stableCompare } from '../sim/random';
 import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
 import { projectCoreImpacts, type CoreImpactProjection } from './core-impact-projection';
 import { toChronicleEvent } from './history-causal-adapter';
@@ -38,9 +39,6 @@ export interface QuarterPulseProjection {
   highlightedRegionIds: readonly string[];
 }
 
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 function uniqueSorted(values: readonly string[]): string[] {
   return [...new Set(values)].sort(stableCompare);

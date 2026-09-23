@@ -10,7 +10,7 @@ const url=process.env.READER_E2E_URL ?? 'http://127.0.0.1:4286';
 const server=process.env.READER_E2E_URL ? null : await createServer({logLevel:'error',server:{host:'127.0.0.1',port:4286,strictPort:true}});
 const sizes=[[768,1024],[1440,900],[390,844],[760,900],[761,900],[840,900],[841,900],[1020,900],[1021,900]];
 const state=page=>page.evaluate(()=>JSON.parse(window.render_game_to_text()));
-const fixtureRoot=new URL('./fixtures/person-fate/',import.meta.url);
+const fixtureRoot=new URL('./fixtures/person-fate/current/',import.meta.url);
 const deceased=JSON.parse(await readFile(new URL('manifest.json',fixtureRoot),'utf8')).find(f=>f.key==='deceased');
 const buffer=gunzipSync(Buffer.from(await readFile(new URL('deceased.json.gz.base64',fixtureRoot),'utf8'),'base64'));
 await mkdir(dir,{recursive:true});await server?.listen();

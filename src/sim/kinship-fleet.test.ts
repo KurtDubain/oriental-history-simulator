@@ -126,6 +126,76 @@ function navy() {
 }
 function sea(world:WorldState) {const {c,emit}=context(world); processV03Maritime(world,c,emit,()=>{throw Error('unexpected landing');}); syncOfficeAppointments(world,world.turn,c); return c;}
 describe('naval deputy occupation and handover',()=>{
+  it.each(['home', 'other-port', 'other-polity', 'at-sea', 'cancelled'] as const)(
+    'commissions a small orphan batch only into a lawful local fleet (%s)', mode => {
+      const { world, fleet, polity } = navy();
+      const port = world.regions.find(r => r.id === fleet.portRegionId)!;
+      port.food = 100000;
+      const project = { id: 'shipproject_99999', polityId: polity.id, portRegionId: port.id,
+        targetFleetId: null, warships: 1, transports: 2, patrolShips: 2,
+        timberCommitted: 220, ironCommitted: 82, treasurySpent: 450,
+        progress: 100, startedTurn: world.turn, completedTurn: null,
+        status: mode === 'cancelled' ? '取消' as const : '建造中' as const };
+      world.shipbuildingProjects.push(project);
+      if (mode === 'other-port') project.portRegionId = world.regions.find(r => r.port && r.controllerId === polity.id && r.id !== port.id)!.id;
+      if (mode === 'other-polity') project.polityId = world.polities.find(p => p.id !== polity.id)!.id;
+      if (mode === 'at-sea') { fleet.portRegionId = null; fleet.seaZoneId = world.seaZones[0].id; }
+      const before = [fleet.warships, fleet.transports, fleet.patrolShips];
+      const population = totalWorldPopulation(world), stocks = JSON.stringify(port.goods);
+      const result = sea(world);
+      const completions = result.events.filter(e => e.kind === 'shipbuilding_completed');
+      expect(completions).toHaveLength(mode === 'home' ? 1 : 0);
+      expect(totalWorldPopulation(world)).toBe(population);
+      expect(JSON.stringify(port.goods)).toBe(stocks);
+      expect(polity.treasury).toBe(0);
+      if (mode === 'home') {
+        expect(project).toMatchObject({ status: '完成', targetFleetId: fleet.id, completedTurn: world.turn });
+        expect([fleet.warships, fleet.transports, fleet.patrolShips]).toEqual(before.map((n, i) => n + [1, 2, 2][i]));
+        expect(completions[0].stateDeltas.filter(d => d.entityId === fleet.id).map(d => d.delta)).toEqual([1,2,2]);
+        world.turn++;
+        expect(sea(world).events.filter(e => e.kind === 'shipbuilding_completed')).toHaveLength(0);
+        expect([fleet.warships, fleet.transports, fleet.patrolShips]).toEqual(before.map((n, i) => n + [1,2,2][i]));
+      } else expect(project.status).not.toBe('完成');
+    });
+
+  it('waits for real personnel to restore the original fleet, then absorbs the small batch once', () => {
+    const { world, fleet, commander, deputy, polity } = navy();
+    world.backgroundPeople = [];
+    const port = world.regions.find(r => r.id === fleet.portRegionId)!;
+    port.food = 100000;
+    const former = world.polities.find(p => p.id !== polity.id)!;
+    former.alive = false; former.rulerId = deputy.id; former.eliminatedTurn = world.turn;
+    deputy.loyalty = 31; world.relationships = [];
+    world.shipbuildingProjects.push({ id: 'shipproject_99999', polityId: polity.id, portRegionId: port.id,
+      targetFleetId: fleet.id, warships: 1, transports: 2, patrolShips: 2, timberCommitted: 220,
+      ironCommitted: 82, treasurySpent: 450, progress: 100, startedTurn: world.turn, completedTurn: null, status: '建造中' });
+    const batch = world.shipbuildingProjects[0];
+    const ships = [fleet.warships, fleet.transports, fleet.patrolShips];
+    const population = totalWorldPopulation(world);
+    settleCharacterDeathState(world, commander.id, world.turn);
+    sea(world); world.turn++; sea(world);
+    expect(world.fleets).toHaveLength(0);
+    expect(batch).toMatchObject({ status: '建造中', progress: 100, targetFleetId: null });
+    expect(totalWorldPopulation(world)).toBe(population);
+    deputy.loyalty = 90; world.turn = 8;
+    sea(world); world.turn++;
+    const restored = world.fleets[0];
+    expect(restored).toBeDefined();
+    expect(sea(world).events.filter(e => e.kind === 'shipbuilding_completed')).toHaveLength(1);
+    expect(batch).toMatchObject({ status: '完成', targetFleetId: restored.id });
+    expect([restored.warships, restored.transports, restored.patrolShips]).toEqual(ships.map((n, i) => n + [1,2,2][i]));
+    expect(totalWorldPopulation(world)).toBe(population);
+    world.turn++;
+    expect(sea(world).events.some(e => e.kind === 'shipbuilding_completed')).toBe(false);
+    expect(world.shipbuildingProjects.every(p => p.status === '完成')).toBe(true);
+    // With actual stocks/payment available the formerly blocked national queue can resume.
+    polity.treasury = 100000;
+    for (const r of world.regions.filter(r => r.controllerId === polity.id)) { r.goods.木材 = 10000; r.goods.铁器 = 10000; }
+    world.turn++; sea(world);
+    expect(world.shipbuildingProjects.some(p => p.status === '建造中')).toBe(true);
+    expect(polity.treasury).toBeLessThan(100000);
+  });
+
   it('does not take an active naval deputy to fill a local office',()=>{
     const {world,fleet,deputy}=navy(); maintainArmies(world,createTurnContext(world));
     expect(deputy.governedRegionId).toBeNull(); expect(fleet.deputyCommanderId).toBe(deputy.id);
@@ -149,6 +219,7 @@ describe('naval deputy occupation and handover',()=>{
   });
   it('keeps the unstaffed hulls as a completed waiting batch, with no duplicate cost or unexplained loss',()=>{
     const {world,fleet,commander,deputy}=navy();
+    world.backgroundPeople=[]; // No eligible named OR registered background commander.
     const ships=fleet.warships+fleet.transports+fleet.patrolShips;
     const former=world.polities.find(p=>p.id!==fleet.polityId)!;former.alive=false;former.rulerId=deputy.id;former.eliminatedTurn=world.turn;deputy.loyalty=31;world.relationships=[];
     settleCharacterDeathState(world,commander.id,world.turn);
@@ -172,6 +243,7 @@ describe('naval deputy occupation and handover',()=>{
   });
   it('records completed unstaffed hulls lost with the port, instead of silently cancelling construction',()=>{
     const {world,fleet,commander,deputy}=navy();
+    world.backgroundPeople=[]; // Exercise genuine exhaustion, not the local replacement path.
     const former=world.polities.find(p=>p.id!==fleet.polityId)!;former.alive=false;former.rulerId=deputy.id;former.eliminatedTurn=world.turn;deputy.loyalty=31;world.relationships=[];
     settleCharacterDeathState(world,commander.id,world.turn); sea(world);
     const p=world.shipbuildingProjects.find(p=>p.status==='建造中')!;

@@ -1,9 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { ObserverMedia, settledCue } from './observer-media';
 import { createObserverInterfaceSettings } from './observer-interface-settings';
-import { gunzipSync, strFromU8 } from 'fflate';
-import frozenDeath from '../../scripts/fixtures/person-fate/deceased.json.gz.base64?raw';
-import { deserializeWorld, readWorldFacts, readWorldHistory } from '../sim';
+import frozenSignals from '../../scripts/fixtures/media/settled-signals.json';
 
 function harness() {
   let clock = 0;
@@ -28,18 +26,17 @@ const drained = async () => { for (let i=0;i<10;i++) await Promise.resolve(); };
 afterEach(() => vi.unstubAllGlobals());
 
 describe('presentation-only media', () => {
-  it('uses the existing frozen natural death and succession evidence, without demanding a new death quota', () => {
-    const bytes=gunzipSync(Uint8Array.from(atob(frozenDeath),c=>c.charCodeAt(0)));
-    const world=deserializeWorld(JSON.stringify(JSON.parse(strFromU8(bytes)).world));
-    const facts=readWorldFacts(world),events=readWorldHistory(world);
-    const death=facts.find(f=>f.kind==='character_death'&&f.importance>=4)!;
-    const succession=events.find(e=>e.kind==='succession'||e.kind==='regency')!;
-    const battle=facts.find(f=>f.kind==='territory_control_changed'&&f.importance>=4)!;
-    expect(death).toBeDefined();expect(succession).toBeDefined();expect(battle).toBeDefined();
+  it('uses frozen current-rule natural evidence without requiring old-world import or a future death quota', () => {
+    const {death,succession,battle,sources,source}=frozenSignals;
+    const records=[death,succession,battle,...sources],ids=new Set(records.map(r=>r.id));
+    expect(records.every(r=>r.sourceFactIds.every(id=>ids.has(id)))).toBe(true);
+    expect(death.kind).toBe('character_death');expect(death.importance).toBeGreaterThanOrEqual(4);
+    expect(['succession','regency']).toContain(succession.kind);
+    expect(battle.kind).toBe('territory_control_changed');expect(battle.importance).toBeGreaterThanOrEqual(4);
     expect(settledCue([death],death.turn)).toBe('farewell');
     expect(settledCue([succession],succession.turn)).toBe('accession');
     expect(settledCue([battle],battle.turn)).toBe('battle-seal');
-    expect(settledCue([death],world.turn)).toBeNull();
+    expect(settledCue([death],source.turn)).toBeNull();
   });
   it('chooses one representative actual settled event, ignoring old and ordinary history', () => {
     const events = [

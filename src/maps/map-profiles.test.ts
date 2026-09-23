@@ -16,6 +16,13 @@ import type { MapProfile } from './types';
 // Independent HEAD replay confirmed unchanged world hashes and complete Facts.
 // v1.29.37: fleet deputies remain occupied; first divergence T4/T6.
 // Original/current office and fact traces: output/kinship-fleet-closure-20260915/golden-trace.json.
+// v1.29.38: T1 local appointments no longer draw serving army members. Two exact
+// replays and first office divergence: output/talent-entry-20260916/goldens.json.
+// v1.29.39: shared succession prediction first changes Situation state, while
+// completion events now include all three ship classes. Two full-body replays
+// and the first actual Fact/Event differences: three-closure-20260916/goldens.json.
+// v1.29.40: T8/T7 background entrants found independent families rather than
+// joining unrelated namesakes. Two full-body runs: mechanism-tail-20260917/goldens.json.
 const GENERAL_GROUP_BASELINES = {
   "架构边界-入世": [
     [
@@ -24,64 +31,64 @@ const GENERAL_GROUP_BASELINES = {
       "4ac6ddd5020590a2"
     ],
     [
-      "ad845e0f7907e227",
-      "8375d98e573a330d",
+      "ae457d87422a4f68",
+      "f213ebba35eff776",
       "c9a338b419142edd"
     ],
     [
-      "8a3a39953cb2a87d",
-      "8375d98e573a330d",
+      "02d6238e2afb36f4",
+      "f213ebba35eff776",
       "fc86e9fa71f202c8"
     ],
     [
-      "b6488cae26730d7d",
-      "67e8734faa709fa5",
-      "2e2bd60da7284cee"
+      "eeff00b68cf4984f",
+      "45fca603e54d3d7f",
+      "655dc480fcf5aed4"
     ],
     [
-      "4312fa420c35f086",
-      "5231c4de3543d0d9",
-      "7a0dbfbd28feb528"
+      "6152a973ccc8321e",
+      "7f4a4a0a97743aa3",
+      "38d8a2cdc70896a4"
     ],
     [
-      "29fe44bbb618fb3a",
-      "d3172db7fe33a3f3",
-      "370ac0a9c76f1488"
+      "d0e6239cc713c0ce",
+      "4873cf656259869b",
+      "b29360b669cfc5fd"
     ],
     [
-      "38b51330be8d504f",
-      "5ea3daf3eaa4c9b1",
-      "609cf2daf7067bba"
+      "490eb3f3a5f81e6d",
+      "604ba9c7830befc5",
+      "f958154d1f88f42c"
     ],
     [
-      "3a88436dad619d1b",
-      "98211452075df0db",
-      "54367339ed1edb40"
+      "a23fb9ca061bab07",
+      "658b12b6e5ac379e",
+      "915e234f73a849b3"
     ],
     [
-      "338de0ce2fbecb2f",
-      "017d35e7f13d1fa6",
-      "f240c1d81cd44ba5"
+      "b2d04e020d05038b",
+      "bb3cd3ccc615b89c",
+      "ffbd155add682406"
     ],
     [
-      "35441d8680ad7fcf",
-      "a7ff07a9cfec08a4",
-      "09029d3381eddcfd"
+      "5639ea2d33e7649c",
+      "2c1f31556b7eee12",
+      "312ba7f87b4eb6e3"
     ],
     [
-      "ff5fbe8e30e808d1",
-      "5114a387cf608e91",
-      "85d9ee034aec0ef7"
+      "97fc31b6aca024ae",
+      "a99305bec657ea14",
+      "817cf8a13e9db483"
     ],
     [
-      "e28ff41573020380",
-      "a3ec1bbf49f9512e",
-      "19b61a04d73124eb"
+      "4800626f52be9f55",
+      "80a156db26c75aba",
+      "a6a647a8607c021e"
     ],
     [
-      "9ffdb6b37ac65866",
-      "05d94719c8fdd2d5",
-      "13b031dca1597840"
+      "ef317fd893ab065d",
+      "d94f6726fd0789f3",
+      "a39ee97bfb078c81"
     ]
   ],
   "州县民生": [
@@ -91,64 +98,64 @@ const GENERAL_GROUP_BASELINES = {
       "311387f8067264d9"
     ],
     [
-      "a2e025e24ccd1ba0",
-      "c7aa7c13c1d129e5",
+      "a3776310fd4868b0",
+      "736a8cba5fa424c3",
       "0fbf29670b95e635"
     ],
     [
-      "12f9ed707969fc23",
-      "46ff5a4071f4553c",
-      "25fe3f75d465931d"
+      "0e8cd37bb0ccac28",
+      "a44403222f292c0e",
+      "f222800af6bd5451"
     ],
     [
-      "b65e514508363b60",
-      "c60ebf95d538b5c6",
-      "f8fc93d93f0d8a92"
+      "bd22e6d6d58e7add",
+      "e5de08c43b0e3980",
+      "fda116e1ab107602"
     ],
     [
-      "dff18fdadb071849",
-      "f230e637fc540af2",
-      "67395235d302b9d2"
+      "be69397b1076de99",
+      "42859aa93948fa6d",
+      "7a5f23a5cc2f9998"
     ],
     [
-      "521062fe544b74d8",
-      "4378fa2544341539",
-      "e843e3898cd6b4ab"
+      "09ec7aba1ce8a1cd",
+      "8c031a8b5212ea13",
+      "fa6a7b5316f7da93"
     ],
     [
-      "da590b3f99093fdb",
-      "7ed4d8d754f85572",
-      "7cf222dd94193d69"
+      "a6f1a090926238e1",
+      "9046061c81db4347",
+      "8b380a4b82845d8a"
     ],
     [
-      "e31277079f023650",
-      "6657ba86f19882f0",
-      "a272ca861f2e56bf"
+      "1cc28bce45411af1",
+      "01fd1eb940a4c94b",
+      "64ccec568320a6ef"
     ],
     [
-      "aa792bbd082f319f",
-      "d525e17454412855",
-      "5bea08b65c8667f4"
+      "9f966261a4ff858b",
+      "372422173106745f",
+      "c61e2231522a5296"
     ],
     [
-      "eade7a7b82d42b8f",
-      "9535565f1cb069a8",
-      "1f583101ae9269b7"
+      "40b18ab34ee2ae7e",
+      "092c1c621ece1416",
+      "e6aec66816be7a3c"
     ],
     [
-      "0920e10cca556398",
-      "9668ae96610176d2",
-      "5fda8e28b611931a"
+      "df44e41bebeff99e",
+      "bb32a9852c71c12b",
+      "d1e0a8ad101066e1"
     ],
     [
-      "93c4e8f0a18e37ca",
-      "a8f9663794e2c2bd",
-      "0d9a2a99cbb6b12b"
+      "f81cd544b1d00b2b",
+      "e4b5567224bf8b26",
+      "c9ec47ef981fafa5"
     ],
     [
-      "58bb32df61a82fb4",
-      "1ca9794c97f03f3c",
-      "421843e7ac51df0f"
+      "c780b62fced9bde1",
+      "17df549ea49487df",
+      "0f9ee0a544263fb2"
     ]
   ]
 } as const;

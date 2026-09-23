@@ -1,5 +1,7 @@
 import { FAMILY_NAMES, GIVEN_NAMES, selectAvailableGivenName } from './names';
 import { biologicalParents, closeKin } from './lineage';
+import { selectRegent, trustedForOffice } from './lineage';
+export { selectRegent, trustedForOffice } from './lineage';
 import { findMapProfileForContentVersion } from '../maps';
 import { keyedChance, keyedInt, keyedRandom, stableCompare, stableHash } from './random';
 import { detachPersonalForce, personalForce } from './military/personal-forces';
@@ -44,7 +46,6 @@ import {
 } from './politics/faction-commitments';
 import type {
   BackgroundPersonState,
-  BiographyFact,
   CharacterState,
   CommitmentKind,
   CommitmentState,
@@ -148,11 +149,11 @@ const OPENING_CENTRAL_OFFICE_KINDS = new Set<OfficeAppointment['kind']>([
   '廷臣',
 ]);
 
-function clamp(value: number, minimum = 0, maximum = 100): number {
+export function clamp(value: number, minimum = 0, maximum = 100): number {
   return Math.max(minimum, Math.min(maximum, value));
 }
 
-function lifeStage(age: number, alive: boolean): CharacterState['lifeStage'] {
+export function lifeStage(age: number, alive: boolean): CharacterState['lifeStage'] {
   if (!alive) return '已故';
   if (age < 8) return '幼年';
   if (age < 16) return '成长';
@@ -169,43 +170,21 @@ function livingAdults(world: WorldState, polityId?: string): CharacterState[] {
 
 export function addBiography(
   character: CharacterState,
-  event: HistoryEvent,
+  event: HistoryEvent | SimulationFact,
   kind: string,
-  summary = event.summary,
+  summary = (event as HistoryEvent).summary,
   importance = event.importance,
 ): void {
-  if (character.biography.some((fact) => fact.eventId === event.id && fact.kind === kind)) return;
+  const factSource = 'payload' in event;
+  if (character.biography.some((fact) => fact[factSource ? 'factId' : 'eventId'] === event.id && fact.kind === kind)) return;
   character.biography.push({
     id: `${character.id}:bio:${event.id}:${kind}`,
     turn: event.turn,
     kind,
     summary,
     importance,
-    eventId: event.id,
-    factId: null,
-  });
-  if (character.biography.length > MAX_BIOGRAPHY_FACTS) {
-    character.biography.splice(0, character.biography.length - MAX_BIOGRAPHY_FACTS);
-  }
-  character.biographyDigest = stableHash(character.biography);
-}
-
-function addFactBiography(
-  character: CharacterState,
-  fact: SimulationFact,
-  kind: string,
-  summary: string,
-  importance: BiographyFact['importance'] = fact.importance,
-): void {
-  if (character.biography.some((item) => item.factId === fact.id && item.kind === kind)) return;
-  character.biography.push({
-    id: `${character.id}:bio:${fact.id}:${kind}`,
-    turn: fact.turn,
-    kind,
-    summary,
-    importance,
-    eventId: null,
-    factId: fact.id,
+    eventId: factSource ? null : event.id,
+    factId: factSource ? event.id : null,
   });
   if (character.biography.length > MAX_BIOGRAPHY_FACTS) {
     character.biography.splice(0, character.biography.length - MAX_BIOGRAPHY_FACTS);
@@ -249,9 +228,10 @@ function syncFamilyMembers(world: WorldState): void {
   for (const character of world.characters) {
     let family = world.families.find((item) => item.id === character.familyId);
     if (!family) {
-      family = world.families
-        .filter((item) => item.polityId === character.polityId && item.familyName === character.familyName)
-        .sort((left, right) => stableCompare(left.id, right.id))[0];
+      // An explicit family or recorded parent supplies provenance; a surname does not.
+      const parent = character.parentIds.map(id => world.characters.find(p => p.id === id))
+        .find(p => world.families.some(f => f.id === p?.familyId));
+      family = world.families.find(f => f.id === parent?.familyId);
       if (!family) family = createFamily(world, character);
       character.familyId = family.id;
     }
@@ -285,7 +265,7 @@ function syncFamilyMembers(world: WorldState): void {
 }
 
 export function ensureRelationship(world: WorldState, sourceId: string, targetId: string): RelationshipState {
-  if (sourceId === targetId) throw new Error(`Self relationship is forbidden: ${sourceId}`);
+  if (sourceId === targetId) throw new Error(`禁止自身关系：${sourceId}`);
   let relation = world.relationships.find((item) => item.sourceId === sourceId && item.targetId === targetId);
   if (relation) return relation;
   world.counters.relationship += 1;
@@ -461,7 +441,7 @@ function ensureDiplomacyPairs(world: WorldState): void {
 
 function appendBackgroundPerson(world: WorldState, regionId: string, id: string, birthTurn: number, initialOpportunity: number): void {
   const region = world.regions.find((candidate) => candidate.id === regionId);
-  if (!region) throw new Error(`Cannot create background cohort in missing region ${regionId}`);
+  if (!region) throw new Error(`候补地区不存在：${regionId}`);
   const familyName = FAMILY_NAMES[keyedInt(world.seed, 0, FAMILY_NAMES.length - 1, 'background', id, 'family')] as string;
   const givenName = GIVEN_NAMES[keyedInt(world.seed, 0, GIVEN_NAMES.length - 1, 'background', id, 'given')] as string;
   const classRoll = keyedInt(world.seed, 0, 4, 'background', id, 'class');
@@ -549,19 +529,28 @@ export function promoteBackgroundPerson(
   polity: PolityState,
   purpose: string,
   forcedFamily?: string,
+  localRegionId?: string,
+  emit?: EmitEvent,
 ): CharacterState | null;
 export function promoteBackgroundPerson(
   world: WorldState,
   polity: PolityState,
   purpose: string,
   forcedFamily?: string,
+  localRegionId?: string,
+  emit?: EmitEvent,
 ): CharacterState | null {
-  createBackgroundPopulation(world);
+  // Local vacancies draw once per polity/quarter from the existing cohort, never manufacture adults.
+  if (localRegionId) {
+    if (!polity.alive || !world.regions.some(r => r.id === localRegionId && r.controllerId === polity.id)
+      || world.backgroundPeople.some(p => p.polityId === polity.id && p.promotedTurn === world.turn)) return null;
+  } else createBackgroundPopulation(world);
   const wardRegency = purpose === 'regency-ward';
   if (wardRegency) maintainBackgroundCohorts(world, world.turn);
   const minimumAge = wardRegency ? 0 : 16;
+  const ageOf = (person: BackgroundPersonState) => Math.floor((world.turn - person.birthTurn) / 4);
   const priority = (person: BackgroundPersonState) => {
-    const age = Math.floor((world.turn - person.birthTurn) / 4);
+    const age = ageOf(person);
     const ability = purpose.includes('commander') ? person.potential.leadership : person.potential.governance;
     return ability * (1 - Math.max(0, age - 50) / 120) + Math.min(40, person.opportunity) * .2;
   };
@@ -569,21 +558,22 @@ export function promoteBackgroundPerson(
     .filter((person) => (
       person.promotedCharacterId === null
       && person.polityId === polity.id
-      && Math.floor((world.turn - person.birthTurn) / 4) >= minimumAge
-      && Math.floor((world.turn - person.birthTurn) / 4) <= 75
+      && (!localRegionId || person.regionId === localRegionId)
+      && ageOf(person) >= minimumAge
+      && ageOf(person) <= 75
     ))
     .sort((left, right) => (
-      (wardRegency ? Math.floor((world.turn - right.birthTurn) / 4) * 100 : 0)
-      - (wardRegency ? Math.floor((world.turn - left.birthTurn) / 4) * 100 : 0)
+      (wardRegency ? (ageOf(right) - ageOf(left)) * 100 : 0)
       || priority(right) - priority(left)
       || stableCompare(left.id, right.id)
     ))[0];
   if (!stub) {
+    if (localRegionId) return null;
     const regionId = polity.capitalRegionId ?? polity.controlledRegionIds[0];
-    if (!regionId) throw new Error(`Cannot promote a background person for landless polity ${polity.id}`);
+    if (!regionId) throw new Error(`无领土可选拔：${polity.id}`);
     const occupiedRulers = new Set(world.polities.filter((item) => item.alive).map((item) => item.rulerId));
-    const fallback = livingAdults(world, polity.id)
-      .filter((character) => trustedForOffice(world, polity, character) && !character.commandingArmyId && !character.commandingFleetId && !character.governedRegionId && !occupiedRulers.has(character.id))
+    const fallback = world.characters
+      .filter((character) => unassignedOfficeCandidate(world, polity, character) && !occupiedRulers.has(character.id))
       .sort((left, right) => right.leadership + right.governance - left.leadership - left.governance || stableCompare(left.id, right.id))[0];
     if (fallback) return fallback;
     if (!wardRegency) return null;
@@ -659,6 +649,7 @@ export function promoteBackgroundPerson(
   stub.promotedTurn = world.turn;
   world.characters.push(character);
   syncFamilyMembers(world);
+  if (emit) processPendingBackgroundPromotions(world, emit);
   return character;
 }
 
@@ -670,7 +661,7 @@ function processPendingBackgroundPromotions(world: WorldState, emit: EmitEvent):
       category: '政治',
       kind: 'background_promoted',
       title: `${character.name}出仕`,
-      summary: `${character.name}从${world.regions.find((region) => region.id === stub.regionId)?.name ?? '地方'}入朝候用，时年${character.age}岁。`,
+      summary: `${character.name}从${world.regions.find((region) => region.id === stub.regionId)?.name ?? '地方'}出仕，时年${character.age}岁。`,
       importance: 2,
       actorIds: [character.id],
       polityIds: [character.polityId],
@@ -982,7 +973,7 @@ export function processCharacterDeathConsequences(
     if (!deceased) continue;
     const projectedDeath = context.events.find((event) => event.sourceFactIds.includes(deathFact.id));
     if (projectedDeath) addBiography(deceased, projectedDeath, '逝世');
-    else addFactBiography(deceased, deathFact, '逝世', `${deceased.name}卒，享年${deathFact.payload.age}岁。`);
+    else addBiography(deceased, deathFact, '逝世', `${deceased.name}卒，享年${deathFact.payload.age}岁。`);
     const family = world.families.find((item) => item.id === deceased.familyId);
     if (!family) continue;
     const oldHeadId = family.headId;
@@ -1073,26 +1064,16 @@ export function processCharacterDeathConsequences(
   if (deathFacts.length > 0) syncFamilyMembers(world);
 }
 
-export function selectRegent(world: WorldState, polity: PolityState): CharacterState | undefined {
-  const adults = livingAdults(world, polity.id).filter((person) => person.id !== polity.rulerId && trustedForOffice(world, polity, person));
-  const office = world.offices.find((item) => item.active && item.polityId === polity.id && item.kind === '宰辅');
-  return adults.find((person) => person.id === office?.holderId) ?? [...adults].sort((a, b) =>
-    (b.governance + b.cunning + b.loyalty + b.influence) - (a.governance + a.cunning + a.loyalty + a.influence)
-    || stableCompare(a.id, b.id))[0];
-}
-
 export function governingCharacter(world: WorldState, polity: PolityState): CharacterState | undefined {
   const ruler = world.characters.find((person) => person.id === polity.rulerId && person.alive);
   return ruler && ruler.age < 16 ? selectRegent(world, polity) : ruler;
 }
 
-/** Annexation is reception, not immediate trust or restoration of a lost throne. */
-export function trustedForOffice(world: WorldState, polity: PolityState, person: CharacterState): boolean {
-  const former = world.polities.find(p => !p.alive && p.rulerId === person.id);
-  if (!former) return true;
-  const support = world.relationships.some(r => r.sourceId === polity.rulerId && r.targetId === person.id
-    && r.trust > r.grievance + 40 && r.gratitude > 0);
-  return support || person.loyalty >= 45 && world.turn - (former.eliminatedTurn ?? world.turn) >= 8;
+/** Common vacancy eligibility only; each caller retains its formation and role restrictions. */
+export function unassignedOfficeCandidate(world: WorldState, polity: PolityState, person: CharacterState): boolean {
+  return person.alive && person.age >= 16 && person.polityId === polity.id
+    && trustedForOffice(world, polity, person)
+    && !person.commandingArmyId && !person.commandingFleetId && !person.governedRegionId;
 }
 
 function processAdulthood(world: WorldState, context: V02TurnContext, emit: EmitEvent): void {
@@ -2324,17 +2305,22 @@ export function processV02MilitaryCareers(world: WorldState, context: V02TurnCon
 function desiredOffices(world: WorldState): Array<Omit<OfficeAppointment, 'id' | 'appointedTurn' | 'endedTurn' | 'active'>> {
   const desired: Array<Omit<OfficeAppointment, 'id' | 'appointedTurn' | 'endedTurn' | 'active'>> = [];
   for (const polity of world.polities.filter((item) => item.alive)) {
-    desired.push({ polityId: polity.id, kind: '君主', holderId: polity.rulerId, regionId: polity.capitalRegionId, armyId: null, rank: 100 });
+    const add = (kind: OfficeAppointment['kind'], holderId: string, regionId: string | null, rank: number, armyId: string | null = null, fleetId?: string) => {
+      const office: (typeof desired)[number] = { polityId: polity.id, kind, holderId, regionId, armyId, rank };
+      if (fleetId !== undefined) office.fleetId = fleetId;
+      desired.push(office);
+    };
+    add('君主', polity.rulerId, polity.capitalRegionId, 100);
     for (const governor of world.characters.filter((character) => character.alive && character.polityId === polity.id && character.governedRegionId)) {
-      desired.push({ polityId: polity.id, kind: '地方长官', holderId: governor.id, regionId: governor.governedRegionId, armyId: null, rank: 55 });
+      add('地方长官', governor.id, governor.governedRegionId, 55);
     }
     for (const army of world.armies.filter((item) => item.polityId === polity.id)) {
-      desired.push({ polityId: polity.id, kind: '军团主帅', holderId: army.commanderId, regionId: null, armyId: army.id, rank: 70 });
-      if (army.deputyCommanderId) desired.push({ polityId: polity.id, kind: '军团副将', holderId: army.deputyCommanderId, regionId: null, armyId: army.id, rank: 48 });
+      add('军团主帅', army.commanderId, null, 70, army.id);
+      if (army.deputyCommanderId) add('军团副将', army.deputyCommanderId, null, 48, army.id);
     }
     for (const fleet of (world.fleets ?? []).filter((item) => item.polityId === polity.id)) {
-      desired.push({ polityId: polity.id, kind: '水师提督', holderId: fleet.commanderId, regionId: fleet.homePortRegionId, armyId: null, fleetId: fleet.id, rank: 72 });
-      if (fleet.deputyCommanderId) desired.push({ polityId: polity.id, kind: '水师副将', holderId: fleet.deputyCommanderId, regionId: fleet.homePortRegionId, armyId: null, fleetId: fleet.id, rank: 50 });
+      add('水师提督', fleet.commanderId, fleet.homePortRegionId, 72, null, fleet.id);
+      if (fleet.deputyCommanderId) add('水师副将', fleet.deputyCommanderId, fleet.homePortRegionId, 50, null, fleet.id);
     }
     const occupied = new Set(desired.filter((office) => office.polityId === polity.id).map((office) => office.holderId));
     const court = livingAdults(world, polity.id).filter((character) => !occupied.has(character.id) && trustedForOffice(world, polity, character));
@@ -2344,14 +2330,14 @@ function desiredOffices(world: WorldState): Array<Omit<OfficeAppointment, 'id' |
       || stableCompare(left.id, right.id)
     ))[0];
     if (chancellor) {
-      desired.push({ polityId: polity.id, kind: '宰辅', holderId: chancellor.id, regionId: polity.capitalRegionId, armyId: null, rank: 82 });
+      add('宰辅', chancellor.id, polity.capitalRegionId, 82);
       occupied.add(chancellor.id);
     }
     const marshal = [...court].filter((character) => !occupied.has(character.id)).sort((left, right) => (
       (right.leadership + right.cunning + right.merit) - (left.leadership + left.cunning + left.merit)
       || stableCompare(left.id, right.id)
     ))[0];
-    if (marshal) desired.push({ polityId: polity.id, kind: '枢密使', holderId: marshal.id, regionId: polity.capitalRegionId, armyId: null, rank: 80 });
+    if (marshal) add('枢密使', marshal.id, polity.capitalRegionId, 80);
   }
   return desired.sort((left, right) => (
     stableCompare(left.polityId, right.polityId)
@@ -2388,6 +2374,37 @@ export function syncOfficeAppointments(
   context?: AppointmentFactContext,
   recordedKinds?: ReadonlySet<OfficeAppointment['kind']>,
 ): void {
+  const record = (office: OfficeAppointment, started: boolean) => {
+    if (!context || (recordedKinds && !recordedKinds.has(office.kind))) return;
+    const source = office.armyId && context.appointmentSourceFactIdsByArmyId?.[office.armyId];
+    emitSimulationFact(world, context, {
+      kind: started ? 'appointment_started' : 'appointment_ended',
+      category: '政治',
+      importance: office.rank >= 80 ? 2 : 1,
+      actorIds: [office.holderId],
+      polityIds: [office.polityId],
+      regionIds: office.regionId ? [office.regionId] : [],
+      causes: [
+        { label: started ? '任职依据' : '职位失配', role: started ? '结构' : '条件', weight: 0.65,
+          evidence: started ? appointmentBasis(world, office) : `${office.kind}已不再对应当前统治、军令或官署状态` },
+        { label: started ? '任命生效' : '任命终止', role: '结果', weight: 0.35,
+          evidence: `${office.id}于第${turn}回合${started ? '开始' : '结束'}` },
+      ],
+      stateDeltas: [{ entityType: 'office', entityId: office.id, field: 'active', before: !started, after: started }],
+      sourceFactIds: source ? [source] : [],
+      payload: {
+        appointmentId: office.id,
+        action: started ? 'started' : 'ended',
+        officeKind: office.kind,
+        holderId: office.holderId,
+        polityId: office.polityId,
+        regionId: office.regionId,
+        armyId: office.armyId,
+        fleetId: office.fleetId ?? null,
+        rank: office.rank,
+      },
+    });
+  };
   for (const background of world.backgroundPeople.filter((person) => person.promotedCharacterId === null)) {
     const controllerId = world.regions.find((region) => region.id === background.regionId)?.controllerId;
     if (controllerId) background.polityId = controllerId;
@@ -2398,35 +2415,7 @@ export function syncOfficeAppointments(
     if (!desiredKeys.has(officeKey(office))) {
       office.active = false;
       office.endedTurn = turn;
-      if (context && (!recordedKinds || recordedKinds.has(office.kind))) {
-        emitSimulationFact(world, context, {
-          kind: 'appointment_ended',
-          category: '政治',
-          importance: office.rank >= 80 ? 2 : 1,
-          actorIds: [office.holderId],
-          polityIds: [office.polityId],
-          regionIds: office.regionId ? [office.regionId] : [],
-          causes: [
-            { label: '职位失配', role: '条件', weight: 0.65, evidence: `${office.kind}已不再对应当前统治、军令或官署状态` },
-            { label: '任命终止', role: '结果', weight: 0.35, evidence: `${office.id}于第${turn}回合结束` },
-          ],
-          stateDeltas: [{ entityType: 'office', entityId: office.id, field: 'active', before: true, after: false }],
-          sourceFactIds: office.armyId && context.appointmentSourceFactIdsByArmyId?.[office.armyId]
-            ? [context.appointmentSourceFactIdsByArmyId[office.armyId] as string]
-            : [],
-          payload: {
-            appointmentId: office.id,
-            action: 'ended',
-            officeKind: office.kind,
-            holderId: office.holderId,
-            polityId: office.polityId,
-            regionId: office.regionId,
-            armyId: office.armyId,
-            fleetId: office.fleetId ?? null,
-            rank: office.rank,
-          },
-        });
-      }
+      record(office, false);
     }
   }
   const activeKeys = new Set(world.offices.filter((office) => office.active).map(officeKey));
@@ -2441,35 +2430,7 @@ export function syncOfficeAppointments(
       active: true,
     };
     world.offices.push(appointment);
-    if (context && (!recordedKinds || recordedKinds.has(appointment.kind))) {
-      emitSimulationFact(world, context, {
-        kind: 'appointment_started',
-        category: '政治',
-        importance: appointment.rank >= 80 ? 2 : 1,
-        actorIds: [appointment.holderId],
-        polityIds: [appointment.polityId],
-        regionIds: appointment.regionId ? [appointment.regionId] : [],
-        causes: [
-          { label: '任职依据', role: '结构', weight: 0.65, evidence: appointmentBasis(world, appointment) },
-          { label: '任命生效', role: '结果', weight: 0.35, evidence: `${appointment.id}于第${turn}回合开始` },
-        ],
-        stateDeltas: [{ entityType: 'office', entityId: appointment.id, field: 'active', before: false, after: true }],
-        sourceFactIds: appointment.armyId && context.appointmentSourceFactIdsByArmyId?.[appointment.armyId]
-          ? [context.appointmentSourceFactIdsByArmyId[appointment.armyId] as string]
-          : [],
-        payload: {
-          appointmentId: appointment.id,
-          action: 'started',
-          officeKind: appointment.kind,
-          holderId: appointment.holderId,
-          polityId: appointment.polityId,
-          regionId: appointment.regionId,
-          armyId: appointment.armyId,
-          fleetId: appointment.fleetId ?? null,
-          rank: appointment.rank,
-        },
-      });
-    }
+    record(appointment, true);
   }
 }
 

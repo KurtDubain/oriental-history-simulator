@@ -127,9 +127,13 @@ function ensureInboundSupport(world: WorldState, sourceId: string, targetId: str
   relationship.grievance = 0;
 }
 
-function decisionFixture(seed: string, expected: 'executed' | 'rejected'): DecisionFixture {
-  const world = advanceWorld(createWorld(seed));
-  const army = world.armies.find((item) => item.deputyCommanderId !== null);
+function decisionFixture(
+  seed: string,
+  expected: 'executed' | 'rejected',
+  world = advanceWorld(createWorld(seed)),
+  armyId?: string,
+): DecisionFixture {
+  const army = world.armies.find((item) => item.deputyCommanderId !== null && (!armyId || item.id === armyId));
   if (!army?.deputyCommanderId) throw new Error('Decision fixture requires a land deputy');
   const deputy = world.characters.find((item) => item.id === army.deputyCommanderId);
   const commander = world.characters.find((item) => item.id === army.commanderId);
@@ -309,6 +313,47 @@ describe('C10/C11 authoritative agency decision core', () => {
     const memoryKinds = world.agencySystem.characters
       .find((entry) => entry.characterId === deputyId)?.memories.map((memory) => memory.kind) ?? [];
     expect(memoryKinds).toEqual(expect.arrayContaining(['support_secured', 'command_appeased']));
+  });
+
+  it('defers a qualified competing request without changing its command, then permits a later review', () => {
+    const first = decisionFixture('agency-competing-requests', 'executed');
+    const polityId = first.world.armies.find(army => army.id === first.armyId)!.polityId;
+    const other = first.world.armies.find(army => army.id !== first.armyId
+      && army.polityId === polityId && army.deputyCommanderId);
+    if (!other) throw new Error('Competing fixture requires two existing formations of the same polity');
+    const { world, context } = decisionFixture('', 'executed', first.world, other.id);
+    const original = new Map(world.armies.map(army => [army.id, {
+      commanderId: army.commanderId, deputyCommanderId: army.deputyCommanderId,
+    }]));
+
+    processAgencyDecisionSystem(world, context, eventEmitter(world, context));
+
+    const resolutions = context.facts.filter(fact => fact.kind === 'agency_intent_resolved');
+    expect(resolutions.map(fact => fact.payload.outcome).sort()).toEqual(['deferred', 'executed']);
+    const deferred = resolutions.find(fact => fact.payload.outcome === 'deferred')!;
+    expect(deferred.payload).toMatchObject({ reasonCode: 'competing_request',
+      institutionResponse: 'none', retryAfterTurn: context.turn + 4 });
+    expect(deferred.payload.checks.every(check => check.passed)).toBe(true);
+    expect(world.armies.find(army => army.id === deferred.payload.targetArmyId))
+      .toMatchObject(original.get(deferred.payload.targetArmyId)!);
+    const submitted = context.facts.find(fact => fact.kind === 'agency_intent_submitted'
+      && fact.payload.actorId === deferred.payload.actorId)!;
+    expect(deferred.sourceFactIds).toContain(submitted.id);
+    expect(context.events.find(event => event.kind === 'command_request_deferred')?.sourceFactIds)
+      .toEqual([submitted.id, deferred.id].sort());
+    expect(world.agencyDecisionSystem.actors.find(actor => actor.characterId === deferred.payload.actorId))
+      .toMatchObject({ nextEligibleIntentTurn: context.turn + 4, goal: { status: 'active' } });
+    expect(validateAgencyDecisionSystemState({ ...world, turn: context.turn + 1 })).toEqual([]);
+    for (let turn = context.turn + 1; turn < context.turn + 4; turn += 1) {
+      const waiting = processDecisionOnlyTurn(world, turn);
+      expect(waiting.facts.some(fact => fact.kind === 'agency_intent_submitted'
+        && fact.payload.actorId === deferred.payload.actorId)).toBe(false);
+    }
+    const retry = processDecisionOnlyTurn(world, context.turn + 4);
+    expect(retry.facts.find(fact => fact.kind === 'agency_intent_resolved'
+      && fact.payload.actorId === deferred.payload.actorId)).toMatchObject({
+      payload: { outcome: 'executed', attemptOrdinal: 2, reasonCode: 'command_granted' },
+    });
   });
 
   it('removes a high-risk deputy from command access instead of recording an empty rejection', () => {

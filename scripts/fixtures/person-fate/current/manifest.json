@@ -1,0 +1,38 @@
+[
+  {
+    "key": "wounded",
+    "personId": "c_067",
+    "factId": "fact_0000161",
+    "seed": "秋灯照海-收卷乙酉",
+    "map": "contest-v01",
+    "turn": 7,
+    "hash": "3ef8fa4961c84d51",
+    "name": "萧德礼",
+    "sha256": "58b80231a3ef682e162e9f39ecbc39b01c11df5f4ac5a5ec0e7f39823ce06d08"
+  },
+  {
+    "key": "returned",
+    "personId": "c_067",
+    "factId": "fact_0000161",
+    "seed": "秋灯照海-收卷乙酉",
+    "map": "contest-v01",
+    "turn": 14,
+    "hash": "23ae04ed87e5f5df",
+    "name": "萧德礼",
+    "sha256": "64bb715b64c6af0310ac8136be472f5dd5d7720985f8dfec251db6d031b4f9df"
+  },
+  {
+    "key": "deceased",
+    "personId": "c_354",
+    "factId": "fact_0003652",
+    "eventId": "event_003778",
+    "caseId": "situation_000056",
+    "caseEventId": "event_003697",
+    "seed": "枫渡余灯-丙申",
+    "map": "contest-v01",
+    "turn": 210,
+    "hash": "db7c22a78b212405",
+    "name": "许叔晟",
+    "sha256": "2518bf9d1c77079fbe6f60a4fa7b22e8b8de840cbe0ce3afd102970dcb1e55d4"
+  }
+]

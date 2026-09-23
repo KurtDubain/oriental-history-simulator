@@ -1,6 +1,8 @@
 import { makeSituationSignal as makeSignal, situationIndexRef as indexRef } from "./candidate-registry";
 import { isContinuousAppointment } from '../facts/projector';
-import { continuesRulingLine } from '../lineage';
+import { continuesRulingLine, lineageLegitimacy, successionPlan } from '../lineage';
+import { stableCompare } from '../random';
+import { clamp } from '../v02';
 import type {
   ArmyState,
   CharacterState,
@@ -71,6 +73,7 @@ export interface InheritanceClaimAssessment {
   age: number;
   lineageLegitimacy: number;
   legalClaim: boolean;
+  eligible: boolean;
   familySupport: number;
   factionSupport: number;
   officeSupport: number;
@@ -79,7 +82,6 @@ export interface InheritanceClaimAssessment {
   institutionalSupport: number;
   claimStrength: number;
   successionScore: number;
-  regencyScore: number;
   executable: boolean;
   supportingFactionIds: readonly string[];
   supportingArmyIds: readonly string[];
@@ -120,16 +122,8 @@ export interface InheritanceCrisisCandidate extends SituationCandidateObservatio
   possibleOutcomes: readonly SituationOutcomeOption[];
 }
 
-function clamp(value: number, minimum = 0, maximum = 100): number {
-  return Math.max(minimum, Math.min(maximum, value));
-}
-
 function rounded(value: number): number {
   return Math.round(value * 10) / 10;
-}
-
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
 }
 
 function uniqueSorted(values: readonly string[], maximum = Number.POSITIVE_INFINITY): string[] {
@@ -146,23 +140,9 @@ function sortedMap<T extends { id: string }>(items: readonly T[]): Map<string, T
     .map((item) => [item.id, item]));
 }
 
-function lineageLegitimacy(
-  candidate: CharacterState,
-  ruler: CharacterState,
-  rulingFamilyId: string | null,
-): number {
-  if (candidate.parentIds.includes(ruler.id)) return 100;
-  if (candidate.spouseIds.includes(ruler.id)) return 72;
-  if (candidate.parentIds.some((parentId) => ruler.parentIds.includes(parentId))) return 64;
-  if (rulingFamilyId && candidate.familyId === rulingFamilyId) return 46;
-  return 0;
-}
-
 function assessClaims(
   polity: PolityState,
-  ruler: CharacterState,
-  charactersById: ReadonlyMap<string, CharacterState>,
-  familiesById: ReadonlyMap<string, FamilyState>,
+  plan: ReturnType<typeof successionPlan>,
   factions: readonly FactionState[],
   offices: readonly OfficeAppointment[],
   armies: readonly ArmyState[],
@@ -170,26 +150,16 @@ function assessClaims(
   totalSoldiers: number,
   totalSailors: number,
 ): InheritanceClaimAssessment[] {
-  const candidates = [...charactersById.values()]
-    .filter((character) => character.alive && character.polityId === polity.id && character.id !== ruler.id)
-    .sort((left, right) => stableCompare(left.id, right.id));
-
-  const assessments = candidates.map((candidate): InheritanceClaimAssessment => {
-    const lineage = lineageLegitimacy(candidate, ruler, polity.rulingFamilyId);
-    const family = familiesById.get(candidate.familyId);
-    const familySupport = family?.prestige ?? 0;
+  const assessments = plan.claims.map(({ character: candidate, lineageLegitimacy: lineage,
+    familySupport, factionSupport, officeSupport, institutionalSupport, successionScore }): InheritanceClaimAssessment => {
     const memberFactions = factions.filter((faction) => (
       faction.active
       && faction.polityId === polity.id
       && faction.memberIds.includes(candidate.id)
     ));
-    // Keep the claim score semantically aligned with processCharacterLife's
-    // current successor selection: membership contributes faction.power * .22.
-    const factionSupport = memberFactions.reduce((sum, faction) => sum + faction.power * 0.22, 0);
     const appointments = offices.filter((office) => (
       office.active && office.polityId === polity.id && office.holderId === candidate.id
     ));
-    const officeSupport = appointments.reduce((sum, office) => sum + office.rank * 0.14, 0);
     const commandedArmies = armies.filter((army) => (
       army.polityId === polity.id
       && (army.commanderId === candidate.id || army.deputyCommanderId === candidate.id)
@@ -208,24 +178,6 @@ function assessClaims(
     const navalSupport = clamp(sailorsInReach / Math.max(1, totalSailors) * 100);
     const hasDirectCommand = commandedArmies.some((army) => army.commanderId === candidate.id)
       || commandedFleets.some((fleet) => fleet.commanderId === candidate.id);
-    // This deliberately mirrors the current engine, including its character
-    // command-pointer lookup rather than inferring the +24 from army records.
-    const institutionalSupport = factionSupport
-      + officeSupport
-      + familySupport * 0.18
-      + (candidate.commandingArmyId || candidate.commandingFleetId ? 24 : 0);
-    // Keep the weights exactly aligned with processCharacterLifecycle's
-    // authoritative successor selection.
-    const successionScore = lineage * 0.46
-      + institutionalSupport * 0.34
-      + candidate.governance * 0.08
-      + candidate.cunning * 0.06
-      + candidate.renown * 0.04
-      + candidate.loyalty * 0.02;
-    const regencyScore = institutionalSupport
-      + candidate.governance
-      + candidate.cunning
-      + candidate.loyalty;
     const legalClaim = lineage >= 46;
     const hasHighOffice = appointments.some((office) => office.rank >= 70 && (
       office.kind === '宰辅'
@@ -249,6 +201,7 @@ function assessClaims(
       age: candidate.age,
       lineageLegitimacy: lineage,
       legalClaim,
+      eligible: plan.eligible.some(c => c.character.id === candidate.id),
       familySupport: rounded(familySupport),
       factionSupport: rounded(factionSupport),
       officeSupport: rounded(officeSupport),
@@ -257,7 +210,6 @@ function assessClaims(
       institutionalSupport: rounded(institutionalSupport),
       claimStrength: rounded(successionScore),
       successionScore,
-      regencyScore,
       executable,
       supportingFactionIds: uniqueSorted([
         ...memberFactions.map((faction) => faction.id),
@@ -269,77 +221,11 @@ function assessClaims(
       supportingFleetIds: uniqueSorted(commandedFleets.map((fleet) => fleet.id), MAX_PARTICIPANT_ARMIES),
     };
   });
-  const ranked = [...assessments].sort((left, right) => (
-    right.successionScore - left.successionScore
-      || stableCompare(left.characterId, right.characterId)
-  ));
-  const bestLegalMinor = [...assessments]
-    .filter((claim) => claim.age < 16 && claim.legalClaim)
-    .sort((left, right) => {
-      const leftCharacter = charactersById.get(left.characterId);
-      const rightCharacter = charactersById.get(right.characterId);
-      const leftScore = left.lineageLegitimacy * 2 + left.age + (leftCharacter?.influence ?? 0);
-      const rightScore = right.lineageLegitimacy * 2 + right.age + (rightCharacter?.influence ?? 0);
-      return rightScore - leftScore || stableCompare(left.characterId, right.characterId);
-    })[0];
-  const bestAdult = ranked.find((claim) => claim.age >= 16);
-  const bestNamedRegent = [...assessments]
-    .filter((claim) => claim.age >= 16)
-    .sort((left, right) => (
-      right.regencyScore - left.regencyScore
-      || stableCompare(left.characterId, right.characterId)
-    ))[0];
-  const selected: InheritanceClaimAssessment[] = [];
-  for (const claim of [bestLegalMinor, bestAdult, bestNamedRegent, ...ranked]) {
-    if (!claim || selected.some((item) => item.characterId === claim.characterId)) continue;
-    selected.push(claim);
-    if (selected.length >= MAX_CLAIMANTS) break;
-  }
-  return selected.sort((left, right) => (
-    right.successionScore - left.successionScore
-      || stableCompare(left.characterId, right.characterId)
-  ));
-}
-
-interface ExpectedSuccessionPlan {
-  successorId: string | null;
-  regentId: string | null;
-}
-
-function expectedSuccessionPlan(
-  world: Readonly<WorldState>,
-  claims: readonly InheritanceClaimAssessment[],
-  charactersById: ReadonlyMap<string, CharacterState>,
-): ExpectedSuccessionPlan {
-  const legalMinor = claims
-    .filter((claim) => claim.age < 16 && claim.legalClaim)
-    .sort((left, right) => {
-      const leftCharacter = charactersById.get(left.characterId);
-      const rightCharacter = charactersById.get(right.characterId);
-      const leftScore = left.lineageLegitimacy * 2 + left.age + (leftCharacter?.influence ?? 0);
-      const rightScore = right.lineageLegitimacy * 2 + right.age + (rightCharacter?.influence ?? 0);
-      return rightScore - leftScore || stableCompare(left.characterId, right.characterId);
-    })[0];
-  const namedRegent = claims
-    .filter((claim) => claim.age >= 16)
-    .sort((left, right) => (
-      right.regencyScore - left.regencyScore
-      || stableCompare(left.characterId, right.characterId)
-    ))[0];
-  const hasBackgroundAdultRegent = world.backgroundPeople.some((person) => {
-    const age = Math.floor((world.turn - person.birthTurn) / 4);
-    return person.promotedCharacterId === null && age >= 16 && age <= 75;
-  });
-  if (legalMinor && (namedRegent || hasBackgroundAdultRegent)) {
-    return {
-      successorId: legalMinor.characterId,
-      regentId: namedRegent?.characterId ?? null,
-    };
-  }
-  return {
-    successorId: claims.find((claim) => claim.age >= 16)?.characterId ?? null,
-    regentId: null,
-  };
+  const leading = assessments.find(c => c.characterId === plan.successor?.character.id);
+  const regent = leading && leading.age < 16 ? assessments.find(c => c.characterId === plan.regent?.id) : undefined;
+  const priority = [leading, regent, ...assessments.filter(c => c.eligible), ...assessments];
+  const selected = [...new Set(priority.filter(Boolean))].slice(0, MAX_CLAIMANTS);
+  return assessments.filter(claim => selected.includes(claim));
 }
 
 export function buildInheritanceCrisisIndex(world: WorldState): InheritanceCrisisIndex {
@@ -370,11 +256,10 @@ export function buildInheritanceCrisisIndex(world: WorldState): InheritanceCrisi
   for (const polity of [...world.polities].sort((left, right) => stableCompare(left.id, right.id))) {
     const ruler = charactersById.get(polity.rulerId);
     if (!polity.alive || !ruler?.alive) continue;
+    const plan = successionPlan(world, polity, ruler);
     const claims = assessClaims(
       polity,
-      ruler,
-      charactersById,
-      familiesById,
+      plan,
       factions,
       offices,
       armies,
@@ -383,9 +268,8 @@ export function buildInheritanceCrisisIndex(world: WorldState): InheritanceCrisi
       totalSailorsByPolity.get(polity.id) ?? 0,
     );
     claimsByPolity.set(polity.id, claims);
-    const expected = expectedSuccessionPlan(world, claims, charactersById);
-    expectedSuccessorByPolity.set(polity.id, expected.successorId);
-    expectedRegentByPolity.set(polity.id, expected.regentId);
+    expectedSuccessorByPolity.set(polity.id, plan.successor?.character.id ?? null);
+    expectedRegentByPolity.set(polity.id, plan.successor && plan.successor.character.age < 16 ? plan.regent?.id ?? null : null);
   }
   return {
     charactersById,
@@ -465,7 +349,6 @@ function familyAndFactionSupporters(
 function possibleOutcomes(
   pressure: number,
   polity: PolityState,
-  ruler: CharacterState,
   legalCount: number,
   leading: InheritanceClaimAssessment | undefined,
 ): SituationOutcomeOption[] {
@@ -477,7 +360,7 @@ function possibleOutcomes(
     },
     {
       key: 'regency_established',
-      confidence: normalize(legalCount > 0 && leading && leading.age < 16 ? 72 : (100 - ruler.health) * 0.28),
+      confidence: leading && leading.age < 16 ? 72 : 0,
     },
     {
       key: 'dynasty_replaced',
@@ -509,12 +392,12 @@ function buildLiveCandidate(
 ): InheritanceCrisisCandidate {
   const { index } = context;
   const claims = index.claimsByPolity.get(polity.id) ?? [];
-  const legalClaims = claims.filter((claim) => claim.legalClaim);
+  const legalClaims = claims.filter((claim) => claim.eligible && claim.legalClaim);
   const credibleClaims = claims.filter((claim) => claim.claimStrength >= 38 || claim.institutionalSupport >= 28);
   const expectedId = index.expectedSuccessorByPolity.get(polity.id) ?? null;
   const expectedRegentId = index.expectedRegentByPolity.get(polity.id) ?? null;
-  const leading = claims.find((claim) => claim.characterId === expectedId) ?? claims[0];
-  const runnerUp = claims.find((claim) => claim.characterId !== leading?.characterId);
+  const leading = claims.find((claim) => claim.characterId === expectedId);
+  const runnerUp = claims.find((claim) => claim.eligible && claim.characterId !== leading?.characterId);
   const claimGap = leading
     ? Math.max(0, leading.claimStrength - (runnerUp?.claimStrength ?? 0))
     : 0;
@@ -793,7 +676,7 @@ function buildLiveCandidate(
     signals,
     sourceFactIds,
     nextWatch,
-    possibleOutcomes: possibleOutcomes(pressure, polity, ruler, legalClaims.length, leading),
+    possibleOutcomes: possibleOutcomes(pressure, polity, legalClaims.length, leading),
     importance: Math.round(clamp(35 + pressure * 0.65)),
     visibility: Math.round(clamp(32 + pressure * 0.54 + (sourceFactIds.length > 0 ? 8 : 0))),
     resolution: null,

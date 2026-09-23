@@ -190,6 +190,40 @@ function incrementallyCompactedWorld(completedTurns: number): ArchiveWorldState 
 }
 
 describe('self-contained world cold archive', () => {
+  it('recovers retired cold sources recursively when a later live fact references them again', () => {
+    const world = incrementallyCompactedWorld(96);
+    const roots = world.agencyDecisionSystem as unknown as { archiveTestFactId?: string };
+    const sourceId = roots.archiveTestFactId!;
+    const source = findWorldFact(world, sourceId)!;
+    delete roots.archiveTestFactId;
+    compactWorldArchive(world);
+    expect(findActiveWorldFact(world, sourceId)).toBeUndefined();
+    expect(findActiveWorldFact(world, source.sourceFactIds[0])).toBeUndefined();
+    const newFact = appendFact(world, 96, [sourceId, sourceId]);
+    world.lastTurn = { factIds: [newFact.id] } as unknown as TurnReport;
+    setWorldTurn(world, 97);
+    const before = { hash: computeWorldHash(world as never), facts: stableStringify(readWorldFacts(world)),
+      history: stableStringify(readWorldHistory(world)), digest: world.factDigest };
+    clearWorldArchiveDecodeCache();
+    compactWorldArchive(world);
+    expect(world.archiveSystem?.pinnedFactIds).toEqual([...source.sourceFactIds, sourceId]);
+    expect(archiveDecodeCacheEntryCount()).toBe(1); // Locate only the required block, not all history.
+    expect(validateWorldArchiveIntegrity(world)).toEqual([]);
+    expect(computeWorldHash(world as never)).toBe(before.hash);
+    expect(stableStringify(readWorldFacts(world))).toBe(before.facts);
+    expect(stableStringify(readWorldHistory(world))).toBe(before.history);
+    expect(world.factDigest).toBe(before.digest);
+    compactWorldArchive(world);
+    expect(world.facts.filter(f => f.id === sourceId)).toHaveLength(1);
+  });
+
+  it('refuses a live reference whose source is genuinely absent, not merely cold', () => {
+    const world = incrementallyCompactedWorld(96);
+    appendFact(world, 96, ['fact_9999999']);
+    world.lastTurn = { factIds: [world.facts.at(-1)!.id] } as unknown as TurnReport;
+    expect(() => compactWorldArchive(world)).toThrow(/fact_9999999/);
+  });
+
   it('keeps complete chains, cold pins, indexes and world hash while compacting', () => {
     const world = syntheticWorld(96);
     const openingFactionFacts = world.facts.filter((fact) => (

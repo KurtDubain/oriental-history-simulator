@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.37',
-  date: '2026-09-15',
-  title: '谱系与水师交接',
+  version: '1.29.40',
+  date: '2026-09-17',
+  title: '接续修正',
   items: [
-    '修正近亲婚育、承统判定和水师交接。',
+    '修复水师配员、家族归属与继承预测。',
   ],
 };
 

@@ -1,3 +1,4 @@
+import { stableCompare } from '../sim/random';
 import type {
   FactionState,
   OfficeAppointment,
@@ -99,9 +100,6 @@ interface CourtEvidenceIndex {
 
 const CENTRAL_OFFICE_KINDS = new Set<OfficeKind>(['君主', '宰辅', '枢密使', '廷臣']);
 
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 function turnLabel(turn: number | null | undefined): string {
   if (turn === null || turn === undefined || !Number.isFinite(turn) || turn < 0) return '立派年月未详';

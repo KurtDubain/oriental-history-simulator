@@ -1,3 +1,4 @@
+import { stableCompare } from '../sim/random';
 import type { HistoryEvent, SimulationFact, WorldState } from '../sim/types';
 import type { SituationState } from '../sim/situations/types';
 import { projectSituationHistoricalScenes } from './historical-scenes';
@@ -352,9 +353,6 @@ const SITUATION_TRIGGER_LABEL: Readonly<Record<ObserverSituationPauseTrigger, st
   resolution: '结案',
 };
 
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 function situationPauseTitle(world: WorldState, situation: SituationState): string {
   const polityName = (id: string | undefined) => (

@@ -6,6 +6,7 @@ import { syncOfficeAppointments, trustedForOffice } from './v02';
 import { processV03Maritime } from './v03-ocean';
 import { selectExpeditionResponses } from './military/expedition-response';
 import type { HistoryEvent, WorldState } from './types';
+import { buildInheritanceCrisisIndex, detectInheritanceCrisisCandidates } from './situations/inheritance-crisis-detector';
 
 function succession() {
   const world = createWorld('继承同池夹具');
@@ -28,6 +29,70 @@ function succession() {
 }
 
 describe('succession compares eligible adults and regency proposals together', () => {
+  it.each(['adult', 'minor', 'untrusted-regent', 'outgoing-trust', 'mature-trust', 'minister', 'tie', 'display-limit', 'background', 'no-regent'] as const)(
+    'keeps prediction, qualifications and execution aligned without mutating the world (%s)', mode => {
+      const { world, polity, old, adult, minor, minister } = succession();
+      old.alive = true; old.deathTurn = null; polity.rulerId = old.id;
+      world.backgroundPeople = [];
+      if (['minor', 'untrusted-regent', 'outgoing-trust', 'mature-trust', 'minister', 'display-limit'].includes(mode)) {
+        minor.governance = minor.cunning = minor.renown = minor.loyalty = 100;
+        adult.parentIds = []; adult.familyId = ''; adult.governance = adult.cunning = adult.renown = adult.loyalty = 0;
+        adult.influence = 100;
+      }
+      if (['untrusted-regent','outgoing-trust','mature-trust'].includes(mode)) {
+        minister.alive = false;
+        const former = world.polities.find(p => p.id !== polity.id)!;
+        former.alive = false; former.rulerId = adult.id; former.eliminatedTurn = world.turn;
+        world.relationships = [];
+        adult.loyalty=31;
+        if(mode==='outgoing-trust') world.relationships.push({id:'outgoing-support',sourceId:old.id,targetId:adult.id,
+          kinship:'无',affinity:80,trust:80,fear:0,grievance:0,gratitude:20,lastInteractionTurn:world.turn,memories:[]});
+        if(mode==='mature-trust'){adult.loyalty=45;former.eliminatedTurn=world.turn-8;}
+      }
+      if (mode === 'minister') world.offices = [{ id: 'regent-office', polityId: polity.id, holderId: minister.id,
+        kind: '宰辅', regionId: polity.capitalRegionId, armyId: null, rank: 70, appointedTurn: 0, endedTurn: null, active: true }];
+      if (mode === 'tie') {
+        minor.age = adult.age;
+        for (const k of ['governance','cunning','renown','loyalty'] as const) minor[k] = adult[k];
+        world.characters.reverse();
+      }
+      if (mode === 'display-limit') for (let i = 0; i < 9; i++) world.characters.push({ ...minor, id: `claim-${i}`,
+        governance: 90, parentIds: [...minor.parentIds], biography: [], commandingArmyId: null });
+      if (mode === 'background' || mode === 'no-regent') {
+        adult.alive = minister.alive = false;
+        if (mode === 'no-regent') world.backgroundPeople = createWorld('未成年候补').backgroundPeople
+          .map(p => ({ ...p, birthTurn: world.turn, promotedCharacterId: null }));
+        if (mode === 'background') {
+          const source = createWorld('已登记摄政候补').backgroundPeople.find(p => p.polityId === polity.id)!;
+          world.backgroundPeople = [{ ...source, promotedCharacterId: null, birthTurn: -100 }];
+        }
+      }
+      const body = JSON.stringify(world);
+      const index = buildInheritanceCrisisIndex(world);
+      const predicted = index.expectedSuccessorByPolity.get(polity.id);
+      const regent = index.expectedRegentByPolity.get(polity.id);
+      const signals = detectInheritanceCrisisCandidates(world, []).find(c => c.scopeKey === polity.id)!;
+      expect(JSON.stringify(world)).toBe(body);
+      expect(index.claimsByPolity.get(polity.id)!.length).toBeLessThanOrEqual(6);
+      if (['adult','untrusted-regent','outgoing-trust'].includes(mode)) { expect(predicted).toBe(adult.id); expect(regent).toBeNull(); }
+      if (['minor', 'minister', 'display-limit', 'background','mature-trust'].includes(mode)) expect(predicted).toBe(minor.id);
+      if (mode === 'minister') expect(regent).toBe(minister.id);
+      if (mode === 'tie') expect(predicted).toBe([adult.id, minor.id].sort()[0]);
+      if (mode === 'no-regent') {
+        expect(predicted).toBeNull();
+        expect(signals.possibleOutcomes.find(o => o.key === 'regency_established')?.confidence).toBe(0);
+      }
+      if (predicted) expect(signals.participants.coreCharacterIds).toContain(predicted);
+      if (regent) expect(signals.participants.supportingCharacterIds).toContain(regent);
+      settleCharacterDeathState(world, old.id, world.turn);
+      const context = createTurnContext(world);
+      resolveVacantRulers(world, context);
+      if (predicted) expect(polity.rulerId).toBe(predicted);
+      else expect(polity.alive).toBe(false);
+      const event = context.events.find(e => ['succession','regency'].includes(e.kind) && e.polityIds.includes(polity.id));
+      if (regent) expect(event?.actorIds).toContain(regent);
+    });
+
   it('does not bypass an equally related adult with clearly stronger actual support', () => {
     const { world, polity, adult, minor } = succession();
     world.offices = [{ id: 'supported-office', polityId: polity.id, holderId: adult.id, kind: '宰辅',

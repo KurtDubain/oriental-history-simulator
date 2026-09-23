@@ -7,8 +7,9 @@ const PORT = Number(process.env.SELF_EVOLUTION_E2E_PORT ?? 4199);
 const APP_URL = process.env.SELF_EVOLUTION_E2E_URL ?? `http://127.0.0.1:${PORT}`;
 const VERSION = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8')).version;
 const ARTIFACT_DIR = `output/self-evolution-v${VERSION}`;
-// v1.29.36 keeps an unstaffed completed ship batch waiting at T7; see world-session-restore.test.ts.
-const EXPECTED_T12_HASH = '3a40781b3a421a6f';
+// v1.29.39 aligns succession prediction; T1 first differs only in Situation state.
+// Two source replays and map/session goldens agree; see three-closure-20260916/goldens.json.
+const EXPECTED_T12_HASH = '2c6de085e3905700';
 const SCENARIOS = [
   { slug: 'desktop-1440x900', viewport: { width: 1440, height: 900 }, mobile: false },
   { slug: 'mobile-390x844', viewport: { width: 390, height: 844 }, mobile: true },

@@ -1,5 +1,10 @@
 # Frozen natural-history UI fixtures
 
+These legacy snapshots are retained unchanged as historical evidence. Current-rule
+person-fate, media and reader-layout E2E use [`current/`](current/README.md), because
+these older worlds no longer satisfy biological-parent validation. No validator
+exception or parent-history migration is performed.
+
 Captured from v1.29.15, HEAD f7875f3, without interventions or edited facts.
 Files are complete portable saves, gzip+base64 for a text-reviewable test-only asset;
 they are not shipped in production. The manifest verifies the decompressed file's SHA-256

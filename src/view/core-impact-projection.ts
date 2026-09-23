@@ -4,6 +4,7 @@ import type {
   StateDelta,
   WorldState,
 } from '../sim/types';
+import { stableCompare } from '../sim/random';
 
 export type CoreImpactSource = '粮食' | '疾病' | '地方压力';
 export type CoreImpactTargetKind = 'army' | 'polity' | 'person' | 'war';
@@ -53,10 +54,6 @@ const ORDER_LABELS = {
   reinforce: '驰援',
   retreat: '撤退',
 } as const;
-
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 function unique(values: readonly string[]): string[] {
   return [...new Set(values.filter(Boolean))].sort(stableCompare);

@@ -284,8 +284,8 @@ function retainActiveFacts(
   while (pending.length > 0) {
     const factId = pending.pop() as string;
     if (resolvedPins.has(factId)) continue;
-    const fact = activeFactById.get(factId);
-    if (!fact) continue;
+    const fact = activeFactById.get(factId) ?? findWorldFact(world, factId);
+    if (!fact) throw new Error(`事实来源缺失：${factId}`);
     resolvedPins.set(factId, fact);
     for (const sourceFactId of fact.sourceFactIds) pending.push(sourceFactId);
   }

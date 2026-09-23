@@ -18,6 +18,7 @@ import {
   turnLabel,
 } from './dossier-adapter-shared';
 import { compact } from './compact-number';
+import { ORDER_LABELS } from '../sim/military/orders';
 
 function foodSafetyRatio(item: RegionState) {
   return item.food / Math.max(1, item.population);
@@ -52,7 +53,7 @@ export function toSystemInspector(world: WorldState, kind: SystemInspectorData['
     });
     const orderTarget = region(world, item.order.targetRegionId)
       ?? region(world, world.armies.find((candidate) => candidate.id === item.order.targetArmyId)?.regionId);
-    const orderName = ({ hold: '固守', advance: '进军', intercept: '截击', reinforce: '驰援', retreat: '撤退' } as const)[item.order.kind];
+    const orderName = ORDER_LABELS[item.order.kind];
     const command = commander?.id !== actual?.id
       ? `${commander?.name ?? '无帅'}掌令，军中更听${actual?.name ?? '旧主'}`
       : `${commander?.name ?? '无帅'}掌令`;

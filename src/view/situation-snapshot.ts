@@ -1,3 +1,4 @@
+import { stableCompare } from '../sim/random';
 import { SITUATION_FACT_SIGNAL_LABELS, SITUATION_FACT_OUTCOME_LABELS } from "../sim/situations/runtime";
 import type { WorldState } from '../sim/types';
 import type {
@@ -195,9 +196,6 @@ const PHASE_SORT_ORDER: Record<SituationPhase, number> = {
   emerging: 2,
 };
 
-function stableCompare(left: string, right: string): number {
-  return left < right ? -1 : left > right ? 1 : 0;
-}
 
 function cloneRef(ref: SituationEvidenceRef): SituationEvidenceRef {
   return { ...ref };

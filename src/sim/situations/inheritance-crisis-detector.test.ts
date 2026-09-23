@@ -23,6 +23,9 @@ import {
   type InheritanceCrisisCandidate,
 } from './inheritance-crisis-detector';
 import { createSituationSystemState, reduceSituationTurn } from './reducer';
+import { settleCharacterDeathState } from '../character-death';
+import { resolveVacantRulers } from '../engine';
+import { createTurnContext } from '../turn-context-state';
 
 interface PreparedSuccession {
   world: WorldState;
@@ -527,7 +530,8 @@ describe('inheritance crisis detector', () => {
     expect(claim.claimStrength).toBe(expected);
   });
 
-  it('prioritizes a legal minor with a real regent over a stronger adult claimant', () => {
+  // The old minor-first prediction contradicted the actual shared candidate competition.
+  it('predicts the stronger adult winner, not a weaker minor merely because a regent exists', () => {
     const prepared = prepareSuccession('B04-minor-priority-parity');
     prepared.first.age = 34;
     prepared.first.parentIds = [prepared.ruler.id];
@@ -550,15 +554,19 @@ describe('inheritance crisis detector', () => {
     const minorClaim = index.claimsByPolity.get(prepared.polity.id)
       ?.find((claim) => claim.characterId === prepared.second.id);
     expect(adultClaim?.claimStrength).toBeGreaterThan(minorClaim?.claimStrength ?? 0);
-    expect(index.expectedSuccessorByPolity.get(prepared.polity.id)).toBe(prepared.second.id);
-    expect(index.expectedRegentByPolity.get(prepared.polity.id)).toBe(prepared.first.id);
+    expect(index.expectedSuccessorByPolity.get(prepared.polity.id)).toBe(prepared.first.id);
+    expect(index.expectedRegentByPolity.get(prepared.polity.id)).toBeNull();
 
     const candidate = candidateFor(prepared.world, prepared.polity.id, [appointmentFact(prepared)]);
-    expect(candidate.signals.flatMap(signal => signal.refs).flatMap(ref => ref.kind === 'index' && ref.field === 'leadingCandidateId' ? [ref.value] : [])[0]).toBe(prepared.second.id);
-    expect(candidate.participants.supportingCharacterIds).toContain(prepared.first.id);
+    expect(candidate.signals.flatMap(signal => signal.refs).flatMap(ref => ref.kind === 'index' && ref.field === 'leadingCandidateId' ? [ref.value] : [])[0]).toBe(prepared.first.id);
+    expect(candidate.participants.coreCharacterIds).toContain(prepared.first.id);
+    expect(candidate.participants.supportingCharacterIds).not.toContain(prepared.first.id);
     expect(candidate.participants.opposingCharacterIds).not.toContain(prepared.first.id);
     expect(candidate.possibleOutcomes.find((outcome) => outcome.key === 'regency_established')?.confidence)
-      .toBe(72);
+      .toBe(0);
+    settleCharacterDeathState(prepared.world, prepared.ruler.id, prepared.world.turn);
+    resolveVacantRulers(prepared.world, createTurnContext(prepared.world));
+    expect(prepared.polity.rulerId).toBe(index.expectedSuccessorByPolity.get(prepared.polity.id));
   });
 
   it('uses stable character id as the adult succession tie-break', () => {

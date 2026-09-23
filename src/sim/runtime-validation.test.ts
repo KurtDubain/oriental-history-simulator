@@ -15,13 +15,59 @@ import {
   type SimulationFact,
   type WorldState,
 } from './index';
-import { authoritativeTransientArmyIds } from './invariants';
+import { authoritativeTransientArmyIds, type RuntimeEntityKind } from './invariants';
 
 function violationCodes(previous: WorldState, next: WorldState): Set<string> {
   return new Set(validateTurnRuntime(previous, next).map((violation) => violation.code));
 }
 
 describe('quarterly runtime validation', () => {
+  it('checks every runtime collection and excludes non-entity object keys without changing the world', () => {
+    const previous = createWorld('runtime-collection-contract');
+    const next = advanceWorld(previous);
+    const collections: Record<RuntimeEntityKind, readonly { id: string }[]> = {
+      region: next.regions, route: next.routes, seaZone: next.seaZones,
+      seaLane: next.seaLanes, portLink: next.portLinks, port: next.ports,
+      polity: next.polities, character: next.characters, army: next.armies,
+      fleet: next.fleets, war: next.wars, family: next.families,
+      relationship: next.relationships, faction: next.factions, diplomacy: next.diplomacy,
+      office: next.offices, backgroundPerson: next.backgroundPeople, commitment: next.commitments,
+      tradeCorridor: next.tradeCorridors, navalOperation: next.navalOperations,
+      shipbuildingProject: next.shipbuildingProjects, pathogen: next.pathogens,
+      infection: next.infections, practice: next.practices, practiceState: next.practiceStates,
+      situation: next.situationSystem.situations,
+    };
+    const before = stableHash(next);
+    const known = Object.fromEntries(Object.entries(collections).map(([kind, items]) => [kind, items.map(item => item.id)]));
+    expect(validateTurnRuntime(previous, next, { changedEntityIds: known })).toEqual([]);
+    const missing = Object.fromEntries(Object.keys(collections).map(kind => [kind, [`missing:${kind}`]]));
+    expect(validateTurnRuntime(previous, next, { changedEntityIds: missing })
+      .filter(issue => issue.code === 'runtime.changed-id').map(issue => issue.entityId).sort())
+      .toEqual(Object.values(missing).flat().sort());
+    expect(stableHash(next)).toBe(before);
+    const probe = structuredClone(next);
+    probe.facts.at(-1)!.stateDeltas.push(...['constructor', 'toString', 'not-an-entity'].map(kind => ({
+      entityType: kind as 'character', entityId: 'not-real', field: 'value', before: 0, after: 1,
+    })));
+    expect(deriveRuntimeTurnArtifacts(previous, probe).changedEntityIds)
+      .toEqual(deriveRuntimeTurnArtifacts(previous, next).changedEntityIds);
+  });
+
+  it('retains duplicate-id and counter checks, including the special personal-force owner key', () => {
+    const world = advanceWorld(createWorld('full-collection-contract'));
+    const invalid = structuredClone(world);
+    invalid.personalForces.push(structuredClone(invalid.personalForces[0]));
+    invalid.characters.push(structuredClone(invalid.characters[0]));
+    for (const key of ['character', 'army', 'polity', 'war', 'event', 'fact', 'family', 'faction',
+      'relationship', 'office', 'commitment', 'fleet', 'tradeCorridor', 'navalOperation', 'shipProject'] as const) {
+      invalid.counters[key] = -1;
+    }
+    const issues = validateWorldFull(invalid);
+    expect(issues.filter(issue => issue.code === 'counter.invalid')).toHaveLength(15);
+    expect(issues.filter(issue => issue.code === 'id.duplicate').map(issue => issue.message))
+      .toEqual([`character出现重复ID ${world.characters[0].id}`, `personal-force出现重复ID ${world.personalForces[0].ownerId}`]);
+  });
+
   it('accepts a same-quarter evicted corridor only when an actual trade shipment proves its identity', () => {
     const previous = createWorld('有界商路并非未知实体');
     const next = advanceWorld(previous);

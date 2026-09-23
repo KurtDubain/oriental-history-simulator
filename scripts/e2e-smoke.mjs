@@ -387,7 +387,11 @@ async function exerciseEmbodiedCourtMobile(browser) {
     const courtActions = entered.observer.embodiment.actions.filter((action) => (
       action.identityLabel === '朝臣议事'
     ));
-    assert.equal(entered.observer.embodiment.actions.length, 3, '不领导当前集团的普通朝臣只应保留三项通用行动');
+    // The current natural replay appoints this person as a governor. Not leading
+    // a faction excludes court alliance, not legitimate local-office actions.
+    assert.deepEqual(entered.observer.embodiment.actions.map(action => action.kind), [
+      'strengthen_relationship', 'declare_stance', 'open_granary', 'reduce_levy',
+    ], '真实地方任职保留既有施政入口，不能把身份行动误作虚构议约');
     assert.equal(courtActions.length, 0, '人物未真实领导集团时不得虚构朝臣议约入口');
     assert.equal(await panel.locator('button[data-embodied-action-kind="form_court_alliance"]').count(), 0);
     await waitForVisualSettled(page.locator('.observer-inspector'));

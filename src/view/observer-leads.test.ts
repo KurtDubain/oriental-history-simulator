@@ -10,6 +10,7 @@ import {
 } from './observer-leads';
 import { playerHistoryText, projectHistoricalScenes, projectSituationHistoricalScenes } from './historical-scenes';
 import { projectQuarterPulse } from './quarter-pulse-stories';
+import { projectSituationDetail } from './situation-detail';
 
 function worldAt(turn: number, seed = '春战副将'): WorldState {
   let world = createWorld(seed);
@@ -147,6 +148,21 @@ function lowSupplyBattleFact(world: WorldState): Extract<SimulationFact, { kind:
 }
 
 describe('observer story leads', () => {
+  it.each([false,true])('keeps a recent battle result attached to the actual side, not always the attacker (%s)', won=>{
+    const world=worldAt(8),fact=lowSupplyBattleFact(world);
+    fact.payload.attackerWon=won;
+    const situation=world.situationSystem.situations.find(s=>s.type==='war_progress')!;
+    fact.payload.warId=situation.scopeKey;
+    world.facts=[fact];world.history=[];world.armies=[];
+    situation.status='open';situation.resolution=null;
+    const before=JSON.stringify(world);
+    const detail=projectSituationDetail(world,situation);
+    const result=won?'攻方取胜':'守方守住';
+    expect(detail.playerSummary.join('')).toContain(`，${result}；`);
+    const attacker=world.characters.find(p=>p.id===fact.payload.attacker.commanderId)!;
+    expect(detail.playerSummary.join('')).not.toContain(`${attacker.name}${result}`);
+    expect(JSON.stringify(world)).toBe(before);
+  });
   function turningWorld() {
     const world = worldAt(12), report = world.lastTurn!, actor = world.characters[0];
     const [parent, next] = world.polities, region = world.regions[0];

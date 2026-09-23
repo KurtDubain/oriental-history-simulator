@@ -39,6 +39,15 @@ it('keeps natural independent-command decisions present but chronicle-readable o
     const resolutions = facts.filter((fact) => fact.kind === 'agency_intent_resolved');
     const supportActions = facts.filter((fact) => fact.kind === 'agency_support_resolved');
     for (const submission of facts.filter((fact) => fact.kind === 'agency_intent_submitted')) {
+      const responses = resolutions.filter(fact => fact.sourceFactIds.includes(submission.id));
+      expect(responses, `${seed}的正式请求必须且只能结算一次`).toHaveLength(1);
+      expect(responses[0].payload).toMatchObject({
+        actorId: submission.payload.actorId,
+        goalId: submission.payload.goalId,
+        targetArmyId: submission.payload.targetArmyId,
+        attemptOrdinal: submission.payload.attemptOrdinal,
+      });
+      expect(responses[0].turn).toBe(submission.turn);
       expect(submission.sourceFactIds.some((factId) => supportActions.some((support) => (
         support.id === factId
         && support.payload.actorId === submission.payload.actorId
@@ -64,12 +73,10 @@ it('keeps natural independent-command decisions present but chronicle-readable o
       `${row.seed}的正式请求没有全部得到制度回应`,
     ).toBe(row.submitted);
   }
-  // Military merit is no longer granted for losing participation. Do not require
-  // a quota of promotions or rejections in each cohort; protect real resolution.
+  // Outcome reachability belongs to decision.test.ts's controlled executed,
+  // rejected and competing-request fixtures. A natural cohort need not supply
+  // any particular outcome; every request it does make must resolve faithfully.
   console.info('agency long-run outcomes', JSON.stringify(rows));
-  expect(rows.some(row => row.submitted > 0)).toBe(true);
-  expect(rows.some(row => row.executed > 0)).toBe(true);
-  expect(rows.some(row => row.rejected + row.deferred > 0)).toBe(true);
   for (const row of rows) {
     expect(row.submitted, `${row.seed}的正式请求过密`).toBeLessThanOrEqual(45);
     expect(row.executed, `${row.seed}的换帅过密`).toBeLessThanOrEqual(20);
