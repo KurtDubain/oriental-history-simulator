@@ -540,6 +540,21 @@ export function promoteBackgroundPerson(
   localRegionId?: string,
   emit?: EmitEvent,
 ): CharacterState | null {
+  // Alternate an existing local opportunity with ready, waiting hulls. Named
+  // candidates have already been tried by callers; neither side gets extra slots.
+  // Invalid/uncrewed/unprovisioned batches never reserve an opportunity.
+  if (purpose === 'local-governor' || purpose === 'new-commander') {
+    const waiting = world.shipbuildingProjects.some(p => p.polityId === polity.id && p.status === '建造中'
+      && p.progress >= 100 && !p.targetFleetId && p.startedTurn < world.turn
+      && !world.fleets.some(f => f.polityId === polity.id && f.portRegionId === p.portRegionId && !f.seaZoneId)
+      && world.ports.some(port => port.regionId === p.portRegionId)
+      && world.regions.some(r => r.id === p.portRegionId && r.controllerId === polity.id
+        && Math.min(r.population, p.warships * 90 + p.transports * 55 + p.patrolShips * 42) >= 300
+        && r.food >= (p.warships * 90 + p.transports * 55 + p.patrolShips * 42) * 2)
+      && world.backgroundPeople.some(b => b.polityId === polity.id && b.regionId === p.portRegionId
+        && b.promotedCharacterId === null && world.turn - b.birthTurn >= 64 && world.turn - b.birthTurn < 304));
+    if (waiting && world.turn % 2 === 0) return null;
+  }
   // Local vacancies draw once per polity/quarter from the existing cohort, never manufacture adults.
   if (localRegionId) {
     if (!polity.alive || !world.regions.some(r => r.id === localRegionId && r.controllerId === polity.id)

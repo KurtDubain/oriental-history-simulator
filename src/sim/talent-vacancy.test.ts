@@ -40,6 +40,33 @@ function sea(world: WorldState) {
 }
 
 describe('existing necessary vacancies can draw on registered local society',()=>{
+  it.each(['ready','land-turn','no-person','no-food','population','cancelled','lost-port'])('shares the existing opportunity with a waiting fleet without starving land (%s)', mode=>{
+    const {world,polity,region,stub}=vacancy(); world.turn=10;
+    world.personalForces=[]; // No unrelated orphaned forces may demobilize into the population boundary.
+    stub.regionId=world.regions.find(r=>r.controllerId===polity.id&&r.id!==region.id&&r.id!==polity.capitalRegionId)!.id;
+    const naval={...stub,id:'bg:naval-wait',regionId:region.id,promotedCharacterId:null,promotedTurn:null};
+    world.backgroundPeople.push(naval);region.population=100000;region.food=100000;
+    const batch={id:'shipproject_wait',polityId:polity.id,portRegionId:region.id,targetFleetId:null,
+      warships:12,transports:8,patrolShips:8,timberCommitted:0,ironCommitted:0,treasurySpent:0,
+      progress:100,startedTurn:9,completedTurn:null,status:'建造中' as '建造中'|'取消'};
+    world.shipbuildingProjects=[batch];
+    if(mode==='land-turn')world.turn=11;
+    if(mode==='no-person')world.backgroundPeople=world.backgroundPeople.filter(s=>s!==naval);
+    if(mode==='no-food')region.food=0;
+    if(mode==='population')region.population=299;
+    if(mode==='cancelled')batch.status='取消';
+    if(mode==='lost-port')region.controllerId='other';
+    land(world);
+    if(mode!=='ready'){
+      const promoted=world.characters.filter(c=>world.backgroundPeople.some(s=>s.promotedTurn===world.turn&&s.promotedCharacterId===c.id));
+      expect(promoted).toHaveLength(1);expect(promoted[0].role).toBe('地方长官');return;
+    }
+    expect(stub.promotedCharacterId).toBeNull();
+    sea(world);expect(naval.promotedCharacterId).not.toBeNull();expect(batch.status).toBe('完成');
+    expect(world.backgroundPeople.filter(s=>s.promotedTurn===10)).toHaveLength(1);
+    world.turn++;land(world);expect(stub.promotedCharacterId).not.toBeNull();
+    expect(world.backgroundPeople.filter(s=>s.promotedTurn===11)).toHaveLength(1);
+  });
   it.each(['ready','no-person','young','population','lost-port','eliminated','cancelled'])(
     'recommissions preserved hulls only when their actual port can supply a crew and officer (%s)', mode => {
       const {world,polity,region,stub}=vacancy();

@@ -476,8 +476,15 @@ export function projectPersonStoryArc(world: WorldState, person: CharacterState,
   const chosen: Candidate[] = [];
   const beginning = [...pool].sort((a,b) => (a.startTurn ?? a.turn)-(b.startTurn ?? b.turn))[0];
   const gains = (c: Candidate) => c.phase === 'battle' ? storyTerritories(c.sourceFactIds, byId).size : 0;
-  const latest = pool.filter(c => c.priority <= 1 && (c.phase === 'command' || c.phase === 'battle'
-    && c.sourceFactIds.some(id => episodes.has(id)))).sort((a,b) => b.turn-a.turn)[0];
+  const latest = pool.filter(c => c.priority <= 1 && c.phase === 'command'
+    || c.phase === 'battle' && c.turn > ((beginning?.startTurn ?? beginning?.turn ?? c.turn) + (terminal?.turn ?? world.turn)) / 2
+    && c.sourceFactIds.some(id => {
+      const battle = episodes.get(id)?.battle;
+      if (!battle) return false;
+      const side = battleSide(battle,person.id)!;
+      return side.won && (side.participant.losses / Math.max(1,side.participant.soldiersBefore) >= .2
+        || side.participant.role !== 'member' && (gains(c) > 0 || battle.payload.defenders.length > 0));
+    })).sort((a,b) => b.turn-a.turn)[0];
   const peak = [...pool].sort((a,b) => gains(b)-gains(a) || a.priority-b.priority || b.importance-a.importance)[0];
   const setback = pool.find(c => c.phase === 'setback' && c.priority <= 2);
   for (const item of [pool[0], peak, setback, latest, ...pool.filter(c => c.phase === 'command' && c.priority <= 1), ...pool.filter(c => c.priority < 0), beginning, ...pool]) {

@@ -19,6 +19,30 @@ function factContext(world: ReturnType<typeof createWorld>): FactTurnBuffer {
 }
 
 describe('POL01 political power ledger', () => {
+  it('keeps personal offices independent of membership and drops ended or dissolved commands', () => {
+    const w = advanceWorldBy(createWorld('个人实权不依赖入派'), 1);
+    const army = w.armies[0], person = w.characters.find(c => c.id === army.commanderId)!;
+    const office = w.offices.find(o => o.active && o.armyId === army.id && o.holderId === person.id)!;
+    const faction = person.factionId;
+    const own = () => calculateCharacterPowerPosition(w, person.id).resources.filter(r => r.id === `office:${office.id}`);
+    expect(own()).toHaveLength(1);
+    person.factionId = null;
+    expect(own()).toHaveLength(1);
+    const body = serializeWorld(w); calculateCharacterPowerPosition(w, person.id); expect(serializeWorld(w)).toBe(body);
+    person.factionId = faction; office.active = false; expect(own()).toHaveLength(0);
+    office.active = true; w.armies = w.armies.filter(a => a.id !== army.id); expect(own()).toHaveLength(0);
+    const fleet=w.fleets[0], admiral=w.characters.find(c=>c.id===fleet.commanderId)!;
+    admiral.factionId=null;
+    const naval=w.offices.find(o=>o.active&&o.fleetId===fleet.id&&o.holderId===admiral.id)!;
+    expect(calculateCharacterPowerPosition(w,admiral.id).resources.some(r=>r.id===`office:${naval.id}`)).toBe(true);
+    w.fleets=w.fleets.filter(f=>f.id!==fleet.id);
+    expect(calculateCharacterPowerPosition(w,admiral.id).resources.some(r=>r.id===`office:${naval.id}`)).toBe(false);
+    const governor = w.offices.find(o => o.active && o.kind === '地方长官')!;
+    const p = w.characters.find(c => c.id === governor.holderId)!; p.factionId = null;
+    expect(calculateCharacterPowerPosition(w,p.id).resources.some(r=>r.id===`office:${governor.id}`)).toBe(true);
+    governor.active=false;
+    expect(calculateCharacterPowerPosition(w,p.id).resources.some(r=>r.id===`office:${governor.id}`)).toBe(false);
+  });
   it('derives every faction total from concrete bounded assets without reading the old total', () => {
     const world = advanceWorldBy(createWorld('权势资源账'), 8);
     const before = serializeWorld(world);
@@ -133,6 +157,9 @@ describe('POL01 political power ledger', () => {
       new Set(actorPosition.resources.map((resource) => resource.id)).size,
     );
     expect(actorPosition.resources.filter((resource) => resource.id === supportId)).toHaveLength(1);
+    const membership=actor.factionId;actor.factionId=null;
+    expect(calculateCharacterPowerPosition(world,actor.id).resources.filter(r=>r.id===supportId)).toHaveLength(1);
+    actor.factionId=membership;
     expect(calculateCharacterPowerPosition(world, target.id).resources).not.toContainEqual(
       expect.objectContaining({ id: supportId }),
     );

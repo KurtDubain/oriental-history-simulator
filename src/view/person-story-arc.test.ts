@@ -68,6 +68,25 @@ function battleFact(
 }
 
 describe('person story arc', () => {
+  it.each(['commander','deputy','member'] as const)('lets a representative late action compete without giving every late appearance a slot (%s)', role=>{
+    const w=createWorld('长军旅真实角色'); const p=w.characters.find(c=>c.id===w.armies[0].commanderId)!;
+    w.facts=[];w.history=[];w.offices=[];w.turn=201;p.alive=false;p.deathTurn=200;
+    for(const [i,t] of [4,12,20,28,190].entries()){
+      const b=battleFact(w,p.id,`career-${i}`,t,t===190&&role==='member'?1:200);b.importance=t===190?3:4;b.payload.warId=`war-${i}`;
+      b.payload.targetRegionId=w.regions[i].id;b.regionIds=[w.regions[i].id];
+      if(t===190){b.payload.attacker.participants![0].role=role;
+        b.payload.defenders=[{...b.payload.attacker,armyId:'opponent',participants:[]}];}
+      w.facts.push(b);
+    }
+    const death:SimulationFact={...w.facts[0],id:'career-end',turn:200,kind:'character_death',
+      payload:{characterId:p.id,cause:'natural',age:78,health:0,diseaseId:null,role:p.role}};
+    w.facts.push(death);const body=serializeWorld(w);const beats=projectPersonStoryArc(w,p);
+    expect(beats.length).toBeLessThanOrEqual(5);expect(beats.some(b=>b.sourceFactIds.includes(death.id))).toBe(true);
+    if(role!=='member')expect(beats.some(b=>b.sourceFactIds.includes('career-4'))).toBe(true);
+    else expect(beats.some(b=>b.sourceFactIds.includes('career-4'))).toBe(false);
+    expect(beats.every(b=>b.sourceFactIds.every(id=>w.facts.some(f=>f.id===id)))).toBe(true);
+    expect(serializeWorld(w)).toBe(body);
+  });
   it.each(['capital_fall', 'polity_eliminated'] as const)('names a low-loss member’s decisive result without inventing a capital (%s)', kind => {
     const w = createWorld('低损成员与最后据点', 'contest-v01');
     const army = w.armies.find(a => a.participantIds.some(id => id !== a.commanderId && id !== a.deputyCommanderId))!;

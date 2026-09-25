@@ -86,11 +86,11 @@ describe('restoreWorldSession', () => {
       historyCount: world.history.length,
     }).toEqual({
       turn: 12,
-      // v1.29.40: T5 background entrant no longer joins an unrelated same-surname family.
-      // Two identical bodies and first differences: mechanism-tail-20260917/goldens.json.
-      hash: 'fe6ca1d9b9d3b46b',
-      factDigest: '85b472cd3e49e7fa',
-      historyDigest: '00b449fa2f36f9ba',
+      // v1.29.41: at T8 ready hulls share the existing recruitment opportunity.
+      // First divergence and two exact replays: closure-20260925/golden.json.
+      hash: 'd5b4d4c0a05b9191',
+      factDigest: 'b56b96622cb44e5a',
+      historyDigest: 'a2dd8832fb146a50',
       factCount: 476,
       historyCount: 295,
     });

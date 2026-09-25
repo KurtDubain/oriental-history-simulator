@@ -111,8 +111,9 @@ function stableCompare(left: string, right: string): number {
 
 function activeOfficeResources(
   world: WorldState,
-  faction: FactionState,
+  faction: Pick<FactionState, 'id' | 'polityId'>,
   members: readonly CharacterState[],
+  individual = false,
 ): PoliticalPowerResource[] {
   const memberIds = new Set(members.map((member) => member.id));
   const result: PoliticalPowerResource[] = [];
@@ -137,6 +138,8 @@ function activeOfficeResources(
     }
     if (office.kind === '军团主帅' || office.kind === '军团副将') {
       const army = world.armies.find((item) => item.id === office.armyId);
+      if (individual && (!army || army.polityId !== office.polityId
+        || (office.kind === '军团主帅' ? army.commanderId : army.deputyCommanderId) !== office.holderId)) continue;
       const aligned = !army || army.allegiance.characterId === office.holderId;
       const actual = army ? world.characters.find((item) => item.id === army.allegiance.characterId)?.name : null;
       result.push({
@@ -160,6 +163,8 @@ function activeOfficeResources(
     }
     if (office.kind === '水师提督' || office.kind === '水师副将') {
       const fleet = world.fleets.find((item) => item.id === office.fleetId);
+      if (individual && (!fleet || fleet.polityId !== office.polityId
+        || (office.kind === '水师提督' ? fleet.commanderId : fleet.deputyCommanderId) !== office.holderId)) continue;
       result.push({
         id: `office:${office.id}`,
         category: 'military_command',
@@ -305,8 +310,9 @@ function allianceResources(world: WorldState, faction: FactionState): PoliticalP
 
 function recentSupportResources(
   world: WorldState,
-  faction: FactionState,
+  faction: Pick<FactionState, 'polityId'>,
   members: readonly CharacterState[],
+  personal = false,
 ): PoliticalPowerResource[] {
   const memberIds = new Set(members.map((member) => member.id));
   const candidates = world.facts
@@ -340,7 +346,7 @@ function recentSupportResources(
     if (seenCarriers.has(key)) return false;
     seenCarriers.add(key);
     return true;
-  }).slice(0, 4);
+  }).slice(0, personal ? 3 : 4);
   return retained
     .map((fact) => {
       const actor = world.characters.find((character) => character.id === fact.payload.actorId)?.name ?? '该派成员';
@@ -353,8 +359,8 @@ function recentSupportResources(
         category: (military ? 'military_command' : 'alliance_support') as PoliticalPowerCategory,
         label: `${target}支持`,
         detail: `${actor}在第${fact.year}年${fact.season}季取得${target}的明确支持；它会随时间失效，也不等同于正式官职`,
-        value: 2 + fact.payload.strength * 0.035,
-        characterIds: [fact.payload.actorId, ...(military ? [] : [fact.payload.targetId])],
+        value: personal ? 3 + fact.payload.strength * .04 : 2 + fact.payload.strength * .035,
+        characterIds: [fact.payload.actorId, ...(military || personal ? [] : [fact.payload.targetId])],
         regionIds: [...fact.regionIds],
         evidence: [{ entityType: 'fact' as const, entityId: fact.id, field: 'outcome' }],
       } satisfies PoliticalPowerResource;
@@ -611,57 +617,15 @@ export function calculateCharacterPowerPosition(world: WorldState, characterId: 
       // A secured request is projected below from the initiator's point of view.
       // The faction ledger also carries it as collective backing, so keeping both
       // would count the same Fact twice and could attribute it to its target.
+      && !['central_office', 'regional_office', 'military_command'].includes(resource.category)
       && !resource.id.startsWith('support:')
     ))
     : [];
-  const supportCandidates = world.facts
-    .filter((fact): fact is Extract<SimulationFact, { kind: 'agency_support_resolved' }> => (
-      fact.kind === 'agency_support_resolved'
-      && fact.payload.actorId === characterId
-      && fact.payload.outcome === 'secured'
-      && world.turn - fact.turn <= 16
-      && fact.payload.polityId === character?.polityId
-      && (fact.payload.targetKind === 'army_officers'
-        ? world.armies.some((army) => (
-          army.id === fact.payload.targetArmyId && army.polityId === fact.payload.polityId
-        ))
-        : world.characters.some((target) => (
-          target.id === fact.payload.targetId
-          && target.alive
-          && target.polityId === fact.payload.polityId
-        )))
-    ))
-    .sort((left, right) => (
-      right.turn - left.turn
-      || right.payload.strength - left.payload.strength
-      || stableCompare(right.id, left.id)
-    ));
-  const seenSupportCarriers = new Set<string>();
-  const supportResources = supportCandidates.filter((fact) => {
-    const carrierId = fact.payload.targetKind === 'army_officers'
-      ? fact.payload.targetArmyId
-      : fact.payload.targetId;
-    const key = `${fact.payload.actorId}:${fact.payload.targetKind}:${carrierId}`;
-    if (seenSupportCarriers.has(key)) return false;
-    seenSupportCarriers.add(key);
-    return true;
-  })
-    .slice(0, 3)
-    .map((fact): PoliticalPowerResource => {
-      const target = fact.payload.targetKind === 'army_officers'
-        ? `${world.armies.find((item) => item.id === fact.payload.targetArmyId)?.name ?? fact.payload.targetArmyName ?? '旧日所部'}将校`
-        : world.characters.find((item) => item.id === fact.payload.targetId)?.name ?? '所请之人';
-      return {
-        id: `support:${fact.id}`,
-        category: fact.payload.targetKind === 'army_officers' ? 'military_command' : 'alliance_support',
-        label: `${target}支持`,
-        detail: `第${fact.year}年${fact.season}季明确应允，效力仍在近期请令审查中`,
-        value: 3 + fact.payload.strength * 0.04,
-        characterIds: [characterId],
-        regionIds: [...fact.regionIds],
-        evidence: [{ entityType: 'fact', entityId: fact.id, field: 'outcome' }],
-      };
-    });
+  const personal = character?.alive ? [character] : [];
+  const supportResources = character ? [
+    ...activeOfficeResources(world, character, personal, true),
+    ...recentSupportResources(world, character, personal, true),
+  ] : [];
   const resources = [...new Map(
     [...factionResources, ...supportResources].map((resource) => [resource.id, resource] as const),
   ).values()]
