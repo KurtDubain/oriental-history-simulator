@@ -1,26 +1,39 @@
 import { settleCharacterDeathState } from '../character-death';
 import { emitSimulationFact, projectFactLinks, type BattleFact } from '../facts';
 import { keyedRandom } from '../random';
-import type { HistoryEvent, StateDelta, WorldState } from '../types';
-import type { MutableTurnContext } from '../turn-context-state';
+import type { ArmyState, HistoryEvent, StateDelta, WorldState } from '../types';
 import { addBiography } from '../v02';
-import type { V03EventInput } from '../v03-context';
+import type { V03EventInput, V03TurnContext } from '../v03-context';
 import { battleRecoveryStatus, isBattleReadyCharacter, woundRecoveryQuarters } from './battle-readiness';
-import { detachPersonalForce, personalForce } from './personal-forces';
+import { detachPersonalForce, formationForces, personalForce } from './personal-forces';
+
+/** Capture before combat, then settle against the same owners before anyone leaves formation. */
+export function battleForceSnapshot(world: WorldState, army: ArmyState, before?: BattleFact['payload']['attacker']): BattleFact['payload']['attacker'] {
+  if (before) return {
+    ...before, soldiersAfter: army.soldiers, moraleAfter: army.morale, losses: before.soldiersBefore-army.soldiers,
+    participants: before.participants!.map(p => {
+      const soldiersAfter=personalForce(world,p.characterId)?.soldiers ?? 0;
+      return {...p,soldiersAfter,losses:p.soldiersBefore-soldiersAfter};
+    }),
+  };
+  return {
+    armyId:army.id, polityId:army.polityId, commanderId:army.commanderId, deputyCommanderId:army.deputyCommanderId,
+    allegianceCharacterId:army.allegiance.characterId, allegianceStrength:army.allegiance.strength,
+    soldiersBefore:army.soldiers, soldiersAfter:army.soldiers,
+    moraleBefore:army.morale, moraleAfter:army.morale, trainingBefore:army.training, supplyBefore:army.supply, losses:0,
+    participants:formationForces(world,army).map(f=>({
+      characterId:f.ownerId,soldiersBefore:f.soldiers,soldiersAfter:f.soldiers,losses:0,
+      factionId:world.characters.find(c=>c.id===f.ownerId)?.factionId ?? null,formationCommanderId:army.commanderId,
+      role:f.ownerId===army.commanderId ? 'commander' : f.ownerId===army.deputyCommanderId ? 'deputy' : 'member',
+    })),
+  };
+}
 
 type Participant = NonNullable<BattleFact['payload']['attacker']['participants']>[number];
 type Row = { participant: Participant; sideWon: boolean; polityId: string };
 type Emit = (input: V03EventInput) => HistoryEvent;
-type Exposure = 'ordinary' | 'exposed' | 'severe' | 'catastrophic';
-export interface BattleFateChances { death: number; wound: number; severity: number; exposure: Exposure }
+export interface BattleFateChances { death: number; wound: number; severity: number }
 const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, value));
-
-function exposureLabel(severity: number): Exposure {
-  if (severity > .72) return 'catastrophic';
-  if (severity > .48) return 'severe';
-  if (severity > .24) return 'exposed';
-  return 'ordinary';
-}
 
 export function battleFateChances(
   participant: Participant,
@@ -42,18 +55,16 @@ export function battleFateChances(
   // with severity² and another fractional power. Negligible losses remain negligible.
   const danger = severity * loss * loss / (loss + .1);
   return {
-    death: clamp(danger * (.2 + role * .05 + (1 - health / 100) * .1) * 1.08, 0, .055),
+    // Defeat amplifies actual retinue losses, not names, rank in a roster or a plot quota.
+    death: clamp(danger * (.2 + role * .05 + (1 - health / 100) * .1) * 1.08 * (sideWon ? 1 : 1 + loss * 2), 0, .12),
     wound: clamp(danger * (2.5 + role * .4 + (1 - health / 100) * .6), 0, .38),
     severity,
-    exposure: exposureLabel(severity),
   };
 }
 
 function participants(fact: BattleFact): Row[] {
-  return [
-    ...(fact.payload.attacker.participants ?? []).map((participant) => ({ participant, sideWon: fact.payload.attackerWon, polityId: fact.payload.attacker.polityId })),
-    ...fact.payload.defenders.flatMap((side) => (side.participants ?? []).map((participant) => ({ participant, sideWon: !fact.payload.attackerWon, polityId: side.polityId }))),
-  ];
+  return [fact.payload.attacker, ...fact.payload.defenders].flatMap((side, index) =>
+    (side.participants ?? []).map(participant => ({participant, sideWon: index === 0 ? fact.payload.attackerWon : !fact.payload.attackerWon, polityId: side.polityId})));
 }
 
 /** Old saves and same-turn state are both repaired from authoritative wound Facts; no recovery ledger is kept. */
@@ -76,7 +87,7 @@ function recoveryRegion(world: WorldState, battle: BattleFact, row: Row): string
 
 function wound(
   world: WorldState,
-  context: MutableTurnContext,
+  context: V03TurnContext,
   battle: BattleFact,
   row: Row,
   severity: number,
@@ -125,7 +136,7 @@ function wound(
   addBiography(person, event, '战阵负伤');
 }
 
-function die(world: WorldState, context: MutableTurnContext, battle: BattleFact, row: Row, emit: Emit): void {
+function die(world: WorldState, context: V03TurnContext, battle: BattleFact, row: Row, emit: Emit): void {
   const person = world.characters.find((item) => item.id === row.participant.characterId);
   if (!person?.alive) return;
   const health = person.health;
@@ -155,7 +166,7 @@ function die(world: WorldState, context: MutableTurnContext, battle: BattleFact,
   addBiography(person, event, '战死');
 }
 
-export function resolveBattleFates(world: WorldState, context: MutableTurnContext, battle: BattleFact, emit: Emit): void {
+export function resolveBattleFates(world: WorldState, context: V03TurnContext, battle: BattleFact, emit: Emit): void {
   for (const row of participants(battle)) {
     const person = world.characters.find((item) => item.id === row.participant.characterId);
     if (!person?.alive || battleRecoveryStatus(world, person.id, context.turn).recovering) continue;

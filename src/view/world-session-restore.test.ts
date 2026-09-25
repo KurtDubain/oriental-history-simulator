@@ -86,12 +86,12 @@ describe('restoreWorldSession', () => {
       historyCount: world.history.length,
     }).toEqual({
       turn: 12,
-      // v1.29.41: at T8 ready hulls share the existing recruitment opportunity.
-      // First divergence and two exact replays: closure-20260925/golden.json.
-      hash: 'd5b4d4c0a05b9191',
-      factDigest: 'b56b96622cb44e5a',
-      historyDigest: 'a2dd8832fb146a50',
-      factCount: 476,
+      // v1.29.42: T4's 35% retinue-loss defeat now wounds c_099.
+      // First divergence and two exact replays: battle-risk-20260925/golden.json.
+      hash: '5774039fe3ede131',
+      factDigest: '00a2abd5ae1502f8',
+      historyDigest: '004e988b30cb3d0a',
+      factCount: 470,
       historyCount: 295,
     });
   });

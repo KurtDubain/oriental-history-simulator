@@ -34,9 +34,12 @@ export type HistoricalSceneReadScope = 'all' | 'active';
 export function historicalSceneContext(world: WorldState, scope: HistoricalSceneReadScope = 'all') {
   const facts = scope === 'all' ? readWorldFacts(world) : world.facts;
   const history = (scope === 'all' ? readWorldHistory(world) : world.history).filter(isDefaultVisibleHistoryEvent);
-  return { facts, history, byId: new Map(facts.map(fact => [fact.id, fact])), continuations: continuousAppointmentIds(facts) };
+  return { facts, history, byId: new Map(facts.map(fact => [fact.id, fact])), order: new Map(facts.map((fact,i) => [fact.id,i])), continuations: continuousAppointmentIds(facts) };
 }
 type SceneContext = ReturnType<typeof historicalSceneContext>;
+const battleSides = (fact: Extract<SimulationFact, { kind: 'battle' }>) => [fact.payload.attacker, ...fact.payload.defenders];
+const factOrder = (context: SceneContext, a: SimulationFact, b: SimulationFact) => a.turn - b.turn
+  || (context.order.get(a.id) ?? 0) - (context.order.get(b.id) ?? 0);
 
 /** Presentation only: historical records and their ids stay untouched. */
 export function playerHistoryText(world: WorldState, text: string): string {
@@ -83,7 +86,7 @@ export function readableParticipant(world: WorldState, ids: readonly string[]) {
 export function participantBattleHeadline(world: WorldState, factId: string): string {
   const fact = world.facts.find((item) => item.id === factId);
   if (fact?.kind !== 'battle') return '战线仍在变化';
-  const sides = [fact.payload.attacker, ...fact.payload.defenders];
+  const sides = battleSides(fact);
   const ids = (side: typeof sides[number]) => [side.commanderId, side.deputyCommanderId,
     ...(side.participants ?? []).map((person) => person.characterId)].filter((id): id is string => Boolean(id));
   const person = readableParticipant(world, sides.flatMap(ids));
@@ -456,7 +459,7 @@ function sceneFromFacts(
   result = '',
   subject: SimulationFact = facts[0]!,
 ): HistoricalScene {
-  const ordered = [...facts].sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
+  const ordered = [...facts].sort((a,b) => factOrder(context,a,b));
   const latest = ordered.at(-1) as SimulationFact;
   const factIds = new Set(ordered.map((fact) => fact.id));
   const summary = narrative.summary.trim();
@@ -524,35 +527,30 @@ function agencyScene(
 function warScene(
   world: WorldState,
   facts: readonly SimulationFact[],
-  key: string,
   context: SceneContext,
 ): HistoricalScene {
-  const start = facts.find((fact): fact is Extract<SimulationFact, { kind: 'war_started' }> => fact.kind === 'war_started');
-  const end = facts.find((fact): fact is Extract<SimulationFact, { kind: 'war_ended' }> => fact.kind === 'war_ended');
+  // Groups start with an encounter or a standalone declaration/end/transfer.
+  // Consequences only join an existing encounter, so its first Fact remains primary.
+  const anchor = facts[0], key = `scene:war:${anchor.id}`;
   const battles = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'battle' }> => fact.kind === 'battle');
-  const transfers = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'territory_control_changed' }> => fact.kind === 'territory_control_changed');
-  const anchor = end ?? battles[0] ?? start ?? transfers[0];
-  const base = projectFactNarrative(world, anchor as SimulationFact);
-  if (battles.length) {
-    const { byId } = context;
-    const linked = (fact: SimulationFact, id: string, seen = new Set<string>()): boolean => {
-      if (seen.has(fact.id)) return false;
-      seen.add(fact.id);
-      return fact.sourceFactIds.some(source => source === id || Boolean(byId.has(source) && linked(byId.get(source)!, id, seen)));
-    };
-    const used = new Set<string>();
-    const summary = battles.map((battle, index) => {
-      const changes = transfers.filter(f => linked(f, battle.id));
-      changes.forEach(f => used.add(f.id));
-      return `${battles.length > 1 ? `第${index + 1}战：` : ''}${projectFactNarrative(world, battle).summary}`
-        + changes.map(f => `${regionName(world, f.payload.regionId)}此战后由${polityName(world, f.payload.previousControllerId)}转入${polityName(world, f.payload.nextControllerId)}。`).join('');
-    }).join(' ');
-    const result = transfers.filter(f => !used.has(f.id)).map(f => projectFactNarrative(world, f).summary).join(' ');
-    return sceneFromFacts(context, `scene:war:${key}`, facts, {
-      title: `${regionName(world, battles[0]!.payload.targetRegionId)}${battles.length > 1 ? `接连${battles.length}战${transfers.length ? `，此后归${polityName(world, transfers.at(-1)!.payload.nextControllerId)}` : ''}` : '之战'}`, summary,
-    }, result, battles[0]);
+  const first = battles[0];
+  if (first) {
+    const sides = battles.map(battleSides), forces = sides.flat();
+    const peak = Math.max(...sides.map(s => s.reduce((n,f) => n+f.soldiersBefore,0)));
+    const losses = forces.reduce((n,f) => n+f.losses,0);
+    const casualties = (kind: 'character_wounded' | 'character_death') => new Set(facts.flatMap(f => f.kind === kind ? [f.payload.characterId] : [])).size;
+    let encounter = 0;
+    const summary = `${battles.length}次交锋；常备军${new Set(forces.map(s => s.armyId)).size}支，单场峰值${peak}人、累计损失${losses}人（单编队最高${Math.round(Math.max(...forces.map(s=>s.losses/Math.max(1,s.soldiersBefore)))*100)}%）；民兵损失${battles.reduce((n,b) => n+b.payload.militiaLosses,0)}人；${casualties('character_wounded')}人负伤、${casualties('character_death')}人阵亡。`
+      + facts.flatMap(f => f.kind === 'battle'
+        ? [`第${++encounter}战，${regionName(world,f.payload.targetRegionId)}：${characterName(world,f.payload.attacker.commanderId)}进攻，${f.payload.attackerWon ? '攻方取胜' : '守方守住'}。`]
+        : f.kind === 'territory_control_changed'
+          ? [`${regionName(world,f.payload.regionId)}此后归${polityName(world,f.payload.nextControllerId)}。`] : []).join('');
+    const scene = sceneFromFacts(context, key, facts, {
+      title: `${regionName(world, first.payload.targetRegionId)}${battles.length > 1 ? '战役' : '之战'}`, summary,
+    }, '', first);
+    return {...scene, dateLabel: `${first.turn !== scene.turn ? `${historyTurnDate(first.turn).label}至` : ''}${scene.dateLabel}`};
   }
-  return sceneFromFacts(context, `scene:war:${key}`, facts, base, '', anchor);
+  return sceneFromFacts(context, key, facts, projectFactNarrative(world, anchor), '', anchor);
 }
 
 function warKey(fact: SimulationFact): string | null {
@@ -591,7 +589,7 @@ export function projectHistoricalScenes(
   const consumed = new Set<string>();
   const scenes: HistoricalScene[] = [];
   const facts = [...new Map(inputFacts.map((fact) => [fact.id, fact])).values()]
-    .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
+    .sort((a,b) => factOrder(context,a,b));
   const { facts: availableFacts, history, byId, continuations } = context;
 
   // A recorded founding owns its direct declaration and transfer, not other events at the same place.
@@ -635,20 +633,33 @@ export function projectHistoricalScenes(
     scenes.push(agencyScene(world, [support], context));
   }
 
-  const warGroups = new Map<string, SimulationFact[]>();
+  const warGroups: { facts: SimulationFact[]; last: Extract<SimulationFact,{kind:'battle'}> | null }[] = [];
+  const owners = new Map<string, typeof warGroups[number]>();
   for (const fact of facts) {
     if (consumed.has(fact.id)) continue;
     const warId = warKey(fact);
-    if (!warId) continue;
-    const region = fact.kind === 'battle' ? fact.payload.targetRegionId : fact.kind === 'territory_control_changed' ? fact.payload.regionId : fact.kind;
-    const key = `${warId}:${fact.turn}:${region}`;
-    const group = warGroups.get(key) ?? [];
-    group.push(fact);
-    warGroups.set(key, group);
+    // Withdrawal/task changes close an action sequence; an entire war is not one campaign.
+    for (const group of warGroups) {
+      if (fact.kind === 'war_ended' && group.last?.payload.warId === warId
+        || fact.kind === 'army_order_changed' && group.last
+          && battleSides(group.last).some(s => s.armyId === fact.payload.armyId)
+          && (['hold','retreat'].includes(fact.payload.next.kind) || fact.payload.next.warId !== group.last.payload.warId)) group.last=null;
+    }
+    let group = fact.kind === 'battle' ? [...warGroups].reverse().find(g => {
+      const last=g.last, p=fact.payload;
+      return last && last.payload.warId === p.warId && fact.turn-last.turn <= 2
+        && (last.payload.targetRegionId === p.targetRegionId || world.regions.find(r=>r.id===last.payload.targetRegionId)?.neighbors.includes(p.targetRegionId))
+        && battleSides(last).some(a=>battleSides(fact).some(b=>a.armyId===b.armyId));
+    }) : ['territory_control_changed','character_wounded','character_death'].includes(fact.kind)
+      ? fact.sourceFactIds.map(id=>context.byId.get(id)?.turn===fact.turn ? owners.get(id) : undefined).find(Boolean) : undefined;
+    if (!group && !warId) continue;
+    if (!group) {group={facts:[],last:null};warGroups.push(group);}
+    group.facts.push(fact);owners.set(fact.id,group);
+    if (fact.kind === 'battle') group.last=fact;
     consumed.add(fact.id);
   }
-  for (const [key, group] of [...warGroups.entries()].sort(([left], [right]) => stableCompare(left, right))) {
-    scenes.push(warScene(world, group, key, context));
+  for (const group of warGroups) {
+    scenes.push(warScene(world, group.facts, context));
   }
 
   for (const fact of facts) {
@@ -670,7 +681,7 @@ function militaryFactTouchesSituation(fact: SimulationFact, situation: Situation
   ]);
   const armies = new Set(situation.participants.armyIds);
   if (fact.kind === 'army_order_changed') return armies.has(fact.payload.armyId);
-  if (fact.kind === 'battle') return [fact.payload.attacker, ...fact.payload.defenders].some((side) => (
+  if (fact.kind === 'battle') return battleSides(fact).some((side) => (
     armies.has(side.armyId) || characters.has(side.commanderId)
       || (side.participants ?? []).some((person) => characters.has(person.characterId))
   ));
@@ -703,8 +714,12 @@ function inheritanceFactTouchesSituation(fact: SimulationFact, situation: Situat
     && fact.payload.rulerBeforeId !== fact.payload.rulerAfterId;
 }
 
-function warFactTouchesSituation(fact: SimulationFact, warId: string): boolean {
+function warFactTouchesSituation(fact: SimulationFact, warId: string, context: SceneContext): boolean {
   if (warKey(fact) === warId) return true;
+  if (fact.kind === 'character_wounded' || fact.kind === 'character_death') {
+    const battle = fact.payload.battleFactId && context.byId.get(fact.payload.battleFactId);
+    return Boolean(battle && warKey(battle) === warId);
+  }
   return fact.kind === 'army_order_changed'
     && (fact.payload.previous.warId === warId || fact.payload.next.warId === warId);
 }
@@ -761,7 +776,7 @@ export function projectSituationHistoricalScenes(
   const selected = availableFacts.filter((fact) => {
     if (fact.turn < situation.startedTurn || fact.turn > lastTurn || continuations.has(fact.id)) return false;
     const linked = directIds.has(fact.id) || fact.sourceFactIds.some((id) => directIds.has(id));
-    if (situation.type === 'war_progress') return warFactTouchesSituation(fact, situation.scopeKey);
+    if (situation.type === 'war_progress') return warFactTouchesSituation(fact, situation.scopeKey, context);
     if (situation.type === 'military_power_crisis') {
       return ['army_order_changed', 'battle', 'agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'appointment_started', 'appointment_ended']
         .includes(fact.kind) && militaryFactTouchesSituation(fact, situation);

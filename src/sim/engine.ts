@@ -81,7 +81,6 @@ import {
   detachFormation,
   distributeFormationGain,
   ensureEligiblePersonalForces,
-  formationForces,
   personalForce,
   isFleetDeputy,
   setFormationStatus,
@@ -99,7 +98,7 @@ import {
   expeditionAssemblyText,
   selectExpeditionResponses,
 } from './military/expedition-response';
-import { releaseUnavailableFormationMembers, resolveBattleFates } from './military/battle-fate';
+import { battleForceSnapshot, releaseUnavailableFormationMembers, resolveBattleFates } from './military/battle-fate';
 import { settleCharacterDeathState } from './character-death';
 import {
   createTurnContext,
@@ -2386,17 +2385,8 @@ function resolveBattle(
 ): void {
   const defenderId = target.controllerId;
   const defenders = world.armies.filter((army) => army.polityId === defenderId && army.regionId === target.id);
-  const participantIdsBefore = new Map([attackerArmy, ...defenders].map((army) => [
-    army.id,
-    formationForces(world, army).map((force) => force.ownerId),
-  ]));
-  const participantSoldiersBefore = new Map([attackerArmy, ...defenders].flatMap((army) => (
-    formationForces(world, army).map((force) => [`${army.id}:${force.ownerId}`, force.soldiers] as const)
-  )));
-  const defenderSoldiersBefore = new Map(defenders.map((army) => [army.id, army.soldiers]));
-  const defenderMoraleBefore = new Map(defenders.map((army) => [army.id, army.morale]));
-  const defenderSupplyBefore = new Map(defenders.map((army) => [army.id, army.supply]));
-  const defenderTrainingBefore = new Map(defenders.map((army) => [army.id, army.training]));
+  const forceSnapshots = new Map([attackerArmy,...defenders].map(army=>[army.id,battleForceSnapshot(world,army)]));
+  const participantIdsBefore = (army: ArmyState) => forceSnapshots.get(army.id)!.participants!.map(p => p.characterId);
   const attackerMoraleBefore = attackerArmy.morale;
   const attackerSupplyBefore = attackerArmy.supply;
   const attackerTrainingBefore = attackerArmy.training;
@@ -2440,31 +2430,12 @@ function resolveBattle(
 
   attackerArmy.experience = Math.round(clamp(attackerArmy.experience + (attackerWon ? 5 : 2)));
   attackerArmy.morale = Math.round(clamp(attackerArmy.morale + (attackerWon ? 8 : -13)));
-  const careerDeltas = creditBattleCommandStanding(world, attackerArmy, attackerWon, attackerLossRate, participantIdsBefore.get(attackerArmy.id), defenders.length > 0);
+  const careerDeltas = creditBattleCommandStanding(world, attackerArmy, attackerWon, attackerLossRate, participantIdsBefore(attackerArmy), defenders.length > 0);
   for (const defender of defenders) {
     defender.experience = Math.round(clamp(defender.experience + (attackerWon ? 2 : 5)));
     defender.morale = Math.round(clamp(defender.morale + (attackerWon ? -12 : 7)));
-    careerDeltas.push(...creditBattleCommandStanding(world, defender, !attackerWon, defenderLossRate, participantIdsBefore.get(defender.id)));
+    careerDeltas.push(...creditBattleCommandStanding(world, defender, !attackerWon, defenderLossRate, participantIdsBefore(defender)));
   }
-
-  const participantFacts = (army: ArmyState) => (participantIdsBefore.get(army.id) ?? []).map((ownerId) => {
-    const force = personalForce(world, ownerId);
-    const after = force?.soldiers ?? 0;
-    const before = participantSoldiersBefore.get(`${army.id}:${ownerId}`) ?? after;
-    return {
-      characterId: ownerId,
-      soldiersBefore: before,
-      soldiersAfter: after,
-      losses: before - after,
-      factionId: world.characters.find((character) => character.id === ownerId)?.factionId ?? null,
-      formationCommanderId: army.commanderId,
-      role: ownerId === army.commanderId
-        ? 'commander' as const
-        : ownerId === army.deputyCommanderId
-          ? 'deputy' as const
-          : 'member' as const,
-    };
-  });
 
   const battleCauses: EventCause[] = [
     { label: '兵力与素质', weight: 0.34, evidence: `攻方战力${Math.round(attackerPower)}，守方战力${Math.round(defenderPower)}` },
@@ -2477,22 +2448,14 @@ function resolveBattle(
     ...careerDeltas,
     { entityType: 'army', entityId: attackerArmy.id, field: 'soldiers', before: attackerBefore, after: attackerArmy.soldiers, delta: -attackerLosses },
     { entityType: 'army', entityId: attackerArmy.id, field: 'morale', before: attackerMoraleBefore, after: attackerArmy.morale, delta: attackerArmy.morale - attackerMoraleBefore },
-    ...defenders.map((army) => ({
+    ...(['soldiers', 'morale'] as const).flatMap(field => defenders.map(army => ({
       entityType: 'army' as const,
       entityId: army.id,
-      field: 'soldiers',
-      before: defenderSoldiersBefore.get(army.id) ?? army.soldiers,
-      after: army.soldiers,
-      delta: army.soldiers - (defenderSoldiersBefore.get(army.id) ?? army.soldiers),
-    })),
-    ...defenders.map((army) => ({
-      entityType: 'army' as const,
-      entityId: army.id,
-      field: 'morale',
-      before: defenderMoraleBefore.get(army.id) ?? army.morale,
-      after: army.morale,
-      delta: army.morale - (defenderMoraleBefore.get(army.id) ?? army.morale),
-    })),
+      field,
+      before: forceSnapshots.get(army.id)![`${field}Before`],
+      after: army[field],
+      delta: army[field] - forceSnapshots.get(army.id)![`${field}Before`],
+    }))),
   ];
   // Emit before retreat/disband/capture so destroyed armies and their deputy
   // assignments remain available to career and Chronicle projectors.
@@ -2500,12 +2463,7 @@ function resolveBattle(
     kind: 'battle',
     category: '军事',
     importance: 3,
-    actorIds: [
-      ...new Set([
-        ...(participantIdsBefore.get(attackerArmy.id) ?? []),
-        ...defenders.flatMap((army) => participantIdsBefore.get(army.id) ?? []),
-      ]),
-    ],
+    actorIds: [...new Set([attackerArmy, ...defenders].flatMap(participantIdsBefore))],
     polityIds: [attackerArmy.polityId, defenderId],
     regionIds: [target.id, attackerArmy.regionId],
     causes: battleCauses,
@@ -2519,38 +2477,8 @@ function resolveBattle(
       attackerPower,
       defenderPower,
       militiaLosses,
-      attacker: {
-        armyId: attackerArmy.id,
-        polityId: attackerArmy.polityId,
-        commanderId: attackerArmy.commanderId,
-        deputyCommanderId: attackerArmy.deputyCommanderId,
-        allegianceCharacterId: attackerArmy.allegiance.characterId,
-        allegianceStrength: attackerArmy.allegiance.strength,
-        soldiersBefore: attackerBefore,
-        soldiersAfter: attackerArmy.soldiers,
-        moraleBefore: attackerMoraleBefore,
-        moraleAfter: attackerArmy.morale,
-        trainingBefore: attackerTrainingBefore,
-        supplyBefore: attackerSupplyBefore,
-        losses: attackerLosses,
-        participants: participantFacts(attackerArmy),
-      },
-      defenders: defenders.map((army) => ({
-        armyId: army.id,
-        polityId: army.polityId,
-        commanderId: army.commanderId,
-        deputyCommanderId: army.deputyCommanderId,
-        allegianceCharacterId: army.allegiance.characterId,
-        allegianceStrength: army.allegiance.strength,
-        soldiersBefore: defenderSoldiersBefore.get(army.id) ?? army.soldiers,
-        soldiersAfter: army.soldiers,
-        moraleBefore: defenderMoraleBefore.get(army.id) ?? army.morale,
-        moraleAfter: army.morale,
-        trainingBefore: defenderTrainingBefore.get(army.id) ?? army.training,
-        supplyBefore: defenderSupplyBefore.get(army.id) ?? army.supply,
-        losses: (defenderSoldiersBefore.get(army.id) ?? army.soldiers) - army.soldiers,
-        participants: participantFacts(army),
-      })),
+      attacker: battleForceSnapshot(world,attackerArmy,forceSnapshots.get(attackerArmy.id)),
+      defenders: defenders.map(army=>battleForceSnapshot(world,army,forceSnapshots.get(army.id))),
     },
   }) as BattleFact;
   resolveBattleFates(world, context, battleFact, (input) => pushEvent(world, context, input));
@@ -2561,12 +2489,7 @@ function resolveBattle(
     title: `${target.name}之战：${attackerWon ? '攻方得势' : '守方获胜'}`,
     summary: `${attackerArmy.name}以${attackerBefore}人进攻${target.name}，${battleLossText(battleFact.payload)}，${attackerWon ? '突破防线' : '被迫退回'}。`,
     importance: 3,
-    actorIds: [
-      ...new Set([
-        ...(participantIdsBefore.get(attackerArmy.id) ?? []),
-        ...defenders.flatMap((army) => participantIdsBefore.get(army.id) ?? []),
-      ]),
-    ],
+    actorIds: battleFact.actorIds,
     polityIds: [attackerArmy.polityId, defenderId],
     regionIds: [target.id, attackerArmy.regionId],
     causes: battleCauses,
@@ -2992,9 +2915,7 @@ export function advanceWorldDetailed(
   runSystem('social_diplomacy', () => processV02Diplomacy(world, context, (input) => pushEvent(world, context, input)));
   runSystem('war_declarations', () => processWarDeclarations(world, context));
   runSystem('diplomacy', () => processV03Diplomacy(world, context, (input) => pushEvent(world, context, input)));
-  runSystem('military', () => {
-    const factStart = context.facts.length;
-    processMilitary(world, context);
+  const settleBattleDeaths = (factStart: number) => {
     const battleDeaths = context.facts.slice(factStart).filter(
       (fact): fact is Extract<SimulationFact, { kind: 'character_death' }> => (
         fact.kind === 'character_death' && fact.payload.cause === 'battle'
@@ -3005,12 +2926,26 @@ export function advanceWorldDetailed(
       resolveVacantRulers(world, context);
       settleFactionDeaths(world, context, battleDeaths.map((fact) => fact.id), (input) => pushEvent(world, context, input));
     }
+  };
+  runSystem('military', () => {
+    const factStart = context.facts.length;
+    processMilitary(world, context);
+    settleBattleDeaths(factStart);
   });
-  runSystem('maritime', () => processV03Maritime(world, context, (input) => pushEvent(world, context, input),
+  runSystem('maritime', () => {
+    const factStart = context.facts.length;
+    processV03Maritime(world, context, (input) => pushEvent(world, context, input),
     (war, army, target, previousControllerId, battleFact, defenders) => {
       settleDefendersAfterCapture(world, defenders, target, previousControllerId, context);
       return captureRegion(world, context, war, army, target, previousControllerId, battleFact, 'amphibious_landing');
-    }));
+    });
+    settleBattleDeaths(factStart);
+    for (const fact of context.facts.slice(factStart)) {
+      if (fact.kind !== 'battle') continue;
+      const army = world.armies.find(a => a.id === fact.payload.attacker.armyId);
+      if (army && army.soldiers < MIN_ARMY_SIZE) removeArmy(world, army, context, true);
+    }
+  });
   runSystem('disease', () => processV03Disease(world, context, (input) => pushEvent(world, context, input)));
   runSystem('knowledge', () => processV03Knowledge(world, context, (input) => pushEvent(world, context, input)));
   runSystem('military_careers', () => processV02MilitaryCareers(world, context, (input) => pushEvent(world, context, input)));

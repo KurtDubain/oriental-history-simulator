@@ -109,7 +109,7 @@ export interface SituationWorkbenchProjection {
 const FACT_KIND_LABELS: Record<SimulationFact['kind'], string> = {
   war_started: '宣战事实',
   war_ended: '停战事实',
-  battle: '战役事实',
+  battle: '单次战斗',
   army_order_changed: '军令变更',
   territory_control_changed: '领土事实',
   appointment_started: '任命事实',
@@ -440,6 +440,8 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
     .flatMap((fact) => fact.stateDeltas)
     .filter((delta) => delta.entityLabel !== '相关对象' && delta.field !== 'status' && delta.field !== 'active')
     .slice(0, 4);
+  const summary = playerSummary(world, situation, item, durationLabel, outcomeLabel);
+  if (situation.type === 'war_progress') summary[0] = `战争历时${durationLabel}，记录${allFacts.filter(f=>f.kind==='battle'&&f.payload.warId===situation.scopeKey).length}次战斗。${summary[0]}`;
   return {
     id: situation.id,
     type: situation.type,
@@ -449,7 +451,7 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
     startDateLabel: dateLabel(situation.startedTurn),
     endDateLabel: dateLabel(endTurn ?? situation.lastUpdatedTurn),
     durationLabel,
-    playerSummary: playerSummary(world, situation, item, durationLabel, outcomeLabel),
+    playerSummary: summary,
     currentChange: latestScene && latestScene.turn === lastSettledTurn
       ? latestScene.shortText
       : latestScene

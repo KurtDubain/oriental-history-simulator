@@ -11,7 +11,8 @@ import {
   syncArmyPersonnelLocations,
 } from './military/authority';
 import { armyOrderFactIds, issueAmphibiousArmyOrder, minimumLandingForce } from './military/orders';
-import { applyFormationLosses, formationForces, isFleetDeputy, setFormationStatus } from './military/personal-forces';
+import { applyFormationLosses, isFleetDeputy, setFormationStatus } from './military/personal-forces';
+import { battleForceSnapshot, resolveBattleFates } from './military/battle-fate';
 import type { V03Emit, V03TurnContext } from './v03-context';
 import {
   COMMODITIES,
@@ -2081,40 +2082,16 @@ function resolveLanding(
   const variance = 0.9 + keyedRandom(world.seed, world.turn, 'landing', operation.id) * 0.2;
   const won = attackPower * variance > defensePower;
   const soldiersBefore = army.soldiers;
-  const participantBefore = formationForces(world, army).map((force) => ({ ownerId: force.ownerId, soldiers: force.soldiers }));
-  const moraleBefore = army.morale;
+  const attackerSnapshot = battleForceSnapshot(world, army);
+  const participantIds = attackerSnapshot.participants!.map(p=>p.characterId);
   recordLandingTransit(world, context, operation, army, operation.targetRegionId);
-  const defenderSnapshots = defenders.map((defender) => ({
-    armyId: defender.id,
-    polityId: defender.polityId,
-    commanderId: defender.commanderId,
-    deputyCommanderId: defender.deputyCommanderId,
-    allegianceCharacterId: defender.allegiance.characterId,
-    allegianceStrength: defender.allegiance.strength,
-    soldiersBefore: defender.soldiers,
-    soldiersAfter: defender.soldiers,
-    moraleBefore: defender.morale,
-    moraleAfter: defender.morale,
-    trainingBefore: defender.training,
-    supplyBefore: defender.supply,
-    losses: 0,
-    participants: formationForces(world, defender).map((force) => ({
-      characterId: force.ownerId,
-      soldiersBefore: force.soldiers,
-      soldiersAfter: force.soldiers,
-      losses: 0,
-      factionId: world.characters.find((character) => character.id === force.ownerId)?.factionId ?? null,
-      formationCommanderId: defender.commanderId,
-      role: force.ownerId === defender.commanderId ? 'commander' as const
-        : force.ownerId === defender.deputyCommanderId ? 'deputy' as const : 'member' as const,
-    })),
-  }));
+  const defenderSnapshots = defenders.map(defender=>battleForceSnapshot(world,defender));
   setFormationStatus(world, army, '交战');
   for (const defender of defenders) setFormationStatus(world, defender, '交战');
   const losses = Math.min(army.soldiers - 1, whole(army.soldiers * (won ? 0.08 : 0.27)));
   applyFormationLosses(world, [army], losses);
   context.population.militaryDeaths += losses;
-  const careerDeltas = creditBattleCommandStanding(world, army, won, losses / Math.max(1, soldiersBefore), participantBefore.map((item) => item.ownerId), defenders.length > 0);
+  const careerDeltas = creditBattleCommandStanding(world, army, won, losses / Math.max(1, soldiersBefore), participantIds, defenders.length > 0);
   for (const defender of defenders) {
     careerDeltas.push(...creditBattleCommandStanding(world, defender, !won, 0));
   }
@@ -2128,15 +2105,15 @@ function resolveLanding(
     importance: 4,
     actorIds: [
       ...new Set([
-        ...participantBefore.map((participant) => participant.ownerId),
+        ...participantIds,
         ...defenders.flatMap((defender) => defender.participantIds),
       ]),
     ],
     polityIds: [army.polityId, previousController],
     regionIds: [operation.originRegionId, target.id],
     causes: [
-      { label: '舰队运输', role: '结构', weight: 0.2, evidence: `参与舰队${operation.fleetIds.length}支` },
-      { label: '沿途海权', role: '条件', weight: 0.24, evidence: `航路${operation.seaZonePath.join('→')}` },
+      { label: '舰队运输', role: '结构', weight: 0.2, evidence: `参与舰队${operation.fleetIds.length}支`, refs: operation.fleetIds.map(id=>({kind:'entity' as const,entityType:'fleet' as const,entityId:id,label:'参战舰队'})) },
+      { label: '沿途海权', role: '条件', weight: 0.24, evidence: `航路${operation.seaZonePath.join('→')}`, refs: operation.seaZonePath.map(id=>({kind:'entity' as const,entityType:'seaZone' as const,entityId:id,label:'登陆航路'})) },
       { label: '攻防实力', role: '条件', weight: 0.31, evidence: `攻方${Math.round(attackPower * variance)}、守方${Math.round(defensePower)}` },
       { label: '登陆结算', role: '结果', weight: 0.25, evidence: `攻方损失${losses}，民兵损失${militiaLoss}` },
     ],
@@ -2150,35 +2127,14 @@ function resolveLanding(
       attackerPower: attackPower * variance,
       defenderPower: defensePower,
       militiaLosses: militiaLoss,
-      attacker: {
-        armyId: army.id,
-        polityId: army.polityId,
-        commanderId: army.commanderId,
-        deputyCommanderId: army.deputyCommanderId,
-        allegianceCharacterId: army.allegiance.characterId,
-        allegianceStrength: army.allegiance.strength,
-        soldiersBefore,
-        soldiersAfter: army.soldiers,
-        moraleBefore,
-        moraleAfter: army.morale,
-        trainingBefore: army.training,
-        supplyBefore: army.supply,
-        losses,
-        participants: participantBefore.map(({ ownerId, soldiers }) => ({
-          characterId: ownerId,
-          soldiersBefore: soldiers,
-          soldiersAfter: world.personalForces.find((force) => force.ownerId === ownerId)?.soldiers ?? 0,
-          losses: soldiers - (world.personalForces.find((force) => force.ownerId === ownerId)?.soldiers ?? 0),
-          factionId: world.characters.find((character) => character.id === ownerId)?.factionId ?? null,
-          formationCommanderId: army.commanderId,
-          role: ownerId === army.commanderId ? 'commander' : ownerId === army.deputyCommanderId ? 'deputy' : 'member',
-        })),
-      },
+      attacker: battleForceSnapshot(world,army,attackerSnapshot),
       defenders: defenderSnapshots,
     },
   }) as BattleFact;
+  resolveBattleFates(world, context, battleFact, emit);
+  const occupied = won && army.soldiers > 0;
   let territoryFact: SimulationFact | null = null;
-  if (won) {
+  if (occupied) {
     recordArmyMovement(army, operation.originRegionId, target.id, context.turn, army.order.kind, operation.warId);
     army.regionId = target.id;
     syncArmyPersonnelLocations(world, army);
@@ -2209,27 +2165,22 @@ function resolveLanding(
     army.embarkedOperationId = null;
     orderLandingFleetsHome(world, operation);
   }
-  setFormationStatus(world, army, won ? '出征' : '撤退');
-  for (const defender of defenders) setFormationStatus(world, defender, won ? '撤退' : '出征');
+  setFormationStatus(world, army, occupied ? '出征' : '撤退');
+  for (const defender of defenders) setFormationStatus(world, defender, occupied ? '撤退' : '出征');
   syncArmyPersonnelLocations(world, army);
   emit({
     category: '海洋',
-    kind: won ? 'amphibious_landing_succeeded' : 'amphibious_landing_failed',
-    title: `${target.name}登陆${won ? '成功' : '受挫'}`,
-    summary: `${army.name}在舰队运输与海权掩护下投入${soldiersBefore}人，损失${losses}，${won ? '建立滩头并夺取区域控制' : '未能突破守备而撤回'}。`,
+    kind: occupied ? 'amphibious_landing_succeeded' : 'amphibious_landing_failed',
+    title: `${target.name}登陆${occupied ? '成功' : '受挫'}`,
+    summary: `${army.name}在舰队运输与海权掩护下投入${soldiersBefore}人，损失${losses}，${occupied ? '建立滩头并夺取区域控制' : won ? '战胜后已无留阵部曲，未能占领' : '未能突破守备而撤回'}。`,
     importance: 4,
-    actorIds: [army.commanderId, ...operation.fleetIds.map((id) => world.fleets.find((fleet) => fleet.id === id)?.commanderId).filter((id): id is string => Boolean(id))],
+    actorIds: [battleFact.payload.attacker.commanderId, ...operation.fleetIds.map((id) => world.fleets.find((fleet) => fleet.id === id)?.commanderId).filter((id): id is string => Boolean(id))],
     polityIds: [army.polityId, previousController],
     regionIds: [operation.originRegionId, target.id],
-    causes: [
-      { label: '运输吨位', role: '结构', weight: 0.2, evidence: `参与舰队${operation.fleetIds.length}支`, refs: operation.fleetIds.map((id) => ({ kind: 'entity' as const, entityType: 'fleet' as const, entityId: id, label: '参战舰队' })) },
-      { label: '沿途海权', role: '条件', weight: 0.24, evidence: `航路${operation.seaZonePath.join('→')}`, refs: operation.seaZonePath.map((id) => ({ kind: 'entity' as const, entityType: 'seaZone' as const, entityId: id, label: '登陆航路' })) },
-      { label: '攻防实力', role: '条件', weight: 0.31, evidence: `攻方${Math.round(attackPower)}、守方${Math.round(defensePower)}` },
-      { label: '登陆结果', role: '结果', weight: 0.25, evidence: `攻方损失${losses}，民兵损失${militiaLoss}` },
-    ],
+    causes: battleFact.causes,
     stateDeltas: [
-      { entityType: 'army', entityId: army.id, field: 'soldiers', before: soldiersBefore, after: army.soldiers, delta: -losses },
-      ...(won ? [{ entityType: 'region' as const, entityId: target.id, field: 'controllerId', before: previousController, after: army.polityId }] : []),
+      { entityType: 'army', entityId: army.id, field: 'soldiers', before: soldiersBefore, after: battleFact.payload.attacker.soldiersAfter, delta: -losses },
+      ...(occupied ? [{ entityType: 'region' as const, entityId: target.id, field: 'controllerId', before: previousController, after: army.polityId }] : []),
       { entityType: 'navalOperation', entityId: operation.id, field: 'stage', before: '登陆', after: operation.stage },
     ],
     ...projectFactLinks(territoryFact ? [battleFact, territoryFact] : battleFact),

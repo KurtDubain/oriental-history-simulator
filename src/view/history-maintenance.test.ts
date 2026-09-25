@@ -61,15 +61,20 @@ describe('same history, faithful reading', () => {
     world.facts.push(...facts);
     const before = serializeWorld(world);
     const [scene] = projectHistoricalScenes(world, [...facts].reverse().concat(battles[0]), 10);
-    expect(scene.title).toContain('接连3战');
+    expect(scene.title).toContain('战役');
+    expect(scene.summary).toContain('3次交锋');
     for (const a of armies) expect(scene.summary).toContain(world.characters.find(p => p.id === a.commanderId)!.name);
     expect(scene.summary.indexOf('第1战')).toBeLessThan(scene.summary.indexOf('第2战'));
     expect(scene.summary.indexOf('第2战')).toBeLessThan(scene.summary.indexOf('第3战'));
     expect(scene.sourceFactIds).toHaveLength(facts.length);
-    expect(scene.summary.match(/攻方军团损失50人、守方常备军损失50人、守地民兵损失7人/g)).toHaveLength(3);
+    // The stage shows deduplicated totals; each original encounter still exposes its own losses.
+    expect(scene.summary).toContain('累计损失300人');
+    expect(scene.summary).toContain('民兵损失21人');
+    for(const b of battles)expect(projectFactNarrative(world,b).summary).toContain('攻方军团损失50人、守方常备军损失50人、守地民兵损失7人');
     if (changes.length) {
-      const causeIndex = wins.lastIndexOf(true) + 1;
-      expect(scene.summary.slice(scene.summary.indexOf(`第${causeIndex}战`) + 3).split(/第\d战/)[0]).toContain('此战后');
+      // This fixture emits its transfer after all three battles. Do not move it earlier
+      // just because its source battle occurred earlier in the same quarter.
+      expect(scene.summary.indexOf('此后归')).toBeGreaterThan(scene.summary.indexOf('第3战'));
     } else expect(scene.summary).not.toContain('转入');
     expect(projectHistoricalScenes(world, facts, 10)).toEqual([scene]);
     expect(serializeWorld(world)).toBe(before);

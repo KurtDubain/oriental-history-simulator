@@ -1,21 +1,11 @@
 import { stableCompare } from '../sim/random';
-import { armyOrderPath } from '../sim/military/orders';
-import type { ArmyOrderKind, ArmyState, FactionState, SimulationFact, WarState, WorldState } from '../sim/types';
-
-const ORDER_LABEL: Readonly<Record<ArmyOrderKind, string>> = {
-  hold: '留守',
-  advance: '进攻',
-  intercept: '截击',
-  reinforce: '增援',
-  retreat: '撤退',
-};
+import { armyOrderPath, ORDER_LABELS as ORDER_LABEL } from '../sim/military/orders';
+import type { ArmyState, FactionState, SimulationFact, WarState, WorldState } from '../sim/types';
 
 export interface WarGroupArmyView {
   id: string;
   name: string;
-  commanderId: string;
   commander: string;
-  deputy: string | null;
   soldiers: number;
   regionId: string;
   region: string;
@@ -35,19 +25,13 @@ export interface WarGroupPersonView {
   formationId: string;
   formation: string;
   commander: string;
-  region: string;
-  status: string;
 }
 
 export interface WarGroupForceView {
   id: string;
   factionId: string | null;
   name: string;
-  shortName: string;
-  leaderId: string | null;
   leader: string;
-  generalIds: readonly string[];
-  generals: readonly string[];
   persons: readonly WarGroupPersonView[];
   armies: readonly WarGroupArmyView[];
   soldiers: number;
@@ -73,7 +57,6 @@ export interface WarContactView {
   attackerCommander: string;
   attackerGroup: string;
   defenderArmyIds: readonly string[];
-  defenders: string;
   defenderCommanders: string;
   defenderGroups: string;
   steps: number;
@@ -82,14 +65,9 @@ export interface WarContactView {
 export interface WarBattleView {
   factId: string;
   eventId: string | null;
-  regionId: string;
   region: string;
-  attacker: string;
   attackerCommander: string;
   attackerGroup: string;
-  defender: string;
-  defenderCommanders: string;
-  defenderGroups: string;
   attackerBefore: number;
   defenderBefore: number;
   attackerLosses: number;
@@ -101,7 +79,6 @@ export interface WarBattleView {
 export interface WarGroupProjection {
   warId: string;
   title: string;
-  durationTurns: number;
   durationLabel: string;
   sides: readonly [WarSideForceView, WarSideForceView];
   mainFront: string;
@@ -117,10 +94,6 @@ function personName(world: WorldState, id: string | null | undefined): string {
 
 function regionName(world: WorldState, id: string | null | undefined): string {
   return world.regions.find((item) => item.id === id)?.name ?? '战地未详';
-}
-
-function compactGroupName(name: string): string {
-  return name.length <= 5 ? name : name.replace(/一系$|旧部$/, '').slice(0, 5);
 }
 
 /** Actual allegiance owns the army; lawful command is only the fallback. */
@@ -147,9 +120,7 @@ function armyView(world: WorldState, army: ArmyState): WarGroupArmyView {
   return {
     id: army.id,
     name: army.name,
-    commanderId: army.commanderId,
     commander: lawful,
-    deputy: army.deputyCommanderId ? personName(world, army.deputyCommanderId) : null,
     soldiers: army.soldiers,
     regionId: army.regionId,
     region: regionName(world, army.regionId),
@@ -191,8 +162,6 @@ function groupsForSide(
       formationId: army.id,
       formation: army.name,
       commander: personName(world, army.commanderId),
-      region: regionName(world, army.regionId),
-      status: force.status,
     });
     buckets.set(key, bucket);
   }
@@ -227,11 +196,7 @@ function groupsForSide(
       id,
       factionId: bucket.faction?.id ?? null,
       name: bucket.faction?.name ?? '未归集团',
-      shortName: compactGroupName(bucket.faction?.name ?? '无系'),
-      leaderId: bucket.faction?.leaderId ?? null,
       leader: bucket.faction ? personName(world, bucket.faction.leaderId) : '暂无首领',
-      generalIds,
-      generals: generalIds.map((characterId) => personName(world, characterId)),
       persons: bucket.persons.sort((left, right) => right.soldiers - left.soldiers || stableCompare(left.id, right.id)),
       armies: views.sort((left, right) => right.soldiers - left.soldiers || stableCompare(left.id, right.id)),
       soldiers: bucket.persons.reduce((sum, person) => sum + person.soldiers, 0),
@@ -283,7 +248,6 @@ function contactsFor(world: WorldState, war: WarState, armies: readonly ArmyStat
       attackerCommander: personName(world, army.commanderId),
       attackerGroup: attackerFactions.join('、') || '未归集团',
       defenderArmyIds: contactDefenders.map((item) => item.id),
-      defenders: contactDefenders.map((item) => item.name).join('、'),
       defenderCommanders: contactDefenders.map((item) => personName(world, item.commanderId)).join('、'),
       defenderGroups: defenderFactions.join('、'),
       steps: Math.max(1, pathIndex.get(regionId) ?? 1),
@@ -301,10 +265,7 @@ function latestBattleView(
   const attackerFactionNames = [...new Set((fact.payload.attacker.participants ?? [])
     .map((item) => world.factions.find((faction) => faction.id === item.factionId)?.name ?? '未归集团'))].sort(stableCompare);
   const defenderArmies = fact.payload.defenders.map((entry) => world.armies.find((item) => item.id === entry.armyId)).filter((item): item is ArmyState => Boolean(item));
-  const defenderFactionNames = [...new Set(fact.payload.defenders.flatMap((entry) => entry.participants ?? [])
-    .map((item) => world.factions.find((faction) => faction.id === item.factionId)?.name ?? '未归集团'))].sort(stableCompare);
   const attackerName = attackerArmy?.name ?? fact.payload.attacker.armyId;
-  const defenderNames = defenderArmies.length ? defenderArmies.map((item) => item.name).join('、') : '地方守军';
   const won = fact.payload.attackerWon;
   const retreatRegions = [...new Set(defenderArmies.flatMap((army) => (
     army.recentMovement?.turn === fact.turn
@@ -319,14 +280,9 @@ function latestBattleView(
   return {
     factId: fact.id,
     eventId: world.history.find((event) => event.sourceFactIds.includes(fact.id))?.id ?? null,
-    regionId: fact.payload.targetRegionId,
     region: regionName(world, fact.payload.targetRegionId),
-    attacker: attackerName,
     attackerCommander: personName(world, fact.payload.attacker.commanderId),
     attackerGroup: attackerFactionNames.join('、') || (attackerArmy ? factionNamesForFormation(world, attackerArmy).join('、') : '') || '未归集团',
-    defender: defenderNames,
-    defenderCommanders: fact.payload.defenders.map((item) => personName(world, item.commanderId)).join('、') || '地方守将',
-    defenderGroups: defenderFactionNames.join('、'),
     attackerBefore: fact.payload.attacker.soldiersBefore,
     defenderBefore: fact.payload.defenders.reduce((sum, item) => sum + item.soldiersBefore, 0),
     attackerLosses: fact.payload.attacker.losses,
@@ -363,7 +319,6 @@ export function projectWarGroups(world: WorldState, warId: string): WarGroupProj
   return {
     warId: war.id,
     title: `${world.polities.find((item) => item.id === war.attackerId)?.shortName ?? '攻方'}攻${world.polities.find((item) => item.id === war.defenderId)?.shortName ?? '守方'}`,
-    durationTurns,
     durationLabel: `第${durationTurns}季`,
     sides: [side(war.attackerId, '攻方'), side(war.defenderId, '守方')],
     mainFront: regionName(world, mainFrontId),

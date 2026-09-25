@@ -132,7 +132,7 @@ describe('battle participant fate', () => {
     expect(ruler).toEqual(before);
     expect(context.facts.filter(f => (f.kind === 'character_wounded' || f.kind === 'character_death') && f.payload.characterId === ruler.id)).toEqual([]);
   });
-  it('raises only conditional death risk by at most eight percent, retaining the cap and wound curve', () => {
+  it('increases defeat exposure smoothly while preserving low-loss victories and the wound curve', () => {
     for (const role of ['commander', 'deputy', 'member'] as const) for (const lost of [0, .01, .2, .4, 1])
       for (const won of [true, false]) for (const health of [35, 80, 100]) {
         const p = { characterId: 'exposed', factionId: null, formationCommanderId: 'commander', role,
@@ -141,9 +141,12 @@ describe('battle participant fate', () => {
         const position = role === 'commander' ? 1 : role === 'deputy' ? .6 : .25;
         const danger = current.severity * lost * lost / (lost + .1);
         const uncapped = danger * (.2 + position * .05 + (1-health/100)*.1);
-        expect(current.death).toBeCloseTo(Math.min(.055, uncapped * 1.08), 12);
-        expect(current.death).toBeGreaterThanOrEqual(Math.min(.055, uncapped));
-        expect(current.death).toBeLessThanOrEqual(Math.min(.055, uncapped) * 1.08);
+        const previous=Math.min(.055,uncapped*1.08);
+        expect(current.death).toBeCloseTo(Math.min(.12, uncapped * 1.08 * (won ? 1 : 1+lost*2)), 12);
+        expect(current.death).toBeGreaterThanOrEqual(previous);
+        if(won&&lost<=.2)expect(current.death).toBe(previous);
+        if(!won&&lost>=.2&&lost<=.4)expect(current.death).toBeGreaterThan(previous*1.3);
+        expect(current.death).toBeLessThanOrEqual(.12);
         expect(current.wound).toBeCloseTo(Math.min(.38, danger*(2.5+position*.4+(1-health/100)*.6)),12);
       }
   });
@@ -188,10 +191,10 @@ describe('battle participant fate', () => {
     expect(firstContext.facts).toEqual(secondContext.facts);
     expect(dangerous.death).toBeGreaterThan(safe.death);
     expect(dangerous.wound).toBeGreaterThan(safe.wound);
-    expect(safe.exposure).toBe('ordinary');
+    expect(safe.severity).toBeLessThan(.24);
     expect(safe.death).toBeLessThan(0.000_001);
     expect(safe.wound).toBeLessThan(0.000_001);
-    expect(dangerous.death).toBeLessThanOrEqual(.055);
+    expect(dangerous.death).toBeLessThanOrEqual(.12);
     expect(dangerous.wound).toBeLessThanOrEqual(.38);
   });
 

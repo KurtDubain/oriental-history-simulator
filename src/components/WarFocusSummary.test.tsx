@@ -8,17 +8,15 @@ import { WarFocusSummary } from './WarFocusSummary';
 const war: WarGroupProjection = {
   warId: 'war_test',
   title: '临攻朔',
-  durationTurns: 3,
   durationLabel: '第3季',
   mainFront: '济州',
   sides: [{
     polityId: 'p_lin', polity: '临', role: '攻方', armyCount: 1, soldiers: 2_700,
     groups: [{
-      id: 'group_lin', factionId: 'f_lin', name: '天衡系', shortName: '天衡', leaderId: 'c_zhao', leader: '赵维谦',
-      generalIds: ['c_zhao', 'c_xie'], generals: ['赵维谦', '谢德清'],
+      id: 'group_lin', factionId: 'f_lin', name: '天衡系', leader: '赵维谦',
       persons: [
-        { id: 'c_zhao', name: '赵维谦', soldiers: 1_800, formationId: 'a_lin', formation: '天衡行营', commander: '赵维谦', region: '济州', status: '出征' },
-        { id: 'c_xie', name: '谢德清', soldiers: 900, formationId: 'a_lin', formation: '天衡行营', commander: '赵维谦', region: '济州', status: '出征' },
+        { id: 'c_zhao', name: '赵维谦', soldiers: 1_800, formationId: 'a_lin', formation: '天衡行营', commander: '赵维谦' },
+        { id: 'c_xie', name: '谢德清', soldiers: 900, formationId: 'a_lin', formation: '天衡行营', commander: '赵维谦' },
       ],
       armies: [], soldiers: 2_700, lossesThisTurn: 300, fronts: ['济州'], posture: '进攻',
     }],
@@ -28,9 +26,8 @@ const war: WarGroupProjection = {
   }],
   contacts: [],
   latestBattle: {
-    factId: 'fact_battle_1', eventId: null, regionId: 'r_jizhou', region: '济州',
-    attacker: '天衡行营', attackerCommander: '赵维谦', attackerGroup: '天衡系',
-    defender: '朔军行营', defenderCommanders: '独孤守一', defenderGroups: '雪塞边军',
+    factId: 'fact_battle_1', eventId: null, region: '济州',
+    attackerCommander: '赵维谦', attackerGroup: '天衡系',
     attackerBefore: 3_000, defenderBefore: 2_000, attackerLosses: 300, defenderLosses: 400,
     result: '得胜', aftermath: '临军留守济州。',
   },

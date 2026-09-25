@@ -1,4 +1,5 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+import * as random from '../random';
 
 import {
   advanceWorld,
@@ -510,6 +511,38 @@ function stageInFlightLanding(
 }
 
 describe('military authority and persistent army orders', () => {
+  it.each(['death', 'wound', 'all-dead'] as const)('settles real landing participants and occupation after %s', outcome => {
+    let world = advanceWorld(createWorld('登陆风险入口夹具'));
+    const fixture = stageInFlightLanding(world, 'r_yamato', ['sea_fujian', 'sea_east_ocean']);
+    const fleet = world.fleets.find(f => f.id === fixture.fleetId)!;
+    fleet.warships = 5000;
+    const army = world.armies.find(a => a.id === fixture.armyId)!;
+    const commanderId = army.commanderId, escortId = fleet.commanderId;
+    world.characters.find(c => c.id === commanderId)!.protectedUntilTurn = outcome === 'wound' ? world.turn + 8 : null;
+    const original = random.keyedRandom;
+    const spy = vi.spyOn(random, 'keyedRandom').mockImplementation((...args) => args[2] === 'battle-fate'
+      ? outcome === 'all-dead' || args.at(-1) === commanderId ? 0 : .999
+      : original(...args));
+    try {
+      for (let t=0;t<5 && !world.facts.some(f=>f.kind==='battle'&&f.payload.warId===fixture.warId);t++) world=advanceWorld(world);
+      const battle=world.facts.find(f=>f.kind==='battle'&&f.payload.warId===fixture.warId)!;
+      if(battle.kind!=='battle')throw Error('landing did not occur');
+      const fates=world.facts.filter((f): f is Extract<typeof f,{kind:'character_death'|'character_wounded'}> => (f.kind==='character_death'||f.kind==='character_wounded')&&f.payload.battleFactId===battle.id);
+      expect(fates.some(f=>f.payload.characterId===commanderId)).toBe(true);
+      expect(fates.some(f=>f.payload.characterId===escortId)).toBe(false);
+      expect(new Set(fates.map(f=>f.payload.characterId)).size).toBe(fates.length);
+      for(const f of fates)expect(f.sourceFactIds).toContain(battle.id);
+      for(const d of battle.payload.defenders){expect(d.losses).toBe(d.soldiersBefore-d.soldiersAfter);expect(d.participants?.every(p=>p.losses===p.soldiersBefore-p.soldiersAfter)).toBe(true);}
+      if(outcome==='all-dead'){
+        expect(fates.length).toBeGreaterThanOrEqual(2);
+        expect(fates.length).toBe(battle.payload.attacker.participants!.length);
+        expect(world.regions.find(r=>r.id==='r_yamato')!.controllerId).toBe('p_yamato');
+        expect(world.armies.some(a=>a.id===fixture.armyId)).toBe(false);
+      }else expect(world.regions.find(r=>r.id==='r_yamato')!.controllerId).toBe('p_minhai');
+      expect(validateWorld(world)).toEqual([]);
+      expect(serializeWorld(deserializeWorld(serializeWorld(world)))).toBe(serializeWorld(world));
+    } finally {spy.mockRestore();}
+  },20000);
   it('creates complete authority fields and derives every formation from unique personal forces', () => {
     const world = createWorld('军权字段开局');
 
