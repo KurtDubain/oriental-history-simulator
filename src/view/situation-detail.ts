@@ -6,9 +6,11 @@ import type { DeltaValue, StateDelta, WorldState } from '../sim/types';
 import { projectCoreImpacts } from './core-impact-projection';
 import { historyTurnDate } from './v1-history';
 import { projectWarGroups } from './war-group-projection';
+import { warEndTurn, warFactMatches } from './war-facts';
 import {
   projectFactNarrative,
   historicalSceneContext,
+  factHistoryIds,
   projectSituationHistoricalScenes,
   type HistoricalScene,
 } from './historical-scenes';
@@ -188,6 +190,8 @@ function unique(values: readonly string[]): string[] {
 }
 
 function boundChronological<T>(items: readonly T[], max: number): T[] {
+  if (max <= 0) return [];
+  if (max === 1) return items.slice(-1);
   if (items.length <= max) return [...items];
   return [items[0], ...items.slice(-(max - 1))];
 }
@@ -198,36 +202,29 @@ function dateLabel(turn: number): string {
 
 const compactNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format;
 
+const ENTITY_COLLECTIONS = {
+  character:'characters', polity:'polities', region:'regions', family:'families', faction:'factions', army:'armies', fleet:'fleets',
+} as const;
+function entityName(world:WorldState,type:string,id:string):string|undefined {
+  const key=ENTITY_COLLECTIONS[type as keyof typeof ENTITY_COLLECTIONS];
+  const entity=key && world[key].find(item=>item.id===id);
+  return entity ? 'shortName' in entity ? entity.shortName ?? entity.name : entity.name : undefined;
+}
+
 function valueLabel(world: WorldState, value: DeltaValue, field: string): string {
   if (typeof value === 'number') return compactNumber(value);
   if (typeof value === 'boolean') return value ? '是' : '否';
   if (value === null) return '无';
   if (field.startsWith('order.') && ORDER_VALUE_LABELS[value]) return ORDER_VALUE_LABELS[value];
-  const named = world.characters.find((item) => item.id === value)?.name
-    ?? world.polities.find((item) => item.id === value)?.shortName
-    ?? world.polities.find((item) => item.id === value)?.name
-    ?? world.regions.find((item) => item.id === value)?.name
-    ?? world.families.find((item) => item.id === value)?.name
-    ?? world.factions.find((item) => item.id === value)?.name
-    ?? world.armies.find((item) => item.id === value)?.name
+  const named = ['character','polity','region','family','faction','army'].map(type=>entityName(world,type,value)).find(name=>name!==undefined)
     ?? world.wars.find((item) => item.id === value)?.reason;
   if (named) return named;
   return field === 'outcomeKey' ? situationOutcomeLabel(value) : value;
 }
 
 function entityLabel(world: WorldState, type: StateDelta['entityType'], id: string): string {
-  if (type === 'character') return world.characters.find((item) => item.id === id)?.name ?? '已佚人物';
-  if (type === 'polity') return world.polities.find((item) => item.id === id)?.shortName
-    ?? world.polities.find((item) => item.id === id)?.name
-    ?? '已佚政权';
-  if (type === 'region') return world.regions.find((item) => item.id === id)?.name ?? '未载州域';
-  if (type === 'family') return world.families.find((item) => item.id === id)?.name ?? '已佚家族';
-  if (type === 'faction') return world.factions.find((item) => item.id === id)?.name ?? '已佚派系';
-  if (type === 'army') return world.armies.find((item) => item.id === id)?.name ?? '已解散军团';
-  if (type === 'fleet') return world.fleets.find((item) => item.id === id)?.name ?? '已解散舰队';
-  if (type === 'war') return '该场战争';
-  if (type === 'situation') return '该局势';
-  return '相关对象';
+  const missing:Partial<Record<StateDelta['entityType'],string>> = {character:'已佚人物',polity:'已佚政权',region:'未载州域',family:'已佚家族',faction:'已佚派系',army:'已解散军团',fleet:'已解散舰队',war:'该场战争',situation:'该局势'};
+  return entityName(world,type,id) ?? missing[type] ?? '相关对象';
 }
 
 function projectDelta(world: WorldState, factId: string, delta: StateDelta): SituationDetailDelta {
@@ -248,21 +245,7 @@ function projectDelta(world: WorldState, factId: string, delta: StateDelta): Sit
   };
 }
 
-type FactHistoryIndex = ReadonlyMap<string, readonly string[]>;
-
-function buildFactHistoryIndex(history: ReturnType<typeof historicalSceneContext>['history']): FactHistoryIndex {
-  const index = new Map<string, string[]>();
-  for (const event of history) {
-    for (const factId of event.sourceFactIds) {
-      const eventIds = index.get(factId) ?? [];
-      if (eventIds.length < 2 && !eventIds.includes(event.id)) eventIds.push(event.id);
-      index.set(factId, eventIds);
-    }
-  }
-  return index;
-}
-
-function projectFact(world: WorldState, fact: SimulationFact, historyByFact: FactHistoryIndex): SituationDetailFact {
+function projectFact(world: WorldState, fact: SimulationFact, history: ReturnType<typeof historicalSceneContext>['history']): SituationDetailFact {
   const copy = projectFactNarrative(world, fact);
   return {
     id: fact.id,
@@ -275,21 +258,15 @@ function projectFact(world: WorldState, fact: SimulationFact, historyByFact: Fac
     importance: fact.importance,
     stateDeltas: fact.stateDeltas.slice(0, MAX_SITUATION_DETAIL_DELTAS).map((delta) => projectDelta(world, fact.id, delta)),
     sourceFactIds: [...fact.sourceFactIds],
-    historyEventIds: [...(historyByFact.get(fact.id) ?? [])],
+    historyEventIds: factHistoryIds(history, new Set([fact.id]), fact),
   };
-}
-
-function warFactMatches(fact: SimulationFact, warId: string): boolean {
-  if (fact.kind === 'war_started' || fact.kind === 'war_ended' || fact.kind === 'battle') {
-    return fact.payload.warId === warId;
-  }
-  return fact.kind === 'territory_control_changed' && fact.payload.warId === warId;
 }
 
 function evidenceFacts(
   situation: SituationState,
   milestoneFacts: readonly Extract<SimulationFact, { kind: 'situation_milestone' }>[],
-  availableFacts: readonly SimulationFact[],
+  context: ReturnType<typeof historicalSceneContext>,
+  scenes: readonly HistoricalScene[],
 ): { facts: SimulationFact[]; missingFactIds: string[] } {
   const directIds = unique([
     ...situation.causalFactIds,
@@ -298,20 +275,19 @@ function evidenceFacts(
     ...milestoneFacts.map((fact) => fact.id),
     ...milestoneFacts.flatMap((fact) => fact.sourceFactIds),
   ]);
-  const factById = new Map(availableFacts.map((fact) => [fact.id, fact]));
+  const {facts:availableFacts,byId:factById} = context;
   const missingFactIds = directIds.filter((id) => !factById.has(id));
-  const selected = new Map<string, SimulationFact>();
-  for (const id of directIds) {
-    const fact = factById.get(id);
-    if (fact) selected.set(id, fact);
-  }
-  if (situation.type === 'war_progress') {
-    for (const fact of availableFacts) {
-      if (warFactMatches(fact, situation.scopeKey)) selected.set(fact.id, fact);
-    }
-  }
-  const ordered = [...selected.values()].sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
-  return { facts: boundChronological(ordered, MAX_SITUATION_DETAIL_FACTS), missingFactIds };
+  const ids = new Set(directIds);
+  const selected = availableFacts.filter(f=>ids.has(f.id)||situation.type==='war_progress'&&warFactMatches(f,situation.scopeKey,factById));
+  const order = (a:SimulationFact,b:SimulationFact) => (context.order.get(a.id) ?? 0)-(context.order.get(b.id) ?? 0);
+  const ordered = selected.filter(f=>f.kind!=='situation_milestone'&&!context.continuations.has(f.id));
+  // Keep the evidence of the scenes actually on screen ahead of old tracking updates.
+  const displayed = new Set(scenes.flatMap(s=>s.sourceFactIds));
+  const rank = (f:SimulationFact) => !displayed.has(f.id) ? 2 : f.kind==='character_death'||f.kind==='character_wounded' ? 0 : 1;
+  const facts = situation.type==='war_progress'
+    ? ordered.sort((a,b)=>rank(a)-rank(b)||order(b,a)).slice(0,MAX_SITUATION_DETAIL_FACTS)
+    : boundChronological(ordered,MAX_SITUATION_DETAIL_FACTS);
+  return { facts:facts.sort(order), missingFactIds };
 }
 
 function outcomeSummary(situation: SituationState, label: string): string {
@@ -342,7 +318,7 @@ function playerSummary(
       ? `${courtParties.length > 0 ? courtParties.join('与') : core ?? '朝中各方'}在${polity ?? '该朝廷'}的角力以“${outcomeLabel ?? '争执平息'}”收束。`
       : outcomeSummary(situation, outcomeLabel ?? '争执平息');
     return [
-      `${item.title}起于${dateLabel(situation.startedTurn)}，于${dateLabel(situation.resolvedTurn ?? situation.lastUpdatedTurn)}结案，历时${durationLabel}。`,
+      `${item.title}已结案，历时${durationLabel}。`,
       resolvedSummary,
     ];
   }
@@ -389,7 +365,7 @@ function directoryItem(situation: SituationState, world: WorldState): SituationD
     status: item.status,
     dateLabel: item.status === 'resolved'
       ? dateLabel(item.resolvedTurn ?? item.lastUpdatedTurn)
-      : `始于${dateLabel(item.startedTurn)}`,
+      : `追踪始于${dateLabel(item.startedTurn)}`,
   };
 }
 
@@ -397,36 +373,31 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
   const item = projectSituationSnapshotItem(situation, world);
   const context = historicalSceneContext(world);
   const allFacts = context.facts;
-  const historyByFact = buildFactHistoryIndex(context.history);
   const milestoneFacts = allFacts
     .filter((fact): fact is Extract<SimulationFact, { kind: 'situation_milestone' }> => (
       fact.kind === 'situation_milestone' && fact.payload.situationId === situation.id
     ))
     .sort((left, right) => left.turn - right.turn || stableCompare(left.id, right.id));
-  const evidenceSelection = evidenceFacts(situation, milestoneFacts, allFacts);
-  const continuations = context.continuations;
+  const scenes = projectSituationHistoricalScenes(world, situation, 3, null, 'all', context);
+  const evidenceSelection = evidenceFacts(situation, milestoneFacts, context, scenes);
   const evidence = evidenceSelection.facts
-    .filter((fact) => fact.kind !== 'situation_milestone' && !continuations.has(fact.id))
-    .map((fact) => projectFact(world, fact, historyByFact));
+    .map((fact) => projectFact(world, fact, context.history));
   const resultFactIds = [...(situation.resolution?.resultFactIds ?? [])];
   const resultFactIdSet = new Set(resultFactIds);
   const consequences = evidence
     .filter((fact) => resultFactIdSet.has(fact.id))
     .flatMap((fact) => fact.stateDeltas.map((delta) => ({
+      ...delta,
       id: `${fact.id}:${delta.entityType}:${delta.entityId}:${delta.field}`,
-      factId: fact.id,
-      entityLabel: delta.entityLabel,
-      fieldLabel: delta.fieldLabel,
-      beforeLabel: delta.beforeLabel,
-      afterLabel: delta.afterLabel,
     })))
     .slice(0, MAX_SITUATION_DETAIL_DELTAS);
   const outcomeKey = situation.resolution?.outcomeKey ?? null;
   const outcomeLabel = outcomeKey ? situationOutcomeLabel(outcomeKey) : null;
-  const endTurn = situation.resolvedTurn;
-  const durationTurns = Math.max(1, (endTurn ?? situation.lastUpdatedTurn) - situation.startedTurn + 1);
+  const war = situation.type === 'war_progress' && world.wars.find(w=>w.id===situation.scopeKey);
+  const startTurn = war ? war.startedTurn : situation.startedTurn;
+  const endTurn = war ? warEndTurn(world,war) : situation.resolvedTurn ?? situation.lastUpdatedTurn;
+  const durationTurns = Math.max(1, endTurn - startTurn + 1);
   const durationLabel = durationTurns < 4 ? `${durationTurns}季` : `${Math.floor(durationTurns / 4)}年${durationTurns % 4 ? `${durationTurns % 4}季` : ''}`;
-  const scenes = projectSituationHistoricalScenes(world, situation, 3, null, 'all', context);
   const latestScene = scenes[0];
   const lastSettledTurn = world.lastTurn?.turn ?? Math.max(0, world.turn - 1);
   const recentFactIds = new Set(latestScene?.sourceFactIds ?? []);
@@ -448,8 +419,8 @@ export function projectSituationDetail(world: WorldState, situation: SituationSt
     typeLabel: item.typeLabel,
     title: item.title,
     status: situation.status,
-    startDateLabel: dateLabel(situation.startedTurn),
-    endDateLabel: dateLabel(endTurn ?? situation.lastUpdatedTurn),
+    startDateLabel: dateLabel(startTurn),
+    endDateLabel: dateLabel(endTurn),
     durationLabel,
     playerSummary: summary,
     currentChange: latestScene && latestScene.turn === lastSettledTurn

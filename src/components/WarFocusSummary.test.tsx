@@ -35,6 +35,11 @@ const war: WarGroupProjection = {
 };
 
 describe('WarFocusSummary', () => {
+  it('keeps the attacker name distinct from a defender victory in both responsive copies',()=>{
+    const markup=renderToStaticMarkup(createElement(WarFocusSummary,{war:{...war,latestBattle:{...war.latestBattle!,result:'守方守住'}},onInspectPerson:vi.fn(),onInspectBattle:vi.fn(),onClose:vi.fn()}));
+    expect(markup).toContain('赵维谦进攻，守方守住');
+    expect(markup).not.toContain('赵维谦守方守住');
+  });
   it('默认折叠集团明细，且无史页的战役仍可打开轻量战报', () => {
     const markup = renderToStaticMarkup(createElement(WarFocusSummary, {
       war,

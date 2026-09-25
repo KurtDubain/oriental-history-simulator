@@ -6,6 +6,7 @@ import type { SituationState } from '../sim/situations';
 import { findWorldFact, readWorldFacts, readWorldHistory } from '../sim/archive';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import { historyTurnDate } from './v1-history';
+import { warEndTurn, warFactMatches, warKey } from './war-facts';
 
 export interface FactNarrative {
   title: string;
@@ -125,7 +126,7 @@ function armyName(world: WorldState, id: string, recordedName?: string): string 
   return world.armies.find((item) => item.id === id)?.name ?? recordedName ?? '旧日所部';
 }
 
-function factHistoryIds(
+export function factHistoryIds(
   history: readonly HistoryEvent[],
   factIds: ReadonlySet<string>,
   subject?: SimulationFact,
@@ -540,11 +541,13 @@ function warScene(
     const losses = forces.reduce((n,f) => n+f.losses,0);
     const casualties = (kind: 'character_wounded' | 'character_death') => new Set(facts.flatMap(f => f.kind === kind ? [f.payload.characterId] : [])).size;
     let encounter = 0;
-    const summary = `${battles.length}次交锋；常备军${new Set(forces.map(s => s.armyId)).size}支，单场峰值${peak}人、累计损失${losses}人（单编队最高${Math.round(Math.max(...forces.map(s=>s.losses/Math.max(1,s.soldiersBefore)))*100)}%）；民兵损失${battles.reduce((n,b) => n+b.payload.militiaLosses,0)}人；${casualties('character_wounded')}人负伤、${casualties('character_death')}人阵亡。`
-      + facts.flatMap(f => f.kind === 'battle'
+    const summary = facts.flatMap(f => f.kind === 'battle'
         ? [`第${++encounter}战，${regionName(world,f.payload.targetRegionId)}：${characterName(world,f.payload.attacker.commanderId)}进攻，${f.payload.attackerWon ? '攻方取胜' : '守方守住'}。`]
         : f.kind === 'territory_control_changed'
-          ? [`${regionName(world,f.payload.regionId)}此后归${polityName(world,f.payload.nextControllerId)}。`] : []).join('');
+          ? [`${regionName(world,f.payload.regionId)}此后归${polityName(world,f.payload.nextControllerId)}。`]
+          : f.kind === 'character_wounded' || f.kind === 'character_death'
+            ? [battleCasualtyText(world, f, context)] : []).join('')
+      + `${battles.length}次交锋；常备军${new Set(forces.map(s => s.armyId)).size}支，单场峰值${peak}人、累计损失${losses}人（单编队最高${Math.round(Math.max(...forces.map(s=>s.losses/Math.max(1,s.soldiersBefore)))*100)}%）；民兵损失${battles.reduce((n,b) => n+b.payload.militiaLosses,0)}人；${casualties('character_wounded')}人负伤、${casualties('character_death')}人阵亡。`;
     const scene = sceneFromFacts(context, key, facts, {
       title: `${regionName(world, first.payload.targetRegionId)}${battles.length > 1 ? '战役' : '之战'}`, summary,
     }, '', first);
@@ -553,10 +556,11 @@ function warScene(
   return sceneFromFacts(context, key, facts, projectFactNarrative(world, anchor), '', anchor);
 }
 
-function warKey(fact: SimulationFact): string | null {
-  if (fact.kind === 'war_started' || fact.kind === 'war_ended' || fact.kind === 'battle') return fact.payload.warId;
-  if (fact.kind === 'territory_control_changed') return fact.payload.warId;
-  return null;
+function battleCasualtyText(world: WorldState, fact: Extract<SimulationFact,{kind:'character_wounded'|'character_death'}>, context: SceneContext): string {
+  const battle = fact.payload.battleFactId && context.byId.get(fact.payload.battleFactId);
+  const side = battle && battle.kind === 'battle' && battleSides(battle).find(s => s.participants?.some(p=>p.characterId===fact.payload.characterId));
+  const role = side ? `${side === battle.payload.attacker ? '攻方' : '守方'}${polityName(world,side.polityId)}${side.commanderId===fact.payload.characterId ? '主帅' : side.deputyCommanderId===fact.payload.characterId ? '副将' : '参战者'}` : '';
+  return `${role}${characterName(world,fact.payload.characterId)}${fact.kind==='character_death' ? '阵亡' : '负伤退阵'}。`;
 }
 
 function collectAgencyChain(
@@ -673,12 +677,16 @@ export function projectHistoricalScenes(
     .slice(0, Math.max(0, maximum));
 }
 
-function militaryFactTouchesSituation(fact: SimulationFact, situation: SituationState): boolean {
-  const characters = new Set([
+function situationCharacters(situation: SituationState): Set<string> {
+  return new Set([
     ...situation.participants.coreCharacterIds,
     ...situation.participants.supportingCharacterIds,
     ...situation.participants.opposingCharacterIds,
   ]);
+}
+
+function militaryFactTouchesSituation(fact: SimulationFact, situation: SituationState): boolean {
+  const characters = situationCharacters(situation);
   const armies = new Set(situation.participants.armyIds);
   if (fact.kind === 'army_order_changed') return armies.has(fact.payload.armyId);
   if (fact.kind === 'battle') return battleSides(fact).some((side) => (
@@ -696,11 +704,7 @@ function militaryFactTouchesSituation(fact: SimulationFact, situation: Situation
 }
 
 function inheritanceFactTouchesSituation(fact: SimulationFact, situation: SituationState): boolean {
-  const characters = new Set([
-    ...situation.participants.coreCharacterIds,
-    ...situation.participants.supportingCharacterIds,
-    ...situation.participants.opposingCharacterIds,
-  ]);
+  const characters = situationCharacters(situation);
   const polities = new Set(situation.participants.polityIds);
   if (fact.kind === 'character_death') return characters.has(fact.payload.characterId);
   if (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') {
@@ -714,22 +718,8 @@ function inheritanceFactTouchesSituation(fact: SimulationFact, situation: Situat
     && fact.payload.rulerBeforeId !== fact.payload.rulerAfterId;
 }
 
-function warFactTouchesSituation(fact: SimulationFact, warId: string, context: SceneContext): boolean {
-  if (warKey(fact) === warId) return true;
-  if (fact.kind === 'character_wounded' || fact.kind === 'character_death') {
-    const battle = fact.payload.battleFactId && context.byId.get(fact.payload.battleFactId);
-    return Boolean(battle && warKey(battle) === warId);
-  }
-  return fact.kind === 'army_order_changed'
-    && (fact.payload.previous.warId === warId || fact.payload.next.warId === warId);
-}
-
 function courtFactTouchesSituation(fact: SimulationFact, situation: SituationState): boolean {
-  const participantCharacters = new Set([
-    ...situation.participants.coreCharacterIds,
-    ...situation.participants.supportingCharacterIds,
-    ...situation.participants.opposingCharacterIds,
-  ]);
+  const participantCharacters = situationCharacters(situation);
   const participantFactions = new Set(situation.participants.factionIds);
   if (fact.kind === 'court_action_resolved') {
     return fact.payload.affectedFactionIds.some((id) => participantFactions.has(id));
@@ -766,7 +756,8 @@ export function projectSituationHistoricalScenes(
   readScope: HistoricalSceneReadScope = 'all',
   context = historicalSceneContext(world, readScope),
 ): HistoricalScene[] {
-  const lastTurn = throughTurn ?? situation.resolvedTurn ?? situation.lastUpdatedTurn;
+  const war = situation.type === 'war_progress' && world.wars.find(w=>w.id===situation.scopeKey);
+  const lastTurn = throughTurn ?? (war ? warEndTurn(world,war) : situation.resolvedTurn ?? situation.lastUpdatedTurn);
   const directIds = new Set([
     ...situation.causalFactIds,
     ...situation.milestoneFactIds,
@@ -774,9 +765,9 @@ export function projectSituationHistoricalScenes(
   ]);
   const { facts: availableFacts, continuations } = context;
   const selected = availableFacts.filter((fact) => {
-    if (fact.turn < situation.startedTurn || fact.turn > lastTurn || continuations.has(fact.id)) return false;
+    if (fact.turn < (war ? war.startedTurn : situation.startedTurn) || fact.turn > lastTurn || continuations.has(fact.id)) return false;
     const linked = directIds.has(fact.id) || fact.sourceFactIds.some((id) => directIds.has(id));
-    if (situation.type === 'war_progress') return warFactTouchesSituation(fact, situation.scopeKey, context);
+    if (situation.type === 'war_progress') return warFactMatches(fact, situation.scopeKey, context.byId);
     if (situation.type === 'military_power_crisis') {
       return ['army_order_changed', 'battle', 'agency_support_resolved', 'agency_intent_submitted', 'agency_intent_resolved', 'appointment_started', 'appointment_ended']
         .includes(fact.kind) && militaryFactTouchesSituation(fact, situation);

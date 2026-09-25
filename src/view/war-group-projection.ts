@@ -1,6 +1,7 @@
 import { stableCompare } from '../sim/random';
 import { armyOrderPath, ORDER_LABELS as ORDER_LABEL } from '../sim/military/orders';
 import type { ArmyState, FactionState, SimulationFact, WarState, WorldState } from '../sim/types';
+import { warEndTurn } from './war-facts';
 
 export interface WarGroupArmyView {
   id: string;
@@ -137,7 +138,7 @@ function armyView(world: WorldState, army: ArmyState): WarGroupArmyView {
 function battleFacts(world: WorldState, warId: string): Extract<SimulationFact, { kind: 'battle' }>[] {
   return world.facts
     .filter((fact): fact is Extract<SimulationFact, { kind: 'battle' }> => fact.kind === 'battle' && fact.payload.warId === warId)
-    .sort((left, right) => right.turn - left.turn || stableCompare(right.id, left.id));
+    .reverse();
 }
 
 function groupsForSide(
@@ -264,19 +265,12 @@ function latestBattleView(
   const attackerArmy = world.armies.find((item) => item.id === fact.payload.attacker.armyId);
   const attackerFactionNames = [...new Set((fact.payload.attacker.participants ?? [])
     .map((item) => world.factions.find((faction) => faction.id === item.factionId)?.name ?? '未归集团'))].sort(stableCompare);
-  const defenderArmies = fact.payload.defenders.map((entry) => world.armies.find((item) => item.id === entry.armyId)).filter((item): item is ArmyState => Boolean(item));
-  const attackerName = attackerArmy?.name ?? fact.payload.attacker.armyId;
   const won = fact.payload.attackerWon;
-  const retreatRegions = [...new Set(defenderArmies.flatMap((army) => (
-    army.recentMovement?.turn === fact.turn
-    && army.recentMovement.fromRegionId === fact.payload.targetRegionId
-    && army.recentMovement.orderKind === 'retreat'
-      ? [regionName(world, army.recentMovement.toRegionId)]
-      : []
-  )))].sort(stableCompare);
-  const aftermath = won
-    ? `${attackerName}推进至${regionName(world, fact.payload.targetRegionId)}，守军${retreatRegions.length ? `退往${retreatRegions.join('、')}` : fact.payload.defenders.length ? '失去建制或撤离战场' : '未能阻止占领'}`
-    : `${attackerName}未能突破，退守原阵地`;
+  const transfer = world.facts.find(f=>f.kind==='territory_control_changed'&&f.sourceFactIds.includes(fact.id));
+  const movement = attackerArmy?.recentMovement;
+  const aftermath = transfer?.kind==='territory_control_changed'
+    ? `${regionName(world,transfer.payload.regionId)}此后归${world.polities.find(p=>p.id===transfer.payload.nextControllerId)?.name ?? '接收方'}`
+    : movement?.turn===fact.turn ? `${attackerArmy!.name}移向${regionName(world,movement.toRegionId)}` : '此战未记录领土易手';
   return {
     factId: fact.id,
     eventId: world.history.find((event) => event.sourceFactIds.includes(fact.id))?.id ?? null,
@@ -315,7 +309,7 @@ export function projectWarGroups(world: WorldState, warId: string): WarGroupProj
     fronts.set(regionId, (fronts.get(regionId) ?? 0) + army.soldiers);
   }
   const mainFrontId = [...fronts].sort((left, right) => right[1] - left[1] || stableCompare(left[0], right[0]))[0]?.[0];
-  const durationTurns = Math.max(1, (war.active ? world.turn : war.endedTurn ?? world.turn) - war.startedTurn);
+  const durationTurns = Math.max(1, warEndTurn(world,war) - war.startedTurn + 1);
   return {
     warId: war.id,
     title: `${world.polities.find((item) => item.id === war.attackerId)?.shortName ?? '攻方'}攻${world.polities.find((item) => item.id === war.defenderId)?.shortName ?? '守方'}`,

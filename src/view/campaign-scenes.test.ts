@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { createWorld, serializeWorld } from '../sim';
+import { advanceWorldBy, createWorld, serializeWorld } from '../sim';
 import type { BattleFact, SimulationFact } from '../sim/facts';
 import { projectHistoricalScenes } from './historical-scenes';
+import { projectSituationDetail } from './situation-detail';
+import { projectWarGroups } from './war-group-projection';
 
 function fixture() {
   const world=createWorld('交战阶段夹具');
@@ -16,6 +18,42 @@ function fixture() {
   return {world,a,b,c,battle};
 }
 describe('read-only campaign scenes',()=>{
+  it('names each side’s casualties in encounter order and exposes their own evidence',()=>{
+    const {world,battle}=fixture();
+    const first=battle('z-first',3),second=battle('a-second',4);second.payload.attackerWon=true;
+    const deaths=[first,second].map((b,i):SimulationFact=>{
+      const side=i?b.payload.defenders[0]:b.payload.attacker;
+      side.participants=[{characterId:side.commanderId,role:'commander',formationCommanderId:side.commanderId,factionId:null,soldiersBefore:1000,soldiersAfter:800,losses:200}];
+      return {...b,id:`death-${i}`,kind:'character_death',sourceFactIds:[b.id],payload:{characterId:side.commanderId,age:50,role:'军团主帅',health:60,diseaseId:null,cause:'battle',battleFactId:b.id}};
+    });
+    world.facts=[first,deaths[0],second,deaths[1]];
+    world.history=deaths.map(f=>({...f,id:`event-${f.id}`,kind:'character_battle_death',title:'真实战死',summary:'真实战死',evidence:[],situationIds:[],sourceFactIds:[f.id,...f.sourceFactIds]}));
+    world.history.unshift({...world.history[0],id:'earlier-listed-consequence',kind:'family_inheritance',sourceFactIds:[deaths[0].id]});
+    const template=advanceWorldBy(createWorld('兵权入世'),8).situationSystem.situations.find(s=>s.type==='war_progress')!;
+    const situation={...template,scopeKey:'war-fixture',startedTurn:4,lastUpdatedTurn:4,causalFactIds:[],milestoneFactIds:[],resolution:null};
+    world.wars=[{...advanceWorldBy(createWorld('兵权入世'),8).wars[0],id:'war-fixture',startedTurn:2,endedTurn:null,active:true}];
+    world.turn=5;world.lastTurn=null;
+    const before=serializeWorld(world),scene=projectHistoricalScenes(world,world.facts,10)[0],detail=projectSituationDetail(world,situation);
+    const attacking=world.characters.find(c=>c.id===first.payload.attacker.commanderId)!.name;
+    const defending=world.characters.find(c=>c.id===second.payload.defenders[0].commanderId)!.name;
+    expect(scene.summary).toContain(`主帅${attacking}阵亡`);expect(scene.summary).toContain(`主帅${defending}阵亡`);
+    expect(scene.summary.indexOf(`${attacking}阵亡`)).toBeLessThan(scene.summary.indexOf('第2战'));
+    expect(scene.summary.indexOf(`${defending}阵亡`)).toBeGreaterThan(scene.summary.indexOf('第2战'));
+    for(const d of deaths){expect(detail.evidence.find(e=>e.id===d.id)?.historyEventIds[0]).toBe(`event-${d.id}`);expect(scene.sourceFactIds).toContain(d.id);}
+    expect(detail.durationLabel).toBe('3季');expect(projectWarGroups(world,'war-fixture')!.durationLabel).toBe('第3季');
+    expect(detail.currentChange).toContain(`${attacking}阵亡`);
+    expect(serializeWorld(world)).toBe(before);
+    world.wars[0].active=false;world.wars[0].endedTurn=4;world.turn=100;
+    expect(projectSituationDetail(world,situation).durationLabel).toBe('3季');
+    expect(projectWarGroups(world,'war-fixture')!.durationLabel).toBe('第3季');
+  });
+  it('does not infer an occupation or retreat from a win or loss alone',()=>{
+    const {world,battle}=fixture(),b=battle('victory-without-survivors',3);b.payload.attackerWon=true;
+    world.facts=[b];world.wars=[{id:'war-fixture',kind:'interstate',attackerId:b.polityIds[0],defenderId:b.polityIds[1],startedTurn:2,endedTurn:null,active:true,attackerScore:0,defenderScore:0,reason:'边境',lastBattleTurn:3,goal:'边境',targetRegionIds:b.regionIds,exhaustion:0}];
+    expect(projectWarGroups(world,'war-fixture')!.latestBattle!.aftermath).toBe('此战未记录领土易手');
+    b.payload.attackerWon=false;
+    expect(projectWarGroups(world,'war-fixture')!.latestBattle!.aftermath).toBe('此战未记录领土易手');
+  });
   it('keeps a continuous multi-season campaign, true order, final control, distinct losses and unique people',()=>{
     const {world,a,b,battle}=fixture();
     const first=battle('z-first',3),second=battle('a-second',4,b.id);second.payload.attackerWon=true;

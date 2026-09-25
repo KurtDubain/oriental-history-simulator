@@ -5,7 +5,7 @@ import type { ArmyState, HistoryEvent, StateDelta, WorldState } from '../types';
 import { addBiography } from '../v02';
 import type { V03EventInput, V03TurnContext } from '../v03-context';
 import { battleRecoveryStatus, isBattleReadyCharacter, woundRecoveryQuarters } from './battle-readiness';
-import { detachPersonalForce, formationForces, personalForce } from './personal-forces';
+import { applyFormationLosses, detachPersonalForce, formationForces, personalForce } from './personal-forces';
 
 /** Capture before combat, then settle against the same owners before anyone leaves formation. */
 export function battleForceSnapshot(world: WorldState, army: ArmyState, before?: BattleFact['payload']['attacker']): BattleFact['payload']['attacker'] {
@@ -35,6 +35,18 @@ type Emit = (input: V03EventInput) => HistoryEvent;
 export interface BattleFateChances { death: number; wound: number; severity: number }
 const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, value));
 
+export function defenderBattleLossRate(attackerWon: boolean, attackerPower: number, defenderPower: number): number {
+  const ratio = attackerPower / Math.max(1, defenderPower);
+  return attackerWon ? clamp(.16 + ratio * .12, .16, .48) : clamp(.035 + ratio * .07, .035, .2);
+}
+
+/** Count combat losses before wounds, command relief or demobilization change formations. */
+export function applyBattleLosses(world: WorldState, armies: ArmyState[], requested: number, context: V03TurnContext): number {
+  const actual = applyFormationLosses(world, armies, requested).reduce((sum, loss) => sum + loss.losses, 0);
+  context.population.militaryDeaths += actual;
+  return actual;
+}
+
 export function battleFateChances(
   participant: Participant,
   sideWon: boolean,
@@ -54,12 +66,11 @@ export function battleFateChances(
   // Actual casualties expose the retinue: do not suppress the same exposure twice
   // with severity² and another fractional power. Negligible losses remain negligible.
   const danger = severity * loss * loss / (loss + .1);
-  return {
-    // Defeat amplifies actual retinue losses, not names, rank in a roster or a plot quota.
-    death: clamp(danger * (.2 + role * .05 + (1 - health / 100) * .1) * 1.08 * (sideWon ? 1 : 1 + loss * 2), 0, .12),
-    wound: clamp(danger * (2.5 + role * .4 + (1 - health / 100) * .6), 0, .38),
-    severity,
-  };
+  const death = clamp(danger * (.2 + role * .05 + (1 - health / 100) * .1) * 1.08 * (sideWon ? 1 : 1 + loss * 2), 0, .12);
+  const wound = clamp(danger * (2.5 + role * .4 + (1 - health / 100) * .6), 0, .38);
+  // Preserve the encounter's casualty envelope; heavy defeats make more of it fatal.
+  const fatal = Math.min(wound, .12 - death, wound * loss * (sideWon ? .25 : 1.2));
+  return { death: death + fatal, wound: wound - fatal, severity };
 }
 
 function participants(fact: BattleFact): Row[] {

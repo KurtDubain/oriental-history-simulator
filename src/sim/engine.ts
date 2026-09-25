@@ -98,7 +98,7 @@ import {
   expeditionAssemblyText,
   selectExpeditionResponses,
 } from './military/expedition-response';
-import { battleForceSnapshot, releaseUnavailableFormationMembers, resolveBattleFates } from './military/battle-fate';
+import { applyBattleLosses as applyCasualties, defenderBattleLossRate, battleForceSnapshot, releaseUnavailableFormationMembers, resolveBattleFates } from './military/battle-fate';
 import { settleCharacterDeathState } from './character-death';
 import {
   createTurnContext,
@@ -2107,18 +2107,6 @@ function baseArmyPower(world: WorldState, army: ArmyState): number {
   return army.soldiers * commandFactor * commandHealthFactor(actual?.health ?? lawful?.health ?? 50) * deputyFactor * readiness;
 }
 
-function applyCasualties(
-  world: WorldState,
-  armies: ArmyState[],
-  requestedCasualties: number,
-  context: MutableTurnContext,
-): number {
-  const losses = applyFormationLosses(world, armies, requestedCasualties);
-  const actual = losses.reduce((sum, loss) => sum + loss.losses, 0);
-  context.population.militaryDeaths += actual;
-  return actual;
-}
-
 function settleDefendersAfterCapture(
   world: WorldState,
   defenders: ArmyState[],
@@ -2412,9 +2400,7 @@ function resolveBattle(
   const attackerLossRate = attackerWon
     ? clamp(0.035 + defenderPower / Math.max(1, attackerPower) * 0.085, 0.035, 0.2)
     : clamp(0.14 + defenderPower / Math.max(1, attackerPower) * 0.08, 0.14, 0.38);
-  const defenderLossRate = attackerWon
-    ? clamp(0.16 + attackerPower / Math.max(1, defenderPower) * 0.12, 0.16, 0.48)
-    : clamp(0.035 + attackerPower / Math.max(1, defenderPower) * 0.07, 0.035, 0.2);
+  const defenderLossRate = defenderBattleLossRate(attackerWon, attackerPower, defenderPower);
   setFormationStatus(world, attackerArmy, '交战');
   for (const defender of defenders) setFormationStatus(world, defender, '交战');
   const attackerLosses = applyCasualties(world, [attackerArmy], integer(attackerBefore * attackerLossRate), context);
@@ -2942,8 +2928,10 @@ export function advanceWorldDetailed(
     settleBattleDeaths(factStart);
     for (const fact of context.facts.slice(factStart)) {
       if (fact.kind !== 'battle') continue;
-      const army = world.armies.find(a => a.id === fact.payload.attacker.armyId);
-      if (army && army.soldiers < MIN_ARMY_SIZE) removeArmy(world, army, context, true);
+      for (const side of [fact.payload.attacker, ...fact.payload.defenders]) {
+        const army = world.armies.find(a => a.id === side.armyId);
+        if (army && army.soldiers < MIN_ARMY_SIZE) removeArmy(world, army, context, true);
+      }
     }
   });
   runSystem('disease', () => processV03Disease(world, context, (input) => pushEvent(world, context, input)));

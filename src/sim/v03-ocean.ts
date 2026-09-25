@@ -12,7 +12,8 @@ import {
 } from './military/authority';
 import { armyOrderFactIds, issueAmphibiousArmyOrder, minimumLandingForce } from './military/orders';
 import { applyFormationLosses, isFleetDeputy, setFormationStatus } from './military/personal-forces';
-import { battleForceSnapshot, resolveBattleFates } from './military/battle-fate';
+import { applyBattleLosses, defenderBattleLossRate, battleForceSnapshot, resolveBattleFates } from './military/battle-fate';
+import { battleLossText } from './facts/projector';
 import type { V03Emit, V03TurnContext } from './v03-context';
 import {
   COMMODITIES,
@@ -2088,17 +2089,20 @@ function resolveLanding(
   const defenderSnapshots = defenders.map(defender=>battleForceSnapshot(world,defender));
   setFormationStatus(world, army, '交战');
   for (const defender of defenders) setFormationStatus(world, defender, '交战');
-  const losses = Math.min(army.soldiers - 1, whole(army.soldiers * (won ? 0.08 : 0.27)));
-  applyFormationLosses(world, [army], losses);
-  context.population.militaryDeaths += losses;
+  const losses = applyBattleLosses(world, [army], Math.min(army.soldiers - 1, whole(army.soldiers * (won ? 0.08 : 0.27))), context);
+  applyBattleLosses(world, defenders, whole(defenderSnapshots.reduce((n,s) => n+s.soldiersBefore,0)
+    * defenderBattleLossRate(won, attackPower * variance, defensePower)), context);
+  const defenderAfter = defenders.map((defender,i) => battleForceSnapshot(world,defender,defenderSnapshots[i]));
   const careerDeltas = creditBattleCommandStanding(world, army, won, losses / Math.max(1, soldiersBefore), participantIds, defenders.length > 0);
-  for (const defender of defenders) {
-    careerDeltas.push(...creditBattleCommandStanding(world, defender, !won, 0));
+  for (const [i, defender] of defenders.entries()) {
+    careerDeltas.push(...creditBattleCommandStanding(world, defender, !won, defenderAfter[i].losses / Math.max(1,defenderAfter[i].soldiersBefore)));
   }
   const militiaLoss = Math.min(target.population, whole(Math.min(7_000, target.population * 0.012) * (won ? 0.18 : 0.08)));
   target.population -= militiaLoss;
   context.population.civilianDeaths += militiaLoss;
   const previousController = target.controllerId;
+  const attackerAfter = battleForceSnapshot(world,army,attackerSnapshot);
+  const soldierDeltas = [attackerAfter,...defenderAfter].map(side => ({entityType:'army' as const,entityId:side.armyId,field:'soldiers',before:side.soldiersBefore,after:side.soldiersAfter,delta:-side.losses}));
   const battleFact = emitSimulationFact(world, context, {
     kind: 'battle',
     category: '海洋',
@@ -2115,10 +2119,10 @@ function resolveLanding(
       { label: '舰队运输', role: '结构', weight: 0.2, evidence: `参与舰队${operation.fleetIds.length}支`, refs: operation.fleetIds.map(id=>({kind:'entity' as const,entityType:'fleet' as const,entityId:id,label:'参战舰队'})) },
       { label: '沿途海权', role: '条件', weight: 0.24, evidence: `航路${operation.seaZonePath.join('→')}`, refs: operation.seaZonePath.map(id=>({kind:'entity' as const,entityType:'seaZone' as const,entityId:id,label:'登陆航路'})) },
       { label: '攻防实力', role: '条件', weight: 0.31, evidence: `攻方${Math.round(attackPower * variance)}、守方${Math.round(defensePower)}` },
-      { label: '登陆结算', role: '结果', weight: 0.25, evidence: `攻方损失${losses}，民兵损失${militiaLoss}` },
+      { label: '登陆结算', role: '结果', weight: 0.25, evidence: battleLossText({attacker:{losses},defenders:defenderAfter,militiaLosses:militiaLoss}) },
     ],
-    stateDeltas: [...careerDeltas, { entityType: 'army', entityId: army.id, field: 'soldiers', before: soldiersBefore, after: army.soldiers, delta: -losses }],
-    sourceFactIds: armyOrderFactIds([army]),
+    stateDeltas: [...careerDeltas,...soldierDeltas],
+    sourceFactIds: armyOrderFactIds([army,...defenders]),
     payload: {
       warId: war.id,
       targetRegionId: target.id,
@@ -2127,8 +2131,8 @@ function resolveLanding(
       attackerPower: attackPower * variance,
       defenderPower: defensePower,
       militiaLosses: militiaLoss,
-      attacker: battleForceSnapshot(world,army,attackerSnapshot),
-      defenders: defenderSnapshots,
+      attacker: attackerAfter,
+      defenders: defenderAfter,
     },
   }) as BattleFact;
   resolveBattleFates(world, context, battleFact, emit);
@@ -2172,14 +2176,14 @@ function resolveLanding(
     category: '海洋',
     kind: occupied ? 'amphibious_landing_succeeded' : 'amphibious_landing_failed',
     title: `${target.name}登陆${occupied ? '成功' : '受挫'}`,
-    summary: `${army.name}在舰队运输与海权掩护下投入${soldiersBefore}人，损失${losses}，${occupied ? '建立滩头并夺取区域控制' : won ? '战胜后已无留阵部曲，未能占领' : '未能突破守备而撤回'}。`,
+    summary: `${army.name}在舰队运输与海权掩护下投入${soldiersBefore}人，${battleLossText(battleFact.payload)}；${occupied ? '建立滩头并夺取区域控制' : won ? '战胜后已无留阵部曲，未能占领' : '未能突破守备而撤回'}。`,
     importance: 4,
     actorIds: [battleFact.payload.attacker.commanderId, ...operation.fleetIds.map((id) => world.fleets.find((fleet) => fleet.id === id)?.commanderId).filter((id): id is string => Boolean(id))],
     polityIds: [army.polityId, previousController],
     regionIds: [operation.originRegionId, target.id],
     causes: battleFact.causes,
     stateDeltas: [
-      { entityType: 'army', entityId: army.id, field: 'soldiers', before: soldiersBefore, after: battleFact.payload.attacker.soldiersAfter, delta: -losses },
+      soldierDeltas[0],
       ...(occupied ? [{ entityType: 'region' as const, entityId: target.id, field: 'controllerId', before: previousController, after: army.polityId }] : []),
       { entityType: 'navalOperation', entityId: operation.id, field: 'stage', before: '登陆', after: operation.stage },
     ],

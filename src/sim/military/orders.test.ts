@@ -511,6 +511,32 @@ function stageInFlightLanding(
 }
 
 describe('military authority and persistent army orders', () => {
+  it('freezes real landing defender losses before death, withdrawal and demobilization', () => {
+    let world=advanceWorld(createWorld('登陆守军真实损失'));
+    const fixture=stageInFlightLanding(world,'r_yamato',['sea_fujian','sea_east_ocean']);
+    const defender=world.armies.find(a=>a.polityId==='p_yamato')!;
+    expect(defender).toBeDefined();
+    defender.regionId='r_yamato';defender.morale=70;defender.food=100000;
+    syncArmyPersonnelLocations(world,defender);
+    const commanderId=defender.commanderId;
+    world.characters.find(c=>c.id===commanderId)!.protectedUntilTurn=null;
+    const original=random.keyedRandom;
+    const spy=vi.spyOn(random,'keyedRandom').mockImplementation((...args)=>args[2]==='battle-fate'
+      ? args.at(-1)===commanderId?0:.999:original(...args));
+    try{
+      for(let t=0;t<5&&!world.facts.some(f=>f.kind==='battle'&&f.payload.warId===fixture.warId);t++)world=advanceWorld(world);
+      const battle=world.facts.find(f=>f.kind==='battle'&&f.payload.warId===fixture.warId);
+      if(battle?.kind!=='battle')throw Error('missing landing');
+      const side=battle.payload.defenders.find(s=>s.armyId===defender.id)!;
+      expect(side.losses).toBeGreaterThan(0);
+      expect(side.losses).toBe(side.soldiersBefore-side.soldiersAfter);
+      expect(side.participants!.reduce((n,p)=>n+p.losses,0)).toBe(side.losses);
+      expect(side.participants!.reduce((n,p)=>n+p.soldiersAfter,0)).toBe(side.soldiersAfter);
+      expect(world.facts.some(f=>f.kind==='character_death'&&f.payload.characterId===commanderId&&f.payload.battleFactId===battle.id)).toBe(true);
+      expect(validateWorld(world)).toEqual([]);
+      expect(serializeWorld(deserializeWorld(serializeWorld(world)))).toBe(serializeWorld(world));
+    }finally{spy.mockRestore();}
+  },20000);
   it.each(['death', 'wound', 'all-dead'] as const)('settles real landing participants and occupation after %s', outcome => {
     let world = advanceWorld(createWorld('登陆风险入口夹具'));
     const fixture = stageInFlightLanding(world, 'r_yamato', ['sea_fujian', 'sea_east_ocean']);
@@ -535,7 +561,7 @@ describe('military authority and persistent army orders', () => {
       for(const d of battle.payload.defenders){expect(d.losses).toBe(d.soldiersBefore-d.soldiersAfter);expect(d.participants?.every(p=>p.losses===p.soldiersBefore-p.soldiersAfter)).toBe(true);}
       if(outcome==='all-dead'){
         expect(fates.length).toBeGreaterThanOrEqual(2);
-        expect(fates.length).toBe(battle.payload.attacker.participants!.length);
+        expect(fates.length).toBe([battle.payload.attacker,...battle.payload.defenders].reduce((n,s)=>n+s.participants!.length,0));
         expect(world.regions.find(r=>r.id==='r_yamato')!.controllerId).toBe('p_yamato');
         expect(world.armies.some(a=>a.id===fixture.armyId)).toBe(false);
       }else expect(world.regions.find(r=>r.id==='r_yamato')!.controllerId).toBe('p_minhai');

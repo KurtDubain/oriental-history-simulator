@@ -12,7 +12,7 @@ import { refreshFactionPowerLedgers } from '../politics/power-ledger';
 import type { V03EventInput } from '../v03-context';
 import { battleRecoveryStatus } from './battle-readiness';
 import { syncFormationStrength } from './personal-forces';
-import { battleFateChances, resolveBattleFates } from './battle-fate';
+import { applyBattleLosses, battleForceSnapshot, defenderBattleLossRate, battleFateChances, resolveBattleFates } from './battle-fate';
 
 function emitEvent(world: WorldState, context: ReturnType<typeof createTurnContext>) {
   return (input: V03EventInput): HistoryEvent => {
@@ -120,6 +120,23 @@ function idForOutcome(
 }
 
 describe('battle participant fate', () => {
+  it.each([true,false])('accounts for standing losses independently of later personal demobilization (attackerWon=%s)',won=>{
+    const world=createWorld('常备军战损账本'),armies=world.armies.slice(0,2),context=createTurnContext(world);
+    const before=armies.map(a=>battleForceSnapshot(world,a)),population=totalWorldPopulation(world);
+    const rate=defenderBattleLossRate(won,won?12000:8000,10000);
+    const requested=Math.round(before.reduce((n,s)=>n+s.soldiersBefore,0)*rate);
+    expect(rate).toBeCloseTo(won?.304:.091,12);
+    const actual=applyBattleLosses(world,armies,requested,context);
+    const after=armies.map((a,i)=>battleForceSnapshot(world,a,before[i]));
+    expect(context.population.militaryDeaths).toBe(actual);
+    expect(population-totalWorldPopulation(world)).toBe(actual);
+    expect(after.reduce((n,s)=>n+s.losses,0)).toBe(actual);
+    for(const side of after){
+      expect(side.losses).toBeGreaterThan(0);
+      expect(side.participants!.reduce((n,p)=>n+p.losses,0)).toBe(side.losses);
+      expect(side.participants!.reduce((n,p)=>n+p.soldiersAfter,0)).toBe(side.soldiersAfter);
+    }
+  });
   it('does not expose a sovereign merely named in the battle actors', () => {
     const world = createWorld('不在阵中的君主');
     const { fact } = battleForCommander(world);
@@ -132,8 +149,8 @@ describe('battle participant fate', () => {
     expect(ruler).toEqual(before);
     expect(context.facts.filter(f => (f.kind === 'character_wounded' || f.kind === 'character_death') && f.payload.characterId === ruler.id)).toEqual([]);
   });
-  it('increases defeat exposure smoothly while preserving low-loss victories and the wound curve', () => {
-    for (const role of ['commander', 'deputy', 'member'] as const) for (const lost of [0, .01, .2, .4, 1])
+  it('makes common heavy defeats more fatal within the same casualty envelope', () => {
+    for (const role of ['commander', 'deputy', 'member'] as const) for (const lost of [0, .01, .1, .2, .25, .3, .4, 1])
       for (const won of [true, false]) for (const health of [35, 80, 100]) {
         const p = { characterId: 'exposed', factionId: null, formationCommanderId: 'commander', role,
           soldiersBefore: 1000, soldiersAfter: 1000 * (1-lost), losses: 1000 * lost };
@@ -141,13 +158,15 @@ describe('battle participant fate', () => {
         const position = role === 'commander' ? 1 : role === 'deputy' ? .6 : .25;
         const danger = current.severity * lost * lost / (lost + .1);
         const uncapped = danger * (.2 + position * .05 + (1-health/100)*.1);
-        const previous=Math.min(.055,uncapped*1.08);
-        expect(current.death).toBeCloseTo(Math.min(.12, uncapped * 1.08 * (won ? 1 : 1+lost*2)), 12);
-        expect(current.death).toBeGreaterThanOrEqual(previous);
-        if(won&&lost<=.2)expect(current.death).toBe(previous);
-        if(!won&&lost>=.2&&lost<=.4)expect(current.death).toBeGreaterThan(previous*1.3);
+        const previous=Math.min(.12,uncapped*1.08*(won?1:1+lost*2));
+        const oldWound=Math.min(.38,danger*(2.5+position*.4+(1-health/100)*.6));
+        const fatal=Math.min(oldWound,.12-previous,oldWound*lost*(won?.25:1.2));
+        expect(current.death).toBeCloseTo(previous+fatal,12);
+        expect(current.death+current.wound).toBeCloseTo(previous+oldWound,12);
+        if(won&&lost<=.1)expect(current.death).toBeLessThan(.002);
+        if(!won&&lost>=.2&&lost<=.3)expect(current.death).toBeGreaterThan(previous*2);
         expect(current.death).toBeLessThanOrEqual(.12);
-        expect(current.wound).toBeCloseTo(Math.min(.38, danger*(2.5+position*.4+(1-health/100)*.6)),12);
+        expect(current.wound).toBeCloseTo(oldWound-fatal,12);
       }
   });
   it('turns an exposed wound into immediate withdrawal and fact-derived recovery', () => {
@@ -173,6 +192,9 @@ describe('battle participant fate', () => {
     expect(wound?.sourceFactIds).toEqual([fact.id]);
     expect(wound?.stateDeltas).toContainEqual(expect.objectContaining({ entityId: commanderId, field: 'health' }));
     expect(wound?.payload.recoveryUntilTurn).toBeGreaterThan(context.turn);
+    const settled=JSON.stringify(world),count=context.facts.length;
+    resolveBattleFates(world,context,fact,emitEvent(world,context));
+    expect(JSON.stringify(world)).toBe(settled);expect(context.facts).toHaveLength(count);
   });
 
   it('is deterministic and keeps high-loss defeats riskier than ordinary victories', () => {

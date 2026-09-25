@@ -1,7 +1,7 @@
 import type { SimulationFact } from './types';
 
 /** Militia casualties are civilians, never included in formation losses. */
-export function battleLossText(payload: Extract<SimulationFact, { kind: 'battle' }>['payload']): string {
+export function battleLossText(payload: { attacker: { losses: number }; defenders: readonly { losses: number }[]; militiaLosses: number }): string {
   return `攻方军团损失${payload.attacker.losses}人、守方常备军损失${payload.defenders.reduce((sum, side) => sum + side.losses, 0)}人、守地民兵损失${payload.militiaLosses}人`;
 }
 

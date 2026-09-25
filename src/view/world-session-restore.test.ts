@@ -86,13 +86,13 @@ describe('restoreWorldSession', () => {
       historyCount: world.history.length,
     }).toEqual({
       turn: 12,
-      // v1.29.42: T4's 35% retinue-loss defeat now wounds c_099.
-      // First divergence and two exact replays: battle-risk-20260925/golden.json.
-      hash: '5774039fe3ede131',
-      factDigest: '00a2abd5ae1502f8',
-      historyDigest: '004e988b30cb3d0a',
-      factCount: 470,
-      historyCount: 295,
+      // v1.29.43: T5's real defeat changes c_077's wound to death.
+      // First divergence and two exact replays: battle-weight-20260925/golden.json.
+      hash: '09724708b42d2ca2',
+      factDigest: '545694d9ea2533ec',
+      historyDigest: '917bae8557c6e8d3',
+      factCount: 472,
+      historyCount: 296,
     });
   });
 });
