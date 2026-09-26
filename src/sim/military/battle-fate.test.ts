@@ -12,7 +12,7 @@ import { refreshFactionPowerLedgers } from '../politics/power-ledger';
 import type { V03EventInput } from '../v03-context';
 import { battleRecoveryStatus } from './battle-readiness';
 import { syncFormationStrength } from './personal-forces';
-import { applyBattleLosses, battleForceSnapshot, defenderBattleLossRate, battleFateChances, resolveBattleFates } from './battle-fate';
+import { applyBattleLosses, battleForceSnapshot, battleLossRate, battleFateChances, resolveBattleFates } from './battle-fate';
 
 function emitEvent(world: WorldState, context: ReturnType<typeof createTurnContext>) {
   return (input: V03EventInput): HistoryEvent => {
@@ -110,7 +110,7 @@ function idForOutcome(
 ): string {
   const character = world.characters.find((item) => item.id === characterId)!;
   const participant = fact.payload.attacker.participants![0]!;
-  const chances = battleFateChances(participant, false, character.health, character.caution);
+  const chances = battleFateChances(participant, false, character.health, character.caution, character.leadership);
   for (let index = 0; index < 20_000; index += 1) {
     const id = `battle-fate-${outcome}-${index}`;
     const roll = keyedRandom(world.seed, world.turn, 'battle-fate', id, characterId);
@@ -120,12 +120,41 @@ function idForOutcome(
 }
 
 describe('battle participant fate', () => {
+  it.each([true,false])('independently settles several real participants once, including victors (%s)',won=>{
+    const world=createWorld('独立抽样与余部'),{fact}=battleForCommander(world);
+    const army=world.armies.find(a=>a.participantIds.length>=3)!,ctx=createTurnContext(world);
+    const before=battleForceSnapshot(world,army);
+    applyBattleLosses(world,[army],Math.round(army.soldiers*.4),ctx);
+    fact.payload.attacker=battleForceSnapshot(world,army,before);fact.payload.attackerWon=won;
+    fact.payload.targetRegionId=army.regionId;fact.polityIds=[army.polityId];fact.regionIds=[army.regionId];
+    const people=fact.payload.attacker.participants!.map(p=>world.characters.find(c=>c.id===p.characterId)!);
+    for(const c of people){c.health=100;c.protectedUntilTurn=null;}
+    const probabilities=fact.payload.attacker.participants!.map((p,i)=>battleFateChances(p,won,100,people[i].caution,people[i].leadership).death);
+    let found=false;
+    for(let i=0;i<20000;i++){
+      fact.id=`independent-fate-${i}`;
+      if(people.every((p,j)=>keyedRandom(world.seed,world.turn,'battle-fate',fact.id,p.id)<probabilities[j])){found=true;break;}
+    }
+    expect(found).toBe(true);
+    expect(new Set(people.map(p=>keyedRandom(world.seed,world.turn,'battle-fate',fact.id,p.id))).size).toBe(people.length);
+    resolveBattleFates(world,ctx,fact,emitEvent(world,ctx));
+    expect(ctx.facts.filter(f=>f.kind==='character_death').map(f=>f.payload.characterId).sort()).toEqual(people.map(p=>p.id).sort());
+    expect(ctx.facts.filter(f=>f.kind==='character_death').every(f=>f.sourceFactIds.includes(fact.id))).toBe(true);
+    const settled=JSON.stringify(world);resolveBattleFates(world,ctx,fact,emitEvent(world,ctx));expect(JSON.stringify(world)).toBe(settled);
+  });
+  it('makes a close fight costly on both sides without a win/loss cliff or costly walkovers',()=>{
+    expect(battleLossRate(10000,10000)).toBeCloseTo(.28);
+    expect(battleLossRate(10001,10000)-battleLossRate(9999,10000)).toBeCloseTo(0,3);
+    expect(battleLossRate(10001,10000)).toBeGreaterThan(.25);
+    expect(battleLossRate(10000,1000)).toBeLessThan(.04);
+    expect(battleLossRate(1000,10000)).toBe(.48);
+  });
   it.each([true,false])('accounts for standing losses independently of later personal demobilization (attackerWon=%s)',won=>{
     const world=createWorld('常备军战损账本'),armies=world.armies.slice(0,2),context=createTurnContext(world);
     const before=armies.map(a=>battleForceSnapshot(world,a)),population=totalWorldPopulation(world);
-    const rate=defenderBattleLossRate(won,won?12000:8000,10000);
+    const rate=battleLossRate(10000,won?12000:8000);
     const requested=Math.round(before.reduce((n,s)=>n+s.soldiersBefore,0)*rate);
-    expect(rate).toBeCloseTo(won?.304:.091,12);
+    expect(rate).toBeGreaterThan(0);
     const actual=applyBattleLosses(world,armies,requested,context);
     const after=armies.map((a,i)=>battleForceSnapshot(world,a,before[i]));
     expect(context.population.militaryDeaths).toBe(actual);
@@ -149,24 +178,18 @@ describe('battle participant fate', () => {
     expect(ruler).toEqual(before);
     expect(context.facts.filter(f => (f.kind === 'character_wounded' || f.kind === 'character_death') && f.payload.characterId === ruler.id)).toEqual([]);
   });
-  it('makes common heavy defeats more fatal within the same casualty envelope', () => {
+  it('gives actual mid/high losses substantial risk on either side, without conserving the old casualty envelope', () => {
     for (const role of ['commander', 'deputy', 'member'] as const) for (const lost of [0, .01, .1, .2, .25, .3, .4, 1])
       for (const won of [true, false]) for (const health of [35, 80, 100]) {
         const p = { characterId: 'exposed', factionId: null, formationCommanderId: 'commander', role,
           soldiersBefore: 1000, soldiersAfter: 1000 * (1-lost), losses: 1000 * lost };
         const current = battleFateChances(p, won, health, 50, 50);
-        const position = role === 'commander' ? 1 : role === 'deputy' ? .6 : .25;
-        const danger = current.severity * lost * lost / (lost + .1);
-        const uncapped = danger * (.2 + position * .05 + (1-health/100)*.1);
-        const previous=Math.min(.12,uncapped*1.08*(won?1:1+lost*2));
-        const oldWound=Math.min(.38,danger*(2.5+position*.4+(1-health/100)*.6));
-        const fatal=Math.min(oldWound,.12-previous,oldWound*lost*(won?.25:1.2));
-        expect(current.death).toBeCloseTo(previous+fatal,12);
-        expect(current.death+current.wound).toBeCloseTo(previous+oldWound,12);
-        if(won&&lost<=.1)expect(current.death).toBeLessThan(.002);
-        if(!won&&lost>=.2&&lost<=.3)expect(current.death).toBeGreaterThan(previous*2);
-        expect(current.death).toBeLessThanOrEqual(.12);
-        expect(current.wound).toBeCloseTo(oldWound-fatal,12);
+        if(lost<=.01)expect(current.death+current.wound).toBeLessThan(.003);
+        if(lost>=.2)expect(current.death).toBeGreaterThan(.06);
+        if(lost>=.3)expect(current.death).toBeGreaterThan(.12);
+        const winner=battleFateChances(p,true,health,50,50);
+        expect(current.death).toBeLessThanOrEqual(winner.death*1.2+1e-12);
+        expect(current.death+current.wound).toBeLessThan(1);
       }
   });
   it('turns an exposed wound into immediate withdrawal and fact-derived recovery', () => {
@@ -207,16 +230,15 @@ describe('battle participant fate', () => {
     resolveBattleFates(world, firstContext, fact, emitEvent(world, firstContext));
     resolveBattleFates(copy, secondContext, structuredClone(fact), emitEvent(copy, secondContext));
     const participant = fact.payload.attacker.participants![0]!;
-    const safe = battleFateChances({ ...participant, losses: 10, soldiersAfter: participant.soldiersBefore - 10 }, true, 100, 90, 90);
+    const safe = battleFateChances({ ...participant, losses: 1, soldiersAfter: participant.soldiersBefore - 1 }, true, 100, 90, 90);
     const dangerous = battleFateChances({ ...participant, losses: participant.soldiersBefore, soldiersAfter: 0 }, false, 30, 10, 20);
 
     expect(firstContext.facts).toEqual(secondContext.facts);
     expect(dangerous.death).toBeGreaterThan(safe.death);
     expect(dangerous.wound).toBeGreaterThan(safe.wound);
     expect(safe.severity).toBeLessThan(.24);
-    expect(safe.death).toBeLessThan(0.000_001);
-    expect(safe.wound).toBeLessThan(0.000_001);
-    expect(dangerous.death).toBeLessThanOrEqual(.12);
+    expect(safe.death+safe.wound).toBeLessThan(.001);
+    expect(dangerous.death).toBeLessThanOrEqual(.38);
     expect(dangerous.wound).toBeLessThanOrEqual(.38);
   });
 

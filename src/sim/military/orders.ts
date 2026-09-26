@@ -24,7 +24,7 @@ export function minimumLandingForce(soldiers: number): number {
   return Math.min(soldiers, Math.max(1_000, Math.round(soldiers * .35)));
 }
 
-const ORDER_REASON_LABELS: Readonly<Record<ArmyOrderReason, string>> = {
+export const ORDER_REASON_LABELS: Readonly<Record<ArmyOrderReason, string>> = {
   peace_garrison: '战事已息，留营守备',
   war_goal: '奉命夺取本战目标',
   enemy_approach: '敌军已经逼近',

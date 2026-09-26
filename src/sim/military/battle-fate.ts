@@ -35,9 +35,10 @@ type Emit = (input: V03EventInput) => HistoryEvent;
 export interface BattleFateChances { death: number; wound: number; severity: number }
 const clamp = (value: number, minimum: number, maximum: number) => Math.max(minimum, Math.min(maximum, value));
 
-export function defenderBattleLossRate(attackerWon: boolean, attackerPower: number, defenderPower: number): number {
-  const ratio = attackerPower / Math.max(1, defenderPower);
-  return attackerWon ? clamp(.16 + ratio * .12, .16, .48) : clamp(.035 + ratio * .07, .035, .2);
+/** Shared land/landing resistance: a narrow win is not a casualty shield. */
+export function battleLossRate(ownPower: number, opposingPower: number): number {
+  const ratio = ownPower / Math.max(1, opposingPower);
+  return Math.min(.48, .035 + .49 / (1 + ratio * ratio));
 }
 
 /** Count combat losses before wounds, command relief or demobilization change formations. */
@@ -57,20 +58,11 @@ export function battleFateChances(
   const loss = clamp(participant.losses / Math.max(1, participant.soldiersBefore), 0, 1);
   const role = participant.role === 'commander' ? 1 : participant.role === 'deputy' ? .6 : .25;
   const protection = caution / 100 * .11 + leadership / 100 * .08;
-  const severity = clamp(Math.pow(loss, 1.45) * .82
-    + (sideWon ? 0 : .07 + loss * .2)
-    + (participant.soldiersAfter === 0 ? .24 : 0)
-    + role * loss * .08
-    + (1 - health / 100) * loss * .16
-    - protection * loss, 0, 1);
-  // Actual casualties expose the retinue: do not suppress the same exposure twice
-  // with severity² and another fractional power. Negligible losses remain negligible.
-  const danger = severity * loss * loss / (loss + .1);
-  const death = clamp(danger * (.2 + role * .05 + (1 - health / 100) * .1) * 1.08 * (sideWon ? 1 : 1 + loss * 2), 0, .12);
-  const wound = clamp(danger * (2.5 + role * .4 + (1 - health / 100) * .6), 0, .38);
-  // Preserve the encounter's casualty envelope; heavy defeats make more of it fatal.
-  const fatal = Math.min(wound, .12 - death, wound * loss * (sideWon ? .25 : 1.2));
-  return { death: death + fatal, wound: wound - fatal, severity };
+  const severity = clamp(Math.pow(loss, 1.45)
+    * (.9 + role * .12 + (sideWon ? 0 : .12) + (1 - health / 100) * .45 - protection), 0, 1);
+  // Separate death/wound ranges keep survival possible even after extreme losses.
+  return { death: Math.min(.38, severity * loss / (loss + .12) * 1.3),
+    wound: Math.min(.38, severity * .9), severity };
 }
 
 function participants(fact: BattleFact): Row[] {
@@ -90,10 +82,6 @@ export function releaseUnavailableFormationMembers(world: WorldState): number {
     released += 1;
   }
   return released;
-}
-
-function recoveryRegion(world: WorldState, battle: BattleFact, row: Row): string {
-  return world.polities.find((polity) => polity.id === row.polityId)?.capitalRegionId ?? battle.payload.targetRegionId;
 }
 
 function wound(
@@ -117,7 +105,7 @@ function wound(
   if (protectedDeath) person.protectedUntilTurn = null;
   detachPersonalForce(world, person.id, '撤退');
   if (person.commandingArmyId === formationId) person.commandingArmyId = null;
-  person.locationRegionId = recoveryRegion(world, battle, row);
+  person.locationRegionId = world.polities.find((polity) => polity.id === row.polityId)?.capitalRegionId ?? battle.payload.targetRegionId;
   const deltas: StateDelta[] = [
     { entityType: 'character', entityId: person.id, field: 'health', before, after: person.health, delta: person.health - before },
     ...(formationId ? [{ entityType: 'character' as const, entityId: person.id, field: 'personalForce.formationId', before: formationId, after: null }] : []),

@@ -1,12 +1,62 @@
 import { describe, expect, it } from 'vitest';
 import { advanceWorld, computeWorldHash, createWorld, deserializeWorld, serializeWorld, stableHash } from './index';
-import { processV02Society, releaseRulerSubordination, syncOfficeAppointments } from './v02';
+import { processV02Society, processV02PoliticalCommitments, processCharacterDeathConsequences, releaseRulerSubordination, syncOfficeAppointments } from './v02';
+import { emitSimulationFact } from './facts';
 import { validateCommitmentState } from './validation/commitments';
 import { createTurnContext } from './turn-context-state';
 import { woundRecoveryQuarters } from './military/battle-readiness';
 import type { HistoryEvent } from './types';
 
 describe('ruler identity and bounded recovery', () => {
+  it.each(['alive','promisor','promisee','both','death-later','ended'])('settles institutional promises, not posthumous personal credit (%s)', mode=>{
+    const world=createWorld('机构与个人承诺');
+    const left=world.factions[0],right=world.factions.find(f=>f.polityId===left.polityId&&f.id!==left.id)!;
+    left.alliedFactionIds=[right.id];right.alliedFactionIds=[left.id];
+    const context=createTurnContext(world);
+    const formation=emitSimulationFact(world,context,{kind:'faction_relation_changed',category:'政治',importance:2,
+      actorIds:[left.leaderId,right.leaderId],polityIds:[left.polityId],regionIds:[],causes:[],stateDeltas:[],sourceFactIds:[],
+      payload:{polityId:left.polityId,leftFactionId:left.id,rightFactionId:right.id,leftLeaderId:left.leaderId,rightLeaderId:right.leaderId,relation:'alliance',action:'formed',reasonCode:'shared_interest'}});
+    if(formation.kind!=='faction_relation_changed')throw Error('expected alliance Fact');
+    const creation={...world.history[0],id:'promise-source',sourceFactIds:[formation.id]};world.history.push(creation);
+    const promise={id:'commit_test',kind:'政治联盟' as const,promisorId:left.leaderId,promiseeId:right.leaderId,polityIds:[left.polityId],terms:'互相支持',madeTurn:0,dueTurn:3,status:'生效' as const,resolvedTurn:null,eventId:creation.id,resolutionEventId:null,trustStake:18};
+    world.commitments=[promise];world.turn=3;world.season='冬';
+    const signerIds=mode==='both'?[left.leaderId,right.leaderId]:mode==='promisor'?[left.leaderId]:mode==='promisee'?[right.leaderId]:[];
+    for(const id of signerIds){const p=world.characters.find(p=>p.id===id)!;p.alive=false;p.deathTurn=3;}
+    if(mode==='ended'){
+      emitSimulationFact(world,createTurnContext(world),{...formation,payload:{...formation.payload,action:'ended',reasonCode:'faction_core_exhausted'},sourceFactIds:[formation.id]});
+      left.alliedFactionIds=[];right.alliedFactionIds=[];
+    }
+    const relations=JSON.stringify(world.relationships),ctx=createTurnContext(world);
+    const emit:Parameters<typeof processV02PoliticalCommitments>[2]=input=>{
+      const e:HistoryEvent={...creation,...input,id:`event_test_${ctx.events.length}`,turn:world.turn,actorIds:input.actorIds??[],sourceFactIds:input.sourceFactIds??[]};
+      world.history.push(e);ctx.events.push(e);return e;
+    };
+    processV02PoliticalCommitments(world,ctx,emit);
+    const event=ctx.events[0];expect(event).toBeDefined();
+    expect(promise.status).toBe(mode==='ended'?'失效':'履约');
+    expect(event.sourceFactIds).not.toHaveLength(0);
+    if(signerIds.length||mode==='ended')expect(JSON.stringify(world.relationships)).toBe(relations);
+    if(signerIds.length){expect(event.actorIds).toEqual([]);expect(event.summary).toContain(left.name);expect(event.summary).toContain(right.name);}
+    if(mode==='death-later'){const p=world.characters.find(p=>p.id===left.leaderId)!;p.alive=false;p.deathTurn=3;}
+    expect(validateCommitmentState(world)).toEqual([]);
+    if(!signerIds.length&&mode!=='ended'){
+      for(const r of world.relationships)r.memories=r.memories.filter(m=>m.eventId!==event.id);
+      expect(validateCommitmentState(world).some(v=>v.code==='commitment.memory')).toBe(true);
+    }
+    const settled=JSON.stringify(world);processV02PoliticalCommitments(world,ctx,emit);expect(JSON.stringify(world)).toBe(settled);
+  });
+  it.each(['promisor','promisee'])('invalidates impossible personal duty after %s dies, preserving its origin',side=>{
+    const world=createWorld('身后军令'),[a,b]=world.characters;
+    const promise={id:'commit_test',kind:'军令' as const,promisorId:a.id,promiseeId:b.id,polityIds:[a.polityId],terms:'履行副将职责',madeTurn:0,dueTurn:16,status:'生效' as const,resolvedTurn:null,eventId:world.history[0].id,resolutionEventId:null,trustStake:18};
+    world.commitments=[promise];const person=side==='promisor'?a:b;person.alive=false;person.deathTurn=0;
+    const context=createTurnContext(world),relations=JSON.stringify(world.relationships);
+    const death=emitSimulationFact(world,context,{kind:'character_death',category:'军事',importance:3,actorIds:[person.id],polityIds:[person.polityId],regionIds:[],causes:[],stateDeltas:[],sourceFactIds:[],payload:{characterId:person.id,age:person.age,health:person.health,role:person.role,diseaseId:null,cause:'natural'}});
+    if(death.kind!=='character_death')throw Error('expected death Fact');
+    processCharacterDeathConsequences(world,context,input=>{const e={...world.history[0],...input,id:`end_${context.events.length}`,actorIds:input.actorIds??[],sourceFactIds:input.sourceFactIds??[]};world.history.push(e);context.events.push(e);return e;},[death]);
+    expect(promise.status).toBe('失效');expect(JSON.stringify(world.relationships)).toBe(relations);
+    expect(world.history.find(e=>e.id===promise.resolutionEventId)?.sourceFactIds).toContain(death.id);
+    expect(promise.eventId).toBe(world.history[0].id);
+  });
   it.each(['living', 'died-before', 'died-earlier-this-turn', 'dies-later-this-turn', 'dies-next-turn'])('checks treaty memory against its actual settlement actors (%s)', mode => {
     const deceased = mode.startsWith('died-');
     const world = createWorld('国家履约与签约人');

@@ -108,7 +108,14 @@ describe('V0.2 coupled social simulation', () => {
     expect(deceasedAfter.alive).toBe(false);
     expect(deceasedAfter.personalWealth).toBe(0);
     expect(inheritorAfter.personalWealth).toBe(inheritorWealthBefore + 137);
-    expect(next.characters.reduce((sum, character) => sum + character.personalWealth, 0)).toBe(privateWealthBefore);
+    // Other same-quarter battle deaths can transfer an heirless estate to its family.
+    // Count that real transfer, rather than requiring nobody else to die in this seed.
+    const inheritances = next.history.filter(e => e.turn === 3 && e.kind === 'family_inheritance');
+    const familyTransfers = inheritances.flatMap(e => e.stateDeltas)
+      .filter(d => d.entityType === 'family' && d.field === 'wealth').reduce((n,d)=>n+(d.delta??0),0);
+    expect(next.characters.reduce((sum, character) => sum + character.personalWealth, 0) + familyTransfers).toBe(privateWealthBefore);
+    for (const event of inheritances) expect(event.stateDeltas
+      .filter(d=>d.field==='personalWealth'||d.field==='wealth').reduce((n,d)=>n+(d.delta??0),0)).toBe(0);
     expect(inheritance?.stateDeltas
       .filter((delta) => delta.field === 'personalWealth' || delta.field === 'wealth')
       .reduce((sum, delta) => sum + (delta.delta ?? 0), 0)).toBe(0);

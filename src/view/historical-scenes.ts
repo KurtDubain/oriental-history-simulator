@@ -99,7 +99,7 @@ export function participantBattleHeadline(world: WorldState, factId: string): st
     : `${regionName(world, fact.payload.targetRegionId)}之战，${fact.payload.attackerWon ? '攻方取胜' : '守方守住'}`;
 }
 
-function unique(values: readonly string[]): string[] {
+export function unique(values: readonly string[]): string[] {
   return [...new Set(values)].sort(stableCompare);
 }
 

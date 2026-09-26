@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.43',
-  date: '2026-09-25',
-  title: '战阵得失',
+  version: '1.29.45',
+  date: '2026-09-26',
+  title: '史事与船批',
   items: [
-    '补齐登陆守军战损，提高惨败致命风险，点明战役死者与依据。',
+    '修复重复线索与船批阻塞。',
   ],
 };
 

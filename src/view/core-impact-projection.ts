@@ -5,6 +5,7 @@ import type {
   WorldState,
 } from '../sim/types';
 import { stableCompare } from '../sim/random';
+import { ORDER_LABELS as MILITARY_ORDER_LABELS } from '../sim/military/orders';
 
 export type CoreImpactSource = '粮食' | '疾病' | '地方压力';
 export type CoreImpactTargetKind = 'army' | 'polity' | 'person' | 'war';
@@ -48,11 +49,8 @@ interface RankedImpact extends CoreImpactProjection {
 }
 
 const ORDER_LABELS = {
+  ...MILITARY_ORDER_LABELS,
   hold: '驻守',
-  advance: '进军',
-  intercept: '截击',
-  reinforce: '驰援',
-  retreat: '撤退',
 } as const;
 
 function unique(values: readonly string[]): string[] {

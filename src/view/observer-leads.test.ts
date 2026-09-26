@@ -148,6 +148,33 @@ function lowSupplyBattleFact(world: WorldState): Extract<SimulationFact, { kind:
 }
 
 describe('observer story leads', () => {
+  it.each([false,true])('consumes a Situation once, keeping both same-quarter battles and casualties instead of recycling old orders (separate fronts=%s)', separate => {
+    const world = worldAt(12), battle = lowSupplyBattleFact(world);
+    const situation = world.situationSystem.situations.find(s => s.type === 'war_progress')!;
+    battle.payload.warId = situation.scopeKey; battle.importance = 5;
+    const second = { ...structuredClone(battle), id: 'second-current-battle' };
+    if(separate){second.payload.attacker.armyId='other-formation';second.payload.defenders=[];}
+    const deaths = [battle, second].map((b, i): Extract<SimulationFact, {kind:'character_death'}> => ({
+      ...b, id: `current-death-${i}`, kind:'character_death', sourceFactIds:[b.id],
+      payload:{characterId:world.characters[i].id, age:40, role:'将领', health:0, diseaseId:null, cause:'battle', battleFactId:b.id},
+    }));
+    const army = world.armies[0];
+    const old: Extract<SimulationFact,{kind:'army_order_changed'}> = { ...battle, id:'old-order', turn:battle.turn-3,
+      kind:'army_order_changed', sourceFactIds:[], payload:{armyId:army.id,polityId:army.polityId,
+        previous:army.order,next:{...army.order,kind:'advance',warId:situation.scopeKey,targetRegionId:battle.payload.targetRegionId}},
+    };
+    world.facts = [old,battle,deaths[0],second,deaths[1]];world.history=[];world.armies=[];
+    situation.status='open';situation.visibility=100;situation.resolution=null;situation.resolvedTurn=null;
+    world.situationSystem.situations=[situation];
+    world.lastTurn={...world.lastTurn!,factIds:[battle.id,deaths[0].id,second.id,deaths[1].id],eventIds:[]};
+    const before=JSON.stringify(world), leads=deriveObserverLeads(world);
+    expect(leads.filter(l=>l.situationId===situation.id)).toHaveLength(1);
+    expect(new Set(leads.map(l=>l.id)).size).toBe(leads.length);
+    expect(leads[0].primarySourceFactIds).toEqual(expect.arrayContaining(world.lastTurn.factIds));
+    expect(leads[0].primarySourceFactIds).not.toContain(old.id);
+    for(const p of world.characters.slice(0,2))expect(leads[0].evidence.join('')).toContain(p.name);
+    expect(JSON.stringify(world)).toBe(before);
+  });
   it.each([false,true])('keeps a recent battle result attached to the actual side, not always the attacker (%s)', won=>{
     const world=worldAt(8),fact=lowSupplyBattleFact(world);
     fact.payload.attackerWon=won;

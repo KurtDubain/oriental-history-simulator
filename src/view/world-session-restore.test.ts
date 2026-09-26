@@ -86,13 +86,13 @@ describe('restoreWorldSession', () => {
       historyCount: world.history.length,
     }).toEqual({
       turn: 12,
-      // v1.29.43: T5's real defeat changes c_077's wound to death.
-      // First divergence and two exact replays: battle-weight-20260925/golden.json.
-      hash: '09724708b42d2ca2',
-      factDigest: '545694d9ea2533ec',
-      historyDigest: '917bae8557c6e8d3',
-      factCount: 472,
-      historyCount: 296,
+      // v1.29.45: at T7, Guangzhou's finished unstaffed batch no longer blocks
+      // paid production. First divergence and two exact replays: closure-leads-fleet-20260926/golden.json.
+      hash: '694fd3e85d498022',
+      factDigest: '12833ccb07914266',
+      historyDigest: 'd2afcc3a0a52389b',
+      factCount: 559,
+      historyCount: 344,
     });
   });
 });

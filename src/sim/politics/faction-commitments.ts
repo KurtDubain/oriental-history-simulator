@@ -1,6 +1,11 @@
-import type { CommitmentState, SimulationFact, WorldState } from '../types';
+import type { CommitmentState, FactionState, SimulationFact, WorldState } from '../types';
 
 export type FactionRelationChangedFact = Extract<SimulationFact, { kind: 'faction_relation_changed' }>;
+
+function alliedPair(left: FactionState | undefined, right: FactionState | undefined): boolean {
+  return Boolean(left?.active && right?.active && left.polityId === right.polityId
+    && left.alliedFactionIds.includes(right.id) && right.alliedFactionIds.includes(left.id));
+}
 
 function sameFactionPair(
   leftFactionId: string,
@@ -77,13 +82,7 @@ export function politicalAllianceRelationIsActive(
 ): boolean {
   const left = world.factions.find((faction) => faction.id === formation.payload.leftFactionId);
   const right = world.factions.find((faction) => faction.id === formation.payload.rightFactionId);
-  return Boolean(
-    left?.active
-    && right?.active
-    && left.polityId === right.polityId
-    && left.alliedFactionIds.includes(right.id)
-    && right.alliedFactionIds.includes(left.id),
-  );
+  return alliedPair(left, right);
 }
 
 /**
@@ -102,12 +101,5 @@ export function legacyPoliticalAllianceRelationIsActive(
   if (!promisor?.factionId || !promisee?.factionId || promisor.factionId === promisee.factionId) return false;
   const left = world.factions.find((faction) => faction.id === promisor.factionId);
   const right = world.factions.find((faction) => faction.id === promisee.factionId);
-  return Boolean(
-    left?.active
-    && right?.active
-    && left.polityId === right.polityId
-    && commitment.polityIds.includes(left.polityId)
-    && left.alliedFactionIds.includes(right.id)
-    && right.alliedFactionIds.includes(left.id),
-  );
+  return alliedPair(left, right) && commitment.polityIds.includes(left!.polityId);
 }

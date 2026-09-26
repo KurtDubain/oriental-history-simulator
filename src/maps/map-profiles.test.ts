@@ -23,6 +23,7 @@ import type { MapProfile } from './types';
 // and the first actual Fact/Event differences: three-closure-20260916/goldens.json.
 // v1.29.40: T8/T7 background entrants found independent families rather than
 // joining unrelated namesakes. Two full-body runs: mechanism-tail-20260917/goldens.json.
+// v1.29.44: T3 battle losses; two exact replays in war-cost-20260926/contracts.json.
 const GENERAL_GROUP_BASELINES = {
   "架构边界-入世": [
     [
@@ -46,49 +47,49 @@ const GENERAL_GROUP_BASELINES = {
       "655dc480fcf5aed4"
     ],
     [
-      "6152a973ccc8321e",
-      "7f4a4a0a97743aa3",
-      "38d8a2cdc70896a4"
+      "cdacd5baa5374107",
+      "180401823a850679",
+      "84280bf5a48b4c01"
     ],
     [
-      "d0e6239cc713c0ce",
-      "4873cf656259869b",
-      "b29360b669cfc5fd"
+      "591a543ca761c492",
+      "f899429a865146db",
+      "2e1ff01596c113fb"
     ],
     [
-      "490eb3f3a5f81e6d",
-      "604ba9c7830befc5",
-      "f958154d1f88f42c"
+      "830d1bf2f50e820a",
+      "9e7eb2e9efbe0d30",
+      "6529f54d6db7d864"
     ],
     [
-      "a23fb9ca061bab07",
-      "658b12b6e5ac379e",
-      "915e234f73a849b3"
+      "d6cefceb2ea3522c",
+      "0e6db123933b5253",
+      "5961439cd5e56bfb"
     ],
     [
-      "b2d04e020d05038b",
-      "bb3cd3ccc615b89c",
-      "ffbd155add682406"
+      "4ba05f87b341308e",
+      "da1fcd74f7791c01",
+      "3bf3e8bcdaddfe25"
     ],
     [
-      "5639ea2d33e7649c",
-      "2c1f31556b7eee12",
-      "312ba7f87b4eb6e3"
+      "337b8a8316210b86",
+      "6e62786c98c59c5e",
+      "e29733ef47f16ca0"
     ],
     [
-      "97fc31b6aca024ae",
-      "a99305bec657ea14",
-      "817cf8a13e9db483"
+      "4076fc6097cc2b14",
+      "5e5b1586c2ac3bff",
+      "126233728b8a1167"
     ],
     [
-      "4800626f52be9f55",
-      "80a156db26c75aba",
-      "a6a647a8607c021e"
+      "7c8b5adbb05284b3",
+      "c1712569cce28090",
+      "1c2606f8c57a984d"
     ],
     [
-      "ef317fd893ab065d",
-      "d94f6726fd0789f3",
-      "a39ee97bfb078c81"
+      "8e6ec02055b1daf5",
+      "a565e57c620cd566",
+      "ac2cb0ad9a069687"
     ]
   ],
   "州县民生": [
@@ -113,49 +114,49 @@ const GENERAL_GROUP_BASELINES = {
       "fda116e1ab107602"
     ],
     [
-      "be69397b1076de99",
-      "42859aa93948fa6d",
-      "7a5f23a5cc2f9998"
+      "b0e4e6430cd2621c",
+      "0b45b1e3544bb316",
+      "aae69d6e1567c19e"
     ],
     [
-      "09ec7aba1ce8a1cd",
-      "8c031a8b5212ea13",
-      "fa6a7b5316f7da93"
+      "53a28df67aa1b105",
+      "3d4b8fc17f8b5d15",
+      "ce4004ed03caa19f"
     ],
     [
-      "a6f1a090926238e1",
-      "9046061c81db4347",
-      "8b380a4b82845d8a"
+      "1a5e8e853ea71a42",
+      "79beb317343c841d",
+      "3aa615ae05b971ee"
     ],
     [
-      "1cc28bce45411af1",
-      "01fd1eb940a4c94b",
-      "64ccec568320a6ef"
+      "2ba0b7097222a1ed",
+      "99fe3b7dc1dd9d3a",
+      "70084a3fbcc0e5f6"
     ],
     [
-      "9f966261a4ff858b",
-      "372422173106745f",
-      "c61e2231522a5296"
+      "2d42b039524e82c8",
+      "ba3486ef4a79f2aa",
+      "d5ee4a4a70259130"
     ],
     [
-      "40b18ab34ee2ae7e",
-      "092c1c621ece1416",
-      "e6aec66816be7a3c"
+      "9ff834ae2a143a6e",
+      "c3dbcec69ab1a1b7",
+      "b5b9eb21a973e07d"
     ],
     [
-      "df44e41bebeff99e",
-      "bb32a9852c71c12b",
-      "d1e0a8ad101066e1"
+      "2e7aeacb8d5d0912",
+      "08d68ee10809c4ec",
+      "53bcad419c9ac2f5"
     ],
     [
-      "f81cd544b1d00b2b",
-      "e4b5567224bf8b26",
-      "c9ec47ef981fafa5"
+      "f0c04a20eb736021",
+      "e0f9a1ad7628ebb0",
+      "daa3ed0601c948dc"
     ],
     [
-      "c780b62fced9bde1",
-      "17df549ea49487df",
-      "0f9ee0a544263fb2"
+      "67050ba8ae4ab0e0",
+      "de046cb8a180818e",
+      "8178f1ae093be7e5"
     ]
   ]
 } as const;

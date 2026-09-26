@@ -41,7 +41,7 @@ export function validateCommitmentState(world: WorldState): InvariantViolation[]
     } else if (
       (commitment.status === '履约' || commitment.status === '背约')
       && world.turn - commitment.resolvedTurn < 32
-      && !(commitment.kind === '外交盟约' && commitment.status === '履约'
+      && !(['外交盟约','政治联盟','贸易条约','朝贡'].includes(commitment.kind) && commitment.status === '履约'
         && resolutionEvent?.kind === 'commitment_fulfilled' && resolutionEvent.turn === commitment.resolvedTurn
         && resolutionEvent.actorIds.length === 0
         && [commitment.promisorId, commitment.promiseeId].some(id => {

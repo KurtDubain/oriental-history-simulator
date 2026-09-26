@@ -1,5 +1,5 @@
 import type { SituationState } from '../sim/situations';
-import { ORDER_LABELS } from '../sim/military/orders';
+import { ORDER_LABELS, ORDER_REASON_LABELS } from '../sim/military/orders';
 import { stableCompare } from '../sim/random';
 import type { SimulationFact } from '../sim/facts/types';
 import type { DeltaValue, StateDelta, WorldState } from '../sim/types';
@@ -11,6 +11,7 @@ import {
   projectFactNarrative,
   historicalSceneContext,
   factHistoryIds,
+  unique,
   projectSituationHistoricalScenes,
   type HistoricalScene,
 } from './historical-scenes';
@@ -172,22 +173,10 @@ const FIELD_LABELS: Readonly<Record<string, string>> = {
 
 const ORDER_VALUE_LABELS: Readonly<Record<string, string>> = {
   ...ORDER_LABELS,
+  ...ORDER_REASON_LABELS,
   active: '可以执行',
   blocked: '道路受阻',
-  peace_garrison: '战事已息，留营守备',
-  war_goal: '夺取战争目标',
-  enemy_approach: '敌军逼近',
-  frontline_support: '接应友军',
-  enemy_strength: '暂缓攻坚',
-  defend_war_goal: '守卫战守要地',
-  amphibious_landing: '改由水师送登陆岸',
-  low_readiness: '军粮或军心不足',
-  target_invalid: '原定目标失效',
 };
-
-function unique(values: readonly string[]): string[] {
-  return [...new Set(values)].sort(stableCompare);
-}
 
 function boundChronological<T>(items: readonly T[], max: number): T[] {
   if (max <= 0) return [];

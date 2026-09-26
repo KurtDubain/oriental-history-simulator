@@ -98,7 +98,7 @@ import {
   expeditionAssemblyText,
   selectExpeditionResponses,
 } from './military/expedition-response';
-import { applyBattleLosses as applyCasualties, defenderBattleLossRate, battleForceSnapshot, releaseUnavailableFormationMembers, resolveBattleFates } from './military/battle-fate';
+import { applyBattleLosses as applyCasualties, battleLossRate, battleForceSnapshot, releaseUnavailableFormationMembers, resolveBattleFates } from './military/battle-fate';
 import { settleCharacterDeathState } from './character-death';
 import {
   createTurnContext,
@@ -2397,10 +2397,8 @@ function resolveBattle(
 
   const attackerBefore = attackerArmy.soldiers;
   const defenderBefore = defenders.reduce((sum, army) => sum + army.soldiers, 0);
-  const attackerLossRate = attackerWon
-    ? clamp(0.035 + defenderPower / Math.max(1, attackerPower) * 0.085, 0.035, 0.2)
-    : clamp(0.14 + defenderPower / Math.max(1, attackerPower) * 0.08, 0.14, 0.38);
-  const defenderLossRate = defenderBattleLossRate(attackerWon, attackerPower, defenderPower);
+  const attackerLossRate = battleLossRate(attackerPower, defenderPower);
+  const defenderLossRate = battleLossRate(defenderPower, attackerPower);
   setFormationStatus(world, attackerArmy, '交战');
   for (const defender of defenders) setFormationStatus(world, defender, '交战');
   const attackerLosses = applyCasualties(world, [attackerArmy], integer(attackerBefore * attackerLossRate), context);

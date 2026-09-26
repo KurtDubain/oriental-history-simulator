@@ -358,11 +358,7 @@ function resolveCommitment(
   commitment.status = status;
   commitment.resolvedTurn = world.turn;
   commitment.resolutionEventId = event.id;
-  if (status === '失效') return;
-  if (commitment.kind === '外交盟约' && status === '履约'
-    && [commitment.promisorId, commitment.promiseeId].some(id => !world.characters.find(c => c.id === id)?.alive)) return;
-  if (!world.characters.some((character) => character.id === commitment.promisorId)) return;
-  if (!world.characters.some((character) => character.id === commitment.promiseeId)) return;
+  if (status === '失效' || [commitment.promisorId, commitment.promiseeId].some(id => !world.characters.find(c => c.id === id)?.alive)) return;
   remember(
     world,
     commitment.promiseeId,
@@ -989,6 +985,15 @@ export function processCharacterDeathConsequences(
     const projectedDeath = context.events.find((event) => event.sourceFactIds.includes(deathFact.id));
     if (projectedDeath) addBiography(deceased, projectedDeath, '逝世');
     else addBiography(deceased, deathFact, '逝世', `${deceased.name}卒，享年${deathFact.payload.age}岁。`);
+    for (const promise of world.commitments.filter(c => c.status === '生效'
+      && (c.kind === '军令' || c.kind === '婚盟') && [c.promisorId,c.promiseeId].includes(deceased.id))) {
+      const event = emit({ category:'政治', kind:'commitment_ended', title:`${promise.kind}承诺终止`,
+        summary:`${deceased.name}去世，原个人义务“${promise.terms}”失效，不作背约。`, importance:1,
+        actorIds:[], polityIds:promise.polityIds, sourceFactIds:[deathFact.id],
+        causes:[{label:'个人义务终止',role:'结果',weight:1,evidence:promise.terms}],
+        stateDeltas:[{entityType:'commitment',entityId:promise.id,field:'status',before:'生效',after:'失效'}] });
+      resolveCommitment(world,promise,'失效',event);
+    }
     const family = world.families.find((item) => item.id === deceased.familyId);
     if (!family) continue;
     const oldHeadId = family.headId;
@@ -1298,17 +1303,19 @@ function fulfillDueCommitment(
   emit: EmitEvent,
 ): void {
   const signers = [commitment.promisorId, commitment.promiseeId].map(id => world.characters.find(c => c.id === id));
-  const posthumous = commitment.kind === '外交盟约' && signers.some(c => !c?.alive);
+  const posthumous = signers.some(c => !c?.alive);
+  const formation = politicalAllianceFormationFact(world, commitment);
   const event = emit({
     category: commitment.kind === '外交盟约' ? '外交' : '政治',
     kind: 'commitment_fulfilled',
     title: `${commitment.kind}承诺履行`,
     summary: posthumous
-      ? `${commitment.polityIds.map(id => world.polities.find(p => p.id === id)?.name ?? '缔约国').join('与')}继续履行国家盟约“${commitment.terms}”，现已期满；原签约人已有离世者。`
+      ? `${(formation ? [formation.payload.leftFactionId,formation.payload.rightFactionId] : commitment.polityIds).map(id=>(formation ? world.factions : world.polities).find(p=>p.id===id)?.name ?? (formation ? '原派系' : '缔约国')).join('与')}继续履行${formation ? '派系' : '国家'}盟约“${commitment.terms}”，现已期满；不新增原签约人的个人履约信用。`
       : `${signers.map(c => c?.name ?? '原签约人').join('与')}在约定期限内维持“${commitment.terms}”。`,
     importance: commitment.kind === '外交盟约' ? 3 : 2,
     actorIds: posthumous ? [] : [commitment.promisorId, commitment.promiseeId],
     polityIds: commitment.polityIds,
+    sourceFactIds: world.history.find(e=>e.id===commitment.eventId)?.sourceFactIds ?? [],
     causes: [
       { label: '承诺条款', role: '结构', weight: 0.35, evidence: commitment.terms },
       { label: '期限届满', role: '触发', weight: 0.25, evidence: `约定第${commitment.dueTurn}回合复核` },

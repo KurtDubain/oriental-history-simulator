@@ -12,7 +12,7 @@ import {
 } from './military/authority';
 import { armyOrderFactIds, issueAmphibiousArmyOrder, minimumLandingForce } from './military/orders';
 import { applyFormationLosses, isFleetDeputy, setFormationStatus } from './military/personal-forces';
-import { applyBattleLosses, defenderBattleLossRate, battleForceSnapshot, resolveBattleFates } from './military/battle-fate';
+import { applyBattleLosses, battleLossRate, battleForceSnapshot, resolveBattleFates } from './military/battle-fate';
 import { battleLossText } from './facts/projector';
 import type { V03Emit, V03TurnContext } from './v03-context';
 import {
@@ -80,6 +80,10 @@ interface TransportPath {
 
 function whole(value: number): number {
   return Math.max(0, Math.floor(Number.isFinite(value) ? value : 0));
+}
+
+function shipCount(batch: Pick<FleetState, 'warships' | 'transports' | 'patrolShips'>): number {
+  return batch.warships + batch.transports + batch.patrolShips;
 }
 
 function addLedger(
@@ -1366,17 +1370,20 @@ function activeTradeAgreement(world: WorldState, leftId: string, rightId: string
 function dissolveFleet(world: WorldState, fleet: FleetState, context: V03TurnContext, emit: V03Emit): void {
   const settlement = world.regions.find((region) => region.id === fleet.portRegionId)
     ?? world.regions.find((region) => region.id === fleet.homePortRegionId);
-  const ships = fleet.warships + fleet.transports + fleet.patrolShips;
+  const ships = shipCount(fleet);
   const retained = settlement?.port && world.polities.some(p => p.alive && p.id === settlement.controllerId);
   let batchId: string | null = null;
-  if (retained && settlement) {
+  if (ships > 0 && retained && settlement) {
     batchId = `shipproject_${String(++world.counters.shipProject).padStart(5, '0')}`;
     world.shipbuildingProjects.push({ id: batchId, polityId: settlement.controllerId, portRegionId: settlement.id,
       targetFleetId: null, warships: fleet.warships, transports: fleet.transports, patrolShips: fleet.patrolShips,
       timberCommitted: 0, ironCommitted: 0, treasurySpent: 0, progress: 100,
       startedTurn: world.turn, completedTurn: null, status: '建造中' });
-    for (const project of world.shipbuildingProjects) if (project.targetFleetId === fleet.id) project.targetFleetId = null;
   } else context.maritime.shipsLost += ships;
+  // A separate paid batch belongs to its safe shipyard, not to the old hull count.
+  for (const project of world.shipbuildingProjects) if (project.targetFleetId === fleet.id
+    && project.polityId === settlement?.controllerId && project.portRegionId === settlement.id
+    && project.polityId === fleet.polityId && settlement.port) project.targetFleetId = null;
   if (settlement) {
     settlement.population += fleet.sailors;
     settlement.food += fleet.food;
@@ -1390,7 +1397,7 @@ function dissolveFleet(world: WorldState, fleet: FleetState, context: V03TurnCon
   if (commander?.commandingFleetId === fleet.id) commander.commandingFleetId = null;
   world.fleets = world.fleets.filter((item) => item.id !== fleet.id);
   emit({ category: '海洋', kind: 'fleet_disbanded', title: `${fleet.name}撤销编制`, importance: 3,
-    summary: retained ? `${ships}艘船归${settlement!.name}待配员；${fleet.sailors}名水手、${fleet.food}军粮返还当地。`
+    summary: settlement ? `${ships}艘船${retained && ships ? `归${settlement.name}待配员` : '退出编制'}；${fleet.sailors}名水手、${fleet.food}军粮返还当地。`
       : `无港可接管，${ships}艘船废弃，计入非战斗退出。`,
     polityIds: [fleet.polityId], regionIds: settlement ? [settlement.id] : [],
     causes: [{ label: '编制条件', role: '触发', weight: 1, evidence: retained ? '指挥编制失效，港区承接实物' : '失去港区' }],
@@ -1838,6 +1845,8 @@ function updateBlockades(world: WorldState, context: V03TurnContext, emit: V03Em
 }
 
 function completeShipProject(world: WorldState, project: ShipbuildingProjectState, context: V03TurnContext, emit: V03Emit, allowCreation = true): void {
+  const ships = shipCount(project);
+  if (!ships) return; // processShipbuilding owns empty-batch closure.
   const retained = project.timberCommitted === 0 && project.ironCommitted === 0 && project.treasurySpent === 0;
   // Orphaned expansion hulls may join a fleet actually docked here, not a
   // nominal home-port fleet at sea. Existing targeted projects retain their path.
@@ -1864,8 +1873,8 @@ function completeShipProject(world: WorldState, project: ShipbuildingProjectStat
     category: '海洋',
     kind: 'shipbuilding_completed',
     title: `${world.regions.find((item) => item.id === project.portRegionId)?.name ?? '港口'}${retained ? '舰船重新编成' : '新舰下水'}`,
-    summary: retained ? `原有${project.warships + project.transports + project.patrolShips}艘船完成配员，重新入列。`
-      : `船厂以已承诺的${project.timberCommitted}木材、${project.ironCommitted}铁器完成${project.warships + project.transports + project.patrolShips}艘船。`,
+    summary: retained ? `原有${ships}艘船完成配员，重新入列。`
+      : `船厂以已承诺的${project.timberCommitted}木材、${project.ironCommitted}铁器完成${ships}艘船。`,
     importance: 3,
     actorIds: [target.commanderId],
     polityIds: [project.polityId],
@@ -1892,8 +1901,9 @@ function processShipbuilding(world: WorldState, context: V03TurnContext, emit: V
       : null;
     const lostAuthority = !polity?.alive || portRegion?.controllerId !== project.polityId;
     const lostTarget = Boolean(project.targetFleetId && !targetFleet);
-    if (lostAuthority || lostTarget) {
-      const finishedShips = project.progress >= 100 ? project.warships + project.transports + project.patrolShips : 0;
+    const empty = shipCount(project) === 0;
+    if (lostAuthority || lostTarget || empty) {
+      const finishedShips = project.progress >= 100 ? shipCount(project) : 0;
       context.maritime.shipsLost += finishedShips;
       project.status = '取消';
       project.completedTurn = context.turn;
@@ -1901,13 +1911,13 @@ function processShipbuilding(world: WorldState, context: V03TurnContext, emit: V
         category: '海洋',
         kind: 'shipbuilding_cancelled',
         title: `${portRegion?.name ?? project.portRegionId}造船工程中止`,
-        summary: `${lostAuthority ? '原政权已失去存续或船厂控制' : '承接扩编的舰队已经不存在'}，${finishedShips ? `${finishedShips}艘待配员船只随批次废弃，计入非战斗退出` : '已投入的木材、铁器与工钱视为沉没成本，工程不再产生船只'}。`,
+        summary: `${empty ? '批次无舰船，无需配员' : lostAuthority ? '原政权已失去存续或船厂控制' : '承接扩编的舰队已经不存在'}，${finishedShips ? `${finishedShips}艘待配员船只随批次废弃，计入非战斗退出` : '既有投入不返还，工程不再产生船只'}。`,
         importance: 2,
         polityIds: [project.polityId],
         regionIds: portRegion ? [portRegion.id] : [],
         causes: [
           { label: '既有工程', role: '结构', weight: 0.28, evidence: `工程${project.id}进度${project.progress}%`, refs: portRegion ? [{ kind: 'entity', entityType: 'region', entityId: portRegion.id, field: `shipbuilding:${project.id}`, label: '工程所在港区' }] : [] },
-          { label: lostAuthority ? '统治中断' : '编制消失', role: '触发', weight: 0.42, evidence: lostAuthority ? `政权存续=${polity?.alive ?? false}，港口控制=${portRegion?.controllerId ?? '无'}` : `目标舰队${project.targetFleetId}已不存在` },
+          { label: '结案条件', role: '触发', weight: 0.42, evidence: empty ? '实际舰船数为0' : lostAuthority ? `政权存续=${polity?.alive ?? false}，港口控制=${portRegion?.controllerId ?? '无'}` : `目标舰队${project.targetFleetId}已不存在` },
           { label: '工程中止', role: '结果', weight: 0.3, evidence: `状态建造中→取消；既有实物投入不返还` },
         ],
         stateDeltas: [{ entityType: 'region', entityId: project.portRegionId, field: `shipbuilding:${project.id}:status`, before: '建造中', after: '取消' }],
@@ -1919,15 +1929,18 @@ function processShipbuilding(world: WorldState, context: V03TurnContext, emit: V
     if (project.progress >= 100) completeShipProject(world, project, context, emit);
   }
   for (const polity of world.polities.filter((item) => item.alive).sort((a, b) => stableCompare(a.id, b.id))) {
-    if (world.shipbuildingProjects.some((item) => item.polityId === polity.id && item.status === '建造中')) continue;
+    const waiting = world.shipbuildingProjects.filter(item => item.polityId === polity.id && item.status === '建造中');
+    if (waiting.some(item => item.progress < 100)) continue;
     const ports = world.ports
       .map((port) => ({ port, region: world.regions.find((region) => region.id === port.regionId && region.controllerId === polity.id) }))
       .filter((item): item is { port: PortState; region: RegionState } => Boolean(item.region && item.port.shipyard > 0))
       .sort((left, right) => right.port.shipyard - left.port.shipyard || stableCompare(left.port.id, right.port.id));
-    const selected = ports[0];
+    const selected = ports.find(item => waiting.some(p => p.portRegionId === item.region.id)) ?? ports[0];
     if (!selected) continue;
-    const fleetShips = world.fleets.filter((fleet) => fleet.polityId === polity.id)
-      .reduce((sum, fleet) => sum + fleet.warships + fleet.transports + fleet.patrolShips, 0);
+    // Completed stock counts toward the existing demand cap; lack of officers
+    // must not produce an unbounded backlog. Only one unfinished batch may run.
+    const fleetShips = [...world.fleets.filter((fleet) => fleet.polityId === polity.id), ...waiting]
+      .reduce((sum, fleet) => sum + shipCount(fleet), 0);
     const desired = ports.length * 10 + selected.port.level * 5;
     if (fleetShips >= desired) continue;
     const warships = selected.port.shipyard >= 2 ? 2 : 1;
@@ -1949,8 +1962,8 @@ function processShipbuilding(world: WorldState, context: V03TurnContext, emit: V
       id: `shipproject_${String(world.counters.shipProject).padStart(5, '0')}`,
       polityId: polity.id,
       portRegionId: selected.region.id,
-      targetFleetId: world.fleets.filter((fleet) => fleet.polityId === polity.id)
-        .sort((a, b) => (a.warships + a.transports + a.patrolShips) - (b.warships + b.transports + b.patrolShips) || stableCompare(a.id, b.id))[0]?.id ?? null,
+      targetFleetId: waiting.length ? null : world.fleets.filter((fleet) => fleet.polityId === polity.id)
+        .sort((a, b) => shipCount(a) - shipCount(b) || stableCompare(a.id, b.id))[0]?.id ?? null,
       warships,
       transports,
       patrolShips,
@@ -2089,9 +2102,9 @@ function resolveLanding(
   const defenderSnapshots = defenders.map(defender=>battleForceSnapshot(world,defender));
   setFormationStatus(world, army, '交战');
   for (const defender of defenders) setFormationStatus(world, defender, '交战');
-  const losses = applyBattleLosses(world, [army], Math.min(army.soldiers - 1, whole(army.soldiers * (won ? 0.08 : 0.27))), context);
+  const losses = applyBattleLosses(world, [army], whole(army.soldiers * battleLossRate(attackPower * variance, defensePower)), context);
   applyBattleLosses(world, defenders, whole(defenderSnapshots.reduce((n,s) => n+s.soldiersBefore,0)
-    * defenderBattleLossRate(won, attackPower * variance, defensePower)), context);
+    * battleLossRate(defensePower, attackPower * variance)), context);
   const defenderAfter = defenders.map((defender,i) => battleForceSnapshot(world,defender,defenderSnapshots[i]));
   const careerDeltas = creditBattleCommandStanding(world, army, won, losses / Math.max(1, soldiersBefore), participantIds, defenders.length > 0);
   for (const [i, defender] of defenders.entries()) {
