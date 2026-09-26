@@ -33,6 +33,7 @@ import {
   family,
   polity,
   region,
+  sourceEventIdForFact,
   toHistoricalSceneView,
   toPowerMovementView,
   toPowerResourceView,
@@ -45,7 +46,6 @@ import {
   type PoliticalFocusLink,
 } from './political-focus';
 import { accessionAppointments, projectPersonStoryArc, personHistoryEvidence } from './person-story-arc';
-import { continuousAppointmentIds } from '../sim/facts/projector';
 
 export type PersonInspectorProjection = PersonInspectorData & {
   politicalFocus: readonly PoliticalFocusLink[];
@@ -115,22 +115,20 @@ function biographySource(
 export function toPersonExperienceRecords(
   world: WorldState,
   item: CharacterState,
-  readScope: 'all' | 'active' = 'all',
 ): ArchiveRecord[] {
   const entries: PersonExperienceEntry[] = [];
   const knownEventIds = new Set<string>();
   const knownFactIds = new Set<string>();
   const biography = Array.isArray(item.biography) ? item.biography : [];
-  const evidence = readScope === 'all' ? personHistoryEvidence(world) : null;
-  const history = (evidence?.events ?? world.history)
-    .filter(isDefaultVisibleHistoryEvent);
-  const facts = evidence?.facts ?? world.facts;
+  const evidence = personHistoryEvidence(world);
+  const history = evidence.events;
+  const facts = evidence.facts;
   const appointmentFacts = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'appointment_started' | 'appointment_ended' }> => (
     (fact.kind === 'appointment_started' || fact.kind === 'appointment_ended') && factNamesCharacter(fact, item.id)
   ));
-  const continuations = evidence?.continuations ?? continuousAppointmentIds(facts);
+  const continuations = evidence.continuations;
   const eventById = new Map(history.map((event) => [event.id, event]));
-  const factById = new Map(facts.map((fact) => [fact.id, fact]));
+  const factById = evidence.byId;
   const claimed = new Set<string>();
   const battles = facts.filter((fact): fact is Extract<SimulationFact, { kind: 'battle' }> => (
     fact.kind === 'battle' && factNamesCharacter(fact, item.id)
@@ -139,8 +137,8 @@ export function toPersonExperienceRecords(
     .some((side) => side.deputyCommanderId === item.id));
   const battleRecord = (fact: SimulationFact | undefined, record: ArchiveRecord): ArchiveRecord => {
     if (fact?.kind !== 'battle') return record;
-    const first = readScope === 'all' && fact.id === battles[0]?.id;
-    const deputy = readScope === 'all' && !first && fact.id === firstDeputy?.id;
+    const first = fact.id === battles[0]?.id;
+    const deputy = !first && fact.id === firstDeputy?.id;
     const narrative = projectFactNarrative(world, fact);
     return { ...record, title: `${first ? '首次参战 · ' : deputy ? '首次以副将身份参战 · ' : ''}${narrative.title}`,
       summary: `${item.name}${deputy ? '首次以副将身份随军' : '参战'}。${narrative.summary}` };
@@ -404,12 +402,6 @@ const COMMAND_PLAN_STEP_LABELS: Readonly<Record<string, string>> = {
   request_independent_command: '向朝廷请领军令',
 };
 
-function commandSourceEventId(world: WorldState, sourceFactId: string): string | null {
-  return [...world.history]
-    .filter((event) => isDefaultVisibleHistoryEvent(event) && event.sourceFactIds.includes(sourceFactId))
-    .sort((left, right) => right.turn - left.turn || right.id.localeCompare(left.id))[0]?.id ?? null;
-}
-
 function commandCheckEvidence(
   fact: AgencyIntentResolvedFact,
 ): PersonAgencyCommandRequestView['evidence'] {
@@ -637,7 +629,7 @@ function currentTerminalCommandRequest(
       periodLabel: turnLabel(terminalResolution.turn),
       ...commandResolutionCopy(terminalResolution, armyName),
       evidence: commandCheckEvidence(terminalResolution),
-      sourceEventId: commandSourceEventId(world, terminalResolution.id),
+      sourceEventId: sourceEventIdForFact(world, terminalResolution.id),
     };
   }
 
@@ -679,7 +671,7 @@ function currentTerminalCommandRequest(
       title: `请领${armyName}军令之议暂且搁下`,
       summary: '三次请令均未获准，此人暂且搁下此议；日后境况有变，仍可重新起意。',
       evidence: [{ tone: 'barrier', label: '缘由', detail: '多次正式请令已有裁定，眼下不再继续申求' }],
-      sourceEventId: finalAttempt ? commandSourceEventId(world, finalAttempt.id) : null,
+      sourceEventId: finalAttempt ? sourceEventIdForFact(world, finalAttempt.id) : null,
     };
   }
   return {
@@ -725,7 +717,7 @@ export function toPersonCommandRequestView(
       periodLabel: turnLabel(resolved.turn),
       ...copy,
       evidence: commandCheckEvidence(resolved),
-      sourceEventId: commandSourceEventId(world, resolved.id),
+      sourceEventId: sourceEventIdForFact(world, resolved.id),
     };
   }
   const resolvedSubmissionIds = new Set(world.facts
@@ -748,7 +740,7 @@ export function toPersonCommandRequestView(
       title: `已向朝廷请领${armyName}军令`,
       summary: '请令已经入册，尚待朝廷作出裁定。',
       evidence: [{ tone: 'support', label: '已行', detail: '请令已递出' }],
-      sourceEventId: commandSourceEventId(world, submitted.id),
+      sourceEventId: sourceEventIdForFact(world, submitted.id),
     };
   }
   if (actor.goal.status !== 'active') return null;

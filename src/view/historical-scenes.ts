@@ -7,6 +7,7 @@ import { findWorldFact, readWorldFacts, readWorldHistory } from '../sim/archive'
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 import { historyTurnDate } from './v1-history';
 import { warEndTurn, warFactMatches, warKey } from './war-facts';
+import { decimalNumber as compactNumber } from './compact-number';
 
 export interface FactNarrative {
   title: string;
@@ -102,8 +103,6 @@ export function participantBattleHeadline(world: WorldState, factId: string): st
 export function unique(values: readonly string[]): string[] {
   return [...new Set(values)].sort(stableCompare);
 }
-
-const compactNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format;
 
 function characterName(world: WorldState, id: string): string {
   return world.characters.find((item) => item.id === id)?.name ?? '未载人物';

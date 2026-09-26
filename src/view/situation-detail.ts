@@ -7,6 +7,7 @@ import { projectCoreImpacts } from './core-impact-projection';
 import { historyTurnDate } from './v1-history';
 import { projectWarGroups } from './war-group-projection';
 import { warEndTurn, warFactMatches } from './war-facts';
+import { decimalNumber as compactNumber } from './compact-number';
 import {
   projectFactNarrative,
   historicalSceneContext,
@@ -188,8 +189,6 @@ function boundChronological<T>(items: readonly T[], max: number): T[] {
 function dateLabel(turn: number): string {
   return historyTurnDate(turn).label;
 }
-
-const compactNumber = new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format;
 
 const ENTITY_COLLECTIONS = {
   character:'characters', polity:'polities', region:'regions', family:'families', faction:'factions', army:'armies', fleet:'fleets',

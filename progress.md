@@ -1590,3 +1590,15 @@ Current story-audit request: 用当前模拟器实际推进多个固定世界，
 - develop-web-game原mandatory exit0，状态T2/T3及截图实看（自动推进截图/采样可跨季）。新scripts/e2e-observer-leads.mjs从新局连续131季，桌面1440×900/触控模拟390×844均走完，每季DOM与投影一致；T131两端均982f4e2f56700054、3条正确卡，无残留/错跳。T32林允慎原阵亡证据返回后继续、T131三入口逐条打开返回；errors/mismatches空。截图browser-verified/已实际查看，不force，不冒称物理手机。
 - 新T400故人卫玄度短传/死亡证据返回、导出只读、保存刷新/重导/继续T401两端通过；7d88a60505c63183→01a26d8563ca81c7与Node正文一致，browser-reading/有完整截图、状态、导出与结果。脚本准备期按钮文本/桌面与手机关闭入口错误均记录，未用改产品/增超时刷绿。
 - 未跑完整test:release及旧power-narrative、archive容量/性能专项和无关E2E，历史失败、跨运行时浮点边界不清零。本轮三处连接已闭环，真实缺资源/缺人/失港等待仍保留；不承诺所有未来世界必然恢复。完成限定任务后停止，不扩机制、UI或音画。
+
+## 2026-09-26 — v1.29.46 有限生产JS去重（本地）
+
+- 开工main/412af894a25e888335d09900d73d4f7dbae833c7、v1.29.45，已有部署文档和本文件独立试玩修改；original快照在output/js-trim-20260926。部署文档逐字节保留，progress仅追加，按原版本门同步package/lock/两版当前记录至1.29.46；未提交、推送或部署。
+- 只保留三组展示等价清理：人物请令commandSourceEventId复用sourceEventIdForFact；无调用的toPersonExperienceRecords active模式移除，复用既有完整冷热events/facts/byId/continuations；史事和案卷共用同一个zh-CN普通分组小数formatter，不换compact notation。首次/副将参战、迁署、登位、去职、死亡、证据排序及可见性不变，无模拟/存档/UI/压缩配置修改。
+- historyRecord/eventArchiveRecord的eventId与importance属性顺序原本不同；试验共享前四字段同时保序反增15B，已撤回。没有为源码行数或5KiB数字叠加抽象。腾讯竞赛版本记录单独+17B，三组代码实测分别-7/-64/-88B（代码净-159，含版本记录净-142）；中间超9/2B的失败日志保留。
+- 四版最终完整构建通过：personal/contest/腾讯personal/腾讯contest全部5JS chunk gzip424713/424716/424807/424810B，较基线424849/424854/424946/424952减136/138/139/142B；原门余247/244/153/150B。每版raw减378B，CSS250692raw/39827gzip和媒体68990B不变。5KiB安全线仍差4970B，E1保持未完成，不提高预算、不漏异步chunk、不转移JS数据到HTML/JSON。逐chunk见报告和before/final bundles.json。
+- 修改前固定秋汀阅史-减重甲(contest)、关河理卷-减重乙(private)，各T40/T120/T400前后hash和规范正文逐字节相同；T400分别2c492c9149ef67c8/5d808fab07f90ba9。1194人物全部关键经历/完整履历，另16份长履历Inspector/Archive及案卷JSON（含属性顺序/source IDs）前后完全一致；阅读未改正文，未更新golden。
+- 恢复不能写成全过：竞赛三点、私地图T40/T120完整校验与恢复下一季通过；私地图T400在修前就有fleet_0008琅琊水师三类船均0但188水手仍活动，fleet.stock使deserialize拒绝，正文13392196B未超16MiB。保留修前失败/原坏档，原源码快照诊断及修后从零均得到相同错误/全文/hash，诊断exit1；本轮未修舰队、不放宽校验、不换种。将此作为独立存读档问题记录，不能因展示等价就清零。
+- 新增13合同测试（证据排序/可见性/他人功劳/属性顺序/数字边界），定向8文件141项通过；最终全量113文件1028/1028、架构/地图/媒体及四版构建内所有原门通过。完整test:release、旧agency-intent/power-narrative/archive性能容量及无关E2E未运行，历史失败/跨运行时边界不清零。
+- develop-web-game原mandatory生产最终exit0、T0→T1截图/state实看；前期T0动作和selector准备失败不冒作推演成功。Playwright生产桌面1440×900/触控模拟390×844：故人拓跋德直短传、5段经历逐一证据返回、完整人物传及史事返回、只读导出、保存刷新续读与T401导出全文均通过；每端6次证据往返，errors空，无横溢/所见遮挡、无force，不冒称物理手机。2c492c9149ef67c8→85a41584dcb6f759与Node全文一致；截图browser/，mandatory-final/实际查看。
+- 报告output/js-trim-20260926/REPORT.md。有限去重已完成、收益有限，5KiB目标未达；已停止扩大，不自动进入舰队机制、长档压缩或UI重构。

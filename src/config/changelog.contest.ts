@@ -2,11 +2,11 @@ import type { AppReleaseNote } from './changelog';
 
 /** Public builds ship only the current note; older notes remain in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.45',
+  version: '1.29.46',
   date: '2026-09-26',
-  title: '史事与船批',
+  title: '工程减重',
   items: [
-    '修复重复线索与船批阻塞。',
+    '复用档案与史事展示逻辑，保持历史与演化不变。',
   ],
 };
 
