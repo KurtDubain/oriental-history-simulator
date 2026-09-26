@@ -1,5 +1,6 @@
 import { findMapProfileForContentVersion } from '../maps';
 import type { MapProfileId } from '../maps/types';
+import { validateFleetStocks } from '../sim/validation/fleet-stock';
 
 // Keep the original database and store names so installed V0.1 autosaves remain discoverable.
 const DATABASE_NAME = 'canghai-history-v01';
@@ -116,6 +117,11 @@ function worldFieldsFromPayload(payload: string): WorldSummaryFields {
   const parsed: unknown = JSON.parse(payload);
   if (typeof parsed !== 'object' || parsed === null) {
     throw new Error('世界正文不是对象。');
+  }
+  // Reuse this parse for a bounded active-stock guard before any durable write.
+  if ('fleets' in parsed && Array.isArray(parsed.fleets)) {
+    const issue = validateFleetStocks(parsed.fleets)[0];
+    if (issue) throw new Error(`存档校验失败：${issue.message}`);
   }
 
   const seed = 'seed' in parsed ? parsed.seed : null;

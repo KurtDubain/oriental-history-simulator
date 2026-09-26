@@ -5,7 +5,7 @@ import { processV03Maritime } from './v03-ocean';
 import { createTurnContext, totalWorldPopulation } from './turn-context-state';
 import { settleCharacterDeathState } from './character-death';
 import { validateWorld } from './invariants';
-import { keyedChance } from './random';
+import { keyedChance, keyedRandom } from './random';
 import type { HistoryEvent, WorldState } from './types';
 
 function context(world: WorldState) {
@@ -126,6 +126,73 @@ function navy() {
 }
 function sea(world:WorldState) {const {c,emit}=context(world); processV03Maritime(world,c,emit,()=>{throw Error('unexpected landing');}); syncOfficeAppointments(world,world.turn,c); return c;}
 describe('naval deputy occupation and handover',()=>{
+  it.each(['warships','transports','patrolShips'] as const)('settles survivors after the last %s is lost, once, with no empty ship batch', field=>{
+    const {world,fleet,commander,deputy}=navy();
+    fleet.warships=fleet.transports=fleet.patrolShips=0;fleet[field]=1;
+    fleet.sailors=233;fleet.food=466;fleet.readiness=0;
+    const zone=world.seaZones.find(z=>z.portRegionIds.includes(fleet.homePortRegionId))!;
+    zone.stormRisk=100;fleet.portRegionId=null;fleet.seaZoneId=zone.id;
+    while(keyedRandom(world.seed,world.turn,'fleet-storm',fleet.id,zone.id)>.01)world.turn++;
+    fleet.lastMovedTurn=world.turn;
+    const population=totalWorldPopulation(world),food=world.regions.reduce((n,r)=>n+r.food,0)+fleet.food;
+    const result=sea(world),dead=field==='warships'?45:field==='transports'?28:20;
+    expect(world.fleets.some(f=>f.id===fleet.id)).toBe(false);
+    expect(result.population.militaryDeaths).toBe(dead);
+    expect(result.population.demobilized).toBe(233-dead);
+    expect(totalWorldPopulation(world)).toBe(population-dead);
+    expect(world.regions.reduce((n,r)=>n+r.food,0)).toBe(food-233);
+    expect(result.maritime.shipsLost).toBe(1);
+    expect(world.shipbuildingProjects).toHaveLength(0);
+    expect(commander.commandingFleetId).toBeNull();
+    expect(world.offices.filter(o=>o.fleetId===fleet.id&&o.endedTurn===null)).toHaveLength(0);
+    expect(world.characters.find(c=>c.id===deputy.id)?.alive).toBe(true);
+    expect(result.events.filter(e=>e.kind==='fleet_disbanded')).toHaveLength(1);
+    world.turn++;const next=sea(world);
+    expect(next.population.demobilized).toBe(0);expect(next.maritime.shipsLost).toBe(0);
+    expect(next.events.some(e=>e.kind==='fleet_disbanded')).toBe(false);
+  });
+  it.each([1,2])('retains a stocked formation when %s hulls face no storm', ships=>{
+    const {world,fleet}=navy();fleet.warships=ships;fleet.transports=fleet.patrolShips=0;
+    for(const z of world.seaZones)z.stormRisk=0;
+    expect(sea(world).events.some(e=>e.kind==='fleet_disbanded')).toBe(false);
+    expect(world.fleets.some(f=>f.id===fleet.id)).toBe(true);
+  });
+  it('a storm with a remaining hull does not disband, while pre-existing empty stock cannot move',()=>{
+    for(const initialShips of [0,2]){
+      const {world,fleet}=navy();fleet.warships=initialShips;fleet.transports=fleet.patrolShips=0;
+      fleet.readiness=0;fleet.sailors=233;fleet.food=466;
+      const zone=world.seaZones.find(z=>z.portRegionIds.includes(fleet.homePortRegionId))!;
+      zone.stormRisk=100;fleet.portRegionId=null;fleet.seaZoneId=zone.id;
+      while(keyedRandom(world.seed,world.turn,'fleet-storm',fleet.id,zone.id)>.01)world.turn++;
+      fleet.lastMovedTurn=world.turn;
+      const result=sea(world);
+      expect(world.fleets.some(f=>f.id===fleet.id)).toBe(initialShips===2);
+      expect(result.maritime.shipsLost).toBe(initialShips===2?1:0);
+    }
+  });
+  it('lands wreck survivors on the actual adjacent coast, never a remote home, without swallowing the paid home batch',()=>{
+    const {world,fleet,polity}=navy();const home=world.regions.find(r=>r.id===fleet.homePortRegionId)!;
+    const zone=world.seaZones.find(z=>!z.portRegionIds.includes(home.id))!;
+    fleet.warships=fleet.transports=fleet.patrolShips=0;fleet.seaZoneId=zone.id;fleet.portRegionId=null;
+    const batch={id:'shipproject_99999',polityId:polity.id,portRegionId:home.id,targetFleetId:fleet.id,
+      warships:4,transports:2,patrolShips:0,timberCommitted:370,ironCommitted:164,treasurySpent:770,
+      progress:30,startedTurn:0,completedTurn:null,status:'建造中' as const};world.shipbuildingProjects=[batch];
+    const population=home.population,result=sea(world),event=result.events.find(e=>e.kind==='fleet_disbanded')!;
+    expect(home.population).toBe(population);
+    expect(zone.portRegionIds).toContain(event.regionIds[0]);
+    expect(batch.targetFleetId).toBeNull();expect(batch.status).toBe('建造中');
+    expect(result.maritime.shipsLost).toBe(0);
+  });
+  it('closes a live operation after its empty carrier exits, preserving its loaded food',()=>{
+    const {world,fleet}=navy();fleet.warships=fleet.transports=fleet.patrolShips=0;
+    const operation={id:'naval_test',polityId:fleet.polityId,armyId:'absent',warId:'absent',fleetIds:[fleet.id],
+      originRegionId:fleet.homePortRegionId,targetRegionId:fleet.homePortRegionId,seaZonePath:[],stage:'集结',
+      foodLoaded:91,progress:0,startedTurn:world.turn,completedTurn:null,manifest:null} as WorldState['navalOperations'][number];
+    world.navalOperations=[operation];const port=world.regions.find(r=>r.id===fleet.homePortRegionId)!;
+    const food=port.food+fleet.food+91,result=sea(world);
+    expect(operation).toMatchObject({stage:'失败',foodLoaded:0,completedTurn:world.turn});
+    expect(port.food).toBe(food);expect(result.events.some(e=>e.kind==='naval_operation_aborted')).toBe(true);
+  });
   it.each([30,100])('detaches a real expansion from an empty disbanding fleet at its own safe port (%s%%)', progress=>{
     const {world,fleet,commander,deputy,polity}=navy();world.backgroundPeople=[];
     settleCharacterDeathState(world,commander.id,world.turn);settleCharacterDeathState(world,deputy.id,world.turn);

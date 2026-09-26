@@ -14,6 +14,7 @@ import {
 } from './agency/decision';
 import type { SituationRecentChange } from './situations/types';
 import type { HistoryEvent, InvariantViolation, SimulationFact, WorldState } from './types';
+import { validateFleetStocks } from './validation/fleet-stock';
 import { validateRuntimeEmbodiedActions } from './validation/embodiment';
 import { validateCourtActionFacts } from './validation/court-actions';
 import { validateFactionState } from './validation/factions';
@@ -902,6 +903,7 @@ export function validateTurnRuntime(
   artifacts: RuntimeTurnArtifacts = deriveRuntimeTurnArtifacts(previous, next),
 ): InvariantViolation[] {
   const violations: InvariantViolation[] = [];
+  violations.push(...validateFleetStocks(next.fleets));
   if (next === previous) push(violations, 'runtime.identity', '季度推进复用了原世界对象');
   if (next.seed !== previous.seed) push(violations, 'runtime.seed', '季度推进改变了世界种子');
   if (next.schemaVersion !== previous.schemaVersion) push(violations, 'runtime.schema', '季度推进改变了存档版本');
@@ -1884,12 +1886,7 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
   }
 
   for (const fleet of world.fleets) {
-    const totalShips = fleet.warships + fleet.transports + fleet.patrolShips;
-    if (!isWholeNonNegative(fleet.sailors) || fleet.sailors === 0 || !isWholeNonNegative(fleet.food)
-      || !isWholeNonNegative(fleet.warships) || !isWholeNonNegative(fleet.transports) || !isWholeNonNegative(fleet.patrolShips)
-      || totalShips === 0) {
-      push(violations, 'fleet.stock', `${fleet.name}舰船、水手或军粮无效`, fleet.id);
-    }
+    violations.push(...validateFleetStocks([fleet]));
     if (!polityById.get(fleet.polityId)?.alive || !regionById.get(fleet.homePortRegionId)?.port) {
       push(violations, 'fleet.references', `${fleet.name}政权或母港无效`, fleet.id);
     }

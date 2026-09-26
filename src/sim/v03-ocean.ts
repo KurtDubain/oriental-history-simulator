@@ -1368,9 +1368,15 @@ function activeTradeAgreement(world: WorldState, leftId: string, rightId: string
 }
 
 function dissolveFleet(world: WorldState, fleet: FleetState, context: V03TurnContext, emit: V03Emit): void {
-  const settlement = world.regions.find((region) => region.id === fleet.portRegionId)
-    ?? world.regions.find((region) => region.id === fleet.homePortRegionId);
   const ships = shipCount(fleet);
+  const home = world.regions.find(region => region.id === fleet.homePortRegionId);
+  // A wreck cannot sail home: demobilize only to a coast linked to its actual sea.
+  const coast = !ships && fleet.seaZoneId
+    ? world.regions.filter(r => r.port && world.portLinks.some(l => l.regionId === r.id && l.seaZoneId === fleet.seaZoneId))
+      .sort((a,b) => Number(b.id === home?.id) - Number(a.id === home?.id)
+        || Number(b.controllerId === fleet.polityId) - Number(a.controllerId === fleet.polityId) || stableCompare(a.id,b.id)) : null;
+  const settlement = coast ? coast[0] : world.regions.find(region => region.id === fleet.portRegionId) ?? home;
+  if (coast && !settlement && fleet.sailors) throw new Error('舰队退出校验失败：无接岸地点');
   const retained = settlement?.port && world.polities.some(p => p.alive && p.id === settlement.controllerId);
   let batchId: string | null = null;
   if (ships > 0 && retained && settlement) {
@@ -1382,8 +1388,8 @@ function dissolveFleet(world: WorldState, fleet: FleetState, context: V03TurnCon
   } else context.maritime.shipsLost += ships;
   // A separate paid batch belongs to its safe shipyard, not to the old hull count.
   for (const project of world.shipbuildingProjects) if (project.targetFleetId === fleet.id
-    && project.polityId === settlement?.controllerId && project.portRegionId === settlement.id
-    && project.polityId === fleet.polityId && settlement.port) project.targetFleetId = null;
+    && project.polityId === fleet.polityId && [fleet.portRegionId,fleet.homePortRegionId].includes(project.portRegionId)
+    && world.regions.some(r => r.id === project.portRegionId && r.port && r.controllerId === project.polityId)) project.targetFleetId = null;
   if (settlement) {
     settlement.population += fleet.sailors;
     settlement.food += fleet.food;
@@ -1400,7 +1406,7 @@ function dissolveFleet(world: WorldState, fleet: FleetState, context: V03TurnCon
     summary: settlement ? `${ships}艘船${retained && ships ? `归${settlement.name}待配员` : '退出编制'}；${fleet.sailors}名水手、${fleet.food}军粮返还当地。`
       : `无港可接管，${ships}艘船废弃，计入非战斗退出。`,
     polityIds: [fleet.polityId], regionIds: settlement ? [settlement.id] : [],
-    causes: [{ label: '编制条件', role: '触发', weight: 1, evidence: retained ? '指挥编制失效，港区承接实物' : '失去港区' }],
+    causes: [{ label: '编制条件', role: '触发', weight: 1, evidence: !ships || !fleet.sailors ? '舰船或水手耗尽，退出活动编制' : retained ? '指挥编制失效，港区承接实物' : '失去港区' }],
     stateDeltas: [{ entityType: 'fleet', entityId: fleet.id, field: 'ships', before: ships, after: 0 },
       ...(batchId ? [{ entityType: 'region' as const, entityId: settlement!.id, field: `shipbuilding:${batchId}:ships`, before: 0, after: ships }] : [])],
   });
@@ -1445,6 +1451,10 @@ function repairFleets(world: WorldState, context: V03TurnContext, emit: V03Emit)
   }
   for (const fleet of [...world.fleets].sort((a, b) => stableCompare(a.id, b.id))) {
     const home = world.regions.find((region) => region.id === fleet.homePortRegionId);
+    if (!shipCount(fleet) || !fleet.sailors) {
+      dissolveFleet(world, fleet, context, emit);
+      continue;
+    }
     if (!alivePolities.has(fleet.polityId)) {
       const receiver = home ? alivePolities.get(home.controllerId) : undefined;
       if (!receiver) {
@@ -1765,6 +1775,7 @@ function maintainFleets(world: WorldState, context: V03TurnContext, emit: V03Emi
               ],
               stateDeltas: [{ entityType: 'fleet', entityId: fleet.id, field: shipField, before: fleet[shipField] + 1, after: fleet[shipField], delta: -1 }],
             });
+            if (!shipCount(fleet) || !fleet.sailors) dissolveFleet(world, fleet, context, emit);
           }
         }
       }
