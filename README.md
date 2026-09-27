@@ -176,7 +176,7 @@ npm run test:release
 
 `test:release` 会依次执行单元/系统测试、个人版与参赛白名单构建、桌面 Chromium 试玩、1440/768/640/390 四档页面栈与移动安全区、390×844 与 640×900 移动舆图触控门、Phase A/B/C、人物 Agency、权势叙事、地方施政、双地图 80 季与 V0.3 长程审计。`npm run build:contest` 产出 `dist-contest/`：模块图会拒绝私人内容依赖，产物还会核对版本/allowlist 清单并扫描从私人 profile 派生的 328 项名称与 ID。`npm run test:e2e:contest` 另外验证参赛静态产物只提供公开地图，且遇到缺图旧档时不会覆盖原载荷。
 
-`npm run test:audit:architecture` 用 TypeScript AST 区分 runtime/type-only 依赖，对运行时环、跨层回写、热点文件预算和类型环债务增长直接失败。v1.26.0 沿用单个 JavaScript 文件原始体积不超过 585 KiB、CSS gzip 总量不超过 40 KiB、JavaScript gzip 总量不超过 415 KiB 的既有门禁；个人版与参赛版实测 JavaScript gzip 均为 424,931 bytes、CSS gzip 均为 39,962 bytes，未提高预算。人物命途长期审计已经进入完整发布门。地图 profile 由构建注入经过校验的 HTML JSON 载荷，不进入主 JavaScript 包的解析与执行路径。`main` 与 Pull Request 会在 Node 22 环境中执行 `npm ci`、单测、架构门、双构建和关键浏览器链，失败时保留浏览器产物供复现。
+`npm run test:audit:architecture` 用 TypeScript AST 区分 runtime/type-only 依赖，对运行时环、跨层回写、热点文件预算和类型环债务增长直接失败。v1.29.48 经明确批准将全部生产 JavaScript gzip 总预算由 415 KiB（424,960 bytes）调为 430 KiB（440,320 bytes）；这增加的 15,360 bytes 是预算调整，不是压缩成果。所有同步及异步 chunk 仍按 gzip level 9 累加；单个 JS 原始体积 585 KiB、CSS gzip 总量 40 KiB、媒体与存档限制不变。`npm run check:bundle-tests` 验证这些边界。人物命途长期审计已经进入完整发布门。地图 profile 由构建注入经过校验的 HTML JSON 载荷，不进入主 JavaScript 包的解析与执行路径。`main` 与 Pull Request 会在 Node 22 环境中执行 `npm ci`、单测、架构门、双构建和关键浏览器链，失败时保留浏览器产物供复现。
 
 `npm run test:update` 单独验证构建版本标识、游戏内手动检查、模拟新部署、更新前自动保存与移动端入口。参赛产物与源码隔离边界见 [参赛地图构建说明](./docs/CONTEST_BUILD.md)；发布任务与三主循环归属见 [Roadmap](./docs/ROADMAP_VNEXT.md) 和 [功能归属台账](./docs/FEATURE_LOOP_INVENTORY.md)。
 

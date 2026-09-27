@@ -9,6 +9,7 @@ import type { HistoricalScene } from './historical-scenes';
 import { isDefaultVisibleHistoryEvent } from './history-visibility';
 
 export { compact } from './compact-number';
+export { totalWorldPopulation as worldPopulation } from '../sim/turn-context-state';
 
 const SEASON_NAMES = ['春', '夏', '秋', '冬'] as const;
 
@@ -43,12 +44,6 @@ export function polityPopulation(world: WorldState, polityId: string): number {
     + world.fleets
       .filter((item) => item.polityId === polityId)
       .reduce((sum, item) => sum + item.sailors, 0);
-}
-
-export function worldPopulation(world: WorldState): number {
-  return world.regions.reduce((sum, item) => sum + item.population, 0)
-    + world.personalForces.reduce((sum, item) => sum + item.soldiers, 0)
-    + world.fleets.reduce((sum, item) => sum + item.sailors, 0);
 }
 
 export function turnLabel(turn: number) {

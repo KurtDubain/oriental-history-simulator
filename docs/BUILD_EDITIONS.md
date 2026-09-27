@@ -39,7 +39,7 @@
 
 Vercel Git 托管构建只有同时具备系统来源信息（`VERCEL`、`VERCEL_ENV`、`VERCEL_DEPLOYMENT_ID`、`VERCEL_GIT_PROVIDER`、仓库 owner/slug、commit ref/SHA），且来源完整、环境为 production/preview、SHA 与实际 Git HEAD 完全一致时，才容忍已确认的 `.npmrc`、`vercel.json` 未暂存普通文件内容修改（Git模式100644保持不变、状态M、该路径无暂存变化）。系统变量语义见[Vercel官方说明](https://vercel.com/docs/environment-variables/system-environment-variables)。这不是仅凭CI标志跳过工作区，也不是对配置字段内容或来源签名的鉴定；两个路径仍属于生产文件。新增、删除、暂存、模式/类型变化及其他生产路径不获例外，本地修改仍须升版；已核验的托管构建（含preview）仍检查正常已提交范围。来源缺失/SHA不符时回到严格校验，不设置手工伪造变量补齐。报错仅输出分类、Git基线和路径，不输出配置正文或环境值。云端实际字段变换仍未核验，由部署session重新构建确认，不据一般平台文档编造具体原因。
 
-每次构建保留原版本、类型、地图、全部同步/异步 JS、CSS、媒体预算检查。
+每次构建保留版本、类型、地图、全部同步/异步 JS、CSS、媒体预算检查。v1.29.48 起全部 JS gzip 总门禁经批准改为430 KiB（440,320B，gzip level 9），四种产物共用；单个JS raw、CSS和媒体门禁不变。
 竞赛版同时检查 Rollup 模块图、HTML 地图 payload 与从私人地图派生的敏感数据令牌；不是只隐藏一个选图按钮。旧 `contest-profile.json` 继续存在，其范围与 `version.json` 由同一组已选 profile 派生。详情见 [CONTEST_BUILD.md](./CONTEST_BUILD.md)。
 
 ## 两个 Vercel 项目（由下一 session 配置）
@@ -86,4 +86,4 @@ Production Branch 均设 `main`，保留正常 Git 自动更新；Preview 仍构
 
 原 `test:e2e:contest` 继续覆盖私人 autosave、收藏不兼容和新建前留底。`test:update`、`test:e2e:media` 及原发布检查保留；新两项已加入 `test:release`。最终实际通过/失败/未执行状态见本轮 `output/build-editions-v1.29.28/REPORT.md` 与 `progress.md`，不得把文档中的命令列表当作通过证明。
 
-未执行：实际双站 Vercel 配置、CDN/正式域名验收、物理移动设备与主观音色确认。额外预留 5KiB JS 目标继续单列，不提高原门禁预算。
+上述v1.29.28轮未执行：实际双站 Vercel 配置、CDN/正式域名验收、物理移动设备与主观音色确认。后续状态见progress.md。本轮预算调整与代码减重分开记录；不将增加预算等同于完成原减重目标。

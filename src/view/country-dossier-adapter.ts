@@ -28,7 +28,9 @@ import {
   worldFactions,
 } from './dossier-adapter-shared';
 
-export function toCountryInspector(world: WorldState, item: PolityState): CountryInspectorData {
+type CountryInspectorWithCourt = CountryInspectorData & { court: ReturnType<typeof projectCourt> };
+
+export function toCountryInspector(world: WorldState, item: PolityState): CountryInspectorWithCourt {
   const owned = world.regions.filter((candidate) => candidate.controllerId === item.id);
   const ruler = livingCharacter(world, item.rulerId);
   const capital = region(world, item.capitalRegionId);
@@ -82,7 +84,7 @@ export function toCountryInspector(world: WorldState, item: PolityState): Countr
     ...world.fleets.filter((fleet) => fleet.polityId === item.id).map((fleet) => ({ id: fleet.id, kind: 'fleet' as const, label: fleet.name, detail: `${fleet.mission} · 战备${Math.round(fleet.readiness)}`, value: fleet.warships + fleet.transports + fleet.patrolShips })),
     ...world.ports.filter((port) => world.regions.find((candidate) => candidate.id === port.regionId)?.controllerId === item.id).slice(0, 4).flatMap((port) => { const portRegion = region(world, port.regionId); return portRegion ? [{ id: portRegion.id, kind: 'region' as const, label: portRegion.name, detail: `港口${port.level}级 · 吞吐${compact.format(port.throughput)}`, value: port.level }] : []; }),
   ];
-  const inspector: CountryInspectorData = {
+  const inspector: CountryInspectorWithCourt = {
     id: item.id,
     name: item.name,
     ruler: ruler?.name ?? '君位空悬',
@@ -161,10 +163,7 @@ export function toCountryArchive(world: WorldState, item: PolityState): ArchiveD
   const records = readWorldHistory(world)
     .filter((event) => isDefaultVisibleHistoryEvent(event) && event.polityIds.includes(item.id))
     .map(eventArchiveRecord);
-  const factionSentence = inspector.court?.summary
-    ?? (inspector.factions?.length
-      ? `${inspector.factions.map((faction) => `${faction.name}主张${faction.agenda}`).join('；')}。其中${inspector.factions[0].name}权势最盛。`
-      : '朝中尚未形成足以被史家命名的稳定派系，权力更多系于具体官职与个人。');
+  const factionSentence = inspector.court.summary;
   const diplomacySentence = inspector.diplomacy?.length
     ? inspector.diplomacy.map((relation) => `与${relation.polity}${relation.status}`).join('，') + '。'
     : '现存记录中未见稳定联盟、朝贡或公开敌对关系。';

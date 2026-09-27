@@ -7,11 +7,11 @@ export interface AppReleaseNote {
 
 /** Only the current in-app note ships; the durable release history lives in progress.md. */
 export const LATEST_APP_RELEASE: AppReleaseNote = {
-  version: '1.29.47',
-  date: '2026-09-26',
-  title: '舰队与存档',
+  version: '1.29.48',
+  date: '2026-09-27',
+  title: '工程收口',
   items: [
-    '修复末船损失后的撤编，阻止非法舰队覆盖自动存档。',
+    '复用总账与档案投影，调整构建预算；保留舰队与存档保护。',
   ],
 };
 

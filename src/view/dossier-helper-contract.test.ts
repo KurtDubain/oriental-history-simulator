@@ -3,8 +3,28 @@ import { createWorld, serializeWorld } from '../sim';
 import { eventArchiveRecord, historyRecord, sourceEventIdForFact } from './dossier-adapter-shared';
 import { toPersonExperienceRecords } from './person-dossier-adapter';
 import { decimalNumber } from './compact-number';
+import { toCountryArchive, toCountryInspector } from './country-dossier-adapter';
+import { projectCourt } from './court-projection';
 
 describe('dossier helper equivalence contracts', () => {
+  it.each(['ruling', 'vacant', 'eliminated'] as const)('always provides the complete court summary for a %s polity', (state) => {
+    const world = createWorld('朝局必有投影');
+    const polity = world.polities[0];
+    if (state !== 'ruling') {
+      polity.rulerId = '';
+      world.factions = world.factions.filter(f => f.polityId !== polity.id);
+      world.offices = world.offices.filter(o => o.polityId !== polity.id);
+    }
+    if (state === 'eliminated') polity.alive = false;
+    const before = serializeWorld(world), inspector = toCountryInspector(world, polity);
+    expect(Object.getOwnPropertyDescriptor(inspector, 'court')?.get).toBeTypeOf('function');
+    expect(inspector.court).toEqual(projectCourt(world, polity.id, 'all'));
+    expect(inspector.court).toBe(inspector.court);
+    expect(toCountryArchive(world, polity).chapters.find(c => c.id === 'court')?.paragraphs[0])
+      .toBe(inspector.court.summary);
+    expect(serializeWorld(world)).toBe(before);
+  });
+
   it.each([0, -0, 1.25, -1.25, 999.99, 10000, 1234567.89, NaN, Infinity, -Infinity])(
     'preserves grouped decimal formatting for %s, never compact notation', (value) => {
       expect(decimalNumber(value)).toBe(new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(value));

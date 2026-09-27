@@ -4,11 +4,10 @@ import { gzipSync } from 'node:zlib';
 
 const KIB = 1024;
 const budgets = {
-  // COMPACT01 removed duplicate observer systems and specialist map layers.
-  // v1.25 spends a bounded five KiB only on authoritative expedition, fate,
-  // and sourced life-story closure; keep the raw/CSS ceilings unchanged.
+  // v1.29.48: explicitly approved total-JS budget increase, not code savings.
+  // Include every synchronous/asynchronous chunk; raw/CSS ceilings stay fixed.
   singleJavaScriptRawBytes: 585 * KIB,
-  totalJavaScriptGzipBytes: 415 * KIB,
+  totalJavaScriptGzipBytes: 430 * KIB,
   totalCssGzipBytes: 40 * KIB,
 } as const;
 

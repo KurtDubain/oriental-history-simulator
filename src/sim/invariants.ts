@@ -2,6 +2,7 @@ import { getDateForTurn } from './calendar';
 import { validateLineage } from './lineage';
 import { stableCompare, stableHash } from './random';
 import { computeWorldHash } from './world-hash';
+import { totalWorldPopulation, totalWorldFood, totalWorldWealth } from './turn-context-state';
 import { validateSituationSystemState } from './situations/reducer';
 import { reducePersonalMemorySystem, validateAgencySystemState } from './agency/memory';
 import {
@@ -128,26 +129,6 @@ function isFiniteRange(value: number, minimum: number, maximum: number): boolean
 function numericIdSuffix(id: string): number {
   const match = id.match(/(\d+)$/);
   return match ? Number(match[1]) : 0;
-}
-
-function runtimeTotalPopulation(world: WorldState): number {
-  return world.regions.reduce((sum, region) => sum + region.population, 0)
-    + world.personalForces.reduce((sum, force) => sum + force.soldiers, 0)
-    + world.fleets.reduce((sum, fleet) => sum + fleet.sailors, 0);
-}
-
-function runtimeTotalFood(world: WorldState): number {
-  return world.regions.reduce((sum, region) => sum + region.food, 0)
-    + world.armies.reduce((sum, army) => sum + army.food, 0)
-    + world.fleets.reduce((sum, fleet) => sum + fleet.food, 0)
-    + world.navalOperations
-      .filter((operation) => operation.stage !== '完成' && operation.stage !== '失败')
-      .reduce((sum, operation) => sum + operation.foodLoaded, 0);
-}
-
-function runtimeTotalWealth(world: WorldState): number {
-  return world.regions.reduce((sum, region) => sum + region.wealth, 0)
-    + world.polities.reduce((sum, polity) => sum + polity.treasury, 0);
 }
 
 function extendAppendOnlyDigest(digest: string, item: unknown): string {
@@ -1157,9 +1138,9 @@ export function validateTurnRuntime(
       push(violations, 'runtime.population-fields', '本季人口账含负数或非整数');
     }
     if (
-      population.start !== runtimeTotalPopulation(previous)
+      population.start !== totalWorldPopulation(previous)
       || population.end !== expectedPopulation
-      || population.end !== runtimeTotalPopulation(next)
+      || population.end !== totalWorldPopulation(next)
     ) {
       push(violations, 'runtime.population-ledger', '本季人口账与前后世界快照不一致');
     }
@@ -1169,7 +1150,7 @@ export function validateTurnRuntime(
     if (Object.values(food).some((value) => !isWholeNonNegative(value))) {
       push(violations, 'runtime.food-fields', '本季粮食账含负数或非整数');
     }
-    if (food.start !== runtimeTotalFood(previous) || food.end !== expectedFood || food.end !== runtimeTotalFood(next)) {
+    if (food.start !== totalWorldFood(previous) || food.end !== expectedFood || food.end !== totalWorldFood(next)) {
       push(violations, 'runtime.food-ledger', '本季粮食账与前后世界快照不一致');
     }
 
@@ -1178,7 +1159,7 @@ export function validateTurnRuntime(
     if (Object.values(wealth).some((value) => !isWholeNonNegative(value))) {
       push(violations, 'runtime.wealth-fields', '本季财富账含负数或非整数');
     }
-    if (wealth.start !== runtimeTotalWealth(previous) || wealth.end !== expectedWealth || wealth.end !== runtimeTotalWealth(next)) {
+    if (wealth.start !== totalWorldWealth(previous) || wealth.end !== expectedWealth || wealth.end !== totalWorldWealth(next)) {
       push(violations, 'runtime.wealth-ledger', '本季财富账与前后世界快照不一致');
     }
 
@@ -2431,17 +2412,9 @@ export function validateWorldFull(world: WorldState): InvariantViolation[] {
     if (wealthFields.some((value) => !isWholeNonNegative(value))) push(violations, 'ledger.wealth-fields', '财富账本含负数或非整数');
     const expectedWealth = wealth.start + wealth.produced - wealth.householdConsumed - wealth.warDestroyed;
     if (wealth.end !== expectedWealth) push(violations, 'ledger.wealth', `财富账本不平：应为${expectedWealth}，实为${wealth.end}`);
-    const currentPopulation = world.regions.reduce((sum, region) => sum + region.population, 0)
-      + world.personalForces.reduce((sum, force) => sum + force.soldiers, 0)
-      + world.fleets.reduce((sum, fleet) => sum + fleet.sailors, 0);
-    const currentFood = world.regions.reduce((sum, region) => sum + region.food, 0)
-      + world.armies.reduce((sum, army) => sum + army.food, 0)
-      + world.fleets.reduce((sum, fleet) => sum + fleet.food, 0)
-      + world.navalOperations
-        .filter((operation) => operation.stage !== '完成' && operation.stage !== '失败')
-        .reduce((sum, operation) => sum + operation.foodLoaded, 0);
-    const currentWealth = world.regions.reduce((sum, region) => sum + region.wealth, 0)
-      + world.polities.reduce((sum, polity) => sum + polity.treasury, 0);
+    const currentPopulation = totalWorldPopulation(world);
+    const currentFood = totalWorldFood(world);
+    const currentWealth = totalWorldWealth(world);
     if (population.end + boundaryDelta('population', 'region') !== currentPopulation) {
       push(violations, 'ledger.population.snapshot', '人口账本终值加边界干预差量后与世界快照不一致');
     }
